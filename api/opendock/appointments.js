@@ -6,6 +6,8 @@ function parseJsonSafe(text) {
   }
 }
 
+var TARGET_TIMEZONE = "America/Chicago";
+
 var authCache = {
   token: "",
   expiresAt: 0,
@@ -94,13 +96,118 @@ function pickArray(payload) {
   return [];
 }
 
-function fmtDateParts(isoLike) {
-  if (!isoLike) return { date: "", time: "" };
+function getNestedValue(obj, path) {
+  var cur = obj;
+  for (var i = 0; i < path.length; i++) {
+    if (!cur || typeof cur !== "object") return "";
+    cur = cur[path[i]];
+  }
+  return cur == null ? "" : cur;
+}
+
+function asCleanString(v) {
+  if (v == null) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  return "";
+}
+
+function pickName(value, preferredKeys) {
+  if (!value) return "";
+  if (typeof value === "string" || typeof value === "number") return String(value);
+  if (typeof value !== "object") return "";
+  for (var i = 0; i < preferredKeys.length; i++) {
+    var picked = asCleanString(value[preferredKeys[i]]);
+    if (picked) return picked;
+  }
+  return "";
+}
+
+function cleanCustomFieldKey(rawKey) {
+  var key = String(rawKey || "");
+  // Strip type prefixes like str/int/doc/dropdown/email/phone/multidoc
+  key = key.replace(/^(str|int|doc|dropdown|email|phone|multidoc)+/i, "");
+  key = key.replace(/([a-z0-9])([A-Z])/g, "$1 $2").trim();
+  return key || String(rawKey || "");
+}
+
+function flattenCustomFieldValue(value) {
+  if (value == null) return "";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) {
+    return value
+      .map(function (item) {
+        return flattenCustomFieldValue(item);
+      })
+      .filter(Boolean)
+      .join("; ");
+  }
+  if (typeof value === "object") {
+    var common = asCleanString(value.value) || asCleanString(value.name) || asCleanString(value.label) || asCleanString(value.id);
+    if (common) return common;
+    // Fallback: readable key=value pairs instead of [object Object]
+    return Object.keys(value)
+      .map(function (k) {
+        var v = flattenCustomFieldValue(value[k]);
+        return v ? k + ": " + v : "";
+      })
+      .filter(Boolean)
+      .join(", ");
+  }
+  return "";
+}
+
+function flattenCustomFields(customFields) {
+  if (!customFields || typeof customFields !== "object") return {};
+  var out = {};
+  Object.keys(customFields).forEach(function (k) {
+    var header = cleanCustomFieldKey(k);
+    out[header] = flattenCustomFieldValue(customFields[k]);
+  });
+  return out;
+}
+
+function toTzParts(date, timeZone) {
+  var fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+  var map = {};
+  fmt.formatToParts(date).forEach(function (p) {
+    if (p.type !== "literal") map[p.type] = p.value;
+  });
+  return map;
+}
+
+function getOffsetForTimeZone(date, timeZone) {
+  var tzn = new Intl.DateTimeFormat("en-US", {
+    timeZone: timeZone,
+    timeZoneName: "longOffset",
+  }).formatToParts(date).find(function (p) {
+    return p.type === "timeZoneName";
+  });
+  var raw = tzn && tzn.value ? tzn.value : "GMT+00:00";
+  var normalized = raw.replace("GMT", "");
+  if (/^[+-]\d{2}:\d{2}$/.test(normalized)) return normalized;
+  return "+00:00";
+}
+
+function toCentralDateTime(isoLike) {
+  if (!isoLike) return { date: "", time: "", iso: "" };
   var dt = new Date(isoLike);
-  if (isNaN(dt)) return { date: "", time: "" };
-  var date = dt.toISOString().slice(0, 10);
-  var time = dt.toISOString().slice(11, 16);
-  return { date: date, time: time };
+  if (isNaN(dt)) return { date: "", time: "", iso: "" };
+  var p = toTzParts(dt, TARGET_TIMEZONE);
+  var offset = getOffsetForTimeZone(dt, TARGET_TIMEZONE);
+  var date = p.year + "-" + p.month + "-" + p.day;
+  var time = p.hour + ":" + p.minute;
+  var iso = date + "T" + time + ":" + p.second + offset;
+  return { date: date, time: time, iso: iso };
 }
 
 function toNumber(v) {
@@ -121,25 +228,30 @@ function calcDurationMinutes(startIso, endIso) {
 function normalizeAppointmentRow(appt) {
   var start = appt && appt.start ? appt.start : "";
   var end = appt && appt.end ? appt.end : "";
-  var parts = fmtDateParts(start);
+  var startLocal = toCentralDateTime(start);
+  var endLocal = toCentralDateTime(end);
   var customFields = appt && appt.customFields && typeof appt.customFields === "object" ? appt.customFields : {};
+  var carrier = pickName(appt ? appt.carrier : null, ["name", "carrierName", "label"]);
+  var loadType = pickName(appt ? appt.loadType : null, ["name", "label", "type"]);
+  var dock = pickName(appt ? appt.dock : null, ["name", "label", "dockName"]);
 
   var row = {
     PO: appt && appt.refNumber ? String(appt.refNumber) : "",
     Status: appt && appt.status ? String(appt.status) : "",
-    "Appt Date": parts.date,
-    "Appt Time": parts.time,
-    Carrier: appt && appt.carrier && appt.carrier.name ? String(appt.carrier.name) : "",
-    "Load Type": appt && appt.loadType && appt.loadType.name ? String(appt.loadType.name) : "",
-    Dock: appt && appt.dock && appt.dock.name ? String(appt.dock.name) : "",
+    "Appt Date": startLocal.date,
+    "Appt Time": startLocal.time,
+    Carrier: carrier,
+    "Load Type": loadType,
+    Dock: dock,
     "Reference / PO Number": appt && appt.refNumber ? String(appt.refNumber) : "",
-    Start: start,
-    End: end,
+    Start: startLocal.iso,
+    End: endLocal.iso,
     "Duration (min)": calcDurationMinutes(start, end),
   };
 
-  Object.keys(customFields).forEach(function (k) {
-    row["CF " + k] = customFields[k] == null ? "" : String(customFields[k]);
+  var flattened = flattenCustomFields(customFields);
+  Object.keys(flattened).forEach(function (k) {
+    row[k] = flattened[k];
   });
 
   return row;
