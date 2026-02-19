@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
 import * as Papa from "papaparse";
 import * as XLSX from "xlsx";
+import NulogySync from "./NulogySync";
 
 const FONTS_CSS = "@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');";
 const sans = "'IBM Plex Sans', -apple-system, sans-serif";
@@ -401,6 +402,25 @@ export default function ProductionReadiness() {
     return items;
   }, [analysis, ciSort, ciSortDir, ciSearch]);
 
+  var handleNulogyData = useCallback(function(results) {
+    var ts = new Date();
+    if (results.inventory) {
+      setInventory(results.inventory.data);
+      setInvFileName("Nulogy Sync");
+      setInvTimestamp(ts);
+    }
+    if (results.workorders) {
+      setWorkOrders(results.workorders.data);
+      setWoFileName("Nulogy Sync");
+      setWoTimestamp(ts);
+    }
+    if (results.bom) {
+      setBoms(results.bom.data);
+      setBomFileName("Nulogy Sync");
+      setBomTimestamp(ts);
+    }
+  }, []);
+
   var handleSort = f => { if (sortField === f) setSortDir(d => d==="asc"?"desc":"asc"); else { setSortField(f); setSortDir("desc"); } };
   var handleCiSort = f => { if (ciSort === f) setCiSortDir(d => d==="asc"?"desc":"asc"); else { setCiSort(f); setCiSortDir("desc"); } };
   var handleFlagSort = f => { if (flagSort === f) setFlagSortDir(d => d==="asc"?"desc":"asc"); else { setFlagSort(f); setFlagSortDir("desc"); } };
@@ -651,8 +671,10 @@ export default function ProductionReadiness() {
       {!mappingConfirmed && (<div>
         <div style={{ marginBottom:16 }}>
           <div style={{ fontSize:15, fontWeight:600, color:C.bright }}>Data Sources</div>
-          <div style={{ fontSize:14, color:C.dim, marginTop:2 }}>Upload Inventory and Work Orders to begin.</div>
+          <div style={{ fontSize:14, color:C.dim, marginTop:2 }}>Sync from Nulogy or upload CSV files to begin.</div>
         </div>
+        <NulogySync onDataLoaded={handleNulogyData} theme={C} />
+        <div style={{ fontSize:13, fontWeight:600, color:C.dim, textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>Or upload files manually</div>
         <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(230px, 1fr))", gap:8, marginBottom:20 }}>
           <FileUploader label="Inventory" uploaded={!!inventory} fileName={invFileName} onData={(d,n) => {setInventory(d);setInvFileName(n);setInvTimestamp(new Date());}} subtitle="Daily stock levels (.csv)" />
           <FileUploader label="Work Orders" uploaded={!!workOrders} fileName={woFileName} onData={(d,n) => {setWorkOrders(d);setWoFileName(n);setWoTimestamp(new Date());}} subtitle="Open work orders (.csv)" />
