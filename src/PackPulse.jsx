@@ -122,6 +122,9 @@ export default function ProductionReadiness() {
   const [dockData, setDockData] = useState(null);
   const [dockFileName, setDockFileName] = useState("");
   const [dockTimestamp, setDockTimestamp] = useState(null);
+  const [dockApiLoading, setDockApiLoading] = useState(false);
+  const [dockApiError, setDockApiError] = useState("");
+  const [dockApiInfo, setDockApiInfo] = useState("");
   const [poData, setPoData] = useState(null);
   const [poFileName, setPoFileName] = useState("");
   const [poTimestamp, setPoTimestamp] = useState(null);
@@ -401,6 +404,28 @@ export default function ProductionReadiness() {
     items.sort((a,b) => { var c = 0; if (ciSort==="sku") c = a.sku.localeCompare(b.sku); else if (ciSort==="desc") c = (a.desc||"").localeCompare(b.desc||""); else if (ciSort==="onHand") c = a.onHand - b.onHand; else if (ciSort==="totalShort") c = a.totalShort - b.totalShort; else if (ciSort==="affectedWOs") c = a.affectedWOs.length - b.affectedWOs.length; else c = a.unlockedUnits - b.unlockedUnits; return ciSortDir==="desc" ? -c : c; });
     return items;
   }, [analysis, ciSort, ciSortDir, ciSearch]);
+
+  var fetchOpenDockApi = useCallback(async () => {
+    setDockApiLoading(true);
+    setDockApiError("");
+    setDockApiInfo("");
+    try {
+      var resp = await fetch("/api/opendock/appointments");
+      var body = await resp.json();
+      if (!resp.ok) {
+        throw new Error(body && body.error ? body.error : "OpenDock API request failed");
+      }
+      var rows = body && Array.isArray(body.rows) ? body.rows : [];
+      setDockData(rows);
+      setDockFileName("OpenDock API");
+      setDockTimestamp(new Date());
+      setDockApiInfo((body && body.message) || ("Loaded " + rows.length + " appointments"));
+    } catch (err) {
+      setDockApiError(err && err.message ? err.message : "Could not load OpenDock data");
+    } finally {
+      setDockApiLoading(false);
+    }
+  }, []);
 
   var handleNulogyData = useCallback(function(results) {
     var ts = new Date();
@@ -697,6 +722,14 @@ export default function ProductionReadiness() {
           <FileUploader label="OpenDock" uploaded={!!dockData} fileName={dockFileName} onData={(d,n) => {setDockData(d);setDockFileName(n);setDockTimestamp(new Date());}} subtitle="Dock appointments (.xlsx)" acceptTypes=".xlsx,.xls,.csv" />
           <FileUploader label="Purchase Order" uploaded={!!poData} fileName={poFileName} onData={(d,n) => {setPoData(d);setPoFileName(n);setPoTimestamp(new Date());var h=d&&d.length?Object.keys(d[0]):[]; setPoHeaders(h); setPoMapping(autoMapColumns(h,PO_PAT));}} subtitle="PO line items (.csv, .xlsx)" acceptTypes=".csv,.xlsx,.xls" />
         </div>
+        <div style={{ marginTop:-10, marginBottom:16, display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+          <button onClick={fetchOpenDockApi} disabled={dockApiLoading} style={{ padding:"8px 14px", borderRadius:6, border:"1px solid "+(dockApiLoading?C.border:C.accentLine), background:dockApiLoading?C.raised:C.accentSoft, color:dockApiLoading?C.dim:C.accent, fontFamily:sans, fontSize:14, fontWeight:600, cursor:dockApiLoading?"not-allowed":"pointer" }}>
+            {dockApiLoading ? "Loading OpenDock..." : "Fetch OpenDock from API"}
+          </button>
+          <span style={{ fontSize:12, color:C.dim }}>Uses secure Vercel server route (`/api/opendock/appointments`).</span>
+          {dockApiInfo && <span style={{ fontSize:12, color:C.ok }}>{dockApiInfo}</span>}
+          {dockApiError && <span style={{ fontSize:12, color:C.bad }}>OpenDock API error: {dockApiError}</span>}
+        </div>
         {allUploaded && !analyzing && (
           <button onClick={() => { setAnalyzing(true); setTimeout(() => { setMappingConfirmed(true); setAnalyzing(false); }, 1500); }} disabled={!requiredMappingsMet} style={{ padding:"8px 24px", borderRadius:6, border:"none", background:requiredMappingsMet?C.accent:C.raised, color:requiredMappingsMet?"#fff":C.dim, fontFamily:sans, fontSize:15, fontWeight:600, cursor:requiredMappingsMet?"pointer":"not-allowed" }}>
             Analyze
@@ -782,9 +815,11 @@ export default function ProductionReadiness() {
             </button>;
           })}
           <button onClick={() => setActiveView(activeView==="flags"?"workorders":"flags")} style={{ padding:"4px 10px", borderRadius:6, border:"1px solid "+(activeView==="flags"?C.accentLine:C.border), background:activeView==="flags"?C.accentSoft:"transparent", cursor:"pointer", color:activeView==="flags"?C.accent:C.dim, fontFamily:sans, fontSize:13 }}>Data Flags {analysis.flags?<span style={{ opacity:0.6 }}>{analysis.flags.length}</span>:""}</button>
+          <button onClick={fetchOpenDockApi} disabled={dockApiLoading} style={{ padding:"4px 10px", borderRadius:6, border:"1px solid "+(dockApiLoading?C.border:C.accentLine), background:dockApiLoading?C.raised:C.accentSoft, cursor:dockApiLoading?"not-allowed":"pointer", color:dockApiLoading?C.dim:C.accent, fontFamily:sans, fontSize:13 }}>Sync OpenDock API</button>
           <button onClick={() => setShowSettings(!showSettings)} style={{ padding:"4px 10px", borderRadius:6, border:"1px solid "+(showSettings?C.accentLine:C.border), background:showSettings?C.accentSoft:"transparent", cursor:"pointer", color:showSettings?C.accent:C.dim, fontFamily:sans, fontSize:13 }}>Settings</button>
           <button onClick={() => { setMappingConfirmed(false); setActiveView("overview"); }} style={{ padding:"4px 10px", borderRadius:6, border:"1px solid "+C.border, background:"transparent", cursor:"pointer", color:C.dim, fontFamily:sans, fontSize:13 }}>Re-upload</button>
         </div>
+        {dockApiError && <div style={{ fontSize:12, color:C.bad, marginTop:-8, marginBottom:10 }}>OpenDock API error: {dockApiError}</div>}
 
         {showSettings && (
           <div style={{ position:"fixed", top:0, left:0, right:0, bottom:0, background:"rgba(0,0,0,0.5)", zIndex:100, display:"flex", alignItems:"center", justifyContent:"center" }} onClick={e => { if (e.target === e.currentTarget) setShowSettings(false); }}>
