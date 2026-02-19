@@ -89,13 +89,22 @@ export default function NulogySync({ onDataLoaded, theme }) {
         throw new Error(errorMsg);
       }
       taskData = await createRes.json();
+      // Log which column set succeeded for diagnostics
+      if (taskData.columnsUsed) {
+        console.log(`[Nulogy] ${type}: attempt ${taskData.attempt} succeeded with columns:`, taskData.columnsUsed);
+      }
     } catch (err) {
       updateReportState(type, { status: ERROR, progress: "", error: err.message });
       return null;
     }
 
     // Step 2: Poll for completion
-    updateReportState(type, { status: POLLING, progress: "Generating report..." });
+    updateReportState(type, { 
+      status: POLLING, 
+      progress: taskData.attempt > 1 
+        ? `Generating report... (column set #${taskData.attempt})` 
+        : "Generating report..." 
+    });
 
     let downloadUrl = null;
     let polls = 0;
