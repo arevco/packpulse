@@ -1,7 +1,6 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
 import * as Papa from "papaparse";
 import * as XLSX from "xlsx";
-import NulogySync from "./NulogySync";
 
 const FONTS_CSS = "@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');";
 const sans = "'IBM Plex Sans', -apple-system, sans-serif";
@@ -38,7 +37,7 @@ function autoMapColumns(headers, patterns) {
   Object.entries(patterns).forEach(([field, cands]) => { for (const c of cands) { const m = normed.find(h => h.norm.includes(c.toLowerCase())); if (m) { map[field] = m.orig; break; } } });
   return map;
 }
-const INV_PAT = { sku:["itemcode","sku","item","material","partnumber"], description:["description","desc","itemname","name"], qtyOnHand:["good","qtyonhand","onhand","available","stock","instock","quantity"] };
+const INV_PAT = { sku:["itemcode","sku","item","material","partnumber"], description:["description","desc","itemname","name"], qtyOnHand:["qtyonhand","onhand","basequantity","available","stock","instock","quantity"] };
 const BOM_PAT = { bomId:["finishedgoodcode","bomid","parentsku","parent","fgcode"], componentSku:["subcomponentcode","componentsku","childsku","component","material"], description:["description","desc","name"], qtyPer:["qtyper","quantity","ratio","usage","per"], substituteFor:["substitutefor","altfor","replacementfor","subfor"], priority:["priority","prio","rank","preference"] };
 const WO_PAT = { woNumber:["workordercode","wonum","wonumber","workorder","wo"], productSku:["itemcode","productsku","sku","material","fgsku"], qtyToProduce:["unitsexpected","qtytoproduce","orderqty","quantity","qty"], dueDate:["duedate","due","needdate","requireddate"], status:["workorderstatus","status","state","wostatus"], customer:["customername","customer","client"], unitsProduced:["unitsproduced","produced","completed"], unitsRemaining:["unitsremaining","remaining","balance"], unitsPerHour:["standardunitsperhour","unitsperhour","rateperhour","rate"], standardPeople:["standardpeople","people","crew","headcount"], plannedStart:["plannedstart","startdate","planstart"], plannedEnd:["plannedend","enddate","planend"], reference1:["reference1","ref1","notes","reference"] };
 const PO_PAT = { material:["material","materialcode","itemcode","sku","item","partnumber","materialdescription"], description:["description","desc","name","materialdescription"], qty:["quantity","qty","orderqty","poqty","ordered"], unitPrice:["unitprice","price","rate","cost"], poNumber:["ponumber","po","purchaseorder","documentnumber"] };
@@ -402,30 +401,6 @@ export default function ProductionReadiness() {
     return items;
   }, [analysis, ciSort, ciSortDir, ciSearch]);
 
-  var handleNulogyData = useCallback(function(results) {
-    var ts = new Date();
-    if (results.inventory) {
-      setInventory(results.inventory.data);
-      setInvFileName("Nulogy Sync");
-      setInvTimestamp(ts);
-    }
-    if (results.workorders) {
-      setWorkOrders(results.workorders.data);
-      setWoFileName("Nulogy Sync");
-      setWoTimestamp(ts);
-    }
-    if (results.bom) {
-      setBoms(results.bom.data);
-      setBomFileName("Nulogy Sync");
-      setBomTimestamp(ts);
-    }
-    // Auto-analyze if we got at least inventory + work orders
-    if (results.inventory && results.workorders) {
-      setAnalyzing(true);
-      setTimeout(function() { setMappingConfirmed(true); setAnalyzing(false); }, 1500);
-    }
-  }, []);
-
   var handleSort = f => { if (sortField === f) setSortDir(d => d==="asc"?"desc":"asc"); else { setSortField(f); setSortDir("desc"); } };
   var handleCiSort = f => { if (ciSort === f) setCiSortDir(d => d==="asc"?"desc":"asc"); else { setCiSort(f); setCiSortDir("desc"); } };
   var handleFlagSort = f => { if (flagSort === f) setFlagSortDir(d => d==="asc"?"desc":"asc"); else { setFlagSort(f); setFlagSortDir("desc"); } };
@@ -676,10 +651,8 @@ export default function ProductionReadiness() {
       {!mappingConfirmed && (<div>
         <div style={{ marginBottom:16 }}>
           <div style={{ fontSize:15, fontWeight:600, color:C.bright }}>Data Sources</div>
-          <div style={{ fontSize:14, color:C.dim, marginTop:2 }}>Sync from Nulogy or upload CSV files to begin.</div>
+          <div style={{ fontSize:14, color:C.dim, marginTop:2 }}>Upload Inventory and Work Orders to begin.</div>
         </div>
-        <NulogySync onDataLoaded={handleNulogyData} theme={C} />
-        <div style={{ fontSize:13, fontWeight:600, color:C.dim, textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>Or upload files manually</div>
         <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(230px, 1fr))", gap:8, marginBottom:20 }}>
           <FileUploader label="Inventory" uploaded={!!inventory} fileName={invFileName} onData={(d,n) => {setInventory(d);setInvFileName(n);setInvTimestamp(new Date());}} subtitle="Daily stock levels (.csv)" />
           <FileUploader label="Work Orders" uploaded={!!workOrders} fileName={woFileName} onData={(d,n) => {setWorkOrders(d);setWoFileName(n);setWoTimestamp(new Date());}} subtitle="Open work orders (.csv)" />
