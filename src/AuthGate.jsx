@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 
@@ -6,6 +6,8 @@ export default function AuthGate({ children }) {
   const [checking, setChecking] = useState(true);
   const [user, setUser] = useState(null);
   const [error, setError] = useState("");
+  const btnRef = useRef(null);
+  const initializedRef = useRef(false);
 
   // Check existing session on mount
   useEffect(() => {
@@ -18,47 +20,8 @@ export default function AuthGate({ children }) {
       .catch(() => setChecking(false));
   }, []);
 
-  // Load Google Identity Services script
-  useEffect(() => {
-    if (user || !GOOGLE_CLIENT_ID) return;
-
-    const existing = document.getElementById("gsi-script");
-    if (existing) return;
-
-    const script = document.createElement("script");
-    script.id = "gsi-script";
-    script.src = "https://accounts.google.com/gsi/client";
-    script.async = true;
-    script.onload = () => initGoogleSignIn();
-    document.head.appendChild(script);
-
-    return () => {};
-  }, [user]);
-
-  const initGoogleSignIn = useCallback(() => {
-    if (!window.google || !GOOGLE_CLIENT_ID) return;
-
-    window.google.accounts.id.initialize({
-      client_id: GOOGLE_CLIENT_ID,
-      callback: handleCredentialResponse,
-      auto_select: false,
-    });
-
-    window.google.accounts.id.renderButton(
-      document.getElementById("google-signin-btn"),
-      {
-        theme: "outline",
-        size: "large",
-        width: 280,
-        text: "signin_with",
-        shape: "rectangular",
-      }
-    );
-  }, []);
-
   const handleCredentialResponse = useCallback(async (response) => {
     setError("");
-
     try {
       const res = await fetch("/api/auth/verify", {
         method: "POST",
@@ -66,9 +29,7 @@ export default function AuthGate({ children }) {
         credentials: "include",
         body: JSON.stringify({ credential: response.credential }),
       });
-
       const data = await res.json();
-
       if (res.ok && data.ok) {
         setUser({ email: data.email, name: data.name, picture: data.picture });
       } else {
@@ -79,22 +40,74 @@ export default function AuthGate({ children }) {
     }
   }, []);
 
+  // Initialize Google Sign-In once script is loaded AND button div is ready
+  const tryInitGoogle = useCallback(() => {
+    if (initializedRef.current) return;
+    if (!window.google || !window.google.accounts || !btnRef.current) return;
+
+    initializedRef.current = true;
+
+    window.google.accounts.id.initialize({
+      client_id: GOOGLE_CLIENT_ID,
+      callback: handleCredentialResponse,
+      auto_select: false,
+    });
+
+    window.google.accounts.id.renderButton(btnRef.current, {
+      theme: "outline",
+      size: "large",
+      width: 280,
+      text: "signin_with",
+      shape: "rectangular",
+    });
+  }, [handleCredentialResponse]);
+
+  // Load Google Identity Services script
+  useEffect(() => {
+    if (user || checking || !GOOGLE_CLIENT_ID) return;
+
+    const loadScript = () => {
+      if (document.getElementById("gsi-script")) {
+        tryInitGoogle();
+        return;
+      }
+
+      const script = document.createElement("script");
+      script.id = "gsi-script";
+      script.src = "https://accounts.google.com/gsi/client";
+      script.async = true;
+      script.onload = () => tryInitGoogle();
+      document.head.appendChild(script);
+    };
+
+    loadScript();
+  }, [user, checking, tryInitGoogle]);
+
+  // Retry initialization when button ref is ready (handles race condition)
+  useEffect(() => {
+    if (user || checking || !GOOGLE_CLIENT_ID) return;
+    if (initializedRef.current) return;
+
+    const interval = setInterval(() => {
+      if (window.google && window.google.accounts && btnRef.current) {
+        tryInitGoogle();
+        clearInterval(interval);
+      }
+    }, 200);
+
+    return () => clearInterval(interval);
+  }, [user, checking, tryInitGoogle]);
+
   const handleLogout = useCallback(async () => {
     await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
     setUser(null);
-    // Re-init Google Sign-In button after logout
-    setTimeout(() => initGoogleSignIn(), 300);
-  }, [initGoogleSignIn]);
+    initializedRef.current = false;
+  }, []);
 
-  // Expose logout function globally so PackPulse header can use it
+  // Expose user/logout globally for PackPulse header
   useEffect(() => {
-    if (user) {
-      window.__ppUser = user;
-      window.__ppLogout = handleLogout;
-    } else {
-      window.__ppUser = null;
-      window.__ppLogout = null;
-    }
+    window.__ppUser = user || null;
+    window.__ppLogout = user ? handleLogout : null;
   }, [user, handleLogout]);
 
   if (checking) {
@@ -102,7 +115,7 @@ export default function AuthGate({ children }) {
       <div style={styles.container}>
         <div style={styles.card}>
           <div style={styles.spinner} />
-          <div style={{ color: "#6b7280", marginTop: 12 }}>Checking session...</div>
+          <div style={{ color: "#6b7280", marginTop: 12, fontSize: 14 }}>Checking session...</div>
         </div>
         <style>{spinnerCSS}</style>
       </div>
@@ -128,7 +141,7 @@ export default function AuthGate({ children }) {
         <div style={styles.card}>
           <div style={{ fontSize: 22, fontWeight: 700, color: "#111827", letterSpacing: -0.3 }}>PackPulse</div>
           <div style={{ fontSize: 14, color: "#9ca3af", marginTop: 2, marginBottom: 24 }}>REV Copack</div>
-          <div id="google-signin-btn" style={{ minHeight: 44 }} />
+          <div ref={btnRef} style={{ minHeight: 44, display: "flex", justifyContent: "center" }} />
           {error && (
             <div style={{ marginTop: 16, padding: "10px 14px", borderRadius: 8, background: "#fef2f2", border: "1px solid #fecaca", color: "#dc2626", fontSize: 14 }}>
               {error}
