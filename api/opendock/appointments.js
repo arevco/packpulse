@@ -6,6 +6,19 @@ function parseJsonSafe(text) {
   }
 }
 
+var authCache = {
+  token: "",
+  expiresAt: 0,
+};
+
+var AUTH_CACHE_MS = 45 * 60 * 1000;
+
+function sleep(ms) {
+  return new Promise(function (resolve) {
+    setTimeout(resolve, ms);
+  });
+}
+
 function extractBearerToken(value) {
   if (!value) return "";
   var s = String(value).trim();
@@ -162,38 +175,61 @@ export default async function handler(req, res) {
   var toMs = now + daysFuture * 24 * 60 * 60 * 1000;
 
   try {
-    var loginResp = await fetch(baseUrl + "/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: email, password: password }),
-    });
-    var loginText = await loginResp.text();
-    var loginBody = parseJsonSafe(loginText);
+    var token = "";
+    if (authCache.token && authCache.expiresAt > Date.now()) {
+      token = authCache.token;
+    } else {
+      var loginResp = null;
+      var loginText = "";
+      var loginBody = null;
+      var attempt = 0;
+      var maxAttempts = 3;
+      while (attempt < maxAttempts) {
+        attempt++;
+        loginResp = await fetch(baseUrl + "/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: email, password: password }),
+        });
+        loginText = await loginResp.text();
+        loginBody = parseJsonSafe(loginText);
+        if (loginResp.ok) break;
+        if (loginResp.status === 429 && attempt < maxAttempts) {
+          await sleep(500 * attempt);
+          continue;
+        }
+        if (loginResp.status === 429) {
+          return res.status(429).json({
+            error: "OpenDock rate limit reached. Please wait 1-2 minutes and try again.",
+            details: loginBody || loginText || "Too Many Requests",
+          });
+        }
+        return res.status(502).json({
+          error: "OpenDock login failed.",
+          details: loginBody || loginText || "Unknown auth error",
+        });
+      }
 
-    if (!loginResp.ok) {
-      return res.status(502).json({
-        error: "OpenDock login failed.",
-        details: loginBody || loginText || "Unknown auth error",
-      });
-    }
-
-    var token = findTokenDeep(loginBody, 0);
-    if (!token) {
-      token =
-        extractBearerToken(loginResp.headers.get("authorization")) ||
-        extractBearerToken(loginResp.headers.get("x-access-token")) ||
-        extractBearerToken(loginResp.headers.get("set-authorization"));
-    }
-    if (!token && typeof loginText === "string") {
-      // Fallback for non-JSON bodies that are raw token strings.
-      var raw = extractBearerToken(loginText);
-      if (looksLikeJwt(raw) || raw.length > 20) token = raw;
-    }
-    if (!token) {
-      return res.status(502).json({
-        error: "OpenDock auth response did not include a token.",
-        loginResponseKeys: loginBody && typeof loginBody === "object" ? Object.keys(loginBody) : [],
-      });
+      token = findTokenDeep(loginBody, 0);
+      if (!token) {
+        token =
+          extractBearerToken(loginResp.headers.get("authorization")) ||
+          extractBearerToken(loginResp.headers.get("x-access-token")) ||
+          extractBearerToken(loginResp.headers.get("set-authorization"));
+      }
+      if (!token && typeof loginText === "string") {
+        // Fallback for non-JSON bodies that are raw token strings.
+        var raw = extractBearerToken(loginText);
+        if (looksLikeJwt(raw) || raw.length > 20) token = raw;
+      }
+      if (!token) {
+        return res.status(502).json({
+          error: "OpenDock auth response did not include a token.",
+          loginResponseKeys: loginBody && typeof loginBody === "object" ? Object.keys(loginBody) : [],
+        });
+      }
+      authCache.token = token;
+      authCache.expiresAt = Date.now() + AUTH_CACHE_MS;
     }
 
     var apptResp = await fetch(baseUrl + "/appointment", {
