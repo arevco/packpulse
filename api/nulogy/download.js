@@ -204,6 +204,9 @@ export default async function handler(req, res) {
     // Parse CSV
     const rows = parseCSV(csvText);
 
+    // Capture original headers before transformation
+    const originalHeaders = rows.length > 0 ? Object.keys(rows[0]) : [];
+
     // Transform column names for PackPulse compatibility
     const transformed = transformColumns(rows, reportType);
 
@@ -211,7 +214,8 @@ export default async function handler(req, res) {
       data: transformed,
       rowCount: transformed.length,
       reportType,
-      columns: transformed.length > 0 ? Object.keys(transformed[0]) : []
+      columns: transformed.length > 0 ? Object.keys(transformed[0]) : [],
+      originalHeaders: originalHeaders
     });
 
   } catch (err) {
