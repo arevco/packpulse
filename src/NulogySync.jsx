@@ -18,12 +18,12 @@ const REPORT_TYPES = [
 const POLL_INTERVAL = 4000; // 4 seconds between polls
 const MAX_POLLS = 60; // max ~4 minutes of polling
 
-export default function NulogySync({ onDataLoaded, theme }) {
+export default function NulogySync({ onDataLoaded, theme, autoStart = false, hideToggle = false }) {
   const C = theme;
   const sans = "'IBM Plex Sans', -apple-system, sans-serif";
   const mono = "'IBM Plex Mono', monospace";
 
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(autoStart || hideToggle);
   const [connectionStatus, setConnectionStatus] = useState(null); // null | {configured, connected, message}
   const [syncing, setSyncing] = useState(false);
   const [reportStates, setReportStates] = useState({
@@ -33,13 +33,14 @@ export default function NulogySync({ onDataLoaded, theme }) {
   });
   const [syncTypes, setSyncTypes] = useState(["inventory", "workorders", "bom"]);
   const abortRef = useRef(false);
+  const autoStartedRef = useRef(false);
 
-  // Test connection on first expand
+  // Test connection on first expand (or immediately in auto mode)
   useEffect(() => {
-    if (expanded && connectionStatus === null) {
+    if ((expanded || autoStart || hideToggle) && connectionStatus === null) {
       testConnection();
     }
-  }, [expanded]);
+  }, [expanded, autoStart, hideToggle, connectionStatus]);
 
   const testConnection = useCallback(async () => {
     setConnectionStatus({ testing: true });
@@ -197,6 +198,16 @@ export default function NulogySync({ onDataLoaded, theme }) {
     setSyncing(false);
   }, [syncTypes, syncReport, onDataLoaded]);
 
+  // Auto-trigger sync once connected
+  useEffect(() => {
+    if (!autoStart) return;
+    if (!connectionStatus || !connectionStatus.connected) return;
+    if (syncing) return;
+    if (autoStartedRef.current) return;
+    autoStartedRef.current = true;
+    startSync();
+  }, [autoStart, connectionStatus, syncing, startSync]);
+
   const cancelSync = useCallback(() => {
     abortRef.current = true;
     setSyncing(false);
@@ -234,49 +245,50 @@ export default function NulogySync({ onDataLoaded, theme }) {
     <div style={{ marginBottom: 16 }}>
       <style>{`@keyframes nulogy-spin { to { transform: rotate(360deg); } }`}</style>
 
-      {/* Collapsed header */}
-      <div
-        onClick={() => setExpanded(!expanded)}
-        style={{
-          display: "flex", alignItems: "center", gap: 10,
-          padding: "12px 14px", border: "1px solid " + (connectionStatus?.connected ? C.okLine : C.border),
-          borderRadius: expanded ? "8px 8px 0 0" : 8,
-          cursor: "pointer",
-          background: connectionStatus?.connected ? C.okSoft : C.surface
-        }}
-      >
-        <div style={{
-          width: 28, height: 28, borderRadius: 6,
-          background: connectionStatus?.connected ? C.ok : C.raised,
-          display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: 13, color: connectionStatus?.connected ? "#fff" : C.dim,
-          fontWeight: 700, flexShrink: 0
-        }}>
-          {connectionStatus?.connected ? "⟳" : "N"}
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 15, fontWeight: 600, color: C.bright, fontFamily: sans }}>
-            Sync from Nulogy
+      {!hideToggle && (
+        <div
+          onClick={() => setExpanded(!expanded)}
+          style={{
+            display: "flex", alignItems: "center", gap: 10,
+            padding: "12px 14px", border: "1px solid " + (connectionStatus?.connected ? C.okLine : C.border),
+            borderRadius: expanded ? "8px 8px 0 0" : 8,
+            cursor: "pointer",
+            background: connectionStatus?.connected ? C.okSoft : C.surface
+          }}
+        >
+          <div style={{
+            width: 28, height: 28, borderRadius: 6,
+            background: connectionStatus?.connected ? C.ok : C.raised,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 13, color: connectionStatus?.connected ? "#fff" : C.dim,
+            fontWeight: 700, flexShrink: 0
+          }}>
+            {connectionStatus?.connected ? "⟳" : "N"}
           </div>
-          <div style={{ fontSize: 13, color: C.dim, fontFamily: sans, marginTop: 1 }}>
-            {connectionStatus?.connected
-              ? "Connected — pull live data from Nulogy"
-              : connectionStatus?.configured
-              ? "Credentials set but not connected"
-              : "Pull inventory, WOs, and BOMs from Nulogy"}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: C.bright, fontFamily: sans }}>
+              Sync from Nulogy
+            </div>
+            <div style={{ fontSize: 13, color: C.dim, fontFamily: sans, marginTop: 1 }}>
+              {connectionStatus?.connected
+                ? "Connected — pull live data from Nulogy"
+                : connectionStatus?.configured
+                ? "Credentials set but not connected"
+                : "Pull inventory, WOs, and BOMs from Nulogy"}
+            </div>
           </div>
+          <span style={{
+            width: 8, height: 8, borderRadius: "50%", background: connDot, flexShrink: 0
+          }} />
+          <span style={{ fontSize: 13, color: C.dim, transform: expanded ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>▸</span>
         </div>
-        <span style={{
-          width: 8, height: 8, borderRadius: "50%", background: connDot, flexShrink: 0
-        }} />
-        <span style={{ fontSize: 13, color: C.dim, transform: expanded ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>▸</span>
-      </div>
+      )}
 
       {/* Expanded panel */}
-      {expanded && (
+      {(expanded || hideToggle) && (
         <div style={{
           border: "1px solid " + C.border, borderTop: "none",
-          borderRadius: "0 0 8px 8px", padding: "14px 16px",
+          borderRadius: hideToggle ? 8 : "0 0 8px 8px", padding: "14px 16px",
           background: C.surface
         }}>
           {/* Connection status */}
