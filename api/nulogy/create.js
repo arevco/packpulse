@@ -9,25 +9,25 @@ const REPORT_CONFIGS = {
   inventory: {
     report: "inventory_snapshot",
     columnSets: [
-      // Attempt 1: API doc column codes (standard)
+      // Attempt 1: REV Copack actual Nulogy column names (verified from CSV export)
+      ["Item", "Item description", "UOM", "Good", "Quarantined", "Rejected", "Unavailable"],
+      // Attempt 2: API doc column codes (standard) - full set
       ["item_code", "item_description", "base_quantity", "base_unit_of_measure",
        "lot_code", "expiry_date", "inventory_status", "inventory_category",
        "item_category_name", "item_type", "item_family_name"],
-      // Attempt 2: Minimal API doc codes
-      ["item_code", "item_description", "base_quantity"],
-      // Attempt 3: Single column test
-      ["item_code"],
-      // Attempt 4: Try base_quantity alone
-      ["base_quantity"],
-      // Attempt 5: Try inventory_status alone
-      ["inventory_status"],
-      // Attempt 6: REV Copack CSV headers (might work as column labels)
-      ["Item", "Item description", "UOM", "Good", "Quarantined", "Rejected", "Unavailable"],
-      // Attempt 7: API doc labels
+      // Attempt 3: API doc labels (Title Case)
       ["Item code", "Item description", "Base quantity", "Base unit of measure",
        "Lot code", "Expiry date", "Inventory status", "Inventory category"],
-      // Attempt 8: Minimal labels
-      ["Item code", "Item description", "Base quantity"]
+      // Attempt 4: Minimal API doc codes WITH description
+      ["item_code", "item_description", "base_quantity"],
+      // Attempt 5: Minimal labels WITH description
+      ["Item code", "Item description", "Base quantity"],
+      // Attempt 6: Minimal codes without description (last resort)
+      ["item_code", "base_quantity"],
+      // Attempt 7: Single column discovery
+      ["item_code"],
+      // Attempt 8: Single column discovery alt
+      ["base_quantity"]
     ]
   },
   workorders: {
