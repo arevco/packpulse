@@ -123,6 +123,43 @@ function pickName(value, preferredKeys) {
   return "";
 }
 
+function findStringDeepByKeys(obj, keys, depth) {
+  if (!obj || depth > 5) return "";
+  if (Array.isArray(obj)) {
+    for (var i = 0; i < obj.length; i++) {
+      var fromArr = findStringDeepByKeys(obj[i], keys, depth + 1);
+      if (fromArr) return fromArr;
+    }
+    return "";
+  }
+  if (typeof obj !== "object") return "";
+
+  var objectKeys = Object.keys(obj);
+  for (var k = 0; k < objectKeys.length; k++) {
+    var currentKey = objectKeys[k];
+    var keyNorm = String(currentKey).toLowerCase();
+    var isTarget = keys.some(function (t) {
+      return keyNorm === t || keyNorm === t + "name" || keyNorm.includes(t);
+    });
+    if (isTarget) {
+      var v = obj[currentKey];
+      var direct = asCleanString(v);
+      if (direct) return direct;
+      var named = pickName(v, ["name", "label", "title", "value"]);
+      if (named) return named;
+    }
+  }
+
+  for (var j = 0; j < objectKeys.length; j++) {
+    var nested = obj[objectKeys[j]];
+    if (nested && typeof nested === "object") {
+      var fromNested = findStringDeepByKeys(nested, keys, depth + 1);
+      if (fromNested) return fromNested;
+    }
+  }
+  return "";
+}
+
 function cleanCustomFieldKey(rawKey) {
   var key = String(rawKey || "");
   // Strip type prefixes like str/int/doc/dropdown/email/phone/multidoc
@@ -161,8 +198,12 @@ function flattenCustomFields(customFields) {
   if (!customFields || typeof customFields !== "object") return {};
   var out = {};
   Object.keys(customFields).forEach(function (k) {
+    if (/^\d+$/.test(String(k))) return;
     var header = cleanCustomFieldKey(k);
-    out[header] = flattenCustomFieldValue(customFields[k]);
+    if (!header || /^\d+$/.test(header)) return;
+    var value = flattenCustomFieldValue(customFields[k]);
+    if (!value) return;
+    out[header] = value;
   });
   return out;
 }
@@ -231,9 +272,18 @@ function normalizeAppointmentRow(appt) {
   var startLocal = toCentralDateTime(start);
   var endLocal = toCentralDateTime(end);
   var customFields = appt && appt.customFields && typeof appt.customFields === "object" ? appt.customFields : {};
-  var carrier = pickName(appt ? appt.carrier : null, ["name", "carrierName", "label"]);
-  var loadType = pickName(appt ? appt.loadType : null, ["name", "label", "type"]);
-  var dock = pickName(appt ? appt.dock : null, ["name", "label", "dockName"]);
+  var carrier =
+    pickName(appt ? appt.carrier : null, ["name", "carrierName", "label"]) ||
+    asCleanString(getNestedValue(appt, ["carrierName"])) ||
+    findStringDeepByKeys(appt, ["carrier"], 0);
+  var loadType =
+    pickName(appt ? appt.loadType : null, ["name", "label", "type"]) ||
+    asCleanString(getNestedValue(appt, ["loadTypeName"])) ||
+    findStringDeepByKeys(appt, ["loadtype", "load_type", "type"], 0);
+  var dock =
+    pickName(appt ? appt.dock : null, ["name", "label", "dockName"]) ||
+    asCleanString(getNestedValue(appt, ["dockName"])) ||
+    findStringDeepByKeys(appt, ["dock", "door"], 0);
 
   var row = {
     PO: appt && appt.refNumber ? String(appt.refNumber) : "",
