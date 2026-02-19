@@ -4,24 +4,19 @@
 
 const NULOGY_URL = process.env.NULOGY_URL || "https://app.nulogy.net";
 
-// Column codes verified from live Nulogy instance documentation
-// https://app.nulogy.net/api/reports/documentation
+// Column codes verified against actual REV Copack Nulogy instance
+// NOTE: This instance uses custom column names, NOT standard API codes
 const REPORT_CONFIGS = {
   inventory: {
     report: "inventory_snapshot",
     columnSets: [
-      // Attempt 1: Full set from live docs — all confirmed valid
+      // Attempt 1: REV Copack actual column codes (verified working)
+      ["Item", "Item description", "UOM", "Good", "Quarantined", "Rejected", "Unavailable"],
+      // Attempt 2: Standard API codes (for other Nulogy instances)
       ["item_code", "item_description", "base_quantity", "base_unit_of_measure",
-       "inventory_status", "lot_code", "expiry_date", "customer_name",
-       "item_category_name", "item_type", "item_family_name", "is_finished_good",
-       "pallet_number"],
-      // Attempt 2: Core fields only (still includes description)
-      ["item_code", "item_description", "base_quantity", "base_unit_of_measure",
-       "inventory_status"],
-      // Attempt 3: Absolute minimum WITH description
-      ["item_code", "item_description", "base_quantity"],
-      // Attempt 4: Without description (last resort)
-      ["item_code", "base_quantity"]
+       "inventory_status", "lot_code", "expiry_date"],
+      // Attempt 3: Minimal standard codes
+      ["item_code", "item_description", "base_quantity"]
     ]
   },
   workorders: {
