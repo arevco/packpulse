@@ -4,30 +4,24 @@
 
 const NULOGY_URL = process.env.NULOGY_URL || "https://app.nulogy.net";
 
-// Column sets to try for each report - ordered by likelihood
+// Column codes verified from live Nulogy instance documentation
+// https://app.nulogy.net/api/reports/documentation
 const REPORT_CONFIGS = {
   inventory: {
     report: "inventory_snapshot",
     columnSets: [
-      // Attempt 1: REV Copack actual Nulogy column names (verified from CSV export)
-      ["Item", "Item description", "UOM", "Good", "Quarantined", "Rejected", "Unavailable"],
-      // Attempt 2: API doc column codes (standard) - full set
+      // Attempt 1: Full set from live docs — all confirmed valid
       ["item_code", "item_description", "base_quantity", "base_unit_of_measure",
-       "lot_code", "expiry_date", "inventory_status", "inventory_category",
-       "item_category_name", "item_type", "item_family_name"],
-      // Attempt 3: API doc labels (Title Case)
-      ["Item code", "Item description", "Base quantity", "Base unit of measure",
-       "Lot code", "Expiry date", "Inventory status", "Inventory category"],
-      // Attempt 4: Minimal API doc codes WITH description
+       "inventory_status", "lot_code", "expiry_date", "customer_name",
+       "item_category_name", "item_type", "item_family_name", "is_finished_good",
+       "pallet_number"],
+      // Attempt 2: Core fields only (still includes description)
+      ["item_code", "item_description", "base_quantity", "base_unit_of_measure",
+       "inventory_status"],
+      // Attempt 3: Absolute minimum WITH description
       ["item_code", "item_description", "base_quantity"],
-      // Attempt 5: Minimal labels WITH description
-      ["Item code", "Item description", "Base quantity"],
-      // Attempt 6: Minimal codes without description (last resort)
-      ["item_code", "base_quantity"],
-      // Attempt 7: Single column discovery
-      ["item_code"],
-      // Attempt 8: Single column discovery alt
-      ["base_quantity"]
+      // Attempt 4: Without description (last resort)
+      ["item_code", "base_quantity"]
     ]
   },
   workorders: {
@@ -38,24 +32,14 @@ const REPORT_CONFIGS = {
        "project_status", "standard_units_per_hour", "standard_people",
        "planned_start_at", "planned_end_at", "reference_1",
        "purchase_order_number"],
-      ["Project Code", "Item Code", "Item Description", "Customer Name",
-       "Units Expected", "Units Produced", "Units Remaining", "Due Date At",
-       "Project Status", "Standard Units Per Hour", "Standard People",
-       "Planned Start At", "Planned End At", "Reference 1",
-       "Purchase Order Number"],
-      ["project_code", "item_code", "units_expected", "project_status"],
-      ["Project Code", "Item Code", "Units Expected", "Project Status"]
+      ["project_code", "item_code", "item_description", "customer_name",
+       "units_expected", "units_produced", "units_remaining", "due_date_at",
+       "project_status"],
+      ["project_code", "item_code", "units_expected", "project_status"]
     ],
     filters: [
       {
         column: "project_status",
-        operator: "!=",
-        threshold: "Cancelled"
-      }
-    ],
-    filtersAlt: [
-      {
-        column: "Project Status",
         operator: "!=",
         threshold: "Cancelled"
       }
@@ -66,10 +50,9 @@ const REPORT_CONFIGS = {
     columnSets: [
       ["finished_good_code", "subcomponent_code", "subcomponent_unit_quantity",
        "subcomponent_uom", "substitute_for", "priority", "version_name"],
-      ["Finished Good Code", "Subcomponent Code", "Subcomponent Quantity",
-       "Subcomponent Unit Of Measure", "Substitute For", "Priority", "Version Name"],
-      ["finished_good_code", "subcomponent_code", "subcomponent_unit_quantity"],
-      ["Finished Good Code", "Subcomponent Code", "Subcomponent Quantity"]
+      ["finished_good_code", "subcomponent_code", "subcomponent_unit_quantity",
+       "substitute_for", "priority"],
+      ["finished_good_code", "subcomponent_code", "subcomponent_unit_quantity"]
     ]
   }
 };
@@ -100,20 +83,15 @@ export default async function handler(req, res) {
   const auth = Buffer.from(`${user}:${pass}`).toString("base64");
   const errors = [];
 
-  // Try each column set until one works
   for (let attempt = 0; attempt < config.columnSets.length; attempt++) {
     const columns = config.columnSets[attempt];
-
-    // Use alternate filters for label-based attempts (odd indexes)
-    const useAltFilters = attempt % 2 === 1;
-    const filters = useAltFilters && config.filtersAlt ? config.filtersAlt : config.filters;
 
     const body = {
       report: config.report,
       columns: columns,
       locale: "en_US"
     };
-    if (filters) body.filters = filters;
+    if (config.filters) body.filters = config.filters;
     if (siteUuid) body.site_uuid = siteUuid;
 
     try {
@@ -134,7 +112,6 @@ export default async function handler(req, res) {
       }
 
       if (response.ok || response.status === 201) {
-        // Success! Get the status URL
         const statusUrl = response.headers.get("location") || response.headers.get("Location");
         const responseBody = await response.json().catch(() => ({}));
         const taskId = responseBody.task_id;
@@ -146,11 +123,12 @@ export default async function handler(req, res) {
           reportType,
           nulogyReport: config.report,
           columnsUsed: columns,
-          attempt: attempt + 1
+          attempt: attempt + 1,
+          totalColumns: columns.length
         });
       }
 
-      // 400 = bad request — capture exact error for diagnostics
+      // 400 = bad request
       if (response.status === 400) {
         let errorText = "";
         try { errorText = await response.text(); } catch(e) { errorText = "Could not read error"; }
@@ -161,8 +139,8 @@ export default async function handler(req, res) {
           nulogyError: errorText
         });
 
-        // If the error is about filters (not columns), try without filters
-        if (errorText.includes("filter") && filters) {
+        // If error is about filters, retry without them
+        if (errorText.includes("filter") && config.filters) {
           const bodyNoFilter = { report: config.report, columns: columns, locale: "en_US" };
           if (siteUuid) bodyNoFilter.site_uuid = siteUuid;
 
@@ -188,7 +166,8 @@ export default async function handler(req, res) {
               nulogyReport: config.report,
               columnsUsed: columns,
               attempt: attempt + 1,
-              note: "filters removed"
+              note: "filters removed",
+              totalColumns: columns.length
             });
           }
         }
@@ -196,7 +175,6 @@ export default async function handler(req, res) {
         continue;
       }
 
-      // Other error
       const text = await response.text();
       errors.push({ attempt: attempt + 1, status: response.status, nulogyError: text });
       continue;
@@ -207,9 +185,8 @@ export default async function handler(req, res) {
     }
   }
 
-  // All attempts failed — return full diagnostics
   return res.status(400).json({
-    error: "Could not find valid column names for this Nulogy report. Your instance may use custom column names.",
+    error: "Could not find valid column names for this Nulogy report.",
     reportType,
     nulogyReport: config.report,
     totalAttempts: errors.length,
