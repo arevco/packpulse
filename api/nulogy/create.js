@@ -4,50 +4,46 @@
 
 const NULOGY_URL = process.env.NULOGY_URL || "https://app.nulogy.net";
 
-// Strategy: try column codes first, then column labels, then minimal set
+// Column sets to try for each report - ordered by likelihood
 const REPORT_CONFIGS = {
   inventory: {
     report: "inventory_snapshot",
     columnSets: [
-      // Attempt 1: REV Copack actual Nulogy column names
-      ["Item", "Item description", "UOM", "Good", "Quarantined", "Rejected", "Unavailable"],
-      // Attempt 2: Column codes from API docs
+      // Attempt 1: API doc column codes (standard)
       ["item_code", "item_description", "base_quantity", "base_unit_of_measure",
-       "lot_code", "expiry_date", "item_category_name", "item_type",
-       "inventory_status", "inventory_category", "item_family_name"],
-      // Attempt 3: Column labels (Title Case)
-      ["Item Code", "Item Description", "Base Quantity", "Base Unit Of Measure",
-       "Lot Code", "Expiry Date", "Item Category Name", "Item Type",
-       "Inventory Status", "Inventory Category", "Item Family Name"],
-      // Attempt 4: Minimal set with codes
+       "lot_code", "expiry_date", "inventory_status", "inventory_category",
+       "item_category_name", "item_type", "item_family_name"],
+      // Attempt 2: Minimal API doc codes
       ["item_code", "item_description", "base_quantity"],
-      // Attempt 5: Minimal set with labels
-      ["Item Code", "Item Description", "Base Quantity"],
-      // Attempt 6: Try common alternative names
-      ["material", "description", "quantity"],
-      ["Material", "Description", "Quantity"],
-      ["sku", "description", "qty_on_hand"],
-      ["SKU", "Description", "Qty On Hand"]
+      // Attempt 3: Single column test
+      ["item_code"],
+      // Attempt 4: Try base_quantity alone
+      ["base_quantity"],
+      // Attempt 5: Try inventory_status alone
+      ["inventory_status"],
+      // Attempt 6: REV Copack CSV headers (might work as column labels)
+      ["Item", "Item description", "UOM", "Good", "Quarantined", "Rejected", "Unavailable"],
+      // Attempt 7: API doc labels
+      ["Item code", "Item description", "Base quantity", "Base unit of measure",
+       "Lot code", "Expiry date", "Inventory status", "Inventory category"],
+      // Attempt 8: Minimal labels
+      ["Item code", "Item description", "Base quantity"]
     ]
   },
   workorders: {
     report: "project_status",
     columnSets: [
-      // Attempt 1: Column codes
       ["project_code", "item_code", "item_description", "customer_name",
        "units_expected", "units_produced", "units_remaining", "due_date_at",
        "project_status", "standard_units_per_hour", "standard_people",
        "planned_start_at", "planned_end_at", "reference_1",
        "purchase_order_number"],
-      // Attempt 2: Column labels
       ["Project Code", "Item Code", "Item Description", "Customer Name",
        "Units Expected", "Units Produced", "Units Remaining", "Due Date At",
        "Project Status", "Standard Units Per Hour", "Standard People",
        "Planned Start At", "Planned End At", "Reference 1",
        "Purchase Order Number"],
-      // Attempt 3: Minimal codes
       ["project_code", "item_code", "units_expected", "project_status"],
-      // Attempt 4: Minimal labels
       ["Project Code", "Item Code", "Units Expected", "Project Status"]
     ],
     filters: [
@@ -68,15 +64,11 @@ const REPORT_CONFIGS = {
   bom: {
     report: "bom",
     columnSets: [
-      // Attempt 1: Column codes
       ["finished_good_code", "subcomponent_code", "subcomponent_unit_quantity",
        "subcomponent_uom", "substitute_for", "priority", "version_name"],
-      // Attempt 2: Column labels
       ["Finished Good Code", "Subcomponent Code", "Subcomponent Quantity",
        "Subcomponent Unit Of Measure", "Substitute For", "Priority", "Version Name"],
-      // Attempt 3: Minimal codes
       ["finished_good_code", "subcomponent_code", "subcomponent_unit_quantity"],
-      // Attempt 4: Minimal labels
       ["Finished Good Code", "Subcomponent Code", "Subcomponent Quantity"]
     ]
   }
@@ -158,13 +150,19 @@ export default async function handler(req, res) {
         });
       }
 
-      // 400 = bad request, likely column names wrong — try next set
+      // 400 = bad request — capture exact error for diagnostics
       if (response.status === 400) {
-        const text = await response.text();
-        errors.push({ attempt: attempt + 1, columns: columns.slice(0, 3).join(", ") + "...", error: text });
+        let errorText = "";
+        try { errorText = await response.text(); } catch(e) { errorText = "Could not read error"; }
+        errors.push({
+          attempt: attempt + 1,
+          columns: columns,
+          status: response.status,
+          nulogyError: errorText
+        });
 
-        // If the error mentions filters (not columns), try without filters
-        if (text.includes("filter") && filters) {
+        // If the error is about filters (not columns), try without filters
+        if (errorText.includes("filter") && filters) {
           const bodyNoFilter = { report: config.report, columns: columns, locale: "en_US" };
           if (siteUuid) bodyNoFilter.site_uuid = siteUuid;
 
@@ -195,12 +193,13 @@ export default async function handler(req, res) {
           }
         }
 
-        continue; // Try next column set
+        continue;
       }
 
       // Other error
       const text = await response.text();
-      return res.status(response.status).json({ error: `Nulogy error (${response.status}): ${text}` });
+      errors.push({ attempt: attempt + 1, status: response.status, nulogyError: text });
+      continue;
 
     } catch (err) {
       errors.push({ attempt: attempt + 1, error: err.message });
@@ -208,11 +207,12 @@ export default async function handler(req, res) {
     }
   }
 
-  // All attempts failed
+  // All attempts failed — return full diagnostics
   return res.status(400).json({
     error: "Could not find valid column names for this Nulogy report. Your instance may use custom column names.",
     reportType,
     nulogyReport: config.report,
+    totalAttempts: errors.length,
     attempts: errors
   });
 }
