@@ -125,6 +125,8 @@ export default function ProductionReadiness() {
   const [dockApiLoading, setDockApiLoading] = useState(false);
   const [dockApiError, setDockApiError] = useState("");
   const [dockApiInfo, setDockApiInfo] = useState("");
+  const [autoBootstrapEnabled, setAutoBootstrapEnabled] = useState(true);
+  const [autoDockAttempted, setAutoDockAttempted] = useState(false);
   const [poData, setPoData] = useState(null);
   const [poFileName, setPoFileName] = useState("");
   const [poTimestamp, setPoTimestamp] = useState(null);
@@ -229,6 +231,7 @@ export default function ProductionReadiness() {
   useMemo(() => { if (bomHeaders.length && !bomMapping.bomId) setBomMapping(autoMapColumns(bomHeaders, BOM_PAT)); }, [bomHeaders]);
   useMemo(() => { if (woHeaders.length && !woMapping.woNumber) setWoMapping(autoMapColumns(woHeaders, WO_PAT)); }, [woHeaders]);
   var allUploaded = inventory && workOrders;
+  var showAutoBootstrap = !mappingConfirmed && autoBootstrapEnabled;
   var requiredMappingsMet = useMemo(() => invMapping.sku && invMapping.qtyOnHand && woMapping.woNumber && woMapping.productSku && woMapping.qtyToProduce && (!boms || (bomMapping.bomId && bomMapping.componentSku && bomMapping.qtyPer)), [invMapping,bomMapping,woMapping,boms]);
 
 
@@ -426,6 +429,12 @@ export default function ProductionReadiness() {
       setDockApiLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (!showAutoBootstrap || autoDockAttempted) return;
+    setAutoDockAttempted(true);
+    fetchOpenDockApi();
+  }, [showAutoBootstrap, autoDockAttempted, fetchOpenDockApi]);
 
   var handleNulogyData = useCallback(function(results) {
     var ts = new Date();
@@ -704,11 +713,24 @@ export default function ProductionReadiness() {
 
       {!mappingConfirmed && (<div>
         <div style={{ marginBottom:16 }}>
-          <div style={{ fontSize:15, fontWeight:600, color:C.bright }}>Data Sources</div>
-          <div style={{ fontSize:14, color:C.dim, marginTop:2 }}>Sync from Nulogy or upload CSV files to begin.</div>
+          <div style={{ fontSize:15, fontWeight:600, color:C.bright }}>{showAutoBootstrap ? "Syncing Live Data" : "Data Sources"}</div>
+          <div style={{ fontSize:14, color:C.dim, marginTop:2 }}>{showAutoBootstrap ? "Pulling Nulogy + OpenDock feeds and entering the dashboard automatically." : "Sync from Nulogy or upload CSV files to begin."}</div>
         </div>
-        <NulogySync onDataLoaded={handleNulogyData} theme={C} />
-        <div style={{ fontSize:13, fontWeight:600, color:C.dim, textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>Or upload files manually</div>
+        <NulogySync onDataLoaded={handleNulogyData} theme={C} autoStart={showAutoBootstrap} hideToggle={showAutoBootstrap} />
+        {showAutoBootstrap && (
+          <div style={{ marginTop:10, marginBottom:16, display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+            <button onClick={fetchOpenDockApi} disabled={dockApiLoading} style={{ padding:"8px 14px", borderRadius:6, border:"1px solid "+(dockApiLoading?C.border:C.accentLine), background:dockApiLoading?C.raised:C.accentSoft, color:dockApiLoading?C.dim:C.accent, fontFamily:sans, fontSize:14, fontWeight:600, cursor:dockApiLoading?"not-allowed":"pointer" }}>
+              {dockApiLoading ? "Loading OpenDock..." : "Refresh OpenDock API"}
+            </button>
+            {dockApiInfo && <span style={{ fontSize:12, color:C.ok }}>{dockApiInfo}</span>}
+            {dockApiError && <span style={{ fontSize:12, color:C.bad }}>OpenDock API error: {dockApiError}</span>}
+            <button onClick={() => setAutoBootstrapEnabled(false)} style={{ padding:"6px 12px", borderRadius:6, border:"1px solid "+C.border, background:"transparent", color:C.dim, fontFamily:sans, fontSize:13, cursor:"pointer" }}>
+              Switch to Manual Upload
+            </button>
+          </div>
+        )}
+        {!showAutoBootstrap && <div style={{ fontSize:13, fontWeight:600, color:C.dim, textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>Or upload files manually</div>}
+        {!showAutoBootstrap && (<>
         <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(230px, 1fr))", gap:8, marginBottom:20 }}>
           <FileUploader label="Inventory" uploaded={!!inventory} fileName={invFileName} onData={(d,n) => {setInventory(d);setInvFileName(n);setInvTimestamp(new Date());}} subtitle="Daily stock levels (.csv)" />
           <FileUploader label="Work Orders" uploaded={!!workOrders} fileName={woFileName} onData={(d,n) => {setWorkOrders(d);setWoFileName(n);setWoTimestamp(new Date());}} subtitle="Open work orders (.csv)" />
@@ -730,6 +752,7 @@ export default function ProductionReadiness() {
           {dockApiInfo && <span style={{ fontSize:12, color:C.ok }}>{dockApiInfo}</span>}
           {dockApiError && <span style={{ fontSize:12, color:C.bad }}>OpenDock API error: {dockApiError}</span>}
         </div>
+        </>)}
         {allUploaded && !analyzing && (
           <button onClick={() => { setAnalyzing(true); setTimeout(() => { setMappingConfirmed(true); setAnalyzing(false); }, 1500); }} disabled={!requiredMappingsMet} style={{ padding:"8px 24px", borderRadius:6, border:"none", background:requiredMappingsMet?C.accent:C.raised, color:requiredMappingsMet?"#fff":C.dim, fontFamily:sans, fontSize:15, fontWeight:600, cursor:requiredMappingsMet?"pointer":"not-allowed" }}>
             Analyze
@@ -744,7 +767,7 @@ export default function ProductionReadiness() {
           </div>
         )}
 
-        <div style={{ marginTop:28, borderTop:"1px solid "+C.border, paddingTop:24 }}>
+        {!showAutoBootstrap && <div style={{ marginTop:28, borderTop:"1px solid "+C.border, paddingTop:24 }}>
           <div style={{ fontSize:15, fontWeight:700, color:C.bright, marginBottom:16 }}>How PackPulse Works</div>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(280px, 1fr))", gap:16 }}>
 
@@ -791,7 +814,7 @@ export default function ProductionReadiness() {
             </div>
 
           </div>
-        </div>
+        </div>}
       </div>)}
 
       {mappingConfirmed && analysis && summary && (<div>
