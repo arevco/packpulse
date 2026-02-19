@@ -25,8 +25,8 @@ export default async function handler(req, res) {
   const auth = Buffer.from(`${user}:${pass}`).toString("base64");
 
   try {
-    // Test by creating a minimal report request (small columns list)
-    // We'll use the item_master report with 1 column as a lightweight test
+    // Try creating a report — we just need to see if auth passes
+    // Column names may vary per instance, so a 400 about columns still means connected
     const response = await fetch(`${NULOGY_URL}/api/reports/report_runs`, {
       method: "POST",
       headers: {
@@ -56,12 +56,14 @@ export default async function handler(req, res) {
       });
     }
 
-    if (response.ok || response.status === 201) {
+    // 201 = report created successfully, 400 = columns wrong but auth passed
+    // Both mean we are authenticated and connected
+    if (response.ok || response.status === 201 || response.status === 400) {
       return res.status(200).json({
         configured: true,
         connected: true,
         message: "Connected to Nulogy successfully.",
-        user: user.replace(/(.{3}).*(@.*)/, "$1***$2"), // mask email
+        user: user.includes("@") ? user.replace(/(.{3}).*(@.*)/, "$1***$2") : user.slice(0, 3) + "***",
         url: NULOGY_URL,
         siteUuid: siteUuid || "default"
       });
