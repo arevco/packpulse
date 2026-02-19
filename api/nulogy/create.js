@@ -9,19 +9,21 @@ const REPORT_CONFIGS = {
   inventory: {
     report: "inventory_snapshot",
     columnSets: [
-      // Attempt 1: Column codes from API docs
+      // Attempt 1: REV Copack actual Nulogy column names
+      ["Item", "Item description", "UOM", "Good", "Quarantined", "Rejected", "Unavailable"],
+      // Attempt 2: Column codes from API docs
       ["item_code", "item_description", "base_quantity", "base_unit_of_measure",
        "lot_code", "expiry_date", "item_category_name", "item_type",
        "inventory_status", "inventory_category", "item_family_name"],
-      // Attempt 2: Column labels (Title Case)
+      // Attempt 3: Column labels (Title Case)
       ["Item Code", "Item Description", "Base Quantity", "Base Unit Of Measure",
        "Lot Code", "Expiry Date", "Item Category Name", "Item Type",
        "Inventory Status", "Inventory Category", "Item Family Name"],
-      // Attempt 3: Minimal set with codes
+      // Attempt 4: Minimal set with codes
       ["item_code", "item_description", "base_quantity"],
-      // Attempt 4: Minimal set with labels
+      // Attempt 5: Minimal set with labels
       ["Item Code", "Item Description", "Base Quantity"],
-      // Attempt 5: Try common alternative names
+      // Attempt 6: Try common alternative names
       ["material", "description", "quantity"],
       ["Material", "Description", "Quantity"],
       ["sku", "description", "qty_on_hand"],
