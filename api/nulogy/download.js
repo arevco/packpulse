@@ -5,6 +5,14 @@
 // (Nulogy may return either column codes or column labels as CSV headers)
 const COLUMN_MAPS = {
   inventory: {
+    // REV Copack actual Nulogy column names
+    "Item": "Item Code",
+    "Item description": "Description",
+    "Good": "Qty On Hand",
+    "UOM": "Base UOM",
+    "Quarantined": "Quarantined",
+    "Rejected": "Rejected",
+    "Unavailable": "Unavailable",
     // Nulogy code → PackPulse header
     "item_code": "Item Code",
     "Item Code": "Item Code",
