@@ -152,9 +152,13 @@ export default function NulogySync({ onDataLoaded, theme }) {
       }
       const dlData = await dlRes.json();
 
+      // Log columns for diagnostics
+      console.log(`[Nulogy] ${type} original headers:`, dlData.originalHeaders);
+      console.log(`[Nulogy] ${type} transformed columns:`, dlData.columns);
+
       updateReportState(type, {
         status: DONE,
-        progress: `${dlData.rowCount.toLocaleString()} rows loaded`,
+        progress: `${dlData.rowCount.toLocaleString()} rows, ${(dlData.columns || []).length} cols [${(dlData.originalHeaders || []).join(", ")}]`,
         rowCount: dlData.rowCount
       });
 
