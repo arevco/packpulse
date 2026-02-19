@@ -667,9 +667,13 @@ export default function ProductionReadiness() {
           <h1 style={{ fontSize:18, fontWeight:700, color:C.bright, margin:0, fontFamily:sans, letterSpacing:-0.2 }}>PackPulse</h1>
           <span style={{ fontSize:13, color:C.dim }}>REV Copack</span>
         </div>
-        <button onClick={() => setTheme(theme==="dark"?"light":"dark")} style={{ padding:"5px 12px", borderRadius:6, border:"1px solid "+C.border, background:"transparent", color:C.dim, fontFamily:sans, fontSize:13, cursor:"pointer" }}>
-          {theme === "dark" ? "Light" : "Dark"}
-        </button>
+        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+          {window.__ppUser && <span style={{ fontSize:13, color:C.dim }}>{window.__ppUser.email}</span>}
+          {window.__ppLogout && <button onClick={window.__ppLogout} style={{ padding:"5px 12px", borderRadius:6, border:"1px solid "+C.border, background:"transparent", color:C.dim, fontFamily:sans, fontSize:13, cursor:"pointer" }}>Sign out</button>}
+          <button onClick={() => setTheme(theme==="dark"?"light":"dark")} style={{ padding:"5px 12px", borderRadius:6, border:"1px solid "+C.border, background:"transparent", color:C.dim, fontFamily:sans, fontSize:13, cursor:"pointer" }}>
+            {theme === "dark" ? "Light" : "Dark"}
+          </button>
+        </div>
       </header>
       <main style={{ padding:"20px 28px", maxWidth:1440, margin:"0 auto" }}>
 
