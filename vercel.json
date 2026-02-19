@@ -1,0 +1,8 @@
+{
+  "framework": "vite",
+  "functions": {
+    "api/nulogy/*.js": {
+      "maxDuration": 60
+    }
+  }
+}
