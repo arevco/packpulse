@@ -108,7 +108,7 @@ function getNestedValue(obj, path) {
 function asCleanString(v) {
   if (v == null) return "";
   if (typeof v === "string") return v;
-  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  if (typeof v === "number") return String(v);
   return "";
 }
 
@@ -266,24 +266,59 @@ function calcDurationMinutes(startIso, endIso) {
   return Math.round((e - s) / 60000);
 }
 
-function normalizeAppointmentRow(appt) {
+function isUuidLike(value) {
+  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function normalizeDisplayName(name, fallback) {
+  var n = asCleanString(name).trim();
+  if (!n) return fallback || "";
+  if (n.toLowerCase() === "false" || n.toLowerCase() === "true") return fallback || "";
+  return n;
+}
+
+function resolveDockName(appt, dockNameById) {
+  var rawDockValue =
+    pickName(appt ? appt.dock : null, ["name", "label", "dockName", "id"]) ||
+    asCleanString(getNestedValue(appt, ["dockName"])) ||
+    asCleanString(getNestedValue(appt, ["dock", "id"])) ||
+    findStringDeepByKeys(appt, ["dock", "door"], 0);
+  var cleaned = normalizeDisplayName(rawDockValue, "");
+  if (!cleaned) return "";
+  if (isUuidLike(cleaned) && dockNameById[cleaned]) return dockNameById[cleaned];
+  return isUuidLike(cleaned) ? "" : cleaned;
+}
+
+function resolveLoadTypeName(appt, loadTypeNameById) {
+  var rawLoadType =
+    pickName(appt ? appt.loadType : null, ["name", "label", "type", "id"]) ||
+    asCleanString(getNestedValue(appt, ["loadTypeName"])) ||
+    asCleanString(getNestedValue(appt, ["loadType", "id"])) ||
+    findStringDeepByKeys(appt, ["loadtype", "load_type", "type"], 0);
+  var cleaned = normalizeDisplayName(rawLoadType, "");
+  if (!cleaned) return "";
+  if (isUuidLike(cleaned) && loadTypeNameById[cleaned]) return loadTypeNameById[cleaned];
+  return isUuidLike(cleaned) ? "" : cleaned;
+}
+
+function resolveCarrierName(appt) {
+  var rawCarrier =
+    pickName(appt ? appt.carrier : null, ["name", "carrierName", "label"]) ||
+    asCleanString(getNestedValue(appt, ["carrierName"])) ||
+    asCleanString(getNestedValue(appt, ["carrier", "name"])) ||
+    findStringDeepByKeys(appt, ["carrier"], 0);
+  return normalizeDisplayName(rawCarrier, "");
+}
+
+function normalizeAppointmentRow(appt, dockNameById, loadTypeNameById) {
   var start = appt && appt.start ? appt.start : "";
   var end = appt && appt.end ? appt.end : "";
   var startLocal = toCentralDateTime(start);
   var endLocal = toCentralDateTime(end);
   var customFields = appt && appt.customFields && typeof appt.customFields === "object" ? appt.customFields : {};
-  var carrier =
-    pickName(appt ? appt.carrier : null, ["name", "carrierName", "label"]) ||
-    asCleanString(getNestedValue(appt, ["carrierName"])) ||
-    findStringDeepByKeys(appt, ["carrier"], 0);
-  var loadType =
-    pickName(appt ? appt.loadType : null, ["name", "label", "type"]) ||
-    asCleanString(getNestedValue(appt, ["loadTypeName"])) ||
-    findStringDeepByKeys(appt, ["loadtype", "load_type", "type"], 0);
-  var dock =
-    pickName(appt ? appt.dock : null, ["name", "label", "dockName"]) ||
-    asCleanString(getNestedValue(appt, ["dockName"])) ||
-    findStringDeepByKeys(appt, ["dock", "door"], 0);
+  var carrier = resolveCarrierName(appt);
+  var loadType = resolveLoadTypeName(appt, loadTypeNameById || {});
+  var dock = resolveDockName(appt, dockNameById || {});
 
   var row = {
     PO: appt && appt.refNumber ? String(appt.refNumber) : "",
@@ -312,6 +347,43 @@ function withinWindow(startIso, fromMs, toMs) {
   var t = new Date(startIso).getTime();
   if (!Number.isFinite(t)) return false;
   return t >= fromMs && t <= toMs;
+}
+
+async function fetchLookupMap(baseUrl, token, endpoint, idFieldCandidates, nameFieldCandidates) {
+  try {
+    var resp = await fetch(baseUrl + endpoint, {
+      method: "GET",
+      headers: { Authorization: "Bearer " + token, Accept: "application/json" },
+    });
+    if (!resp.ok) return {};
+    var text = await resp.text();
+    var body = parseJsonSafe(text);
+    var rows = pickArray(body);
+    var map = {};
+    rows.forEach(function (row) {
+      if (!row || typeof row !== "object") return;
+      var id = "";
+      for (var i = 0; i < idFieldCandidates.length; i++) {
+        var maybeId = asCleanString(row[idFieldCandidates[i]]);
+        if (maybeId) {
+          id = maybeId;
+          break;
+        }
+      }
+      var name = "";
+      for (var j = 0; j < nameFieldCandidates.length; j++) {
+        var maybeName = asCleanString(row[nameFieldCandidates[j]]);
+        if (maybeName) {
+          name = maybeName;
+          break;
+        }
+      }
+      if (id && name) map[id] = name;
+    });
+    return map;
+  } catch (_) {
+    return {};
+  }
 }
 
 export default async function handler(req, res) {
@@ -425,7 +497,11 @@ export default async function handler(req, res) {
       return new Date(a.start).getTime() - new Date(b.start).getTime();
     });
 
-    var rows = filtered.map(normalizeAppointmentRow);
+    var dockNameById = await fetchLookupMap(baseUrl, token, "/dock", ["id", "dockId", "uuid"], ["name", "dockName", "label"]);
+    var loadTypeNameById = await fetchLookupMap(baseUrl, token, "/loadtype", ["id", "loadTypeId", "uuid"], ["name", "label", "type"]);
+    var rows = filtered.map(function (appt) {
+      return normalizeAppointmentRow(appt, dockNameById, loadTypeNameById);
+    });
 
     return res.status(200).json({
       rows: rows,
