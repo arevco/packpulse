@@ -419,6 +419,11 @@ export default function ProductionReadiness() {
       setBomFileName("Nulogy Sync");
       setBomTimestamp(ts);
     }
+    // Auto-analyze if we got at least inventory + work orders
+    if (results.inventory && results.workorders) {
+      setAnalyzing(true);
+      setTimeout(function() { setMappingConfirmed(true); setAnalyzing(false); }, 1500);
+    }
   }, []);
 
   var handleSort = f => { if (sortField === f) setSortDir(d => d==="asc"?"desc":"asc"); else { setSortField(f); setSortDir("desc"); } };
