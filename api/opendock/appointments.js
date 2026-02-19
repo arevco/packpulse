@@ -6,6 +6,72 @@ function parseJsonSafe(text) {
   }
 }
 
+function extractBearerToken(value) {
+  if (!value) return "";
+  var s = String(value).trim();
+  if (!s) return "";
+  if (/^bearer\s+/i.test(s)) return s.replace(/^bearer\s+/i, "").trim();
+  return s;
+}
+
+function looksLikeJwt(value) {
+  if (!value || typeof value !== "string") return false;
+  // Loose check: JWT usually has 3 dot-separated base64url sections.
+  return value.split(".").length === 3;
+}
+
+function findTokenDeep(obj, depth) {
+  if (!obj || depth > 4) return "";
+  if (typeof obj === "string") {
+    var maybe = extractBearerToken(obj);
+    return looksLikeJwt(maybe) ? maybe : "";
+  }
+  if (Array.isArray(obj)) {
+    for (var i = 0; i < obj.length; i++) {
+      var fromArr = findTokenDeep(obj[i], depth + 1);
+      if (fromArr) return fromArr;
+    }
+    return "";
+  }
+  if (typeof obj !== "object") return "";
+
+  var commonKeys = [
+    "token",
+    "jwt",
+    "accessToken",
+    "access_token",
+    "idToken",
+    "id_token",
+    "authToken",
+    "authorization",
+  ];
+  for (var k = 0; k < commonKeys.length; k++) {
+    var key = commonKeys[k];
+    if (obj[key]) {
+      var maybe = extractBearerToken(obj[key]);
+      if (looksLikeJwt(maybe) || maybe.length > 20) return maybe;
+    }
+  }
+
+  var nestedKeys = ["data", "result", "payload", "user", "session"];
+  for (var j = 0; j < nestedKeys.length; j++) {
+    var nested = obj[nestedKeys[j]];
+    if (nested) {
+      var fromNested = findTokenDeep(nested, depth + 1);
+      if (fromNested) return fromNested;
+    }
+  }
+
+  // Last resort: scan object string values for JWT-like strings.
+  var values = Object.values(obj);
+  for (var v = 0; v < values.length; v++) {
+    var fromVal = findTokenDeep(values[v], depth + 1);
+    if (fromVal) return fromVal;
+  }
+
+  return "";
+}
+
 function pickArray(payload) {
   if (Array.isArray(payload)) return payload;
   if (!payload || typeof payload !== "object") return [];
@@ -111,14 +177,23 @@ export default async function handler(req, res) {
       });
     }
 
-    var token = "";
-    if (loginBody && typeof loginBody === "object") {
-      token = loginBody.token || loginBody.jwt || loginBody.accessToken || "";
-    } else if (typeof loginBody === "string") {
-      token = loginBody;
+    var token = findTokenDeep(loginBody, 0);
+    if (!token) {
+      token =
+        extractBearerToken(loginResp.headers.get("authorization")) ||
+        extractBearerToken(loginResp.headers.get("x-access-token")) ||
+        extractBearerToken(loginResp.headers.get("set-authorization"));
+    }
+    if (!token && typeof loginText === "string") {
+      // Fallback for non-JSON bodies that are raw token strings.
+      var raw = extractBearerToken(loginText);
+      if (looksLikeJwt(raw) || raw.length > 20) token = raw;
     }
     if (!token) {
-      return res.status(502).json({ error: "OpenDock auth response did not include a token." });
+      return res.status(502).json({
+        error: "OpenDock auth response did not include a token.",
+        loginResponseKeys: loginBody && typeof loginBody === "object" ? Object.keys(loginBody) : [],
+      });
     }
 
     var apptResp = await fetch(baseUrl + "/appointment", {
