@@ -78,7 +78,15 @@ export default function NulogySync({ onDataLoaded, theme }) {
       });
       if (!createRes.ok) {
         const err = await createRes.json();
-        throw new Error(err.error || `HTTP ${createRes.status}`);
+        // Show detailed diagnostics if available
+        let errorMsg = err.error || `HTTP ${createRes.status}`;
+        if (err.attempts && err.attempts.length > 0) {
+          const details = err.attempts.map(a =>
+            `Attempt ${a.attempt}: ${(a.nulogyError || a.error || "unknown").substring(0, 200)}`
+          ).join(" | ");
+          errorMsg += " — DETAILS: " + details;
+        }
+        throw new Error(errorMsg);
       }
       taskData = await createRes.json();
     } catch (err) {
@@ -361,7 +369,7 @@ export default function NulogySync({ onDataLoaded, theme }) {
                         <span style={{ fontSize: 13, fontWeight: 600, color: C.bright, minWidth: 90 }}>
                           {rt.label}
                         </span>
-                        <span style={{ fontSize: 13, color: st.error ? C.bad : C.dim, flex: 1 }}>
+                        <span style={{ fontSize: 13, color: st.error ? C.bad : C.dim, flex: 1, wordBreak: "break-word", lineHeight: 1.4 }}>
                           {st.error || st.progress || "Waiting..."}
                         </span>
                         {st.status === DONE && (
