@@ -63,6 +63,22 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, boms, wo
       itemMasterBySku[sku].desc = pickBetterDescription(itemMasterBySku[sku].desc || "", invDescRaw, skuRaw);
       if (!itemMasterBySku[sku].skuRaw && skuRaw) itemMasterBySku[sku].skuRaw = skuRaw;
     });
+    // Enrich item master descriptions from Work Orders when Inventory description is blank.
+    // Inventory remains primary source-of-truth; this only fills missing descriptions.
+    var woCols = workOrders && workOrders.length ? Object.keys(workOrders[0]) : [];
+    var woDescCol = woCols.find(function(c) { var n = normalizeStr(c); return n === "description" || n.includes("itemdescription"); });
+    if (woDescCol) {
+      workOrders.forEach(function(row) {
+        var skuRaw = (row[woMapping.productSku] || "").toString().trim();
+        var sku = normalizeStr(skuRaw);
+        if (!sku) return;
+        var woDescRaw = (row[woDescCol] || "").toString().trim();
+        if (!woDescRaw) return;
+        if (!itemMasterBySku[sku]) itemMasterBySku[sku] = { sku:sku, skuRaw:skuRaw, desc:"" };
+        itemMasterBySku[sku].desc = pickBetterDescription(itemMasterBySku[sku].desc || "", woDescRaw, skuRaw);
+        if (!itemMasterBySku[sku].skuRaw && skuRaw) itemMasterBySku[sku].skuRaw = skuRaw;
+      });
+    }
     function resolveItemDescription(skuNorm, skuRaw, fallbackDesc) {
       var masterDesc = itemMasterBySku[skuNorm] ? itemMasterBySku[skuNorm].desc : "";
       return pickBetterDescription(masterDesc || "", fallbackDesc || "", skuRaw || (itemMasterBySku[skuNorm] && itemMasterBySku[skuNorm].skuRaw) || "");
