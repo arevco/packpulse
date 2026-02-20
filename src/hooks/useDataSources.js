@@ -15,12 +15,15 @@ function areMappingsEqual(a, b) {
 
 export function useDataSources() {
   const [inventory, setInventory] = useState(null);
+  const [itemMaster, setItemMaster] = useState(null);
   const [boms, setBoms] = useState(null);
   const [workOrders, setWorkOrders] = useState(null);
   const [invFileName, setInvFileName] = useState("");
+  const [itemMasterFileName, setItemMasterFileName] = useState("");
   const [bomFileName, setBomFileName] = useState("");
   const [woFileName, setWoFileName] = useState("");
   const [invTimestamp, setInvTimestamp] = useState(null);
+  const [itemMasterTimestamp, setItemMasterTimestamp] = useState(null);
   const [bomTimestamp, setBomTimestamp] = useState(null);
   const [woTimestamp, setWoTimestamp] = useState(null);
   const [edrData, setEdrData] = useState(null);
@@ -126,12 +129,15 @@ export function useDataSources() {
 
   return {
     inventory, setInventory,
+    itemMaster, setItemMaster,
     boms, setBoms,
     workOrders, setWorkOrders,
     invFileName, setInvFileName,
+    itemMasterFileName, setItemMasterFileName,
     bomFileName, setBomFileName,
     woFileName, setWoFileName,
     invTimestamp, setInvTimestamp,
+    itemMasterTimestamp, setItemMasterTimestamp,
     bomTimestamp, setBomTimestamp,
     woTimestamp, setWoTimestamp,
     edrData, setEdrData,

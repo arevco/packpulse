@@ -47,12 +47,30 @@ function pickBetterDescription(currentDesc, nextDesc, skuRaw) {
   return b.length > a.length ? b : a;
 }
 
-export function useAnalysis({ mappingConfirmed, allUploaded, inventory, boms, workOrders, invMapping, bomMapping, woMapping, poData, poMapping, edrData, dockData }) {
+function firstValue(row, keys) {
+  if (!row) return "";
+  for (var i = 0; i < keys.length; i++) {
+    var k = keys[i];
+    if (Object.prototype.hasOwnProperty.call(row, k) && row[k] != null && row[k] !== "") return row[k];
+  }
+  return "";
+}
+
+export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMaster, boms, workOrders, invMapping, bomMapping, woMapping, poData, poMapping, edrData, dockData }) {
 
   /* ====== ANALYSIS ENGINE ====== */
   var analysis = useMemo(() => {
     if (!mappingConfirmed || !allUploaded) return null;
     var invMap = {}; var itemMasterBySku = {};
+    (itemMaster || []).forEach(function(row) {
+      var skuRaw = firstValue(row, ["Item Code", "Code", "item_code", "code"]).toString().trim();
+      var sku = normalizeStr(skuRaw);
+      if (!sku) return;
+      var masterDescRaw = firstValue(row, ["Description", "description", "Item Description", "item_description"]).toString().trim();
+      if (!itemMasterBySku[sku]) itemMasterBySku[sku] = { sku:sku, skuRaw:skuRaw, desc:"" };
+      itemMasterBySku[sku].desc = pickBetterDescription(itemMasterBySku[sku].desc || "", masterDescRaw, skuRaw);
+      if (!itemMasterBySku[sku].skuRaw && skuRaw) itemMasterBySku[sku].skuRaw = skuRaw;
+    });
     inventory.forEach(row => {
       var skuRaw = (row[invMapping.sku] || "").toString().trim();
       var sku = normalizeStr(skuRaw);
@@ -132,7 +150,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, boms, wo
       if (maxRun === Infinity) maxRun = qtyToProduce; if (couldMk === Infinity) couldMk = qtyToProduce;
       return Object.assign({ woNum:woNum, productSkuRaw:productSkuRaw, productDesc:resolveItemDescription(productSku, productSkuRaw, ""), qtyToProduce:qtyToProduce, dueDate:dueDate, status:status, readiness:readiness, runStatus:runStatus, components:components, maxRunnable:Math.min(maxRun, qtyToProduce), couldMake:Math.min(couldMk, qtyToProduce), zeroStockCount:zeroCount, normalizedSku:productSku }, extra);
     });
-    var diag = { invCount:inventory.length, invUniqueSkus:Object.keys(invMap).length, itemMasterSkus:Object.keys(itemMasterBySku).length, invSampleQtys:Object.entries(invMap).slice(0,6).map(function(e){return{key:e[0],qty:e[1]}}), bomParentCount:Object.keys(bomMap).length, bomSampleParents:Object.keys(bomMap).slice(0,8), bomTotalLines:boms?boms.length:0, woCount:workOrders.length, woUniqueSkus:[...new Set(results.map(r=>r.normalizedSku))], woUnmatched:[...new Set(results.filter(r=>r.runStatus==="nobom").map(r=>({raw:r.productSkuRaw,norm:r.normalizedSku})))].slice(0,10), woMatchedCount:results.filter(r=>r.runStatus!=="nobom").length };
+    var diag = { invCount:inventory.length, invUniqueSkus:Object.keys(invMap).length, itemMasterRows:(itemMaster||[]).length, itemMasterSkus:Object.keys(itemMasterBySku).length, invSampleQtys:Object.entries(invMap).slice(0,6).map(function(e){return{key:e[0],qty:e[1]}}), bomParentCount:Object.keys(bomMap).length, bomSampleParents:Object.keys(bomMap).slice(0,8), bomTotalLines:boms?boms.length:0, woCount:workOrders.length, woUniqueSkus:[...new Set(results.map(r=>r.normalizedSku))], woUnmatched:[...new Set(results.filter(r=>r.runStatus==="nobom").map(r=>({raw:r.productSkuRaw,norm:r.normalizedSku})))].slice(0,10), woMatchedCount:results.filter(r=>r.runStatus!=="nobom").length };
 
     /* ====== DATA FLAGS ====== */
     var flags = [];
@@ -168,7 +186,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, boms, wo
     } }); });
 
     return { results:results, diagnostics:diag, flags:flags };
-  }, [mappingConfirmed, allUploaded, inventory, boms, workOrders, invMapping, bomMapping, woMapping]);
+  }, [mappingConfirmed, allUploaded, inventory, itemMaster, boms, workOrders, invMapping, bomMapping, woMapping]);
 
   var summary = useMemo(() => { if (!analysis) return null; var r = analysis.results; return { total:r.length, ready:r.filter(w=>w.runStatus==="ready").length, partial:r.filter(w=>w.runStatus==="partial").length, blocked:r.filter(w=>w.runStatus==="blocked").length, nobom:r.filter(w=>w.runStatus==="nobom").length }; }, [analysis]);
 

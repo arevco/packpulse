@@ -18,7 +18,7 @@ export default function ProductionReadiness() {
   const ds = useDataSources();
   const { analysis, summary, criticalItems, woStatuses, woCustomers, timelineData, inboundCoverage } = useAnalysis({
     mappingConfirmed: ds.mappingConfirmed, allUploaded: ds.allUploaded,
-    inventory: ds.inventory, boms: ds.boms, workOrders: ds.workOrders,
+    inventory: ds.inventory, itemMaster: ds.itemMaster, boms: ds.boms, workOrders: ds.workOrders,
     invMapping: ds.invMapping, bomMapping: ds.bomMapping, woMapping: ds.woMapping,
     edrData: ds.edrData, dockData: ds.dockData,
   });
@@ -84,6 +84,11 @@ export default function ProductionReadiness() {
       ds.setWoFileName("Nulogy Sync");
       ds.setWoTimestamp(ts);
     }
+    if (results.itemmaster) {
+      ds.setItemMaster(results.itemmaster.data);
+      ds.setItemMasterFileName("Nulogy Sync");
+      ds.setItemMasterTimestamp(ts);
+    }
     if (results.bom) {
       ds.setBoms(results.bom.data);
       ds.setBomFileName("Nulogy Sync");
@@ -113,6 +118,7 @@ export default function ProductionReadiness() {
     var steps = [
       { key:"inventory", label:"Inventory" },
       { key:"workorders", label:"Work Orders" },
+      { key:"itemmaster", label:"Item Master" },
       { key:"bom", label:"BOM" },
       { key:"opendock", label:"OpenDock API", synthetic:true }
     ];

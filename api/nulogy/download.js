@@ -101,6 +101,24 @@ const COLUMN_MAPS = {
     "unit_of_measure": "Unit of Measure",
     "Unit Of Measure": "Unit of Measure"
   },
+  itemmaster: {
+    "code": "Item Code",
+    "Code": "Item Code",
+    "description": "Description",
+    "Description": "Description",
+    "is_subcomponent": "Is Subcomponent",
+    "Is Subcomponent": "Is Subcomponent",
+    "is_finished_good": "Is Finished Good",
+    "Is Finished Good": "Is Finished Good",
+    "item_type": "Item Type",
+    "Item Type": "Item Type",
+    "item_category": "Item Category",
+    "Item Category": "Item Category",
+    "inactive": "Inactive",
+    "Inactive": "Inactive",
+    "customer": "Customer",
+    "Customer": "Customer"
+  },
   bom: {
     "finished_good_code": "Finished Good Code",
     "Finished Good Code": "Finished Good Code",
@@ -214,7 +232,7 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Missing url parameter" });
   }
   if (!reportType || !COLUMN_MAPS[reportType]) {
-    return res.status(400).json({ error: "Missing or invalid type parameter. Use: inventory, workorders, or bom" });
+    return res.status(400).json({ error: "Missing or invalid type parameter. Use: inventory, workorders, itemmaster, or bom" });
   }
 
   try {
