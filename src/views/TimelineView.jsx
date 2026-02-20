@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTheme } from "../theme";
 import { useStyles } from "../hooks/useStyles";
+import { formatDescriptionForDisplay } from "../utils";
 
 export default function TimelineView({ timelineData }) {
   const { C, sans, mono } = useTheme();
@@ -57,7 +58,7 @@ export default function TimelineView({ timelineData }) {
                   <span style={{ fontSize:13, fontWeight:600, fontFamily:mono, color:C.bright }}>{wo.woNum}</span>
                   <span style={{ width:6, height:6, borderRadius:"50%", background:sc }} />
                 </div>
-                <div style={{ fontSize:12, color:C.dim, marginTop:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:290 }}>{wo.productSku} | {wo.productDesc||""}</div>
+                <div style={{ fontSize:12, color:C.dim, marginTop:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:290 }}>{wo.productSku} | {formatDescriptionForDisplay(wo.productDesc)||""}</div>
                 <div style={{ fontSize:13, color:C.dim, fontFamily:mono, marginTop:1 }}>{"Need "+wo.qtyToProduce.toLocaleString()+" | Can make "+wo.maxRunnable.toLocaleString()+" | +"+wo.totalIncoming.toLocaleString()+" incoming"}</div>
               </div>
               <div style={{ display:"flex", flex:1 }}>
@@ -126,7 +127,7 @@ export default function TimelineView({ timelineData }) {
             <tbody>
               {f.map(function(r,i) { return <tr key={i} style={{ borderBottom:"1px solid "+C.border }}>
                 <td style={Object.assign({}, tdM, { fontWeight:600, color:C.bright })}>{r.sku}</td>
-                <td style={Object.assign({}, tdN, { color:C.dim, maxWidth:180, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" })}>{r.desc||"--"}</td>
+                <td style={Object.assign({}, tdN, { color:C.dim, maxWidth:180, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" })}>{formatDescriptionForDisplay(r.desc)||"--"}</td>
                 <td style={tdN}><span style={{ fontSize:12, fontWeight:500, padding:"1px 7px", borderRadius:10, color:r.tab==="FG"?C.accent:C.warn, background:r.tab==="FG"?C.accentSoft:C.warnSoft }}>{r.tab||"--"}</span></td>
                 <td style={Object.assign({}, tdN, { fontSize:13, color:r.dockSummary?C.bright:C.dim })}>{r.dockSummary||"--"}</td>
                 <td style={Object.assign({}, tdM, { color:C.bright })}>{r.delCount}</td>

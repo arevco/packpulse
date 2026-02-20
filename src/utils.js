@@ -4,6 +4,34 @@ export function parseCSV(text) { return Papa.parse(text, { header:true, skipEmpt
 export function safeNum(v) { if (v == null || v === "") return 0; const n = typeof v === "number" ? v : parseFloat(String(v).replace(/[^0-9.\-]/g, "")); return isNaN(n) ? 0 : n; }
 export function normalizeStr(s) { return String(s || "").replace(/[^a-z0-9]/gi, "").toLowerCase(); }
 export function fmtDate(v) { if (!v) return "--"; var d = v instanceof Date ? v : new Date(v); if (isNaN(d)) return String(v); return (d.getMonth()+1) + "/" + d.getDate() + "/" + String(d.getFullYear()).slice(-2); }
+export function formatDescriptionForDisplay(value) {
+  var raw = String(value || "").trim();
+  if (!raw) return "";
+  var compact = raw.replace(/\s+/g, " ");
+  var letters = compact.replace(/[^A-Za-z]/g, "");
+  var looksAllCaps = !!letters && letters === letters.toUpperCase();
+  if (!looksAllCaps) return compact;
+
+  var keepUpper = {
+    US:true, SKU:true, PO:true, BOM:true, FG:true, RM:true,
+    WIP:true, VP:true, IB:true, OB:true, PK:true, CT:true,
+    OZ:true, LBS:true, LB:true, KG:true, ML:true, EA:true
+  };
+
+  var formatToken = function(token) {
+    if (!token) return token;
+    if (token.indexOf("-") >= 0) return token.split("-").map(formatToken).join("-");
+    if (token.indexOf("/") >= 0) return token.split("/").map(formatToken).join("/");
+    if (/^\d+(\.\d+)?$/.test(token)) return token;
+    if (/^[A-Z]+$/.test(token)) {
+      if (keepUpper[token] || token.length <= 2) return token;
+      return token.charAt(0) + token.slice(1).toLowerCase();
+    }
+    return token;
+  };
+
+  return compact.split(" ").map(formatToken).join(" ");
+}
 export function autoMapColumns(headers, patterns) {
   const map = {}; const normed = headers.map(h => ({ orig:h, norm:normalizeStr(h) }));
   Object.entries(patterns).forEach(([field, cands]) => { for (const c of cands) { const m = normed.find(h => h.norm.includes(c.toLowerCase())); if (m) { map[field] = m.orig; break; } } });

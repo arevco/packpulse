@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { useTheme } from "../theme";
 import { useStyles } from "../hooks/useStyles";
-import { fmtDate, triggerDownload, buildExportHTML, normalizeStr } from "../utils";
+import { fmtDate, triggerDownload, buildExportHTML, normalizeStr, formatDescriptionForDisplay } from "../utils";
 
 function parseDateValue(value) {
   if (!value) return null;
@@ -131,7 +131,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
           <td style={tdToggle}>{isX ? "\u25BE" : "\u25B8"}</td>
           <td style={Object.assign({}, tdM, { fontWeight:600, color:C.bright })}>{wo.woNum}</td>
           <td style={tdM}>{wo.productSkuRaw}</td>
-          <td style={Object.assign({}, tdN, { color:C.dim }, truncate(220))}>{wo.productDesc || "--"}</td>
+          <td style={Object.assign({}, tdN, { color:C.dim }, truncate(220))}>{formatDescriptionForDisplay(wo.productDesc) || "--"}</td>
           <td style={Object.assign({}, tdN, { color:C.dim }, truncate(140))}>{wo.customer || "--"}</td>
           <td style={Object.assign({}, tdN, { whiteSpace:"nowrap" })}>
             <span title={wo.runStatus || ""} style={{ display:"inline-block", minWidth:34, textAlign:"center", padding:"2px 6px", borderRadius:999, fontSize:11, fontWeight:700, color:rs.color, background:rs.bg, marginRight:4 }}>{rs.label}</span>
@@ -174,7 +174,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
                   rows.push(
                     <tr key={"c"+ci} style={{ borderBottom:comp.hasSubs?"none":"1px solid "+C.border }}>
                       <td style={Object.assign({}, tdDM, { color:C.bright })}>{comp.sku}{comp.hasSubs && <span style={{ fontSize:13, color:C.accent, marginLeft:3 }}>+alt</span>}</td>
-                      <td style={Object.assign({}, tdDN, { color:C.dim }, truncate(150))}>{comp.desc || "--"}</td>
+                      <td style={Object.assign({}, tdDN, { color:C.dim }, truncate(150))}>{formatDescriptionForDisplay(comp.desc) || "--"}</td>
                       <td style={tdDM}>{comp.qtyPer}</td>
                       <td style={Object.assign({}, tdDM, { color:C.bright })}>{comp.needed.toLocaleString()}</td>
                       <td style={Object.assign({}, tdDM, { fontWeight:600, color:comp.onHand>=comp.needed?C.ok:C.bad })}>{comp.onHand.toLocaleString()}</td>
