@@ -89,7 +89,21 @@ export function useDataSources() {
   var bomHeaders = useMemo(() => boms && boms.length > 0 ? Object.keys(boms[0]) : [], [boms]);
   var woHeaders = useMemo(() => workOrders && workOrders.length > 0 ? Object.keys(workOrders[0]) : [], [workOrders]);
   useMemo(() => { if (invHeaders.length && !invMapping.sku) setInvMapping(autoMapColumns(invHeaders, INV_PAT)); }, [invHeaders]);
-  useMemo(() => { if (bomHeaders.length && !bomMapping.bomId) setBomMapping(autoMapColumns(bomHeaders, BOM_PAT)); }, [bomHeaders]);
+  useMemo(() => {
+    if (!bomHeaders.length) return;
+    var shouldInitialize = !bomMapping.bomId;
+    var hasVersionNameAsDescription = !!(bomMapping.description && normalizeStr(bomMapping.description).includes("versionname"));
+    if (!shouldInitialize && !hasVersionNameAsDescription) return;
+    var next = autoMapColumns(bomHeaders, BOM_PAT);
+    if (!shouldInitialize) {
+      // Preserve user's existing mappings unless we are correcting the known "Version Name" description pitfall.
+      next = Object.assign({}, bomMapping, next);
+      if (hasVersionNameAsDescription && next.description && normalizeStr(next.description).includes("versionname")) {
+        delete next.description;
+      }
+    }
+    setBomMapping(next);
+  }, [bomHeaders, bomMapping]);
   useMemo(() => { if (woHeaders.length && !woMapping.woNumber) setWoMapping(autoMapColumns(woHeaders, WO_PAT)); }, [woHeaders]);
   var allUploaded = inventory && workOrders;
   var requiredMappingsMet = useMemo(() => invMapping.sku && invMapping.qtyOnHand && woMapping.woNumber && woMapping.productSku && woMapping.qtyToProduce && (!boms || (bomMapping.bomId && bomMapping.componentSku && bomMapping.qtyPer)), [invMapping,bomMapping,woMapping,boms]);

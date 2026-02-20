@@ -19,20 +19,65 @@ function isWorkOrderClosed(wo) {
   return safeNum(wo && wo.unitsRemaining) <= 0;
 }
 
+function isGenericBomDescription(desc) {
+  var s = (desc || "").toString().trim();
+  if (!s) return true;
+  return /^bom\s*\d*$/i.test(s) || /^version\s*\d*$/i.test(s) || /^v\d+$/i.test(s);
+}
+
+function descriptionScore(desc, skuRaw) {
+  var s = (desc || "").toString().trim();
+  if (!s) return 0;
+  if (s === "--") return 0;
+  if (isGenericBomDescription(s)) return 1;
+  if (normalizeStr(s) === normalizeStr(skuRaw || "")) return 2;
+  if (s.length < 3) return 2;
+  return 10;
+}
+
+function pickBetterDescription(currentDesc, nextDesc, skuRaw) {
+  var a = (currentDesc || "").toString().trim();
+  var b = (nextDesc || "").toString().trim();
+  if (!a) return b;
+  if (!b) return a;
+  var sa = descriptionScore(a, skuRaw);
+  var sb = descriptionScore(b, skuRaw);
+  if (sb > sa) return b;
+  if (sa > sb) return a;
+  return b.length > a.length ? b : a;
+}
+
 export function useAnalysis({ mappingConfirmed, allUploaded, inventory, boms, workOrders, invMapping, bomMapping, woMapping, poData, poMapping, edrData, dockData }) {
 
   /* ====== ANALYSIS ENGINE ====== */
   var analysis = useMemo(() => {
     if (!mappingConfirmed || !allUploaded) return null;
-    var invMap = {}; var invDescMap = {};
-    inventory.forEach(row => { var sku = normalizeStr(row[invMapping.sku]); if (sku) { invMap[sku] = (invMap[sku]||0) + safeNum(row[invMapping.qtyOnHand]); if (invMapping.description && row[invMapping.description] && !invDescMap[sku]) invDescMap[sku] = row[invMapping.description].toString().trim(); } });
-    var bomMap = {};
+    var invMap = {}; var itemMasterBySku = {};
+    inventory.forEach(row => {
+      var skuRaw = (row[invMapping.sku] || "").toString().trim();
+      var sku = normalizeStr(skuRaw);
+      if (!sku) return;
+      var invDescRaw = invMapping.description ? (row[invMapping.description] || "").toString().trim() : "";
+      invMap[sku] = (invMap[sku] || 0) + safeNum(row[invMapping.qtyOnHand]);
+      if (!itemMasterBySku[sku]) itemMasterBySku[sku] = { sku:sku, skuRaw:skuRaw, desc:"" };
+      itemMasterBySku[sku].desc = pickBetterDescription(itemMasterBySku[sku].desc || "", invDescRaw, skuRaw);
+      if (!itemMasterBySku[sku].skuRaw && skuRaw) itemMasterBySku[sku].skuRaw = skuRaw;
+    });
+    function resolveItemDescription(skuNorm, skuRaw, fallbackDesc) {
+      var masterDesc = itemMasterBySku[skuNorm] ? itemMasterBySku[skuNorm].desc : "";
+      return pickBetterDescription(masterDesc || "", fallbackDesc || "", skuRaw || (itemMasterBySku[skuNorm] && itemMasterBySku[skuNorm].skuRaw) || "");
+    }
+    var bomMap = {}; var bomDescBySku = {};
     if (boms && boms.length) { boms.forEach(row => {
       var parentRaw = (row[bomMapping.bomId]||"").toString().trim(); var parent = normalizeStr(parentRaw); if (!parent) return;
       if (!bomMap[parent]) bomMap[parent] = { parentRaw:parentRaw, rawComponents:[] };
       var subForRaw = bomMapping.substituteFor ? (row[bomMapping.substituteFor]||"").toString().trim() : "";
       var priorityRaw = bomMapping.priority ? safeNum(row[bomMapping.priority]) : 0;
-      bomMap[parent].rawComponents.push({ sku:normalizeStr(row[bomMapping.componentSku]), skuRaw:(row[bomMapping.componentSku]||"").toString().trim(), descRaw:bomMapping.description?(row[bomMapping.description]||"").toString().trim():"", qtyPer:safeNum(row[bomMapping.qtyPer]), substituteFor:subForRaw?normalizeStr(subForRaw):"", substituteForRaw:subForRaw, priority:priorityRaw||1 });
+      var compSkuRaw = (row[bomMapping.componentSku]||"").toString().trim();
+      var compSkuNorm = normalizeStr(compSkuRaw);
+      var compDescRaw = bomMapping.description ? (row[bomMapping.description]||"").toString().trim() : "";
+      if (compSkuNorm && compDescRaw) bomDescBySku[compSkuNorm] = pickBetterDescription(bomDescBySku[compSkuNorm] || "", compDescRaw, compSkuRaw);
+      bomMap[parent].rawComponents.push({ sku:compSkuNorm, skuRaw:compSkuRaw, descRaw:compDescRaw, qtyPer:safeNum(row[bomMapping.qtyPer]), substituteFor:subForRaw?normalizeStr(subForRaw):"", substituteForRaw:subForRaw, priority:priorityRaw||1 });
     }); }
     Object.values(bomMap).forEach(bom => {
       var pri = bom.rawComponents.filter(c => !c.substituteFor); var subs = bom.rawComponents.filter(c => !!c.substituteFor);
@@ -55,33 +100,31 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, boms, wo
       var prodPct = qtyToProduce > 0 ? Math.round(unitsProduced / qtyToProduce * 100) : 0;
       var extra = { customer:customer, unitsProduced:unitsProduced, unitsRemaining:unitsRemaining, unitsPerHour:unitsPerHour, standardPeople:standardPeople, plannedStart:plannedStart, plannedEnd:plannedEnd, reference1:reference1, estHours:estHours, prodPct:prodPct };
       var bom = bomMap[productSku];
-      if (!bom) return Object.assign({ woNum:woNum, productSkuRaw:productSkuRaw, productDesc:invDescMap[productSku]||"", qtyToProduce:qtyToProduce, dueDate:dueDate, status:status, readiness:-1, runStatus:"nobom", components:[], maxRunnable:0, couldMake:0, zeroStockCount:0, normalizedSku:productSku }, extra);
+      if (!bom) return Object.assign({ woNum:woNum, productSkuRaw:productSkuRaw, productDesc:resolveItemDescription(productSku, productSkuRaw, ""), qtyToProduce:qtyToProduce, dueDate:dueDate, status:status, readiness:-1, runStatus:"nobom", components:[], maxRunnable:0, couldMake:0, zeroStockCount:0, normalizedSku:productSku }, extra);
       var minFill = Infinity, maxRun = Infinity, couldMk = Infinity, zeroCount = 0; var components = [];
       bom.groups.forEach(group => {
         var qp = group.primary.qtyPer; var needed = qp * qtyToProduce; if (needed <= 0) return;
         var combined = 0;
-        var optDet = group.allOptions.map(opt => { var oh = invMap[opt.sku]||0; combined += oh; return { sku:opt.skuRaw, desc:invDescMap[opt.sku]||opt.descRaw||"", onHand:oh, priority:opt.priority, isSub:!!opt.substituteFor, foundInInventory:invMap.hasOwnProperty(opt.sku) }; });
+        var optDet = group.allOptions.map(opt => { var oh = invMap[opt.sku]||0; combined += oh; return { sku:opt.skuRaw, desc:resolveItemDescription(opt.sku, opt.skuRaw, bomDescBySku[opt.sku] || opt.descRaw || ""), onHand:oh, priority:opt.priority, isSub:!!opt.substituteFor, foundInInventory:invMap.hasOwnProperty(opt.sku) }; });
         var fill = (combined/needed)*100; var canMake = qp > 0 ? Math.floor(combined/qp) : Infinity; var short = Math.max(0, needed - combined);
         minFill = Math.min(minFill, fill); maxRun = Math.min(maxRun, canMake);
         if (combined === 0 && qp > 0) zeroCount++; else couldMk = Math.min(couldMk, canMake);
-        components.push({ sku:group.primary.skuRaw, desc:invDescMap[group.primary.sku]||group.primary.descRaw||"", qtyPer:qp, needed:needed, onHand:combined, fillRate:fill, canMake:canMake, short:short, foundInInventory:optDet.some(o => o.foundInInventory), hasSubs:group.substitutes.length>0, optionDetails:group.substitutes.length>0?optDet:null });
+        components.push({ sku:group.primary.skuRaw, desc:resolveItemDescription(group.primary.sku, group.primary.skuRaw, bomDescBySku[group.primary.sku] || group.primary.descRaw || ""), qtyPer:qp, needed:needed, onHand:combined, fillRate:fill, canMake:canMake, short:short, foundInInventory:optDet.some(o => o.foundInInventory), hasSubs:group.substitutes.length>0, optionDetails:group.substitutes.length>0?optDet:null });
       });
       var readiness = minFill === Infinity ? 100 : Math.min(minFill, 100);
       var runStatus = readiness >= 100 ? "ready" : maxRun > 0 ? "partial" : "blocked";
       if (maxRun === Infinity) maxRun = qtyToProduce; if (couldMk === Infinity) couldMk = qtyToProduce;
-      return Object.assign({ woNum:woNum, productSkuRaw:productSkuRaw, productDesc:invDescMap[productSku]||"", qtyToProduce:qtyToProduce, dueDate:dueDate, status:status, readiness:readiness, runStatus:runStatus, components:components, maxRunnable:Math.min(maxRun, qtyToProduce), couldMake:Math.min(couldMk, qtyToProduce), zeroStockCount:zeroCount, normalizedSku:productSku }, extra);
+      return Object.assign({ woNum:woNum, productSkuRaw:productSkuRaw, productDesc:resolveItemDescription(productSku, productSkuRaw, ""), qtyToProduce:qtyToProduce, dueDate:dueDate, status:status, readiness:readiness, runStatus:runStatus, components:components, maxRunnable:Math.min(maxRun, qtyToProduce), couldMake:Math.min(couldMk, qtyToProduce), zeroStockCount:zeroCount, normalizedSku:productSku }, extra);
     });
-    var diag = { invCount:inventory.length, invUniqueSkus:Object.keys(invMap).length, invSampleQtys:Object.entries(invMap).slice(0,6).map(function(e){return{key:e[0],qty:e[1]}}), bomParentCount:Object.keys(bomMap).length, bomSampleParents:Object.keys(bomMap).slice(0,8), bomTotalLines:boms?boms.length:0, woCount:workOrders.length, woUniqueSkus:[...new Set(results.map(r=>r.normalizedSku))], woUnmatched:[...new Set(results.filter(r=>r.runStatus==="nobom").map(r=>({raw:r.productSkuRaw,norm:r.normalizedSku})))].slice(0,10), woMatchedCount:results.filter(r=>r.runStatus!=="nobom").length };
+    var diag = { invCount:inventory.length, invUniqueSkus:Object.keys(invMap).length, itemMasterSkus:Object.keys(itemMasterBySku).length, invSampleQtys:Object.entries(invMap).slice(0,6).map(function(e){return{key:e[0],qty:e[1]}}), bomParentCount:Object.keys(bomMap).length, bomSampleParents:Object.keys(bomMap).slice(0,8), bomTotalLines:boms?boms.length:0, woCount:workOrders.length, woUniqueSkus:[...new Set(results.map(r=>r.normalizedSku))], woUnmatched:[...new Set(results.filter(r=>r.runStatus==="nobom").map(r=>({raw:r.productSkuRaw,norm:r.normalizedSku})))].slice(0,10), woMatchedCount:results.filter(r=>r.runStatus!=="nobom").length };
 
     /* ====== DATA FLAGS ====== */
     var flags = [];
     var flagId = 0;
     // 1. Inventory SKUs missing descriptions
-    var seenInvSkus = new Set();
-    inventory.forEach(row => {
-      var sku = normalizeStr(row[invMapping.sku]); var skuRaw = (row[invMapping.sku]||"").toString().trim();
-      if (!sku || seenInvSkus.has(sku)) return; seenInvSkus.add(sku);
-      var desc = invMapping.description ? (row[invMapping.description]||"").toString().trim() : "";
+    Object.keys(itemMasterBySku).forEach(function(sku) {
+      var skuRaw = itemMasterBySku[sku].skuRaw || sku;
+      var desc = (itemMasterBySku[sku].desc || "").toString().trim();
       if (!desc) flags.push({ id:flagId++, type:"missing-desc", severity:"warn", sku:skuRaw, skuNorm:sku, desc:"", source:"Inventory", detail:"SKU has no product description in inventory. Update in ERP.", affectedWOs:[] });
     });
     // 2. BOM components not found in inventory
@@ -116,7 +159,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, boms, wo
   var criticalItems = useMemo(() => {
     if (!analysis) return [];
     var m = {};
-    analysis.results.filter(function(wo) { return !isWorkOrderClosed(wo); }).forEach(wo => { wo.components.forEach(comp => { if (comp.short <= 0) return; var k = normalizeStr(comp.sku); if (!m[k]) m[k] = { sku:comp.sku, desc:comp.desc, onHand:comp.onHand, totalShort:0, affectedWOs:[], unlockedUnits:0, isZeroStock:comp.onHand===0, customersMap:{} }; m[k].totalShort += comp.short; m[k].unlockedUnits += wo.qtyToProduce - wo.maxRunnable; m[k].affectedWOs.push({ woNum:wo.woNum, productSku:wo.productSkuRaw, customer:wo.customer||"", qtyToProduce:wo.qtyToProduce, needed:comp.needed, short:comp.short, dueDate:wo.dueDate }); if (wo.customer) m[k].customersMap[wo.customer] = true; }); });
+    analysis.results.filter(function(wo) { return !isWorkOrderClosed(wo); }).forEach(wo => { wo.components.forEach(comp => { if (comp.short <= 0) return; var k = normalizeStr(comp.sku); if (!m[k]) m[k] = { sku:comp.sku, desc:comp.desc, onHand:comp.onHand, totalShort:0, affectedWOs:[], unlockedUnits:0, isZeroStock:comp.onHand===0, customersMap:{} }; m[k].desc = pickBetterDescription(m[k].desc || "", comp.desc || "", m[k].sku); m[k].totalShort += comp.short; m[k].unlockedUnits += wo.qtyToProduce - wo.maxRunnable; m[k].affectedWOs.push({ woNum:wo.woNum, productSku:wo.productSkuRaw, customer:wo.customer||"", qtyToProduce:wo.qtyToProduce, needed:comp.needed, short:comp.short, dueDate:wo.dueDate }); if (wo.customer) m[k].customersMap[wo.customer] = true; }); });
     return Object.values(m).map(function(item) {
       var customers = Object.keys(item.customersMap || {});
       return Object.assign({}, item, { customers:customers, customerLabel:customers.length ? customers.join(", ") : "--" });
