@@ -4,6 +4,27 @@ import { useStyles } from "../hooks/useStyles";
 import { fmtDate, triggerDownload, buildExportHTML, normalizeStr } from "../utils";
 import Dot from "../components/Dot";
 
+function parseDateValue(value) {
+  if (!value) return null;
+  if (value instanceof Date) return isNaN(value) ? null : value;
+  var raw = String(value).trim();
+  if (!raw) return null;
+
+  // Handles M/D/YYYY and MM/DD/YYYY explicitly to avoid lexicographic ordering bugs.
+  var mdy = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (mdy) {
+    var mm = parseInt(mdy[1], 10);
+    var dd = parseInt(mdy[2], 10);
+    var yy = parseInt(mdy[3], 10);
+    if (yy < 100) yy += 2000;
+    var parsedMdy = new Date(yy, mm - 1, dd);
+    return isNaN(parsedMdy) ? null : parsedMdy;
+  }
+
+  var parsed = new Date(raw);
+  return isNaN(parsed) ? null : parsed;
+}
+
 export default function WorkOrdersView({ analysis, woStatuses, woCustomers, prefilterCustomer, prefilterNonce }) {
   const { C, sans, mono } = useTheme();
   const { thC, tdN, tdM, tdToggle, thDS, tdDN, tdDM, truncate, inp, sel, pill } = useStyles();
@@ -32,7 +53,27 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
     if (filterWoStatus !== "all") r = r.filter(w => w.status === filterWoStatus);
     if (filterCustomer !== "all") r = r.filter(w => w.customer === filterCustomer);
     if (searchTerm) { var q = searchTerm.toLowerCase(); r = r.filter(w => w.woNum.toLowerCase().includes(q) || w.productSkuRaw.toLowerCase().includes(q) || (w.productDesc||"").toLowerCase().includes(q) || (w.customer||"").toLowerCase().includes(q) || (w.reference1||"").toLowerCase().includes(q)); }
-    r.sort((a,b) => { var c = 0; if (sortField==="woNum") c=a.woNum.localeCompare(b.woNum); else if (sortField==="product") c=a.productSkuRaw.localeCompare(b.productSkuRaw); else if (sortField==="customer") c=(a.customer||"").localeCompare(b.customer||""); else if (sortField==="qty") c=a.qtyToProduce-b.qtyToProduce; else if (sortField==="produced") c=a.unitsProduced-b.unitsProduced; else if (sortField==="remaining") c=a.unitsRemaining-b.unitsRemaining; else if (sortField==="complete") c=a.prodPct-b.prodPct; else if (sortField==="maxRunnable") c=a.maxRunnable-b.maxRunnable; else if (sortField==="readiness") c=a.readiness-b.readiness; else if (sortField==="estHours") c=a.estHours-b.estHours; else if (sortField==="dueDate") c=(a.dueDate||"zzz").localeCompare(b.dueDate||"zzz"); else if (sortField==="plannedStart") c=(a.plannedStart||"zzz").localeCompare(b.plannedStart||"zzz"); else if (sortField==="plannedEnd") c=(a.plannedEnd||"zzz").localeCompare(b.plannedEnd||"zzz"); else if (sortField==="status") c=(a.status||"").localeCompare(b.status||""); return sortDir==="desc"?-c:c; });
+    r.sort((a,b) => {
+      var c = 0;
+      if (sortField==="woNum") c=a.woNum.localeCompare(b.woNum);
+      else if (sortField==="product") c=a.productSkuRaw.localeCompare(b.productSkuRaw);
+      else if (sortField==="customer") c=(a.customer||"").localeCompare(b.customer||"");
+      else if (sortField==="qty") c=a.qtyToProduce-b.qtyToProduce;
+      else if (sortField==="produced") c=a.unitsProduced-b.unitsProduced;
+      else if (sortField==="remaining") c=a.unitsRemaining-b.unitsRemaining;
+      else if (sortField==="complete") c=a.prodPct-b.prodPct;
+      else if (sortField==="maxRunnable") c=a.maxRunnable-b.maxRunnable;
+      else if (sortField==="readiness") c=a.readiness-b.readiness;
+      else if (sortField==="estHours") c=a.estHours-b.estHours;
+      else if (sortField==="dueDate" || sortField==="plannedStart" || sortField==="plannedEnd") {
+        var aDate = parseDateValue(sortField==="dueDate" ? a.dueDate : sortField==="plannedStart" ? a.plannedStart : a.plannedEnd);
+        var bDate = parseDateValue(sortField==="dueDate" ? b.dueDate : sortField==="plannedStart" ? b.plannedStart : b.plannedEnd);
+        var aTs = aDate ? aDate.getTime() : Number.POSITIVE_INFINITY;
+        var bTs = bDate ? bDate.getTime() : Number.POSITIVE_INFINITY;
+        c = aTs - bTs;
+      } else if (sortField==="status") c=(a.status||"").localeCompare(b.status||"");
+      return sortDir==="desc"?-c:c;
+    });
     return r;
   }, [analysis, filterStatus, filterWoStatus, filterCustomer, searchTerm, sortField, sortDir]);
 
