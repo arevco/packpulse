@@ -11,7 +11,6 @@ import WorkOrdersView from "./views/WorkOrdersView";
 import CriticalItemsView from "./views/CriticalItemsView";
 import FlagsView from "./views/FlagsView";
 import TimelineView from "./views/TimelineView";
-import InboundCoverageView from "./views/InboundCoverageView";
 
 export default function ProductionReadiness() {
   const { C, theme, setTheme, sans, mono, FONTS_CSS, A11Y_CSS } = useTheme();
@@ -456,7 +455,6 @@ export default function ProductionReadiness() {
         <div style={{ display:"flex", gap:0, marginBottom:16, borderBottom:"1px solid "+C.border }}>
           {[{key:"overview",label:"Overview",count:null,alert:false},{key:"workorders",label:"Work Orders",count:summaryForUI.total},{key:"criticalitems",label:"Critical Items",count:criticalItemsForUI.length}]
             .concat([{key:"flags",label:"Data Flags",count:analysisForUI.flags.length,alert:analysisForUI.flags.length>0}])
-            .concat([{key:"inboundcoverage",label:"Inbound Coverage",count:inboundCoverage ? inboundCoverage.summary.atRisk : 0,alert:inboundCoverage ? inboundCoverage.summary.atRisk > 0 : false}])
             .concat([{key:"timeline",label:"Deliveries",count:timelineData ? timelineData.woTimelines.length : 0,alert:false}]).map(t =>
               <button key={t.key} onClick={() => setActiveView(t.key)} style={{ padding:"8px 16px", border:"none", fontFamily:sans, fontSize:14, fontWeight:500, cursor:"pointer", background:"transparent", color:activeView===t.key?C.bright:C.dim, borderBottom:activeView===t.key?"2px solid "+C.accent:"2px solid transparent", marginBottom:-1 }}>
                 {t.label} {t.count != null && <span style={{ opacity:t.alert?1:0.45, fontSize:13, color:t.alert?C.bad:undefined }}>{t.alert?"\u26A0 ":""}{t.count}</span>}
@@ -466,9 +464,8 @@ export default function ProductionReadiness() {
 
         {activeView === "overview" && <OverviewView analysis={analysisForUI} woStatuses={woStatusesForUI} onSelectCustomer={openWorkOrdersForCustomer} />}
         {activeView === "workorders" && <WorkOrdersView analysis={analysisForUI} woStatuses={woStatusesForUI} woCustomers={woCustomersForUI} prefilterCustomer={workOrdersPrefilterCustomer} prefilterNonce={workOrdersPrefilterNonce} />}
-        {activeView === "criticalitems" && <CriticalItemsView rawCriticalItems={criticalItemsForUI} />}
+        {activeView === "criticalitems" && <CriticalItemsView rawCriticalItems={criticalItemsForUI} inboundCoverage={inboundCoverage} />}
         {activeView === "flags" && <FlagsView flags={analysisForUI.flags} />}
-        {activeView === "inboundcoverage" && <InboundCoverageView inboundCoverage={inboundCoverage} />}
         {activeView === "timeline" && <TimelineView timelineData={timelineData} />}
 
       </div>
