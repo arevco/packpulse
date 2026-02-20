@@ -28,6 +28,8 @@ export default function ProductionReadiness() {
   const [activeView, setActiveView] = useState("overview");
   const [showSettings, setShowSettings] = useState(false);
   const [showDataSetup, setShowDataSetup] = useState(false);
+  const [showDataControlsPanel, setShowDataControlsPanel] = useState(false);
+  const [showDataStatusPanel, setShowDataStatusPanel] = useState(false);
   const [autoBootstrapEnabled, setAutoBootstrapEnabled] = useState(true);
   const [syncNonce, setSyncNonce] = useState(0);
   const [nulogySyncState, setNulogySyncState] = useState(null);
@@ -358,25 +360,41 @@ export default function ProductionReadiness() {
           </div>
         ) : null}
 
-        <div style={{ display:"flex", gap:6, marginBottom:16, flexWrap:"wrap", alignItems:"center" }}>
-          {[
-            {k:"inv",l:"Inventory",ts:ds.invTimestamp,cad:"daily",ref:() => window.__invR && window.__invR.click()},
-            {k:"wo",l:"Work Orders",ts:ds.woTimestamp,cad:"monthly",ref:() => window.__woR && window.__woR.click()},
-            {k:"bom",l:"BOMs",ts:ds.bomTimestamp,cad:"rare",ref:() => window.__bomR && window.__bomR.click()},
-            {k:"edr",l:"EDR",ts:ds.edrTimestamp,cad:"monthly",ref:() => window.__edrR && window.__edrR.click()},
-            {k:"dock",l:"OpenDock",ts:ds.dockTimestamp,cad:"daily",ref:() => window.__dockR && window.__dockR.click()},
-          ]
-           .map(s => {
-            var sl = staleLevel(s.ts, s.cad); var dc = sl==="fresh"?C.ok:sl==="stale"?C.warn:C.bad;
-            return <button key={s.k} onClick={s.ref} style={{ display:"inline-flex", alignItems:"center", gap:5, padding:"4px 10px", borderRadius:6, border:"1px solid "+C.border, background:C.surface, cursor:"pointer", color:C.dim, fontFamily:sans, fontSize:13, fontWeight:500 }}>
-              <span style={{ width:6, height:6, borderRadius:"50%", background:dc }} />{s.l} <span style={{ opacity:0.6 }}>{fmtTs(s.ts)}</span>
-            </button>;
-          })}
-          <button onClick={() => setActiveView(activeView==="flags"?"workorders":"flags")} style={{ padding:"4px 10px", borderRadius:6, border:"1px solid "+(activeView==="flags"?C.accentLine:C.border), background:activeView==="flags"?C.accentSoft:"transparent", cursor:"pointer", color:activeView==="flags"?C.accent:C.dim, fontFamily:sans, fontSize:13 }}>Data Flags {analysisForUI.flags?<span style={{ opacity:0.6 }}>{analysisForUI.flags.length}</span>:""}</button>
-          <button onClick={fetchOpenDockApi} disabled={dockApiLoading} style={{ padding:"4px 10px", borderRadius:6, border:"1px solid "+(dockApiLoading?C.border:C.accentLine), background:dockApiLoading?C.raised:C.accentSoft, cursor:dockApiLoading?"not-allowed":"pointer", color:dockApiLoading?C.dim:C.accent, fontFamily:sans, fontSize:13 }}>Sync OpenDock API</button>
-          <button onClick={() => setShowSettings(!showSettings)} style={{ padding:"4px 10px", borderRadius:6, border:"1px solid "+(showSettings?C.accentLine:C.border), background:showSettings?C.accentSoft:"transparent", cursor:"pointer", color:showSettings?C.accent:C.dim, fontFamily:sans, fontSize:13 }}>Settings</button>
-          <button onClick={() => setShowDataSetup(v => !v)} style={{ padding:"4px 10px", borderRadius:6, border:"1px solid "+C.border, background:"transparent", cursor:"pointer", color:C.dim, fontFamily:sans, fontSize:13 }}>{showDataSetup ? "Close Setup" : "Data Setup"}</button>
+        <div style={{ display:"flex", gap:6, marginBottom:10, flexWrap:"wrap", alignItems:"center" }}>
+          <button onClick={() => setShowDataControlsPanel(v => !v)} style={{ padding:"4px 10px", borderRadius:6, border:"1px solid "+(showDataControlsPanel?C.accentLine:C.border), background:showDataControlsPanel?C.accentSoft:"transparent", cursor:"pointer", color:showDataControlsPanel?C.accent:C.dim, fontFamily:sans, fontSize:13 }}>
+            {showDataControlsPanel ? "Hide Data Controls" : "Data Controls"}
+          </button>
+          <button onClick={() => setShowSettings(!showSettings)} style={{ padding:"4px 10px", borderRadius:6, border:"1px solid "+(showSettings?C.accentLine:C.border), background:showSettings?C.accentSoft:"transparent", cursor:"pointer", color:showSettings?C.accent:C.dim, fontFamily:sans, fontSize:13 }}>Data Mapping</button>
         </div>
+        {showDataControlsPanel && (
+          <div style={{ marginBottom:10, border:"1px solid "+C.border, borderRadius:8, background:C.surface, padding:"10px 12px", display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
+            <button onClick={() => setShowDataStatusPanel(v => !v)} style={{ padding:"4px 10px", borderRadius:6, border:"1px solid "+(showDataStatusPanel?C.accentLine:C.border), background:showDataStatusPanel?C.accentSoft:"transparent", cursor:"pointer", color:showDataStatusPanel?C.accent:C.dim, fontFamily:sans, fontSize:13 }}>
+              {showDataStatusPanel ? "Hide Data Status" : "Data Status"}
+            </button>
+            <button onClick={fetchOpenDockApi} disabled={dockApiLoading} style={{ padding:"4px 10px", borderRadius:6, border:"1px solid "+(dockApiLoading?C.border:C.accentLine), background:dockApiLoading?C.raised:C.accentSoft, cursor:dockApiLoading?"not-allowed":"pointer", color:dockApiLoading?C.dim:C.accent, fontFamily:sans, fontSize:13 }}>
+              {dockApiLoading ? "Syncing OpenDock..." : "Sync OpenDock API"}
+            </button>
+            <button onClick={() => setShowDataSetup(v => !v)} style={{ padding:"4px 10px", borderRadius:6, border:"1px solid "+C.border, background:"transparent", cursor:"pointer", color:C.dim, fontFamily:sans, fontSize:13 }}>
+              {showDataSetup ? "Close Data Setup" : "Open Data Setup"}
+            </button>
+          </div>
+        )}
+        {showDataStatusPanel && (
+          <div style={{ marginBottom:14, border:"1px solid "+C.border, borderRadius:8, background:C.surface, padding:"10px 12px", display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
+            {[
+              {k:"inv",l:"Inventory",ts:ds.invTimestamp,cad:"daily",ref:() => window.__invR && window.__invR.click()},
+              {k:"wo",l:"Work Orders",ts:ds.woTimestamp,cad:"monthly",ref:() => window.__woR && window.__woR.click()},
+              {k:"bom",l:"BOMs",ts:ds.bomTimestamp,cad:"rare",ref:() => window.__bomR && window.__bomR.click()},
+              {k:"edr",l:"EDR",ts:ds.edrTimestamp,cad:"monthly",ref:() => window.__edrR && window.__edrR.click()},
+              {k:"dock",l:"OpenDock",ts:ds.dockTimestamp,cad:"daily",ref:() => window.__dockR && window.__dockR.click()},
+            ].map(s => {
+              var sl = staleLevel(s.ts, s.cad); var dc = sl==="fresh"?C.ok:sl==="stale"?C.warn:C.bad;
+              return <button key={s.k} onClick={s.ref} style={{ display:"inline-flex", alignItems:"center", gap:5, padding:"4px 10px", borderRadius:6, border:"1px solid "+C.border, background:C.surface, cursor:"pointer", color:C.dim, fontFamily:sans, fontSize:13, fontWeight:500 }}>
+                <span style={{ width:6, height:6, borderRadius:"50%", background:dc }} />{s.l} <span style={{ opacity:0.6 }}>{fmtTs(s.ts)}</span>
+              </button>;
+            })}
+          </div>
+        )}
         {dockApiError && <div style={{ fontSize:12, color:C.bad, marginTop:-8, marginBottom:10 }}>OpenDock API error: {dockApiError}</div>}
 
         {showSettings && (
@@ -402,6 +420,7 @@ export default function ProductionReadiness() {
 
         <div style={{ display:"flex", gap:0, marginBottom:16, borderBottom:"1px solid "+C.border }}>
           {[{key:"overview",label:"Overview",count:null,alert:false},{key:"workorders",label:"Work Orders",count:summaryForUI.total},{key:"criticalitems",label:"Critical Items",count:criticalItemsForUI.length}]
+            .concat([{key:"flags",label:"Data Flags",count:analysisForUI.flags.length,alert:analysisForUI.flags.length>0}])
             .concat([{key:"pocheck",label:"PO Check",count:poCheck ? poCheck.missing+poCheck.qtyMismatch : 0,alert:poCheck ? poCheck.missing+poCheck.qtyMismatch>0 : false}])
             .concat([{key:"timeline",label:"Deliveries",count:timelineData ? timelineData.woTimelines.length : 0,alert:false}]).map(t =>
               <button key={t.key} onClick={() => setActiveView(t.key)} style={{ padding:"8px 16px", border:"none", fontFamily:sans, fontSize:14, fontWeight:500, cursor:"pointer", background:"transparent", color:activeView===t.key?C.bright:C.dim, borderBottom:activeView===t.key?"2px solid "+C.accent:"2px solid transparent", marginBottom:-1 }}>
