@@ -273,7 +273,9 @@ export default function ProductionReadiness() {
         </div>
 
         <div style={{ display:"flex", gap:0, marginBottom:16, borderBottom:"1px solid "+C.border }}>
-          {[{key:"overview",label:"Overview",count:null,alert:false},{key:"workorders",label:"Work Orders",count:summary.total},{key:"criticalitems",label:"Critical Items",count:criticalItems.length}].concat(poCheck?[{key:"pocheck",label:"PO Check",count:poCheck.missing+poCheck.qtyMismatch,alert:poCheck.missing+poCheck.qtyMismatch>0}]:[]).concat(timelineData?[{key:"timeline",label:"Delivery Timeline",count:timelineData.woTimelines.length}]:[]).map(t =>
+          {[{key:"overview",label:"Overview",count:null,alert:false},{key:"workorders",label:"Work Orders",count:summary.total},{key:"criticalitems",label:"Critical Items",count:criticalItems.length}]
+            .concat(poCheck?[{key:"pocheck",label:"PO Check",count:poCheck.missing+poCheck.qtyMismatch,alert:poCheck.missing+poCheck.qtyMismatch>0}]:[])
+            .concat([{key:"timeline",label:"Deliveries",count:timelineData ? timelineData.woTimelines.length : 0,alert:false}]).map(t =>
               <button key={t.key} onClick={() => setActiveView(t.key)} style={{ padding:"8px 16px", border:"none", fontFamily:sans, fontSize:14, fontWeight:500, cursor:"pointer", background:"transparent", color:activeView===t.key?C.bright:C.dim, borderBottom:activeView===t.key?"2px solid "+C.accent:"2px solid transparent", marginBottom:-1 }}>
                 {t.label} {t.count != null && <span style={{ opacity:t.alert?1:0.45, fontSize:13, color:t.alert?C.bad:undefined }}>{t.alert?"\u26A0 ":""}{t.count}</span>}
               </button>

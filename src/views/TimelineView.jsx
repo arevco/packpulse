@@ -13,7 +13,16 @@ export default function TimelineView({ timelineData }) {
   const [matFilterWO, setMatFilterWO] = useState("all");
   const [matSearch, setMatSearch] = useState("");
 
-  if (!timelineData) return null;
+  if (!timelineData) {
+    return (
+      <div style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, padding:"20px 18px" }}>
+        <div style={{ fontSize:16, fontWeight:700, color:C.bright, marginBottom:6 }}>Deliveries</div>
+        <div style={{ fontSize:13, color:C.dim, lineHeight:1.5 }}>
+          No delivery data loaded yet. Upload EDR and/or OpenDock data to enable the delivery timeline and inbound material analysis.
+        </div>
+      </div>
+    );
+  }
 
   return (<div>
     <div style={{ display:"flex", gap:20, marginBottom:16 }}>
