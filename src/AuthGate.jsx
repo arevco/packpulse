@@ -1,6 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 
+const FONTS_CSS = "@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Roboto+Mono:wght@400;500;700&display=swap');";
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+const DEV_BYPASS_AUTH = import.meta.env.DEV && String(import.meta.env.VITE_DEV_BYPASS_AUTH || "").toLowerCase() === "true";
+const DEV_BYPASS_USER = {
+  email: import.meta.env.VITE_DEV_BYPASS_EMAIL || "dev@revcopack.local",
+  name: import.meta.env.VITE_DEV_BYPASS_NAME || "PackPulse Dev",
+  picture: "",
+};
 
 export default function AuthGate({ children }) {
   const [checking, setChecking] = useState(true);
@@ -11,6 +18,11 @@ export default function AuthGate({ children }) {
 
   // Check existing session on mount
   useEffect(() => {
+    if (DEV_BYPASS_AUTH) {
+      setUser(DEV_BYPASS_USER);
+      setChecking(false);
+      return;
+    }
     fetch("/api/auth/check", { credentials: "include" })
       .then(r => r.json())
       .then(data => {
@@ -99,6 +111,10 @@ export default function AuthGate({ children }) {
   }, [user, checking, tryInitGoogle]);
 
   const handleLogout = useCallback(async () => {
+    if (DEV_BYPASS_AUTH) {
+      setUser(DEV_BYPASS_USER);
+      return;
+    }
     await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
     setUser(null);
     initializedRef.current = false;
@@ -117,12 +133,12 @@ export default function AuthGate({ children }) {
           <div style={styles.spinner} />
           <div style={{ color: "#6b7280", marginTop: 12, fontSize: 14 }}>Checking session...</div>
         </div>
-        <style>{spinnerCSS}</style>
+        <style>{FONTS_CSS + spinnerCSS}</style>
       </div>
     );
   }
 
-  if (!GOOGLE_CLIENT_ID) {
+  if (!DEV_BYPASS_AUTH && !GOOGLE_CLIENT_ID) {
     return (
       <div style={styles.container}>
         <div style={styles.card}>
@@ -131,6 +147,7 @@ export default function AuthGate({ children }) {
             VITE_GOOGLE_CLIENT_ID is not set. Add it to your Vercel environment variables.
           </div>
         </div>
+        <style>{FONTS_CSS}</style>
       </div>
     );
   }
@@ -140,18 +157,18 @@ export default function AuthGate({ children }) {
       <div style={styles.container}>
         <div style={styles.card}>
           <div style={{ fontSize: 22, fontWeight: 700, color: "#111827", letterSpacing: -0.3 }}>PackPulse</div>
-          <div style={{ fontSize: 14, color: "#9ca3af", marginTop: 2, marginBottom: 24 }}>REV Copack</div>
+          <div style={{ fontSize: 14, color: "#6b7280", marginTop: 2, marginBottom: 24 }}>REV Copack</div>
           <div ref={btnRef} style={{ minHeight: 44, display: "flex", justifyContent: "center" }} />
           {error && (
             <div style={{ marginTop: 16, padding: "10px 14px", borderRadius: 8, background: "#fef2f2", border: "1px solid #fecaca", color: "#dc2626", fontSize: 14 }}>
               {error}
             </div>
           )}
-          <div style={{ marginTop: 20, fontSize: 13, color: "#9ca3af" }}>
+          <div style={{ marginTop: 20, fontSize: 13, color: "#6b7280" }}>
             Restricted to authorized accounts
           </div>
         </div>
-        <style>{spinnerCSS}</style>
+        <style>{FONTS_CSS + spinnerCSS}</style>
       </div>
     );
   }
@@ -166,7 +183,7 @@ const styles = {
     alignItems: "center",
     justifyContent: "center",
     background: "#f3f4f6",
-    fontFamily: "'IBM Plex Sans', -apple-system, sans-serif",
+    fontFamily: "'Inter', -apple-system, sans-serif",
   },
   card: {
     background: "#ffffff",
@@ -189,4 +206,9 @@ const styles = {
   },
 };
 
-const spinnerCSS = `@keyframes spin { to { transform: rotate(360deg); } }`;
+const spinnerCSS = `
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+`;
