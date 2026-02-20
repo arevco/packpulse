@@ -6,7 +6,7 @@ import Dot from "../components/Dot";
 
 export default function CriticalItemsView({ rawCriticalItems }) {
   const { C, sans, mono } = useTheme();
-  const { thC, thS, tdN, tdM, inp, pill } = useStyles();
+  const { thC, tdN, tdM, tdToggle, thDS, tdDN, tdDM, truncate, inp, pill } = useStyles();
 
   const [ciSearch, setCiSearch] = useState("");
   const [ciSort, setCiSort] = useState("unlockedUnits");
@@ -38,10 +38,10 @@ export default function CriticalItemsView({ rawCriticalItems }) {
       out.push(
         <tr key={"ci"+idx} onClick={() => setExpandedWO(isX ? null : "ci-" + idx)} style={{ cursor:"pointer", borderBottom:"1px solid "+C.border, background:isX?C.raised:"transparent" }}
           onMouseEnter={e => { if (!isX) e.currentTarget.style.background = C.hover; }} onMouseLeave={e => { if (!isX) e.currentTarget.style.background = isX ? C.raised : "transparent"; }}>
-          <td style={{ padding:"9px 6px", textAlign:"center", fontSize:13, color:C.dim }}>{isX ? "\u25BE" : "\u25B8"}</td>
-          <td title={ci.sku} style={Object.assign({}, tdM, { fontWeight:600, color:C.bright, maxWidth:140, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" })}>{truncateItem(ci.sku)}</td>
-          <td style={Object.assign({}, tdN, { color:C.dim, maxWidth:200, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" })}>{ci.desc || "--"}</td>
-          <td style={Object.assign({}, tdN, { color:C.dim, maxWidth:220, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" })}>{ci.customerLabel || "--"}</td>
+          <td style={tdToggle}>{isX ? "\u25BE" : "\u25B8"}</td>
+          <td title={ci.sku} style={Object.assign({}, tdM, { fontWeight:600, color:C.bright }, truncate(140))}>{truncateItem(ci.sku)}</td>
+          <td style={Object.assign({}, tdN, { color:C.dim }, truncate(200))}>{ci.desc || "--"}</td>
+          <td style={Object.assign({}, tdN, { color:C.dim }, truncate(220))}>{ci.customerLabel || "--"}</td>
           <td style={tdN}><Dot status={ci.isZeroStock ? "blocked" : "partial"} /></td>
           <td style={Object.assign({}, tdM, { textAlign:"right", fontWeight:600, color:ci.isZeroStock?C.bad:C.warn })}>{Math.round(ci.onHand).toLocaleString()}</td>
           <td style={Object.assign({}, tdM, { textAlign:"right", fontWeight:600, color:C.bad })}>{Math.round(ci.totalShort).toLocaleString()}</td>
@@ -55,17 +55,17 @@ export default function CriticalItemsView({ rawCriticalItems }) {
             <div style={{ fontSize:12, fontWeight:600, color:C.accent, marginBottom:6, marginTop:10, textTransform:"uppercase", letterSpacing:0.8 }}>Affected Work Orders</div>
             <table style={{ width:"100%", borderCollapse:"collapse" }}>
               <thead><tr>
-                {["WO#","Product","Customer","WO Qty","Needed","Short","Due"].map(h => <th key={h} style={{ padding:"7px 10px", fontSize:13, fontWeight:600, fontFamily:sans, textTransform:"uppercase", letterSpacing:0.6, color:C.dim, textAlign:"left", borderBottom:"1px solid "+C.border }}>{h}</th>)}
+                {["WO#","Product","Customer","WO Qty","Needed","Short","Due"].map(h => <th key={h} style={thDS}>{h}</th>)}
               </tr></thead>
               <tbody>
                 {ci.affectedWOs.map((wo, wi) => <tr key={wi} style={{ borderBottom:"1px solid "+C.border }}>
-                  <td style={{ padding:"7px 10px", fontFamily:mono, fontSize:13, fontWeight:600, color:C.bright }}>{wo.woNum}</td>
-                  <td style={{ padding:"7px 10px", fontFamily:mono, fontSize:13, color:C.text }}>{wo.productSku}</td>
-                  <td style={{ padding:"7px 10px", fontFamily:sans, fontSize:13, color:C.dim }}>{wo.customer || "--"}</td>
-                  <td style={{ padding:"7px 10px", fontFamily:mono, fontSize:13, color:C.bright }}>{wo.qtyToProduce.toLocaleString()}</td>
-                  <td style={{ padding:"7px 10px", fontFamily:mono, fontSize:13, color:C.text }}>{Math.round(wo.needed).toLocaleString()}</td>
-                  <td style={{ padding:"7px 10px", fontFamily:mono, fontSize:13, fontWeight:600, color:C.bad }}>{Math.round(wo.short).toLocaleString()}</td>
-                  <td style={{ padding:"7px 10px", fontFamily:mono, fontSize:13, color:C.text }}>{fmtDate(wo.dueDate)}</td>
+                  <td style={Object.assign({}, tdDM, { fontWeight:600, color:C.bright })}>{wo.woNum}</td>
+                  <td style={tdDM}>{wo.productSku}</td>
+                  <td style={Object.assign({}, tdDN, { color:C.dim })}>{wo.customer || "--"}</td>
+                  <td style={Object.assign({}, tdDM, { color:C.bright })}>{wo.qtyToProduce.toLocaleString()}</td>
+                  <td style={tdDM}>{Math.round(wo.needed).toLocaleString()}</td>
+                  <td style={Object.assign({}, tdDM, { fontWeight:600, color:C.bad })}>{Math.round(wo.short).toLocaleString()}</td>
+                  <td style={tdDM}>{fmtDate(wo.dueDate)}</td>
                 </tr>)}
               </tbody>
             </table>
@@ -88,7 +88,7 @@ export default function CriticalItemsView({ rawCriticalItems }) {
       <div style={{ overflowX:"auto" }}>
         <table style={{ width:"100%", borderCollapse:"collapse" }}>
           <thead><tr style={{ background:C.raised }}>
-            <th style={{ width:24, padding:"9px 6px", borderBottom:"1px solid "+C.border }} />
+            <th style={{ width:24, padding:"0 8px", borderBottom:"1px solid "+C.border }} />
             {[{f:"sku",l:"Item"},{f:"desc",l:"Description"},{f:"customer",l:"Customer"},{f:"status",l:"Status"},{f:"onHand",l:"On Hand"},{f:"totalShort",l:"Short"},{f:"affectedWOs",l:"WOs"},{f:"unlockedUnits",l:"Units Unlocked"}].map(col =>
               <th key={col.f} onClick={() => handleCiSort(col.f)} style={Object.assign({}, thC(ciSort===col.f), { textAlign:col.f==="sku"||col.f==="desc"||col.f==="customer"?"left":"right" })}>
                 {col.l}{ciSort===col.f ? (ciSortDir==="asc" ? " \u2191" : " \u2193") : ""}

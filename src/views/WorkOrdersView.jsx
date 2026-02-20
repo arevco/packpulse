@@ -6,7 +6,7 @@ import Dot from "../components/Dot";
 
 export default function WorkOrdersView({ analysis, woStatuses, woCustomers }) {
   const { C, sans, mono } = useTheme();
-  const { thC, thS, tdN, tdM, inp, sel, pill } = useStyles();
+  const { thC, tdN, tdM, tdToggle, thDS, tdDN, tdDM, truncate, inp, sel, pill } = useStyles();
 
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
@@ -41,10 +41,10 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers }) {
       out.push(
         <tr key={"r"+idx} onClick={() => setExpandedWO(isX ? null : wo.woNum + idx)} style={{ cursor:"pointer", borderBottom:"1px solid "+C.border, background:isX?C.raised:"transparent" }}
           onMouseEnter={e => { if (!isX) e.currentTarget.style.background = C.hover; }} onMouseLeave={e => { if (!isX) e.currentTarget.style.background = isX ? C.raised : "transparent"; }}>
-          <td style={{ padding:"9px 6px", textAlign:"center", fontSize:13, color:C.dim }}>{isX ? "\u25BE" : "\u25B8"}</td>
+          <td style={tdToggle}>{isX ? "\u25BE" : "\u25B8"}</td>
           <td style={Object.assign({}, tdM, { fontWeight:600, color:C.bright })}>{wo.woNum}</td>
           <td style={tdM}>{wo.productSkuRaw}</td>
-          <td style={Object.assign({}, tdN, { color:C.dim, maxWidth:140, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" })}>{wo.customer || "--"}</td>
+          <td style={Object.assign({}, tdN, { color:C.dim }, truncate(140))}>{wo.customer || "--"}</td>
           <td style={tdN}><Dot status={wo.runStatus} />{wo.status ? <span style={{ marginLeft:6, fontSize:12, color:C.dim }}>{wo.status}</span> : ""}</td>
           <td style={Object.assign({}, tdM, { color:C.text })}>{fmtDate(wo.dueDate)}</td>
           <td style={Object.assign({}, tdM, { color:C.dim, fontSize:12 })}>{fmtDate(wo.plannedStart)}</td>
@@ -71,25 +71,25 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers }) {
             <div style={{ fontSize:12, fontWeight:600, color:C.accent, marginBottom:6, marginTop:4, textTransform:"uppercase", letterSpacing:0.8 }}>BOM - {wo.components.length} components</div>
             <table style={{ width:"100%", borderCollapse:"collapse" }}>
               <thead><tr>
-                {["Component","Description","Qty/Unit","Needed","On Hand","Short","Fill %"].map(h => <th key={h} style={{ padding:"7px 10px", fontSize:13, fontWeight:600, fontFamily:sans, textTransform:"uppercase", letterSpacing:0.6, color:C.dim, textAlign:"left", borderBottom:"1px solid "+C.border }}>{h}</th>)}
+                {["Component","Description","Qty/Unit","Needed","On Hand","Short","Fill %"].map(h => <th key={h} style={thDS}>{h}</th>)}
               </tr></thead>
               <tbody>
                 {wo.components.map((comp, ci) => {
                   var rows = [];
                   rows.push(
                     <tr key={"c"+ci} style={{ borderBottom:comp.hasSubs?"none":"1px solid "+C.border }}>
-                      <td style={{ padding:"7px 10px", fontFamily:mono, fontSize:13, color:C.bright }}>{comp.sku}{comp.hasSubs && <span style={{ fontSize:13, color:C.accent, marginLeft:3 }}>+alt</span>}</td>
-                      <td style={{ padding:"7px 10px", fontSize:13, color:C.dim, maxWidth:150, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{comp.desc || "--"}</td>
-                      <td style={{ padding:"7px 10px", fontFamily:mono, fontSize:13, color:C.text }}>{comp.qtyPer}</td>
-                      <td style={{ padding:"7px 10px", fontFamily:mono, fontSize:13, color:C.bright }}>{comp.needed.toLocaleString()}</td>
-                      <td style={{ padding:"7px 10px", fontFamily:mono, fontSize:13, fontWeight:600, color:comp.onHand>=comp.needed?C.ok:C.bad }}>{comp.onHand.toLocaleString()}</td>
-                      <td style={{ padding:"7px 10px", fontFamily:mono, fontSize:13, fontWeight:600, color:comp.short>0?C.bad:C.dim }}>{comp.short > 0 ? comp.short.toLocaleString() : "--"}</td>
-                      <td style={{ padding:"7px 10px", fontFamily:mono, fontSize:13, fontWeight:500, color:comp.fillRate>=100?C.ok:comp.fillRate>=70?C.warn:C.bad }}>{Math.round(Math.min(comp.fillRate, 100))+"%"}</td>
+                      <td style={Object.assign({}, tdDM, { color:C.bright })}>{comp.sku}{comp.hasSubs && <span style={{ fontSize:13, color:C.accent, marginLeft:3 }}>+alt</span>}</td>
+                      <td style={Object.assign({}, tdDN, { color:C.dim }, truncate(150))}>{comp.desc || "--"}</td>
+                      <td style={tdDM}>{comp.qtyPer}</td>
+                      <td style={Object.assign({}, tdDM, { color:C.bright })}>{comp.needed.toLocaleString()}</td>
+                      <td style={Object.assign({}, tdDM, { fontWeight:600, color:comp.onHand>=comp.needed?C.ok:C.bad })}>{comp.onHand.toLocaleString()}</td>
+                      <td style={Object.assign({}, tdDM, { fontWeight:600, color:comp.short>0?C.bad:C.dim })}>{comp.short > 0 ? comp.short.toLocaleString() : "--"}</td>
+                      <td style={Object.assign({}, tdDM, { fontWeight:500, color:comp.fillRate>=100?C.ok:comp.fillRate>=70?C.warn:C.bad })}>{Math.round(Math.min(comp.fillRate, 100))+"%"}</td>
                     </tr>
                   );
                   if (comp.hasSubs && comp.optionDetails) {
                     rows.push(
-                      <tr key={"s"+ci}><td colSpan={7} style={{ padding:"0 8px 5px 20px", borderBottom:"1px solid "+C.border }}>
+                      <tr key={"s"+ci}><td colSpan={7} style={{ padding:"0 8px 6px 20px", borderBottom:"1px solid "+C.border }}>
                         <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
                           {comp.optionDetails.map((opt, oi) => <span key={oi} style={{ fontSize:12, fontFamily:mono, color:C.dim }}>
                             <span style={{ color:opt.isSub?C.accent:C.ok, fontWeight:600, marginRight:2 }}>{opt.isSub ? "ALT" : "PRI"}</span>{opt.sku} = {opt.onHand.toLocaleString()}
@@ -134,7 +134,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers }) {
       <div style={{ overflowX:"auto" }}>
         <table style={{ width:"100%", borderCollapse:"collapse" }}>
           <thead><tr style={{ background:C.raised }}>
-            <th style={{ width:24, padding:"9px 6px", borderBottom:"1px solid "+C.border }} />
+            <th style={{ width:24, padding:"0 8px", borderBottom:"1px solid "+C.border }} />
             <SortTh field="woNum">WO#</SortTh>
             <SortTh field="product">Product</SortTh>
             <SortTh field="customer">Customer</SortTh>
