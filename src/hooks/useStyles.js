@@ -9,7 +9,7 @@ export function useStyles() {
   const fBody = "clamp(12px, 2.9vw, 13px)";
   const fHead = "clamp(11px, 2.6vw, 12px)";
 
-  const thBase = { padding:vPad + " " + hPad, textAlign:"left", fontSize:fHead, fontWeight:600, fontFamily:sans, letterSpacing:0.6, borderBottom:"1px solid "+C.border, whiteSpace:"nowrap", textTransform:"uppercase" };
+  const thBase = { padding:vPad + " " + hPad, textAlign:"left", fontSize:fHead, fontWeight:600, fontFamily:sans, letterSpacing:0.2, borderBottom:"1px solid "+C.border, whiteSpace:"nowrap" };
   const tdBase = { padding:vPad + " " + hPad, fontSize:fBody, lineHeight:1.25 };
 
   const thC = active => Object.assign({}, thBase, { color:active?C.accent:C.dim, cursor:"pointer", userSelect:"none" });
@@ -18,7 +18,7 @@ export function useStyles() {
   const tdM = Object.assign({}, tdBase, { fontFamily:mono, color:C.text });
   const tdToggle = { padding:"0 " + hPadDetail, width:26, textAlign:"center", fontSize:fBody, color:C.dim, whiteSpace:"nowrap" };
 
-  const thDS = { padding:vPadDetail + " " + hPadDetail, textAlign:"left", fontSize:fBody, fontWeight:600, fontFamily:sans, textTransform:"uppercase", letterSpacing:0.6, color:C.dim, borderBottom:"1px solid "+C.border };
+  const thDS = { padding:vPadDetail + " " + hPadDetail, textAlign:"left", fontSize:fBody, fontWeight:600, fontFamily:sans, letterSpacing:0.2, color:C.dim, borderBottom:"1px solid "+C.border };
   const tdDN = { padding:vPadDetail + " " + hPadDetail, fontSize:fBody, fontFamily:sans, color:C.text, lineHeight:1.25 };
   const tdDM = { padding:vPadDetail + " " + hPadDetail, fontSize:fBody, fontFamily:mono, color:C.text, lineHeight:1.25 };
 

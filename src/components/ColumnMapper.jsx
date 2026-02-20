@@ -4,7 +4,7 @@ export default function ColumnMapper({ title, headers, mapping, onMappingChange,
   const { C, sans, mono } = useTheme();
   return (
     <div style={{ marginBottom:20 }}>
-      <div style={{ fontSize:12, fontWeight:600, color:C.accent, fontFamily:mono, textTransform:"uppercase", letterSpacing:1.5, marginBottom:10 }}>{title}</div>
+      <div style={{ fontSize:12, fontWeight:600, color:C.accent, fontFamily:mono, letterSpacing:0.3, marginBottom:10 }}>{title}</div>
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(190px, 1fr))", gap:8 }}>
         {fields.map(f => (
           <div key={f.key}>

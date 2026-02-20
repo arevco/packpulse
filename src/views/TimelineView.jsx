@@ -27,7 +27,7 @@ export default function TimelineView({ timelineData }) {
   return (<div>
     <div style={{ display:"flex", gap:20, marginBottom:16 }}>
       {[{l:"Inbound",v:timelineData.totalDeliveries,c:C.accent},{l:"BOM Matched",v:timelineData.matchedToBOM,c:C.ok},{l:"Dock Appts",v:timelineData.withDockAppt,c:C.bright},{l:"WOs Waiting",v:timelineData.woTimelines.length,c:C.warn}].map((s,i) =>
-        <div key={i}><div style={{ fontSize:24, fontWeight:700, fontFamily:mono, color:s.c, lineHeight:1 }}>{s.v}</div><div style={{ fontSize:13, color:C.dim, marginTop:3, textTransform:"uppercase", letterSpacing:0.5 }}>{s.l}</div></div>
+        <div key={i}><div style={{ fontSize:24, fontWeight:700, fontFamily:mono, color:s.c, lineHeight:1 }}>{s.v}</div><div style={{ fontSize:13, color:C.dim, marginTop:3, letterSpacing:0.1 }}>{s.l}</div></div>
       )}
     </div>
     <div style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, overflow:"hidden", marginBottom:16 }}>
@@ -37,7 +37,7 @@ export default function TimelineView({ timelineData }) {
       <div style={{ overflowX:"auto" }}>
         <div style={{ minWidth:Math.max(800, timelineData.days.length*40 + 340), display:"flex", flexDirection:"column" }}>
           <div style={{ display:"flex", position:"sticky", top:0, zIndex:2, background:C.raised }}>
-            <div style={{ minWidth:320, padding:"6px 12px", fontSize:13, fontWeight:600, fontFamily:sans, textTransform:"uppercase", letterSpacing:0.6, color:C.dim, borderBottom:"1px solid "+C.border, flexShrink:0 }}>Work Order</div>
+            <div style={{ minWidth:320, padding:"6px 12px", fontSize:13, fontWeight:600, fontFamily:sans, letterSpacing:0.1, color:C.dim, borderBottom:"1px solid "+C.border, flexShrink:0 }}>Work Order</div>
             <div style={{ display:"flex", flex:1 }}>
               {timelineData.days.map(day => {
                 var dt = new Date(day + "T12:00:00"); var isT = day === timelineData.today; var isW = dt.getDay()===0||dt.getDay()===6;

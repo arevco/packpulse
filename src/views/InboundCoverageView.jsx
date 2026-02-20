@@ -82,7 +82,7 @@ export default function InboundCoverageView({ inboundCoverage }) {
           return (
             <div key={kpi.label} style={{ background:C.surface, border:"1px solid " + C.border, borderRadius:8, padding:"10px 12px" }}>
               <div style={{ fontSize:20, fontWeight:700, color:kpi.color, lineHeight:1 }}>{kpi.value}</div>
-              <div style={{ fontSize:12, color:C.dim, marginTop:4, textTransform:"uppercase", letterSpacing:0.5 }}>{kpi.label}</div>
+              <div style={{ fontSize:12, color:C.dim, marginTop:4, letterSpacing:0.1 }}>{kpi.label}</div>
             </div>
           );
         })}

@@ -271,7 +271,7 @@ export default function ProductionReadiness() {
             </button>
           </div>
         )}
-        {(!showAutoBootstrap || showDataSetup) && <div style={{ fontSize:13, fontWeight:600, color:C.dim, textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>Data setup</div>}
+        {(!showAutoBootstrap || showDataSetup) && <div style={{ fontSize:13, fontWeight:600, color:C.dim, letterSpacing:0.2, marginBottom:8 }}>Data Setup</div>}
         {(!showAutoBootstrap || showDataSetup) && (
           <NulogySync onDataLoaded={handleNulogyData} theme={C} autoStart={false} hideToggle={false} />
         )}
@@ -281,7 +281,7 @@ export default function ProductionReadiness() {
           <FileUploader label="Work Orders" uploaded={!!ds.workOrders} fileName={ds.woFileName} onData={(d,n) => {ds.setWorkOrders(d);ds.setWoFileName(n);ds.setWoTimestamp(new Date());}} subtitle="Open work orders (.csv)" />
         </div>
         <div style={{ marginBottom:8 }}>
-          <div style={{ fontSize:13, fontWeight:600, color:C.dim, textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>Optional</div>
+          <div style={{ fontSize:13, fontWeight:600, color:C.dim, letterSpacing:0.2, marginBottom:8 }}>Optional</div>
         </div>
         <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(230px, 1fr))", gap:8, marginBottom:20 }}>
           <FileUploader label="Bill of Materials" uploaded={!!ds.boms} fileName={ds.bomFileName} onData={(d,n) => {ds.setBoms(d);ds.setBomFileName(n);ds.setBomTimestamp(new Date());}} subtitle={ds.boms ? ("Saved \u00b7 Re-upload to update") : "BOM structure (.csv, .xlsx)"} acceptTypes=".csv,.xlsx,.xls" />

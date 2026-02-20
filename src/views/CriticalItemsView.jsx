@@ -187,7 +187,7 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
       if (isX) {
         out.push(
           <tr key={"cd" + idx}><td colSpan={9} style={{ padding:"0 12px 14px 36px", background:C.raised }}>
-            <div style={{ fontSize:12, fontWeight:600, color:C.accent, marginBottom:6, marginTop:10, textTransform:"uppercase", letterSpacing:0.8 }}>Affected Work Orders</div>
+            <div style={{ fontSize:12, fontWeight:600, color:C.accent, marginBottom:6, marginTop:10, letterSpacing:0.1 }}>Affected Work Orders</div>
             <table style={{ width:"100%", borderCollapse:"collapse" }}>
               <thead><tr>{["WO#", "Product", "Customer", "WO Qty", "Needed", "Short", "Due"].map(function(h) { return <th key={h} style={thDS}>{h}</th>; })}</tr></thead>
               <tbody>
@@ -244,7 +244,7 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
               <span style={{ color:C.dim }}>Earliest Scheduled: <span style={{ color:C.bright, fontFamily:"monospace" }}>{fmtDate(ci.earliestScheduledDate)}</span></span>
               <span style={{ color:C.dim }}>POs: <span style={{ color:C.bright }}>{(ci.openPOs || []).length ? ci.openPOs.join(", ") : "--"}</span></span>
             </div>
-            <div style={{ fontSize:12, fontWeight:600, color:C.accent, marginBottom:6, textTransform:"uppercase", letterSpacing:0.8 }}>Affected Work Orders</div>
+            <div style={{ fontSize:12, fontWeight:600, color:C.accent, marginBottom:6, letterSpacing:0.1 }}>Affected Work Orders</div>
             <table style={{ width:"100%", borderCollapse:"collapse" }}>
               <thead><tr>{["WO#", "Product", "Customer", "WO Qty", "Needed", "Short", "Due"].map(function(h) { return <th key={h} style={thDS}>{h}</th>; })}</tr></thead>
               <tbody>

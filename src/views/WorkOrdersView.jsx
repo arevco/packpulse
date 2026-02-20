@@ -149,7 +149,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
       );
       if (isX) {
         var details = [];
-        if (wo.reference1) details.push(<div key="ref" style={{ fontSize:13, color:C.text, marginBottom:8 }}><span style={{ fontSize:12, fontWeight:600, color:C.dim, textTransform:"uppercase", letterSpacing:0.6, marginRight:6 }}>Notes</span>{wo.reference1}</div>);
+        if (wo.reference1) details.push(<div key="ref" style={{ fontSize:13, color:C.text, marginBottom:8 }}><span style={{ fontSize:12, fontWeight:600, color:C.dim, letterSpacing:0.1, marginRight:6 }}>Notes</span>{wo.reference1}</div>);
         if (wo.plannedStart || wo.plannedEnd) details.push(
           <div key="sched" style={{ fontSize:13, color:C.dim, marginBottom:8, display:"flex", gap:16, flexWrap:"wrap" }}>
             <span>Start: <span style={{ color:C.bright, fontFamily:mono }}>{fmtDate(wo.plannedStart)}</span></span>
@@ -163,7 +163,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
         </div>);
         if (wo.components.length > 0) details.push(
           <div key="bom">
-            <div style={{ fontSize:12, fontWeight:600, color:C.accent, marginBottom:6, marginTop:4, textTransform:"uppercase", letterSpacing:0.8 }}>BOM - {wo.components.length} components</div>
+            <div style={{ fontSize:12, fontWeight:600, color:C.accent, marginBottom:6, marginTop:4, letterSpacing:0.1 }}>BOM - {wo.components.length} components</div>
             <table style={{ width:"100%", borderCollapse:"collapse" }}>
               <thead><tr>
                 {["Component","Description","Qty/Unit","Needed","On Hand","Short","Fill %"].map(h => <th key={h} style={thDS}>{h}</th>)}

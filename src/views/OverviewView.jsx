@@ -132,7 +132,7 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
         {l:"Late WOs", v:overview.lateWOs.length, c:overview.lateWOs.length>0?C.bad:C.ok}
       ].map(s => <div key={s.l} style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, padding:"14px 16px" }}>
         <div style={{ fontSize:24, fontWeight:700, fontFamily:mono, color:s.c, lineHeight:1 }}>{s.v}</div>
-        <div style={{ fontSize:12, color:C.dim, marginTop:5, fontWeight:500, textTransform:"uppercase", letterSpacing:0.5 }}>{s.l}</div>
+        <div style={{ fontSize:12, color:C.dim, marginTop:5, fontWeight:500, letterSpacing:0.1 }}>{s.l}</div>
       </div>)}
     </div>
 
