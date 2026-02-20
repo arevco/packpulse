@@ -1,3 +1,5 @@
+import Sentry from "../_sentry.js";
+
 function parseJsonSafe(text) {
   try {
     return JSON.parse(text);
@@ -512,6 +514,7 @@ export default async function handler(req, res) {
       message: "Loaded " + rows.length + " OpenDock appointments",
     });
   } catch (err) {
+    Sentry.captureException(err);
     return res.status(500).json({
       error: "Unexpected OpenDock proxy error.",
       details: err && err.message ? err.message : String(err),

@@ -2,6 +2,7 @@
 // Verifies Google ID token, checks email domain, sets session cookie
 
 import crypto from "crypto";
+import Sentry from "../_sentry.js";
 
 const SESSION_SECRET = process.env.SESSION_SECRET || "packpulse-default-secret-change-me";
 const ALLOWED_DOMAIN = process.env.ALLOWED_DOMAIN || "revcopack.com";
@@ -58,6 +59,7 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true, email, name, picture });
 
   } catch (err) {
+    Sentry.captureException(err);
     console.error("Auth verify error:", err);
     return res.status(500).json({ error: "Authentication failed" });
   }

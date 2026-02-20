@@ -1,6 +1,8 @@
 // GET /api/nulogy/status?url=<statusUrl>
 // Checks the status of a Nulogy report job
 
+import Sentry from "../_sentry.js";
+
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
@@ -46,6 +48,7 @@ export default async function handler(req, res) {
     });
 
   } catch (err) {
+    Sentry.captureException(err);
     console.error("Nulogy status check error:", err);
     return res.status(500).json({ error: `Failed to check report status: ${err.message}` });
   }
