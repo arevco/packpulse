@@ -26,12 +26,6 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
     var s = String(v || "");
     return s.length > ITEM_TRUNCATE_LEN ? (s.slice(0, ITEM_TRUNCATE_LEN) + "...") : s;
   };
-  var runStatusMeta = function(status) {
-    var s = String(status || "").toLowerCase();
-    if (s === "ready") return { label:"RDY", color:C.ok, bg:C.okSoft || C.accentSoft };
-    if (s === "partial") return { label:"PRT", color:C.warn, bg:C.warnSoft };
-    return { label:"BLK", color:C.bad, bg:C.badSoft };
-  };
 
   var handleCiSort = function(f) {
     if (ciSort === f) setCiSortDir(function(d) { return d === "asc" ? "desc" : "asc"; });
@@ -70,7 +64,6 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
       if (ciSort === "sku") c = a.sku.localeCompare(b.sku);
       else if (ciSort === "desc") c = (a.desc || "").localeCompare(b.desc || "");
       else if (ciSort === "customer") c = (a.customerLabel || "").localeCompare(b.customerLabel || "");
-      else if (ciSort === "status") c = Number(a.isZeroStock) - Number(b.isZeroStock);
       else if (ciSort === "onHand") c = a.onHand - b.onHand;
       else if (ciSort === "totalShort") c = a.totalShort - b.totalShort;
       else if (ciSort === "affectedWOs") c = a.affectedWOs.length - b.affectedWOs.length;
@@ -154,23 +147,23 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
       return;
     }
 
-    var h = ["Item Code", "Description", "Customer", "Status", "On Hand", "Total Short", "WOs Affected", "Production Unlocked"];
+    var h = ["Item Code", "Description", "Customer", "On Hand", "Total Short", "WOs Affected", "Production Unlocked"];
     var rows = criticalItems.map(function(i) {
-      return [i.sku, '"' + (i.desc || "").replace(/"/g, '""') + '"', '"' + (i.customerLabel || "--").replace(/"/g, '""') + '"', i.isZeroStock ? "ZERO" : "LOW", Math.round(i.onHand), Math.round(i.totalShort), i.affectedWOs.length, Math.round(i.unlockedUnits)];
+      return [i.sku, '"' + (i.desc || "").replace(/"/g, '""') + '"', '"' + (i.customerLabel || "--").replace(/"/g, '""') + '"', Math.round(i.onHand), Math.round(i.totalShort), i.affectedWOs.length, Math.round(i.unlockedUnits)];
     });
     triggerDownload([h.join(",")].concat(rows.map(function(r) { return r.join(","); })).join("\n"), "critical_items_" + new Date().toISOString().slice(0, 10) + ".csv", "text/csv");
   };
 
   var exportCriticalPDF = function() {
-    var th = ["Item", "Desc", "Customer", "Status", "On Hand", "Short", "WOs", "Unlocked"].map(function(hd) { return "<th>" + hd + "</th>"; }).join("");
+    var th = ["Item", "Desc", "Customer", "On Hand", "Short", "WOs", "Unlocked"].map(function(hd) { return "<th>" + hd + "</th>"; }).join("");
     var tb = criticalItems.map(function(i) {
-      return "<tr><td>" + i.sku + "</td><td>" + (i.desc || "--") + "</td><td>" + (i.customerLabel || "--") + "</td><td class=\"" + (i.isZeroStock ? "zero" : "low") + "\">" + (i.isZeroStock ? "ZERO" : "LOW") + "</td><td>" + Math.round(i.onHand).toLocaleString() + "</td><td>" + Math.round(i.totalShort).toLocaleString() + "</td><td>" + i.affectedWOs.length + "</td><td>" + Math.round(i.unlockedUnits).toLocaleString() + "</td></tr>";
+      return "<tr><td>" + i.sku + "</td><td>" + (i.desc || "--") + "</td><td>" + (i.customerLabel || "--") + "</td><td>" + Math.round(i.onHand).toLocaleString() + "</td><td>" + Math.round(i.totalShort).toLocaleString() + "</td><td>" + i.affectedWOs.length + "</td><td>" + Math.round(i.unlockedUnits).toLocaleString() + "</td></tr>";
     }).join("");
     triggerDownload(buildExportHTML("Critical Items Report", th, tb), "critical_items_" + new Date().toISOString().slice(0, 10) + ".html", "text/html");
   };
 
   var renderMaterialRows = function() {
-    if (criticalItems.length === 0) return <tr><td colSpan={9} style={{ padding:36, textAlign:"center", color:C.dim }}>All materials available.</td></tr>;
+    if (criticalItems.length === 0) return <tr><td colSpan={8} style={{ padding:36, textAlign:"center", color:C.dim }}>All materials available.</td></tr>;
     var out = [];
     criticalItems.forEach(function(ci, idx) {
       var rowKey = "material-" + idx;
@@ -182,12 +175,6 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
           <td title={ci.sku} style={Object.assign({}, tdM, { fontWeight:600, color:C.bright }, truncate(140))}>{truncateItem(ci.sku)}</td>
           <td style={Object.assign({}, tdN, { color:C.dim }, truncate(200))}>{ci.desc || "--"}</td>
           <td style={Object.assign({}, tdN, { color:C.dim }, truncate(220))}>{ci.customerLabel || "--"}</td>
-          <td style={Object.assign({}, tdN, { whiteSpace:"nowrap" })}>
-            {(function() {
-              var rs = runStatusMeta(ci.isZeroStock ? "blocked" : "partial");
-              return <span title={ci.isZeroStock ? "Blocked" : "Partial"} style={{ display:"inline-block", minWidth:34, textAlign:"center", padding:"2px 6px", borderRadius:999, fontSize:11, fontWeight:700, color:rs.color, background:rs.bg }}>{rs.label}</span>;
-            })()}
-          </td>
           <td style={Object.assign({}, tdM, { textAlign:"right", fontWeight:600, color:ci.isZeroStock ? C.bad : C.warn })}>{Math.round(ci.onHand).toLocaleString()}</td>
           <td style={Object.assign({}, tdM, { textAlign:"right", fontWeight:600, color:C.bad })}>{Math.round(ci.totalShort).toLocaleString()}</td>
           <td style={Object.assign({}, tdM, { textAlign:"right", color:C.bright })}>{ci.affectedWOs.length}</td>
@@ -196,7 +183,7 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
       );
       if (isX) {
         out.push(
-          <tr key={"cd" + idx}><td colSpan={9} style={{ padding:"0 12px 14px 36px", background:C.raised }}>
+          <tr key={"cd" + idx}><td colSpan={8} style={{ padding:"0 12px 14px 36px", background:C.raised }}>
             <div style={{ fontSize:12, fontWeight:600, color:C.accent, marginBottom:6, marginTop:10, letterSpacing:0.1 }}>Affected Work Orders</div>
             <table style={{ width:"100%", borderCollapse:"collapse" }}>
               <thead><tr>{["WO#", "Product", "Customer", "WO Qty", "Needed", "Short", "Due"].map(function(h) { return <th key={h} style={thDS}>{h}</th>; })}</tr></thead>
@@ -327,7 +314,7 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
           <thead><tr style={{ background:C.raised }}>
             <th style={{ width:24, padding:"0 8px", borderBottom:"1px solid " + C.border }} />
             {ciMode === "material" ? (
-              [{ f:"sku", l:"Item" }, { f:"desc", l:"Description" }, { f:"customer", l:"Customer" }, { f:"status", l:"Status" }, { f:"onHand", l:"On Hand" }, { f:"totalShort", l:"Short" }, { f:"affectedWOs", l:"WOs" }, { f:"unlockedUnits", l:"Units Unlocked" }].map(function(col) {
+              [{ f:"sku", l:"Item" }, { f:"desc", l:"Description" }, { f:"customer", l:"Customer" }, { f:"onHand", l:"On Hand" }, { f:"totalShort", l:"Short" }, { f:"affectedWOs", l:"WOs" }, { f:"unlockedUnits", l:"Units Unlocked" }].map(function(col) {
                 return <th key={col.f} onClick={function() { handleCiSort(col.f); }} style={Object.assign({}, thC(ciSort===col.f), { textAlign:col.f==="sku"||col.f==="desc"||col.f==="customer"?"left":"right" })}>{col.l}{ciSort===col.f ? (ciSortDir==="asc" ? " \u2191" : " \u2193") : ""}</th>;
               })
             ) : (
