@@ -14,9 +14,12 @@ const REPORT_TYPES = [
   { key: "workorders", label: "Work Orders", required: true },
   { key: "bom", label: "Bill of Materials", required: false }
 ];
+const CORE_REPORT_TYPES = ["inventory", "workorders"];
+const OPTIONAL_DEFERRED_TYPES = ["bom"];
 
 const POLL_INTERVAL = 4000; // 4 seconds between polls
 const MAX_POLLS = 60; // max ~4 minutes of polling
+const BETWEEN_REPORT_DELAY_MS = 450;
 
 export default function NulogySync({ onDataLoaded, theme, autoStart = false, hideToggle = false, silent = false, onSyncStateChange }) {
   const C = theme;
@@ -26,6 +29,7 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
   const [expanded, setExpanded] = useState(autoStart || hideToggle);
   const [connectionStatus, setConnectionStatus] = useState(null); // null | {configured, connected, message}
   const [syncing, setSyncing] = useState(false);
+  const [deferredSyncing, setDeferredSyncing] = useState(false);
   const [reportStates, setReportStates] = useState({
     inventory: { status: IDLE, progress: "", error: null, rowCount: 0 },
     workorders: { status: IDLE, progress: "", error: null, rowCount: 0 },
@@ -62,6 +66,10 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
       ...prev,
       [type]: { ...prev[type], ...update }
     }));
+  }, []);
+
+  const waitBriefly = useCallback(async () => {
+    await new Promise(r => setTimeout(r, BETWEEN_REPORT_DELAY_MS));
   }, []);
 
   const syncReport = useCallback(async (type) => {
@@ -174,6 +182,7 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
   const startSync = useCallback(async () => {
     abortRef.current = false;
     setSyncing(true);
+    setDeferredSyncing(false);
 
     // Reset states for selected types
     const resetStates = {};
@@ -182,21 +191,40 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
     });
     setReportStates(prev => ({ ...prev, ...resetStates }));
 
-    // Run reports sequentially (Nulogy docs recommend not running concurrent reports)
-    const results = {};
-    for (const type of syncTypes) {
+    // Phase 1: required core reports only (sequential to avoid API rate/concurrency issues).
+    const coreTypes = CORE_REPORT_TYPES.filter(t => syncTypes.includes(t));
+    const coreResults = {};
+    for (const type of coreTypes) {
       if (abortRef.current) break;
       const result = await syncReport(type);
-      if (result) results[type] = result;
+      if (result) coreResults[type] = result;
+      if (!abortRef.current) await waitBriefly();
     }
 
-    // Send loaded data to parent
-    if (Object.keys(results).length > 0) {
-      onDataLoaded(results);
+    // Deliver core data ASAP so dashboard can open quickly.
+    if (Object.keys(coreResults).length > 0) {
+      onDataLoaded(coreResults);
     }
 
+    // End blocking sync stage.
     setSyncing(false);
-  }, [syncTypes, syncReport, onDataLoaded]);
+
+    // Phase 2: optional reports deferred in background.
+    const deferredTypes = OPTIONAL_DEFERRED_TYPES.filter(t => syncTypes.includes(t));
+    if (abortRef.current || deferredTypes.length === 0) return;
+
+    setDeferredSyncing(true);
+    for (const type of deferredTypes) {
+      if (abortRef.current) break;
+      updateReportState(type, { progress: "Queued (optional background sync)..." });
+      const result = await syncReport(type);
+      if (result) {
+        onDataLoaded({ [type]: result });
+      }
+      if (!abortRef.current) await waitBriefly();
+    }
+    setDeferredSyncing(false);
+  }, [syncTypes, syncReport, onDataLoaded, updateReportState, waitBriefly]);
 
   // Auto-trigger sync once connected
   useEffect(() => {
@@ -211,6 +239,7 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
   const cancelSync = useCallback(() => {
     abortRef.current = true;
     setSyncing(false);
+    setDeferredSyncing(false);
   }, []);
 
   const toggleSyncType = useCallback((type) => {
@@ -226,12 +255,13 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
     var errorCount = Object.values(reportStates).filter(function(r) { return r.status === ERROR; }).length;
     onSyncStateChange({
       syncing: syncing,
+      deferredSyncing: deferredSyncing,
       connectionStatus: connectionStatus,
       doneCount: doneCount,
       errorCount: errorCount,
       reportStates: reportStates
     });
-  }, [onSyncStateChange, syncing, connectionStatus, reportStates]);
+  }, [onSyncStateChange, syncing, deferredSyncing, connectionStatus, reportStates]);
 
   // Status icon helper
   const StatusIcon = ({ status }) => {
@@ -404,7 +434,7 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
               )}
 
               {/* Sync progress */}
-              {syncing && (
+              {(syncing || deferredSyncing) && (
                 <div style={{ marginBottom: 12 }} aria-live="polite">
                   {syncTypes.map(type => {
                     const st = reportStates[type];
@@ -434,7 +464,7 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
 
               {/* Action buttons */}
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                {!syncing ? (
+                {!syncing && !deferredSyncing ? (
                   <button
                     onClick={startSync}
                     disabled={syncTypes.length === 0}
@@ -462,9 +492,14 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
                   </button>
                 )}
 
-                {!syncing && Object.values(reportStates).some(s => s.status === DONE) && (
+                {!syncing && !deferredSyncing && Object.values(reportStates).some(s => s.status === DONE) && (
                   <span style={{ fontSize: 13, color: C.ok }}>
                     <span aria-hidden="true">✓ </span>Data loaded — click Analyze to continue
+                  </span>
+                )}
+                {deferredSyncing && !syncing && (
+                  <span style={{ fontSize: 13, color: C.dim }}>
+                    Optional BOM is syncing in background...
                   </span>
                 )}
               </div>
