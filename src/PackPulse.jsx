@@ -15,7 +15,7 @@ import POCheckView from "./views/POCheckView";
 import TimelineView from "./views/TimelineView";
 
 export default function ProductionReadiness() {
-  const { C, theme, setTheme, sans, mono, FONTS_CSS } = useTheme();
+  const { C, theme, setTheme, sans, mono, FONTS_CSS, A11Y_CSS } = useTheme();
   const { pill } = useStyles();
   const ds = useDataSources();
   const { analysis, summary, criticalItems, woStatuses, woCustomers, poCheck, timelineData } = useAnalysis({
@@ -93,7 +93,7 @@ export default function ProductionReadiness() {
   /* ====== MAIN RENDER ====== */
   return (
     <div style={{ fontFamily:sans, background:C.bg, minHeight:"100vh", color:C.text }}>
-      <style>{FONTS_CSS}</style>
+      <style>{FONTS_CSS + A11Y_CSS}</style>
       <header style={{ padding:"16px 28px", borderBottom:"1px solid "+C.border, display:"flex", alignItems:"center", justifyContent:"space-between", background:C.surface }}>
         <div>
           <h1 style={{ fontSize:18, fontWeight:700, color:C.bright, margin:0, fontFamily:sans, letterSpacing:-0.2 }}>PackPulse</h1>
