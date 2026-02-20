@@ -1,7 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import NulogySync from "./NulogySync";
 import { useTheme } from "./theme";
-import { autoMapColumns, PO_PAT } from "./utils";
 import { useStyles } from "./hooks/useStyles";
 import { useDataSources } from "./hooks/useDataSources";
 import { useAnalysis } from "./hooks/useAnalysis";
@@ -11,7 +10,6 @@ import OverviewView from "./views/OverviewView";
 import WorkOrdersView from "./views/WorkOrdersView";
 import CriticalItemsView from "./views/CriticalItemsView";
 import FlagsView from "./views/FlagsView";
-import POCheckView from "./views/POCheckView";
 import TimelineView from "./views/TimelineView";
 import InboundCoverageView from "./views/InboundCoverageView";
 
@@ -19,11 +17,11 @@ export default function ProductionReadiness() {
   const { C, theme, setTheme, sans, mono, FONTS_CSS, A11Y_CSS } = useTheme();
   const { pill } = useStyles();
   const ds = useDataSources();
-  const { analysis, summary, criticalItems, woStatuses, woCustomers, poCheck, timelineData, inboundCoverage } = useAnalysis({
+  const { analysis, summary, criticalItems, woStatuses, woCustomers, timelineData, inboundCoverage } = useAnalysis({
     mappingConfirmed: ds.mappingConfirmed, allUploaded: ds.allUploaded,
     inventory: ds.inventory, boms: ds.boms, workOrders: ds.workOrders,
     invMapping: ds.invMapping, bomMapping: ds.bomMapping, woMapping: ds.woMapping,
-    poData: ds.poData, poMapping: ds.poMapping, edrData: ds.edrData, dockData: ds.dockData,
+    edrData: ds.edrData, dockData: ds.dockData,
   });
 
   const [activeView, setActiveView] = useState("overview");
@@ -257,7 +255,6 @@ export default function ProductionReadiness() {
           <FileUploader label="Bill of Materials" uploaded={!!ds.boms} fileName={ds.bomFileName} onData={(d,n) => {ds.setBoms(d);ds.setBomFileName(n);ds.setBomTimestamp(new Date());}} subtitle={ds.boms ? ("Saved \u00b7 Re-upload to update") : "BOM structure (.csv, .xlsx)"} acceptTypes=".csv,.xlsx,.xls" />
           <FileUploader label="EDR" uploaded={!!ds.edrData} fileName={ds.edrFileName} onData={(d,n) => {ds.setEdrData(d);ds.setEdrFileName(n);ds.setEdrTimestamp(new Date());}} subtitle="Inbound deliveries (.xlsx)" acceptTypes=".xlsx,.xls,.csv" parseWorkbook={ds.parseEdrWorkbook} />
           <FileUploader label="OpenDock" uploaded={!!ds.dockData} fileName={ds.dockFileName} onData={(d,n) => {ds.setDockData(d);ds.setDockFileName(n);ds.setDockTimestamp(new Date());}} subtitle="Dock appointments (.xlsx)" acceptTypes=".xlsx,.xls,.csv" />
-          <FileUploader label="Purchase Order" uploaded={!!ds.poData} fileName={ds.poFileName} onData={(d,n) => {ds.setPoData(d);ds.setPoFileName(n);ds.setPoTimestamp(new Date());var h=d&&d.length?Object.keys(d[0]):[]; ds.setPoHeaders(h); ds.setPoMapping(autoMapColumns(h,PO_PAT));}} subtitle="PO line items (.csv, .xlsx, .pdf)" acceptTypes=".csv,.xlsx,.xls,.pdf" />
         </div>
         <div style={{ marginTop:-10, marginBottom:16, display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
           <button onClick={fetchOpenDockApi} disabled={dockApiLoading} style={{ padding:"8px 14px", borderRadius:6, border:"1px solid "+(dockApiLoading?C.border:C.accentLine), background:dockApiLoading?C.raised:C.accentSoft, color:dockApiLoading?C.dim:C.accent, fontFamily:sans, fontSize:14, fontWeight:600, cursor:dockApiLoading?"not-allowed":"pointer" }}>
@@ -324,7 +321,7 @@ export default function ProductionReadiness() {
             <div style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, padding:"16px 18px" }}>
               <div style={{ fontSize:14, fontWeight:700, color:C.accent, marginBottom:6 }}>6. Optional Data Sources</div>
               <div style={{ fontSize:13, color:C.dim, lineHeight:1.6 }}>
-                <span style={{ color:C.bright }}>BOM</span> {"\u2014"} enables component-level readiness (saved between sessions). <span style={{ color:C.bright }}>EDR</span> {"\u2014"} inbound delivery data for the Delivery Timeline. <span style={{ color:C.bright }}>OpenDock</span> {"\u2014"} dock appointment statuses. <span style={{ color:C.bright }}>Purchase Order</span> {"\u2014"} cross-checks PO line items against WOs to catch missing or mismatched orders.
+                <span style={{ color:C.bright }}>BOM</span> {"\u2014"} enables component-level readiness (saved between sessions). <span style={{ color:C.bright }}>EDR</span> {"\u2014"} inbound delivery data for the Delivery Timeline. <span style={{ color:C.bright }}>OpenDock</span> {"\u2014"} dock appointment statuses.
               </div>
             </div>
 
@@ -422,7 +419,6 @@ export default function ProductionReadiness() {
               <ColumnMapper title="Inventory" headers={ds.invHeaders} mapping={ds.invMapping} onMappingChange={ds.setInvMapping} fields={[{key:"sku",label:"Item / SKU",required:true},{key:"description",label:"Description"},{key:"qtyOnHand",label:"Qty On Hand",required:true}]} />
               {ds.boms && <ColumnMapper title="Bill of Materials" headers={ds.bomHeaders} mapping={ds.bomMapping} onMappingChange={ds.setBomMapping} fields={[{key:"bomId",label:"Finished Good",required:true},{key:"componentSku",label:"Component SKU",required:true},{key:"description",label:"Description"},{key:"qtyPer",label:"Qty Per",required:true},{key:"substituteFor",label:"Substitute For"},{key:"priority",label:"Priority"}]} />}
               <ColumnMapper title="Work Orders" headers={ds.woHeaders} mapping={ds.woMapping} onMappingChange={ds.setWoMapping} fields={[{key:"woNumber",label:"WO Number",required:true},{key:"productSku",label:"Product SKU",required:true},{key:"qtyToProduce",label:"Qty to Produce",required:true},{key:"dueDate",label:"Due Date"},{key:"status",label:"Status"},{key:"customer",label:"Customer"},{key:"unitsProduced",label:"Units Produced"},{key:"unitsRemaining",label:"Units Remaining"},{key:"unitsPerHour",label:"Units/Hour"},{key:"standardPeople",label:"Crew Size"},{key:"plannedStart",label:"Planned Start"},{key:"plannedEnd",label:"Planned End"},{key:"reference1",label:"Reference / Notes"}]} />
-              {ds.poData && <ColumnMapper title="Purchase Order" headers={ds.poHeaders} mapping={ds.poMapping} onMappingChange={ds.setPoMapping} fields={[{key:"material",label:"Material / SKU",required:true},{key:"description",label:"Description"},{key:"qty",label:"Quantity",required:true},{key:"unitPrice",label:"Unit Price"},{key:"poNumber",label:"PO Number"}]} />}
               <div style={{ display:"flex", justifyContent:"flex-end", marginTop:16 }}>
                 <button onClick={() => setShowSettings(false)} style={{ padding:"8px 20px", borderRadius:6, border:"none", background:C.accent, color:"#fff", fontFamily:sans, fontSize:15, fontWeight:600, cursor:"pointer" }}>Done</button>
               </div>
@@ -433,7 +429,6 @@ export default function ProductionReadiness() {
         <div style={{ display:"flex", gap:0, marginBottom:16, borderBottom:"1px solid "+C.border }}>
           {[{key:"overview",label:"Overview",count:null,alert:false},{key:"workorders",label:"Work Orders",count:summaryForUI.total},{key:"criticalitems",label:"Critical Items",count:criticalItemsForUI.length}]
             .concat([{key:"flags",label:"Data Flags",count:analysisForUI.flags.length,alert:analysisForUI.flags.length>0}])
-            .concat([{key:"pocheck",label:"PO Check",count:poCheck ? poCheck.missing+poCheck.qtyMismatch : 0,alert:poCheck ? poCheck.missing+poCheck.qtyMismatch>0 : false}])
             .concat([{key:"inboundcoverage",label:"Inbound Coverage",count:inboundCoverage ? inboundCoverage.summary.atRisk : 0,alert:inboundCoverage ? inboundCoverage.summary.atRisk > 0 : false}])
             .concat([{key:"timeline",label:"Deliveries",count:timelineData ? timelineData.woTimelines.length : 0,alert:false}]).map(t =>
               <button key={t.key} onClick={() => setActiveView(t.key)} style={{ padding:"8px 16px", border:"none", fontFamily:sans, fontSize:14, fontWeight:500, cursor:"pointer", background:"transparent", color:activeView===t.key?C.bright:C.dim, borderBottom:activeView===t.key?"2px solid "+C.accent:"2px solid transparent", marginBottom:-1 }}>
@@ -446,7 +441,6 @@ export default function ProductionReadiness() {
         {activeView === "workorders" && <WorkOrdersView analysis={analysisForUI} woStatuses={woStatusesForUI} woCustomers={woCustomersForUI} prefilterCustomer={workOrdersPrefilterCustomer} prefilterNonce={workOrdersPrefilterNonce} />}
         {activeView === "criticalitems" && <CriticalItemsView rawCriticalItems={criticalItemsForUI} />}
         {activeView === "flags" && <FlagsView flags={analysisForUI.flags} />}
-        {activeView === "pocheck" && <POCheckView poCheck={poCheck} />}
         {activeView === "inboundcoverage" && <InboundCoverageView inboundCoverage={inboundCoverage} />}
         {activeView === "timeline" && <TimelineView timelineData={timelineData} />}
 
