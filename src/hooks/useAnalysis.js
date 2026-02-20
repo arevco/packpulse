@@ -60,11 +60,11 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, boms, wo
       bom.groups.forEach(group => {
         var qp = group.primary.qtyPer; var needed = qp * qtyToProduce; if (needed <= 0) return;
         var combined = 0;
-        var optDet = group.allOptions.map(opt => { var oh = invMap[opt.sku]||0; combined += oh; return { sku:opt.skuRaw, desc:invDescMap[opt.sku]||"", onHand:oh, priority:opt.priority, isSub:!!opt.substituteFor, foundInInventory:invMap.hasOwnProperty(opt.sku) }; });
+        var optDet = group.allOptions.map(opt => { var oh = invMap[opt.sku]||0; combined += oh; return { sku:opt.skuRaw, desc:invDescMap[opt.sku]||opt.descRaw||"", onHand:oh, priority:opt.priority, isSub:!!opt.substituteFor, foundInInventory:invMap.hasOwnProperty(opt.sku) }; });
         var fill = (combined/needed)*100; var canMake = qp > 0 ? Math.floor(combined/qp) : Infinity; var short = Math.max(0, needed - combined);
         minFill = Math.min(minFill, fill); maxRun = Math.min(maxRun, canMake);
         if (combined === 0 && qp > 0) zeroCount++; else couldMk = Math.min(couldMk, canMake);
-        components.push({ sku:group.primary.skuRaw, desc:invDescMap[group.primary.sku]||"", qtyPer:qp, needed:needed, onHand:combined, fillRate:fill, canMake:canMake, short:short, foundInInventory:optDet.some(o => o.foundInInventory), hasSubs:group.substitutes.length>0, optionDetails:group.substitutes.length>0?optDet:null });
+        components.push({ sku:group.primary.skuRaw, desc:invDescMap[group.primary.sku]||group.primary.descRaw||"", qtyPer:qp, needed:needed, onHand:combined, fillRate:fill, canMake:canMake, short:short, foundInInventory:optDet.some(o => o.foundInInventory), hasSubs:group.substitutes.length>0, optionDetails:group.substitutes.length>0?optDet:null });
       });
       var readiness = minFill === Infinity ? 100 : Math.min(minFill, 100);
       var runStatus = readiness >= 100 ? "ready" : maxRun > 0 ? "partial" : "blocked";
