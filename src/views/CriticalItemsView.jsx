@@ -12,6 +12,11 @@ export default function CriticalItemsView({ rawCriticalItems }) {
   const [ciSort, setCiSort] = useState("unlockedUnits");
   const [ciSortDir, setCiSortDir] = useState("desc");
   const [expandedWO, setExpandedWO] = useState(null);
+  const ITEM_TRUNCATE_LEN = 14;
+  var truncateItem = function(v) {
+    var s = String(v || "");
+    return s.length > ITEM_TRUNCATE_LEN ? (s.slice(0, ITEM_TRUNCATE_LEN) + "...") : s;
+  };
 
   var handleCiSort = f => { if (ciSort === f) setCiSortDir(d => d==="asc"?"desc":"asc"); else { setCiSort(f); setCiSortDir("desc"); } };
 
@@ -34,7 +39,7 @@ export default function CriticalItemsView({ rawCriticalItems }) {
         <tr key={"ci"+idx} onClick={() => setExpandedWO(isX ? null : "ci-" + idx)} style={{ cursor:"pointer", borderBottom:"1px solid "+C.border, background:isX?C.raised:"transparent" }}
           onMouseEnter={e => { if (!isX) e.currentTarget.style.background = C.hover; }} onMouseLeave={e => { if (!isX) e.currentTarget.style.background = isX ? C.raised : "transparent"; }}>
           <td style={{ padding:"9px 6px", textAlign:"center", fontSize:13, color:C.dim }}>{isX ? "\u25BE" : "\u25B8"}</td>
-          <td style={Object.assign({}, tdM, { fontWeight:600, color:C.bright })}>{ci.sku}</td>
+          <td title={ci.sku} style={Object.assign({}, tdM, { fontWeight:600, color:C.bright, maxWidth:140, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" })}>{truncateItem(ci.sku)}</td>
           <td style={Object.assign({}, tdN, { color:C.dim, maxWidth:200, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" })}>{ci.desc || "--"}</td>
           <td style={Object.assign({}, tdN, { color:C.dim, maxWidth:220, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" })}>{ci.customerLabel || "--"}</td>
           <td style={tdN}><Dot status={ci.isZeroStock ? "blocked" : "partial"} /></td>
