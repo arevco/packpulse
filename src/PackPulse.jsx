@@ -89,7 +89,15 @@ export default function ProductionReadiness() {
     // Auto-analyze if we got at least inventory + work orders
     if (results.inventory && results.workorders) {
       ds.setAnalyzing(true);
-      setTimeout(function() { ds.setMappingConfirmed(true); ds.setAnalyzing(false); }, 1500);
+      setTimeout(function() {
+        ds.setMappingConfirmed(true);
+        ds.setAnalyzing(false);
+        setShowDataSetup(false);
+        setTimeout(function() {
+          var el = document.getElementById("dashboard-main");
+          if (el && el.scrollIntoView) el.scrollIntoView({ behavior:"smooth", block:"start" });
+        }, 0);
+      }, 1500);
     }
   }, []);
   var analysisForUI = analysis || { results:[], flags:[], diagnostics:{} };
@@ -138,6 +146,10 @@ export default function ProductionReadiness() {
     dockApiError ||
     (nulogySyncState && nulogySyncState.errorCount > 0)
   );
+  useEffect(() => {
+    if (!ds.mappingConfirmed || !showDataSetup) return;
+    setShowDataSetup(false);
+  }, [ds.mappingConfirmed, showDataSetup]);
   var goToDashboard = function() {
     setShowDataSetup(false);
     setTimeout(function() {
@@ -243,7 +255,7 @@ export default function ProductionReadiness() {
         </div>
         </>)}
         {ds.allUploaded && !ds.analyzing && (
-          <button onClick={() => { ds.setAnalyzing(true); setTimeout(() => { ds.setMappingConfirmed(true); ds.setAnalyzing(false); }, 1500); }} disabled={!ds.requiredMappingsMet} style={{ padding:"8px 24px", borderRadius:6, border:"none", background:ds.requiredMappingsMet?C.accent:C.raised, color:ds.requiredMappingsMet?"#fff":C.dim, fontFamily:sans, fontSize:15, fontWeight:600, cursor:ds.requiredMappingsMet?"pointer":"not-allowed" }}>
+          <button onClick={() => { ds.setAnalyzing(true); setTimeout(() => { ds.setMappingConfirmed(true); ds.setAnalyzing(false); setShowDataSetup(false); setTimeout(() => { var el = document.getElementById("dashboard-main"); if (el && el.scrollIntoView) el.scrollIntoView({ behavior:"smooth", block:"start" }); }, 0); }, 1500); }} disabled={!ds.requiredMappingsMet} style={{ padding:"8px 24px", borderRadius:6, border:"none", background:ds.requiredMappingsMet?C.accent:C.raised, color:ds.requiredMappingsMet?"#fff":C.dim, fontFamily:sans, fontSize:15, fontWeight:600, cursor:ds.requiredMappingsMet?"pointer":"not-allowed" }}>
             Analyze
           </button>
         )}
