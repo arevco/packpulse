@@ -2,7 +2,6 @@ import { useState, useMemo } from "react";
 import { useTheme } from "../theme";
 import { useStyles } from "../hooks/useStyles";
 import { fmtDate, triggerDownload, buildExportHTML, normalizeStr } from "../utils";
-import Dot from "../components/Dot";
 
 export default function CriticalItemsView({ rawCriticalItems, inboundCoverage }) {
   const { C } = useTheme();
@@ -26,6 +25,12 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
   var truncateItem = function(v) {
     var s = String(v || "");
     return s.length > ITEM_TRUNCATE_LEN ? (s.slice(0, ITEM_TRUNCATE_LEN) + "...") : s;
+  };
+  var runStatusMeta = function(status) {
+    var s = String(status || "").toLowerCase();
+    if (s === "ready") return { label:"RDY", color:C.ok, bg:C.okSoft || C.accentSoft };
+    if (s === "partial") return { label:"PRT", color:C.warn, bg:C.warnSoft };
+    return { label:"BLK", color:C.bad, bg:C.badSoft };
   };
 
   var handleCiSort = function(f) {
@@ -177,7 +182,12 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
           <td title={ci.sku} style={Object.assign({}, tdM, { fontWeight:600, color:C.bright }, truncate(140))}>{truncateItem(ci.sku)}</td>
           <td style={Object.assign({}, tdN, { color:C.dim }, truncate(200))}>{ci.desc || "--"}</td>
           <td style={Object.assign({}, tdN, { color:C.dim }, truncate(220))}>{ci.customerLabel || "--"}</td>
-          <td style={tdN}><Dot status={ci.isZeroStock ? "blocked" : "partial"} /></td>
+          <td style={Object.assign({}, tdN, { whiteSpace:"nowrap" })}>
+            {(function() {
+              var rs = runStatusMeta(ci.isZeroStock ? "blocked" : "partial");
+              return <span title={ci.isZeroStock ? "Blocked" : "Partial"} style={{ display:"inline-block", minWidth:34, textAlign:"center", padding:"2px 6px", borderRadius:999, fontSize:11, fontWeight:700, color:rs.color, background:rs.bg }}>{rs.label}</span>;
+            })()}
+          </td>
           <td style={Object.assign({}, tdM, { textAlign:"right", fontWeight:600, color:ci.isZeroStock ? C.bad : C.warn })}>{Math.round(ci.onHand).toLocaleString()}</td>
           <td style={Object.assign({}, tdM, { textAlign:"right", fontWeight:600, color:C.bad })}>{Math.round(ci.totalShort).toLocaleString()}</td>
           <td style={Object.assign({}, tdM, { textAlign:"right", color:C.bright })}>{ci.affectedWOs.length}</td>
