@@ -1,6 +1,24 @@
 import { useMemo } from "react";
 import { safeNum, normalizeStr } from "../utils";
 
+function normalizePoKey(value) {
+  var s = (value || "").toString().trim();
+  if (!s) return "";
+  // Handle spreadsheet-style PO exports like 12345.0
+  s = s.replace(/\.0+$/, "");
+  // Keep only alphanumerics for safer cross-system matching.
+  s = s.replace(/[^a-zA-Z0-9]/g, "");
+  return normalizeStr(s);
+}
+
+function isWorkOrderClosed(wo) {
+  var st = normalizeStr(wo && wo.status ? wo.status : "");
+  var closedTokens = ["closed", "complete", "completed", "done", "cancelled", "canceled", "archived"];
+  if (st && closedTokens.some(function(t) { return st.includes(t); })) return true;
+  // Defensive fallback: if remaining is zero or less, treat as closed for shortage logic.
+  return safeNum(wo && wo.unitsRemaining) <= 0;
+}
+
 export function useAnalysis({ mappingConfirmed, allUploaded, inventory, boms, workOrders, invMapping, bomMapping, woMapping, poData, poMapping, edrData, dockData }) {
 
   /* ====== ANALYSIS ENGINE ====== */
@@ -98,7 +116,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, boms, wo
   var criticalItems = useMemo(() => {
     if (!analysis) return [];
     var m = {};
-    analysis.results.forEach(wo => { wo.components.forEach(comp => { if (comp.short <= 0) return; var k = normalizeStr(comp.sku); if (!m[k]) m[k] = { sku:comp.sku, desc:comp.desc, onHand:comp.onHand, totalShort:0, affectedWOs:[], unlockedUnits:0, isZeroStock:comp.onHand===0, customersMap:{} }; m[k].totalShort += comp.short; m[k].unlockedUnits += wo.qtyToProduce - wo.maxRunnable; m[k].affectedWOs.push({ woNum:wo.woNum, productSku:wo.productSkuRaw, customer:wo.customer||"", qtyToProduce:wo.qtyToProduce, needed:comp.needed, short:comp.short, dueDate:wo.dueDate }); if (wo.customer) m[k].customersMap[wo.customer] = true; }); });
+    analysis.results.filter(function(wo) { return !isWorkOrderClosed(wo); }).forEach(wo => { wo.components.forEach(comp => { if (comp.short <= 0) return; var k = normalizeStr(comp.sku); if (!m[k]) m[k] = { sku:comp.sku, desc:comp.desc, onHand:comp.onHand, totalShort:0, affectedWOs:[], unlockedUnits:0, isZeroStock:comp.onHand===0, customersMap:{} }; m[k].totalShort += comp.short; m[k].unlockedUnits += wo.qtyToProduce - wo.maxRunnable; m[k].affectedWOs.push({ woNum:wo.woNum, productSku:wo.productSkuRaw, customer:wo.customer||"", qtyToProduce:wo.qtyToProduce, needed:comp.needed, short:comp.short, dueDate:wo.dueDate }); if (wo.customer) m[k].customersMap[wo.customer] = true; }); });
     return Object.values(m).map(function(item) {
       var customers = Object.keys(item.customersMap || {});
       return Object.assign({}, item, { customers:customers, customerLabel:customers.length ? customers.join(", ") : "--" });
@@ -264,14 +282,15 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, boms, wo
       var dStatus = findDockCol(["status"]);
       if (dPO && dStatus) {
         dockRows.forEach(function(row) {
-          var po = (row[dPO] || "").toString().trim();
-          if (!po) return;
+          var poRaw = (row[dPO] || "").toString().trim();
+          var poKey = normalizePoKey(poRaw);
+          if (!poKey) return;
           var status = (row[dStatus] || "").toString().trim();
           if (!status) return;
           var statusNorm = normalizeStr(status);
-          if (!dockStatusesByPO[po]) dockStatusesByPO[po] = {};
-          dockStatusesByPO[po][status] = true;
-          if (statusNorm === "scheduled") dockScheduledByPO[po] = true;
+          if (!dockStatusesByPO[poKey]) dockStatusesByPO[poKey] = {};
+          dockStatusesByPO[poKey][status] = true;
+          if (statusNorm.includes("scheduled")) dockScheduledByPO[poKey] = true;
         });
       }
     }
@@ -286,6 +305,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, boms, wo
       if (isNaN(dateObj)) return;
       if (dateObj < now || dateObj > horizonEnd) return;
       var po = colPO ? (row[colPO] || "").toString().trim() : "";
+      var poKey = normalizePoKey(po);
       var qtyOpen = colQtyOpen ? safeNum(row[colQtyOpen]) : 0;
       var qtyOrd = colQtyOrd ? safeNum(row[colQtyOrd]) : 0;
       var qty = qtyOpen > 0 ? qtyOpen : qtyOrd;
@@ -295,9 +315,10 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, boms, wo
         sku: skuRaw,
         qty: qty,
         po: po,
+        poKey: poKey,
         dateObj: dateObj,
         date: dateObj.toISOString().slice(0, 10),
-        isScheduled: !!(po && dockScheduledByPO[po]),
+        isScheduled: !!(poKey && dockScheduledByPO[poKey]),
       });
     });
 
@@ -354,9 +375,10 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, boms, wo
 
       var openPOs = Array.from(new Set(inboundRows.map(function(r) { return r.po; }).filter(Boolean)));
       var scheduledPOs = Array.from(new Set(scheduledRows.map(function(r) { return r.po; }).filter(Boolean)));
+      var openPOKeys = Array.from(new Set(inboundRows.map(function(r) { return r.poKey; }).filter(Boolean)));
       var dockStatuses = Array.from(
         new Set(
-          openPOs.flatMap(function(po) { return Object.keys(dockStatusesByPO[po] || {}); })
+          openPOKeys.flatMap(function(poKey) { return Object.keys(dockStatusesByPO[poKey] || {}); })
         )
       );
 
