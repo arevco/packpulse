@@ -92,14 +92,19 @@ export function useDataSources() {
   useMemo(() => {
     if (!bomHeaders.length) return;
     var shouldInitialize = !bomMapping.bomId;
+    var missingDescriptionMapping = !bomMapping.description;
     var hasVersionNameAsDescription = !!(bomMapping.description && normalizeStr(bomMapping.description).includes("versionname"));
-    if (!shouldInitialize && !hasVersionNameAsDescription) return;
+    if (!shouldInitialize && !hasVersionNameAsDescription && !missingDescriptionMapping) return;
     var next = autoMapColumns(bomHeaders, BOM_PAT);
     if (!shouldInitialize) {
       // Preserve user's existing mappings unless we are correcting the known "Version Name" description pitfall.
       next = Object.assign({}, bomMapping, next);
       if (hasVersionNameAsDescription && next.description && normalizeStr(next.description).includes("versionname")) {
         delete next.description;
+      }
+      if (missingDescriptionMapping && !next.description) {
+        var descCandidate = autoMapColumns(bomHeaders, { description: BOM_PAT.description }).description;
+        if (descCandidate) next.description = descCandidate;
       }
     }
     setBomMapping(next);
