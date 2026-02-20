@@ -79,7 +79,7 @@ export default function OverviewView({ analysis, woStatuses }) {
     </div>
 
     <div style={{ marginBottom:20 }}>
-      <div style={{ fontSize:14, fontWeight:600, color:C.bright, marginBottom:10 }}>By Customer</div>
+      <div style={{ fontSize:14, fontWeight:600, color:C.bright, marginBottom:10 }}>Work Orders by Customer</div>
       <div style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, overflow:"hidden" }}>
         <table style={{ width:"100%", borderCollapse:"collapse" }}>
           <thead><tr style={{ background:C.raised }}>
