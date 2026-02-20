@@ -327,27 +327,29 @@ export default function ProductionReadiness() {
 
         {showSyncBanner ? (
           <div style={{ marginBottom:10, border:"1px solid "+C.border, borderRadius:8, background:C.surface, padding:"8px 10px", display:"flex", flexWrap:"wrap", alignItems:"center", gap:8 }}>
-            <span style={{ fontSize:13, fontWeight:600, color:C.bright }}>Syncing live data in background</span>
+            <span style={{ fontSize:13, fontWeight:600, color:C.bright }}>Live Sync</span>
             <span style={{ fontSize:12, color:C.dim }}>
-              {nulogySyncState && nulogySyncState.syncing ? "Pulling Nulogy + OpenDock feeds while you stay on dashboard." : "Preparing live data feeds."}
+              {nulogySyncState && nulogySyncState.syncing ? "Syncing data..." : "Up to date"}
             </span>
             <span style={{ fontSize:12, color:C.dim }}>
-              {syncProgress.done}/{syncProgress.total} steps ({syncProgress.pct}%)
+              {syncProgress.done}/{syncProgress.total}
             </span>
             <div style={{ width:180, height:6, borderRadius:999, background:C.raised, overflow:"hidden", border:"1px solid "+C.border }}>
               <div style={{ width:syncProgress.pct+"%", height:"100%", background:syncProgress.errors>0?C.bad:C.accent, transition:"width 240ms ease" }} />
             </div>
-            <span style={{ fontSize:12, color:syncProgress.errors>0?C.bad:C.dim }}>
-              {syncProgress.activeText}
-            </span>
+            {syncProgress.pct < 100 && (
+              <span style={{ fontSize:12, color:syncProgress.errors>0?C.bad:C.dim }}>
+                {syncProgress.activeText}
+              </span>
+            )}
             {nulogySyncState && nulogySyncState.syncing && <span style={pill("info")}>Nulogy</span>}
             {dockApiLoading && <span style={pill("info")}>OpenDock</span>}
-            {dockApiInfo && <span style={pill("ok")}>{dockApiInfo}</span>}
+            {dockApiInfo && syncProgress.pct < 100 && <span style={pill("ok")}>{dockApiInfo}</span>}
             {dockApiError && <span style={pill("bad")}>OpenDock: {dockApiError}</span>}
             {nulogySyncState && nulogySyncState.errorCount > 0 && <span style={pill("bad")}>Nulogy sync has errors</span>}
             {!dockApiLoading && (!nulogySyncState || !nulogySyncState.syncing) && !ds.mappingConfirmed && (
               <button onClick={() => { setDockApiInfo(""); setDockApiError(""); setAutoDockAttempted(false); setSyncNonce(n => n + 1); }} style={{ padding:"6px 10px", borderRadius:6, border:"1px solid "+C.border, background:"transparent", color:C.dim, fontFamily:sans, fontSize:12, cursor:"pointer" }}>
-                Retry Sync
+                Retry
               </button>
             )}
             <button onClick={() => setShowDataSetup(v => !v)} style={{ padding:"6px 10px", borderRadius:6, border:"1px solid "+C.border, background:"transparent", color:C.dim, fontFamily:sans, fontSize:12, cursor:"pointer" }}>
