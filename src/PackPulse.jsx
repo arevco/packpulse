@@ -92,6 +92,18 @@ export default function ProductionReadiness() {
       setTimeout(function() { ds.setMappingConfirmed(true); ds.setAnalyzing(false); }, 1500);
     }
   }, []);
+  var analysisForUI = analysis || { results:[], flags:[], diagnostics:{} };
+  var summaryForUI = summary || { total:0, ready:0, partial:0, blocked:0, nobom:0 };
+  var criticalItemsForUI = criticalItems || [];
+  var woStatusesForUI = woStatuses || [];
+  var woCustomersForUI = woCustomers || [];
+  var showSyncBanner = showAutoBootstrap && (
+    !ds.mappingConfirmed ||
+    dockApiLoading ||
+    (nulogySyncState && nulogySyncState.syncing) ||
+    dockApiError ||
+    (nulogySyncState && nulogySyncState.errorCount > 0)
+  );
 
   /* ====== MAIN RENDER ====== */
   return (
@@ -123,7 +135,7 @@ export default function ProductionReadiness() {
         />
       )}
 
-      {!ds.mappingConfirmed && (<div>
+      {(showDataSetup || (!ds.mappingConfirmed && !showAutoBootstrap)) && (<div>
         {showAutoBootstrap && !showDataSetup && (
           <div style={{ marginBottom:16, border:"1px solid "+C.border, borderRadius:10, background:C.surface, padding:"12px 14px", display:"flex", flexWrap:"wrap", alignItems:"center", gap:10 }}>
             <div style={{ display:"flex", flexDirection:"column", gap:2, minWidth:260 }}>
@@ -245,20 +257,32 @@ export default function ProductionReadiness() {
         </div>}
       </div>)}
 
-      {ds.mappingConfirmed && analysis && summary && (<div>
+      <div>
         <input ref={ds.invRefreshRef} type="file" accept=".csv" style={{display:"none"}} onChange={e => {ds.handleRefreshFile("inv",e.target.files[0]);e.target.value="";}} />
         <input ref={ds.bomRefreshRef} type="file" accept=".csv,.xlsx,.xls" style={{display:"none"}} onChange={e => {ds.handleRefreshFile("bom",e.target.files[0]);e.target.value="";}} />
         <input ref={ds.woRefreshRef} type="file" accept=".csv" style={{display:"none"}} onChange={e => {ds.handleRefreshFile("wo",e.target.files[0]);e.target.value="";}} />
         <input ref={ds.edrRefreshRef} type="file" accept=".xlsx,.xls,.csv" style={{display:"none"}} onChange={e => {ds.handleRefreshFile("edr",e.target.files[0]);e.target.value="";}} />
         <input ref={ds.dockRefreshRef} type="file" accept=".xlsx,.xls,.csv" style={{display:"none"}} onChange={e => {ds.handleRefreshFile("dock",e.target.files[0]);e.target.value="";}} />
 
-        {(nulogySyncState && nulogySyncState.syncing) || dockApiLoading ? (
+        {showSyncBanner ? (
           <div style={{ marginBottom:10, border:"1px solid "+C.border, borderRadius:8, background:C.surface, padding:"8px 10px", display:"flex", flexWrap:"wrap", alignItems:"center", gap:8 }}>
-            <span style={{ fontSize:13, color:C.dim }}>
-              Refreshing live data in background...
+            <span style={{ fontSize:13, fontWeight:600, color:C.bright }}>Syncing live data in background</span>
+            <span style={{ fontSize:12, color:C.dim }}>
+              {nulogySyncState && nulogySyncState.syncing ? "Pulling Nulogy + OpenDock feeds while you stay on dashboard." : "Preparing live data feeds."}
             </span>
             {nulogySyncState && nulogySyncState.syncing && <span style={pill("info")}>Nulogy</span>}
             {dockApiLoading && <span style={pill("info")}>OpenDock</span>}
+            {dockApiInfo && <span style={pill("ok")}>{dockApiInfo}</span>}
+            {dockApiError && <span style={pill("bad")}>OpenDock: {dockApiError}</span>}
+            {nulogySyncState && nulogySyncState.errorCount > 0 && <span style={pill("bad")}>Nulogy sync has errors</span>}
+            {!dockApiLoading && (!nulogySyncState || !nulogySyncState.syncing) && !ds.mappingConfirmed && (
+              <button onClick={() => { setDockApiInfo(""); setDockApiError(""); setAutoDockAttempted(false); setSyncNonce(n => n + 1); }} style={{ padding:"6px 10px", borderRadius:6, border:"1px solid "+C.border, background:"transparent", color:C.dim, fontFamily:sans, fontSize:12, cursor:"pointer" }}>
+                Retry Sync
+              </button>
+            )}
+            <button onClick={() => setShowDataSetup(v => !v)} style={{ padding:"6px 10px", borderRadius:6, border:"1px solid "+C.border, background:"transparent", color:C.dim, fontFamily:sans, fontSize:12, cursor:"pointer" }}>
+              {showDataSetup ? "Close Setup" : "Open Data Setup"}
+            </button>
           </div>
         ) : null}
 
@@ -276,10 +300,10 @@ export default function ProductionReadiness() {
               <span style={{ width:6, height:6, borderRadius:"50%", background:dc }} />{s.l} <span style={{ opacity:0.6 }}>{fmtTs(s.ts)}</span>
             </button>;
           })}
-          <button onClick={() => setActiveView(activeView==="flags"?"workorders":"flags")} style={{ padding:"4px 10px", borderRadius:6, border:"1px solid "+(activeView==="flags"?C.accentLine:C.border), background:activeView==="flags"?C.accentSoft:"transparent", cursor:"pointer", color:activeView==="flags"?C.accent:C.dim, fontFamily:sans, fontSize:13 }}>Data Flags {analysis.flags?<span style={{ opacity:0.6 }}>{analysis.flags.length}</span>:""}</button>
+          <button onClick={() => setActiveView(activeView==="flags"?"workorders":"flags")} style={{ padding:"4px 10px", borderRadius:6, border:"1px solid "+(activeView==="flags"?C.accentLine:C.border), background:activeView==="flags"?C.accentSoft:"transparent", cursor:"pointer", color:activeView==="flags"?C.accent:C.dim, fontFamily:sans, fontSize:13 }}>Data Flags {analysisForUI.flags?<span style={{ opacity:0.6 }}>{analysisForUI.flags.length}</span>:""}</button>
           <button onClick={fetchOpenDockApi} disabled={dockApiLoading} style={{ padding:"4px 10px", borderRadius:6, border:"1px solid "+(dockApiLoading?C.border:C.accentLine), background:dockApiLoading?C.raised:C.accentSoft, cursor:dockApiLoading?"not-allowed":"pointer", color:dockApiLoading?C.dim:C.accent, fontFamily:sans, fontSize:13 }}>Sync OpenDock API</button>
           <button onClick={() => setShowSettings(!showSettings)} style={{ padding:"4px 10px", borderRadius:6, border:"1px solid "+(showSettings?C.accentLine:C.border), background:showSettings?C.accentSoft:"transparent", cursor:"pointer", color:showSettings?C.accent:C.dim, fontFamily:sans, fontSize:13 }}>Settings</button>
-          <button onClick={() => { ds.setMappingConfirmed(false); setActiveView("overview"); }} style={{ padding:"4px 10px", borderRadius:6, border:"1px solid "+C.border, background:"transparent", cursor:"pointer", color:C.dim, fontFamily:sans, fontSize:13 }}>Re-upload</button>
+          <button onClick={() => setShowDataSetup(v => !v)} style={{ padding:"4px 10px", borderRadius:6, border:"1px solid "+C.border, background:"transparent", cursor:"pointer", color:C.dim, fontFamily:sans, fontSize:13 }}>{showDataSetup ? "Close Setup" : "Data Setup"}</button>
         </div>
         {dockApiError && <div style={{ fontSize:12, color:C.bad, marginTop:-8, marginBottom:10 }}>OpenDock API error: {dockApiError}</div>}
 
@@ -305,7 +329,7 @@ export default function ProductionReadiness() {
         )}
 
         <div style={{ display:"flex", gap:0, marginBottom:16, borderBottom:"1px solid "+C.border }}>
-          {[{key:"overview",label:"Overview",count:null,alert:false},{key:"workorders",label:"Work Orders",count:summary.total},{key:"criticalitems",label:"Critical Items",count:criticalItems.length}]
+          {[{key:"overview",label:"Overview",count:null,alert:false},{key:"workorders",label:"Work Orders",count:summaryForUI.total},{key:"criticalitems",label:"Critical Items",count:criticalItemsForUI.length}]
             .concat([{key:"pocheck",label:"PO Check",count:poCheck ? poCheck.missing+poCheck.qtyMismatch : 0,alert:poCheck ? poCheck.missing+poCheck.qtyMismatch>0 : false}])
             .concat([{key:"timeline",label:"Deliveries",count:timelineData ? timelineData.woTimelines.length : 0,alert:false}]).map(t =>
               <button key={t.key} onClick={() => setActiveView(t.key)} style={{ padding:"8px 16px", border:"none", fontFamily:sans, fontSize:14, fontWeight:500, cursor:"pointer", background:"transparent", color:activeView===t.key?C.bright:C.dim, borderBottom:activeView===t.key?"2px solid "+C.accent:"2px solid transparent", marginBottom:-1 }}>
@@ -314,14 +338,14 @@ export default function ProductionReadiness() {
           )}
         </div>
 
-        {activeView === "overview" && <OverviewView analysis={analysis} woStatuses={woStatuses} />}
-        {activeView === "workorders" && <WorkOrdersView analysis={analysis} woStatuses={woStatuses} woCustomers={woCustomers} />}
-        {activeView === "criticalitems" && <CriticalItemsView rawCriticalItems={criticalItems} />}
-        {activeView === "flags" && <FlagsView flags={analysis.flags} />}
+        {activeView === "overview" && <OverviewView analysis={analysisForUI} woStatuses={woStatusesForUI} />}
+        {activeView === "workorders" && <WorkOrdersView analysis={analysisForUI} woStatuses={woStatusesForUI} woCustomers={woCustomersForUI} />}
+        {activeView === "criticalitems" && <CriticalItemsView rawCriticalItems={criticalItemsForUI} />}
+        {activeView === "flags" && <FlagsView flags={analysisForUI.flags} />}
         {activeView === "pocheck" && <POCheckView poCheck={poCheck} />}
         {activeView === "timeline" && <TimelineView timelineData={timelineData} />}
 
-      </div>)}
+      </div>
       </main>
     </div>
   );
