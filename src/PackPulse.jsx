@@ -97,6 +97,40 @@ export default function ProductionReadiness() {
   var criticalItemsForUI = criticalItems || [];
   var woStatusesForUI = woStatuses || [];
   var woCustomersForUI = woCustomers || [];
+  var syncProgress = (() => {
+    var reportStates = nulogySyncState && nulogySyncState.reportStates ? nulogySyncState.reportStates : null;
+    var steps = [
+      { key:"inventory", label:"Inventory" },
+      { key:"workorders", label:"Work Orders" },
+      { key:"bom", label:"BOM" },
+      { key:"opendock", label:"OpenDock API", synthetic:true }
+    ];
+    var done = 0;
+    var active = [];
+    var errors = 0;
+    steps.forEach(function(step) {
+      if (step.synthetic) {
+        if (dockApiLoading) active.push("Loading OpenDock API...");
+        else if (ds.dockData && ds.dockData.length) done++;
+        if (dockApiError) errors++;
+        return;
+      }
+      var st = reportStates && reportStates[step.key] ? reportStates[step.key] : null;
+      if (!st) return;
+      if (st.status === "done") done++;
+      else if (st.status === "error") errors++;
+      else if (st.status && st.status !== "idle") active.push(step.label + (st.progress ? ": " + st.progress : ""));
+    });
+    var total = steps.length;
+    var pct = Math.max(0, Math.min(100, Math.round(done / total * 100)));
+    return {
+      total: total,
+      done: done,
+      errors: errors,
+      pct: pct,
+      activeText: active.length ? active[0] : (done >= total ? "Sync complete." : "Waiting to start...")
+    };
+  })();
   var showSyncBanner = showAutoBootstrap && (
     !ds.mappingConfirmed ||
     dockApiLoading ||
@@ -269,6 +303,15 @@ export default function ProductionReadiness() {
             <span style={{ fontSize:13, fontWeight:600, color:C.bright }}>Syncing live data in background</span>
             <span style={{ fontSize:12, color:C.dim }}>
               {nulogySyncState && nulogySyncState.syncing ? "Pulling Nulogy + OpenDock feeds while you stay on dashboard." : "Preparing live data feeds."}
+            </span>
+            <span style={{ fontSize:12, color:C.dim }}>
+              {syncProgress.done}/{syncProgress.total} steps ({syncProgress.pct}%)
+            </span>
+            <div style={{ width:180, height:6, borderRadius:999, background:C.raised, overflow:"hidden", border:"1px solid "+C.border }}>
+              <div style={{ width:syncProgress.pct+"%", height:"100%", background:syncProgress.errors>0?C.bad:C.accent, transition:"width 240ms ease" }} />
+            </div>
+            <span style={{ fontSize:12, color:syncProgress.errors>0?C.bad:C.dim }}>
+              {syncProgress.activeText}
             </span>
             {nulogySyncState && nulogySyncState.syncing && <span style={pill("info")}>Nulogy</span>}
             {dockApiLoading && <span style={pill("info")}>OpenDock</span>}
