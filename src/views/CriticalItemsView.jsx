@@ -6,15 +6,18 @@ import Dot from "../components/Dot";
 
 export default function CriticalItemsView({ rawCriticalItems, inboundCoverage }) {
   const { C } = useTheme();
-  const { thC, tdN, tdM, tdToggle, thDS, tdDN, tdDM, truncate, inp, pill } = useStyles();
+  const { thC, tdN, tdM, tdToggle, thDS, tdDN, tdDM, truncate, inp, sel, pill } = useStyles();
 
   const [ciMode, setCiMode] = useState("material");
   const [ciSearch, setCiSearch] = useState("");
+  const [ciCustomerFilter, setCiCustomerFilter] = useState("all");
+  const [ciStockFilter, setCiStockFilter] = useState("all");
 
   const [ciSort, setCiSort] = useState("unlockedUnits");
   const [ciSortDir, setCiSortDir] = useState("desc");
 
   const [covStatusFilter, setCovStatusFilter] = useState("all");
+  const [covRiskFilter, setCovRiskFilter] = useState("all");
   const [covSort, setCovSort] = useState("shortQty");
   const [covSortDir, setCovSortDir] = useState("desc");
 
@@ -35,6 +38,14 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
     else { setCovSort(f); setCovSortDir("desc"); }
   };
 
+  var customerOptions = useMemo(function() {
+    var set = new Set();
+    (rawCriticalItems || []).forEach(function(item) {
+      (item.customers || []).forEach(function(c) { if (c) set.add(c); });
+    });
+    return Array.from(set).sort();
+  }, [rawCriticalItems]);
+
   var criticalItems = useMemo(function() {
     var items = (rawCriticalItems || []).slice();
     if (ciSearch) {
@@ -42,6 +53,12 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
       items = items.filter(function(i) {
         return i.sku.toLowerCase().includes(q) || (i.desc || "").toLowerCase().includes(q) || (i.customerLabel || "").toLowerCase().includes(q);
       });
+    }
+    if (ciCustomerFilter !== "all") {
+      items = items.filter(function(i) { return (i.customers || []).includes(ciCustomerFilter); });
+    }
+    if (ciStockFilter !== "all") {
+      items = items.filter(function(i) { return ciStockFilter === "zero" ? i.isZeroStock : !i.isZeroStock; });
     }
     items.sort(function(a, b) {
       var c = 0;
@@ -56,7 +73,7 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
       return ciSortDir === "desc" ? -c : c;
     });
     return items;
-  }, [rawCriticalItems, ciSort, ciSortDir, ciSearch]);
+  }, [rawCriticalItems, ciSort, ciSortDir, ciSearch, ciCustomerFilter, ciStockFilter]);
 
   var coverageItems = useMemo(function() {
     if (!inboundCoverage || !inboundCoverage.rows) return [];
@@ -87,6 +104,12 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
 
     if (covStatusFilter === "at-risk") items = items.filter(function(r) { return r.riskLevel !== "low"; });
     else if (covStatusFilter !== "all") items = items.filter(function(r) { return r.status === covStatusFilter; });
+    if (covRiskFilter !== "all") items = items.filter(function(r) { return r.riskLevel === covRiskFilter; });
+    if (ciCustomerFilter !== "all") {
+      items = items.filter(function(i) {
+        return String(i.customerLabel || "").split(",").map(function(v) { return v.trim(); }).includes(ciCustomerFilter);
+      });
+    }
 
     items.sort(function(a, b) {
       var c = 0;
@@ -101,7 +124,7 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
       return covSortDir === "desc" ? -c : c;
     });
     return items;
-  }, [inboundCoverage, rawCriticalItems, ciSearch, covStatusFilter, covSort, covSortDir]);
+  }, [inboundCoverage, rawCriticalItems, ciSearch, covStatusFilter, covRiskFilter, ciCustomerFilter, covSort, covSortDir]);
 
   var exportCriticalCSV = function() {
     if (ciMode === "coverage") {
@@ -249,25 +272,41 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
   };
 
   var coverageSummary = inboundCoverage ? inboundCoverage.summary : null;
+  var hasActiveFilters = !!ciSearch || ciCustomerFilter !== "all" || (ciMode === "material" ? ciStockFilter !== "all" : (covStatusFilter !== "all" || covRiskFilter !== "all"));
 
   return (<div>
     <div style={{ display:"flex", gap:6, marginBottom:12, flexWrap:"wrap", alignItems:"center" }}>
       <button onClick={function() { setCiMode("material"); }} style={pill(ciMode === "material")}>Material Risk</button>
       <button onClick={function() { setCiMode("coverage"); }} style={pill(ciMode === "coverage")}>Inbound Coverage</button>
       <input type="text" placeholder={ciMode === "coverage" ? "Search SKU, customer, PO..." : "Search..."} value={ciSearch} onChange={function(e) { setCiSearch(e.target.value); }} style={Object.assign({}, inp, { width:220 })} />
+      <select value={ciCustomerFilter} onChange={function(e) { setCiCustomerFilter(e.target.value); }} style={Object.assign({}, sel, { fontSize:13 })}>
+        <option value="all">All Customers</option>
+        {customerOptions.map(function(c) { return <option key={c} value={c}>{c}</option>; })}
+      </select>
 
       {ciMode === "material" ? (
-        <span style={{ fontSize:13, color:C.dim }}><span style={{ color:C.bad, fontWeight:600 }}>{criticalItems.filter(function(i) { return i.isZeroStock; }).length}</span> zero | <span style={{ color:C.warn, fontWeight:600 }}>{criticalItems.filter(function(i) { return !i.isZeroStock; }).length}</span> low</span>
+        <>
+          {[{ key:"all", label:"All Stock" }, { key:"zero", label:"Zero Stock" }, { key:"low", label:"Low Stock" }].map(function(f) {
+            return <button key={f.key} onClick={function() { setCiStockFilter(f.key); }} style={pill(ciStockFilter === f.key)}>{f.label}</button>;
+          })}
+          <span style={{ fontSize:13, color:C.dim }}><span style={{ color:C.bad, fontWeight:600 }}>{criticalItems.filter(function(i) { return i.isZeroStock; }).length}</span> zero | <span style={{ color:C.warn, fontWeight:600 }}>{criticalItems.filter(function(i) { return !i.isZeroStock; }).length}</span> low</span>
+        </>
       ) : (
         <>
           {[{ key:"all", label:"All" }, { key:"at-risk", label:"At Risk" }, { key:"missing", label:"Missing" }, { key:"unscheduled", label:"Unscheduled" }, { key:"partial", label:"Partial" }, { key:"covered", label:"Covered" }].map(function(f) {
             return <button key={f.key} onClick={function() { setCovStatusFilter(f.key); }} style={pill(covStatusFilter === f.key)}>{f.label}</button>;
+          })}
+          {[{ key:"all", label:"All Risk" }, { key:"high", label:"High Risk" }, { key:"medium", label:"Medium Risk" }, { key:"low", label:"Low Risk" }].map(function(f) {
+            return <button key={f.key} onClick={function() { setCovRiskFilter(f.key); }} style={pill(covRiskFilter === f.key)}>{f.label}</button>;
           })}
           {coverageSummary && <span style={{ fontSize:13, color:C.dim }}><span style={{ color:C.bad, fontWeight:600 }}>{coverageSummary.atRisk}</span> at risk | <span style={{ color:C.ok, fontWeight:600 }}>{coverageSummary.covered}</span> covered</span>}
         </>
       )}
 
       <div style={{ flex:1 }} />
+      {hasActiveFilters && (
+        <button onClick={function() { setCiSearch(""); setCiCustomerFilter("all"); setCiStockFilter("all"); setCovStatusFilter("all"); setCovRiskFilter("all"); }} style={Object.assign({}, pill(false), { fontSize:13, color:C.bad, borderColor:C.badLine })}>Clear Filters</button>
+      )}
       <button onClick={exportCriticalCSV} style={Object.assign({}, pill(false), { fontSize:13 })}>CSV</button>
       {ciMode === "material" && <button onClick={exportCriticalPDF} style={Object.assign({}, pill(false), { fontSize:13 })}>PDF</button>}
     </div>
