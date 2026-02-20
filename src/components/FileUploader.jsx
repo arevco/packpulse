@@ -9,6 +9,10 @@ export default function FileUploader({ label, onData, uploaded, fileName, subtit
   const handleFile = useCallback(file => {
     if (!file) return;
     const ext = file.name.split(".").pop().toLowerCase();
+    if (ext === "pdf") {
+      window.alert("PDF selected. Automatic PO parsing currently supports CSV/XLSX only. Please export the PDF to CSV/XLSX and upload that file.");
+      return;
+    }
     if (ext === "xlsx" || ext === "xls") {
       const r = new FileReader();
       r.onload = e => { try { const wb = XLSX.read(new Uint8Array(e.target.result), { type:"array", cellDates:true }); parseWorkbook ? onData(parseWorkbook(wb), file.name) : onData(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval:"" }), file.name); } catch(err) { console.error(err); } };

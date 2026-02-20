@@ -170,7 +170,7 @@ export default function ProductionReadiness() {
           <FileUploader label="Bill of Materials" uploaded={!!ds.boms} fileName={ds.bomFileName} onData={(d,n) => {ds.setBoms(d);ds.setBomFileName(n);ds.setBomTimestamp(new Date());}} subtitle={ds.boms ? ("Saved \u00b7 Re-upload to update") : "BOM structure (.csv, .xlsx)"} acceptTypes=".csv,.xlsx,.xls" />
           <FileUploader label="EDR" uploaded={!!ds.edrData} fileName={ds.edrFileName} onData={(d,n) => {ds.setEdrData(d);ds.setEdrFileName(n);ds.setEdrTimestamp(new Date());}} subtitle="Inbound deliveries (.xlsx)" acceptTypes=".xlsx,.xls,.csv" parseWorkbook={ds.parseEdrWorkbook} />
           <FileUploader label="OpenDock" uploaded={!!ds.dockData} fileName={ds.dockFileName} onData={(d,n) => {ds.setDockData(d);ds.setDockFileName(n);ds.setDockTimestamp(new Date());}} subtitle="Dock appointments (.xlsx)" acceptTypes=".xlsx,.xls,.csv" />
-          <FileUploader label="Purchase Order" uploaded={!!ds.poData} fileName={ds.poFileName} onData={(d,n) => {ds.setPoData(d);ds.setPoFileName(n);ds.setPoTimestamp(new Date());var h=d&&d.length?Object.keys(d[0]):[]; ds.setPoHeaders(h); ds.setPoMapping(autoMapColumns(h,PO_PAT));}} subtitle="PO line items (.csv, .xlsx)" acceptTypes=".csv,.xlsx,.xls" />
+          <FileUploader label="Purchase Order" uploaded={!!ds.poData} fileName={ds.poFileName} onData={(d,n) => {ds.setPoData(d);ds.setPoFileName(n);ds.setPoTimestamp(new Date());var h=d&&d.length?Object.keys(d[0]):[]; ds.setPoHeaders(h); ds.setPoMapping(autoMapColumns(h,PO_PAT));}} subtitle="PO line items (.csv, .xlsx, .pdf)" acceptTypes=".csv,.xlsx,.xls,.pdf" />
         </div>
         <div style={{ marginTop:-10, marginBottom:16, display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
           <button onClick={fetchOpenDockApi} disabled={dockApiLoading} style={{ padding:"8px 14px", borderRadius:6, border:"1px solid "+(dockApiLoading?C.border:C.accentLine), background:dockApiLoading?C.raised:C.accentSoft, color:dockApiLoading?C.dim:C.accent, fontFamily:sans, fontSize:14, fontWeight:600, cursor:dockApiLoading?"not-allowed":"pointer" }}>
@@ -303,15 +303,6 @@ export default function ProductionReadiness() {
             </div>
           </div>
         )}
-
-        <div style={{ display:"flex", gap:1, marginBottom:16, background:C.surface, borderRadius:8, border:"1px solid "+C.border, width:"fit-content", overflow:"hidden" }}>
-          {[{l:"Total",v:summary.total,c:C.bright},{l:"Ready",v:summary.ready,c:C.ok},{l:"Partial",v:summary.partial,c:C.warn},{l:"Blocked",v:summary.blocked,c:C.bad},{l:"No BOM",v:summary.nobom,c:C.accent}].map(s =>
-            <div key={s.l} style={{ padding:"10px 18px", textAlign:"center", minWidth:70 }}>
-              <div style={{ fontSize:22, fontWeight:700, fontFamily:mono, color:s.c, lineHeight:1 }}>{s.v}</div>
-              <div style={{ fontSize:13, color:C.dim, marginTop:3, fontWeight:500, textTransform:"uppercase", letterSpacing:0.5 }}>{s.l}</div>
-            </div>
-          )}
-        </div>
 
         <div style={{ display:"flex", gap:0, marginBottom:16, borderBottom:"1px solid "+C.border }}>
           {[{key:"overview",label:"Overview",count:null,alert:false},{key:"workorders",label:"Work Orders",count:summary.total},{key:"criticalitems",label:"Critical Items",count:criticalItems.length}]
