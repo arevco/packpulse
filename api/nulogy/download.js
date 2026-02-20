@@ -1,6 +1,8 @@
 // GET /api/nulogy/download?url=<s3Url>&type=<reportType>
 // Downloads the CSV from S3, transforms column names for PackPulse, returns JSON
 
+import Sentry from "../_sentry.js";
+
 // Column name mappings: Nulogy API column codes → PackPulse-friendly headers
 // (Nulogy may return either column codes or column labels as CSV headers)
 const COLUMN_MAPS = {
@@ -237,6 +239,7 @@ export default async function handler(req, res) {
     });
 
   } catch (err) {
+    Sentry.captureException(err);
     console.error("Nulogy download error:", err);
     return res.status(500).json({ error: `Failed to download report: ${err.message}` });
   }

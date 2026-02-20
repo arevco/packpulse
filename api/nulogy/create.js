@@ -2,6 +2,8 @@
 // Creates a Nulogy report job with automatic column name discovery
 // Body: { reportType: "inventory" | "workorders" | "bom" }
 
+import Sentry from "../_sentry.js";
+
 const NULOGY_URL = process.env.NULOGY_URL || "https://app.nulogy.net";
 
 // Column codes verified against actual REV Copack Nulogy instance
@@ -181,6 +183,7 @@ export default async function handler(req, res) {
       continue;
 
     } catch (err) {
+      Sentry.captureException(err);
       errors.push({ attempt: attempt + 1, error: err.message });
       continue;
     }

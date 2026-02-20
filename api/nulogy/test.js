@@ -1,6 +1,8 @@
 // GET /api/nulogy/test
 // Tests Nulogy credentials by attempting a lightweight API call
 
+import Sentry from "../_sentry.js";
+
 const NULOGY_URL = process.env.NULOGY_URL || "https://app.nulogy.net";
 
 export default async function handler(req, res) {
@@ -77,6 +79,7 @@ export default async function handler(req, res) {
     });
 
   } catch (err) {
+    Sentry.captureException(err);
     return res.status(200).json({
       configured: true,
       connected: false,

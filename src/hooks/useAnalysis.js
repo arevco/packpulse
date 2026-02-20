@@ -1,0 +1,197 @@
+import { useMemo } from "react";
+import { safeNum, normalizeStr } from "../utils";
+
+export function useAnalysis({ mappingConfirmed, allUploaded, inventory, boms, workOrders, invMapping, bomMapping, woMapping, poData, poMapping, edrData, dockData }) {
+
+  /* ====== ANALYSIS ENGINE ====== */
+  var analysis = useMemo(() => {
+    if (!mappingConfirmed || !allUploaded) return null;
+    var invMap = {}; var invDescMap = {};
+    inventory.forEach(row => { var sku = normalizeStr(row[invMapping.sku]); if (sku) { invMap[sku] = (invMap[sku]||0) + safeNum(row[invMapping.qtyOnHand]); if (invMapping.description && row[invMapping.description] && !invDescMap[sku]) invDescMap[sku] = row[invMapping.description].toString().trim(); } });
+    var bomMap = {};
+    if (boms && boms.length) { boms.forEach(row => {
+      var parentRaw = (row[bomMapping.bomId]||"").toString().trim(); var parent = normalizeStr(parentRaw); if (!parent) return;
+      if (!bomMap[parent]) bomMap[parent] = { parentRaw:parentRaw, rawComponents:[] };
+      var subForRaw = bomMapping.substituteFor ? (row[bomMapping.substituteFor]||"").toString().trim() : "";
+      var priorityRaw = bomMapping.priority ? safeNum(row[bomMapping.priority]) : 0;
+      bomMap[parent].rawComponents.push({ sku:normalizeStr(row[bomMapping.componentSku]), skuRaw:(row[bomMapping.componentSku]||"").toString().trim(), descRaw:bomMapping.description?(row[bomMapping.description]||"").toString().trim():"", qtyPer:safeNum(row[bomMapping.qtyPer]), substituteFor:subForRaw?normalizeStr(subForRaw):"", substituteForRaw:subForRaw, priority:priorityRaw||1 });
+    }); }
+    Object.values(bomMap).forEach(bom => {
+      var pri = bom.rawComponents.filter(c => !c.substituteFor); var subs = bom.rawComponents.filter(c => !!c.substituteFor);
+      bom.groups = pri.map(p => { var gs = subs.filter(s => s.substituteFor === p.sku).sort((a,b) => a.priority - b.priority); return { primary:p, substitutes:gs, allOptions:[p,...gs] }; });
+      var mapped = new Set(bom.groups.flatMap(g => g.substitutes.map(s => s.sku)));
+      subs.filter(s => !mapped.has(s.sku)).forEach(s => { bom.groups.push({ primary:s, substitutes:[], allOptions:[s] }); });
+    });
+    var results = workOrders.map(wo => {
+      var woNum = (wo[woMapping.woNumber]||"").toString().trim(); var productSku = normalizeStr(wo[woMapping.productSku]); var productSkuRaw = (wo[woMapping.productSku]||"").toString().trim();
+      var qtyToProduce = safeNum(wo[woMapping.qtyToProduce]); var dueDate = woMapping.dueDate ? (wo[woMapping.dueDate]||"").toString().trim() : ""; var status = woMapping.status ? (wo[woMapping.status]||"").toString().trim() : "";
+      var customer = woMapping.customer ? (wo[woMapping.customer]||"").toString().trim() : "";
+      var unitsProduced = woMapping.unitsProduced ? safeNum(wo[woMapping.unitsProduced]) : 0;
+      var unitsRemaining = woMapping.unitsRemaining ? safeNum(wo[woMapping.unitsRemaining]) : Math.max(0, qtyToProduce - unitsProduced);
+      var unitsPerHour = woMapping.unitsPerHour ? safeNum(wo[woMapping.unitsPerHour]) : 0;
+      var standardPeople = woMapping.standardPeople ? safeNum(wo[woMapping.standardPeople]) : 0;
+      var plannedStart = woMapping.plannedStart ? (wo[woMapping.plannedStart]||"").toString().trim() : "";
+      var plannedEnd = woMapping.plannedEnd ? (wo[woMapping.plannedEnd]||"").toString().trim() : "";
+      var reference1 = woMapping.reference1 ? (wo[woMapping.reference1]||"").toString().trim() : "";
+      var estHours = unitsPerHour > 0 && unitsRemaining > 0 ? Math.round(unitsRemaining / unitsPerHour * 10) / 10 : 0;
+      var prodPct = qtyToProduce > 0 ? Math.round(unitsProduced / qtyToProduce * 100) : 0;
+      var extra = { customer:customer, unitsProduced:unitsProduced, unitsRemaining:unitsRemaining, unitsPerHour:unitsPerHour, standardPeople:standardPeople, plannedStart:plannedStart, plannedEnd:plannedEnd, reference1:reference1, estHours:estHours, prodPct:prodPct };
+      var bom = bomMap[productSku];
+      if (!bom) return Object.assign({ woNum:woNum, productSkuRaw:productSkuRaw, productDesc:invDescMap[productSku]||"", qtyToProduce:qtyToProduce, dueDate:dueDate, status:status, readiness:-1, runStatus:"nobom", components:[], maxRunnable:0, couldMake:0, zeroStockCount:0, normalizedSku:productSku }, extra);
+      var minFill = Infinity, maxRun = Infinity, couldMk = Infinity, zeroCount = 0; var components = [];
+      bom.groups.forEach(group => {
+        var qp = group.primary.qtyPer; var needed = qp * qtyToProduce; if (needed <= 0) return;
+        var combined = 0;
+        var optDet = group.allOptions.map(opt => { var oh = invMap[opt.sku]||0; combined += oh; return { sku:opt.skuRaw, desc:invDescMap[opt.sku]||"", onHand:oh, priority:opt.priority, isSub:!!opt.substituteFor, foundInInventory:invMap.hasOwnProperty(opt.sku) }; });
+        var fill = (combined/needed)*100; var canMake = qp > 0 ? Math.floor(combined/qp) : Infinity; var short = Math.max(0, needed - combined);
+        minFill = Math.min(minFill, fill); maxRun = Math.min(maxRun, canMake);
+        if (combined === 0 && qp > 0) zeroCount++; else couldMk = Math.min(couldMk, canMake);
+        components.push({ sku:group.primary.skuRaw, desc:invDescMap[group.primary.sku]||"", qtyPer:qp, needed:needed, onHand:combined, fillRate:fill, canMake:canMake, short:short, foundInInventory:optDet.some(o => o.foundInInventory), hasSubs:group.substitutes.length>0, optionDetails:group.substitutes.length>0?optDet:null });
+      });
+      var readiness = minFill === Infinity ? 100 : Math.min(minFill, 100);
+      var runStatus = readiness >= 100 ? "ready" : maxRun > 0 ? "partial" : "blocked";
+      if (maxRun === Infinity) maxRun = qtyToProduce; if (couldMk === Infinity) couldMk = qtyToProduce;
+      return Object.assign({ woNum:woNum, productSkuRaw:productSkuRaw, productDesc:invDescMap[productSku]||"", qtyToProduce:qtyToProduce, dueDate:dueDate, status:status, readiness:readiness, runStatus:runStatus, components:components, maxRunnable:Math.min(maxRun, qtyToProduce), couldMake:Math.min(couldMk, qtyToProduce), zeroStockCount:zeroCount, normalizedSku:productSku }, extra);
+    });
+    var diag = { invCount:inventory.length, invUniqueSkus:Object.keys(invMap).length, invSampleQtys:Object.entries(invMap).slice(0,6).map(function(e){return{key:e[0],qty:e[1]}}), bomParentCount:Object.keys(bomMap).length, bomSampleParents:Object.keys(bomMap).slice(0,8), bomTotalLines:boms?boms.length:0, woCount:workOrders.length, woUniqueSkus:[...new Set(results.map(r=>r.normalizedSku))], woUnmatched:[...new Set(results.filter(r=>r.runStatus==="nobom").map(r=>({raw:r.productSkuRaw,norm:r.normalizedSku})))].slice(0,10), woMatchedCount:results.filter(r=>r.runStatus!=="nobom").length };
+
+    /* ====== DATA FLAGS ====== */
+    var flags = [];
+    var flagId = 0;
+    // 1. Inventory SKUs missing descriptions
+    var seenInvSkus = new Set();
+    inventory.forEach(row => {
+      var sku = normalizeStr(row[invMapping.sku]); var skuRaw = (row[invMapping.sku]||"").toString().trim();
+      if (!sku || seenInvSkus.has(sku)) return; seenInvSkus.add(sku);
+      var desc = invMapping.description ? (row[invMapping.description]||"").toString().trim() : "";
+      if (!desc) flags.push({ id:flagId++, type:"missing-desc", severity:"warn", sku:skuRaw, skuNorm:sku, desc:"", source:"Inventory", detail:"SKU has no product description in inventory. Update in ERP.", affectedWOs:[] });
+    });
+    // 2. BOM components not found in inventory
+    var seenNotInInv = new Set();
+    Object.values(bomMap).forEach(bom => { bom.rawComponents.forEach(comp => {
+      if (seenNotInInv.has(comp.sku)) return;
+      if (!invMap.hasOwnProperty(comp.sku)) { seenNotInInv.add(comp.sku); var aws = results.filter(r => r.components.some(c => normalizeStr(c.sku) === comp.sku)).map(r => r.woNum);
+        flags.push({ id:flagId++, type:"not-in-inventory", severity:"bad", sku:comp.skuRaw, skuNorm:comp.sku, desc:"", source:"BOM", detail:"Referenced in BOM but has no inventory record. Add to ERP or verify SKU.", affectedWOs:aws });
+      }
+    }); });
+    // 3. WO product SKUs with no BOM
+    var seenNoBom = new Set();
+    results.forEach(r => { if (r.runStatus === "nobom" && !seenNoBom.has(r.normalizedSku)) { seenNoBom.add(r.normalizedSku); var aws = results.filter(w => w.normalizedSku === r.normalizedSku).map(w => w.woNum);
+      flags.push({ id:flagId++, type:"no-bom", severity:"bad", sku:r.productSkuRaw, skuNorm:r.normalizedSku, desc:r.productDesc, source:"Work Orders", detail:"Work order product has no BOM defined. Create BOM in ERP.", affectedWOs:aws });
+    } });
+    // 4. FG SKUs on work orders not in inventory
+    var seenFgNoInv = new Set();
+    results.forEach(r => { if (!invMap.hasOwnProperty(r.normalizedSku) && !seenFgNoInv.has(r.normalizedSku)) { seenFgNoInv.add(r.normalizedSku); var aws = results.filter(w => w.normalizedSku === r.normalizedSku).map(w => w.woNum);
+      flags.push({ id:flagId++, type:"fg-not-in-inventory", severity:"warn", sku:r.productSkuRaw, skuNorm:r.normalizedSku, desc:r.productDesc, source:"Work Orders", detail:"Finished good has no inventory record. Add to ERP.", affectedWOs:aws });
+    } });
+    // 5. BOM components with description in inventory but needed and zero stock
+    var seenZero = new Set();
+    results.forEach(r => { r.components.forEach(comp => { var cn = normalizeStr(comp.sku); if (comp.onHand === 0 && comp.needed > 0 && !seenZero.has(cn) && invMap.hasOwnProperty(cn)) { seenZero.add(cn); var aws = results.filter(w => w.components.some(c => normalizeStr(c.sku) === cn && c.onHand === 0 && c.needed > 0)).map(w => w.woNum);
+      flags.push({ id:flagId++, type:"zero-stock", severity:"bad", sku:comp.sku, skuNorm:cn, desc:comp.desc, source:"Inventory", detail:"Component exists in inventory but has zero stock. Verify count or expedite PO.", affectedWOs:aws });
+    } }); });
+
+    return { results:results, diagnostics:diag, flags:flags };
+  }, [mappingConfirmed, allUploaded, inventory, boms, workOrders, invMapping, bomMapping, woMapping]);
+
+  var summary = useMemo(() => { if (!analysis) return null; var r = analysis.results; return { total:r.length, ready:r.filter(w=>w.runStatus==="ready").length, partial:r.filter(w=>w.runStatus==="partial").length, blocked:r.filter(w=>w.runStatus==="blocked").length, nobom:r.filter(w=>w.runStatus==="nobom").length }; }, [analysis]);
+
+  var criticalItems = useMemo(() => {
+    if (!analysis) return [];
+    var m = {};
+    analysis.results.forEach(wo => { wo.components.forEach(comp => { if (comp.short <= 0) return; var k = normalizeStr(comp.sku); if (!m[k]) m[k] = { sku:comp.sku, desc:comp.desc, onHand:comp.onHand, totalShort:0, affectedWOs:[], unlockedUnits:0, isZeroStock:comp.onHand===0 }; m[k].totalShort += comp.short; m[k].unlockedUnits += wo.qtyToProduce - wo.maxRunnable; m[k].affectedWOs.push({ woNum:wo.woNum, productSku:wo.productSkuRaw, qtyToProduce:wo.qtyToProduce, needed:comp.needed, short:comp.short, dueDate:wo.dueDate }); }); });
+    return Object.values(m);
+  }, [analysis]);
+
+  var woStatuses = useMemo(() => { if (!analysis) return []; return [...new Set(analysis.results.map(r => r.status).filter(Boolean))].sort(); }, [analysis]);
+  var woCustomers = useMemo(() => { if (!analysis) return []; return [...new Set(analysis.results.map(r => r.customer).filter(Boolean))].sort(); }, [analysis]);
+
+  var poCheck = useMemo(() => {
+    if (!poData || !poData.length || !poMapping.material || !poMapping.qty || !analysis) return null;
+    var woSkuMap = {};
+    analysis.results.forEach(wo => {
+      var sk = normalizeStr(wo.productSkuRaw);
+      if (!woSkuMap[sk]) woSkuMap[sk] = [];
+      woSkuMap[sk].push(wo);
+    });
+    var lines = [], matched = 0, missing = 0, qtyMismatch = 0, totalPOQty = 0, totalWOQty = 0;
+    var poNum = poData[0] && poMapping.poNumber ? (poData[0][poMapping.poNumber]||"").toString().trim() : "";
+    poData.forEach(row => {
+      var mat = (row[poMapping.material]||"").toString().trim();
+      var matNorm = normalizeStr(mat);
+      if (!matNorm) return;
+      var qty = safeNum(row[poMapping.qty]);
+      var desc = poMapping.description ? (row[poMapping.description]||"").toString().trim() : "";
+      var price = poMapping.unitPrice ? (row[poMapping.unitPrice]||"").toString().trim() : "";
+      totalPOQty += qty;
+      var wos = woSkuMap[matNorm] || [];
+      var woTotalQty = wos.reduce((s,w) => s + w.qtyToProduce, 0);
+      var woTotalProduced = wos.reduce((s,w) => s + w.unitsProduced, 0);
+      totalWOQty += woTotalQty;
+      var status = "missing";
+      if (wos.length > 0) {
+        if (Math.abs(woTotalQty - qty) <= 1) { status = "matched"; matched++; }
+        else { status = "qty_mismatch"; qtyMismatch++; }
+      } else { missing++; }
+      lines.push({ material:mat, description:desc, poQty:qty, price:price, status:status, woCount:wos.length, woTotalQty:woTotalQty, woProduced:woTotalProduced, wos:wos, qtyDiff:woTotalQty - qty });
+    });
+    return { lines:lines, poNum:poNum, matched:matched, missing:missing, qtyMismatch:qtyMismatch, totalLines:lines.length, totalPOQty:totalPOQty, totalWOQty:totalWOQty };
+  }, [poData, poMapping, analysis]);
+
+  /* ====== TIMELINE ====== */
+  var timelineData = useMemo(() => {
+    if (!edrData || !edrData.length || !analysis) return null;
+    var edrCols = Object.keys(edrData[0]);
+    var findCol = cands => edrCols.find(c => cands.some(p => normalizeStr(c).includes(p)));
+    var colMat = findCol(["material"]) || findCol(["sku","itemcode"]);
+    var colDesc = findCol(["shorttext","matdesc","desc"]);
+    var colDate = findCol(["deliverydate","delivery"]) || findCol(["reqdely"]);
+    var colPO = findCol(["purchasingdocument","purchasedoc","ponumber"]);
+    var colQtyOpen = findCol(["stilltobedelivered","openqty","stillto"]);
+    var colQtyOrd = findCol(["orderquantity","orderqty"]);
+    var colTab = "__edrTab";
+    if (!colMat || !colDate) return null;
+    var dockByPO = {};
+    if (dockData && dockData.length) {
+      var dC = Object.keys(dockData[0]); var dPO = dC.find(c=>normalizeStr(c)==="po") || dC.find(c=>normalizeStr(c).includes("po")); var dSt = dC.find(c=>normalizeStr(c)==="status"); var dDt = dC.find(c=>normalizeStr(c).includes("apptdate")); var dTm = dC.find(c=>normalizeStr(c).includes("appttime"));
+      if (dPO) dockData.forEach(row => { var po = (row[dPO]||"").toString().trim(); if (!po) return; if (!dockByPO[po]) dockByPO[po] = []; dockByPO[po].push({ status:(row[dSt]||"").toString().trim(), apptDate:(row[dDt]||"").toString().trim() }); });
+    }
+    var deliveries = [];
+    edrData.forEach(row => {
+      var mat = (row[colMat]||"").toString().trim(); var desc = colDesc ? (row[colDesc]||"").toString().trim() : "";
+      var rawDate = row[colDate]; var po = colPO ? (row[colPO]||"").toString().trim() : "";
+      var qtyOpen = colQtyOpen ? safeNum(row[colQtyOpen]) : 0; var qtyOrd = colQtyOrd ? safeNum(row[colQtyOrd]) : 0;
+      var tab = row[colTab] || "";
+      if (!mat || !rawDate) return; var qty = qtyOpen > 0 ? qtyOpen : qtyOrd; if (qty <= 0) return;
+      var dateObj; if (rawDate instanceof Date) dateObj = rawDate; else { dateObj = new Date(rawDate); if (isNaN(dateObj)) return; }
+      var dateStr = dateObj.toISOString().slice(0,10);
+      var dockAppts = dockByPO[po] || [];
+      var bestDock = dockAppts.length > 0 ? dockAppts.sort((a,b) => { var o = {Completed:0,Arrived:1,Scheduled:2,Cancelled:3}; return (o[a.status]||9)-(o[b.status]||9); })[0] : null;
+      deliveries.push({ sku:mat, skuNorm:normalizeStr(mat), desc:desc, date:dateStr, dateObj:dateObj, qty:qty, po:po, tab:tab, dockStatus:bestDock?bestDock.status:"", qtyOrd:qtyOrd });
+    });
+    if (!deliveries.length) return null;
+    var compToFG = {};
+    analysis.results.forEach(wo => {
+      wo.components.forEach(comp => {
+        var norm = normalizeStr(comp.sku); if (!compToFG[norm]) compToFG[norm] = [];
+        compToFG[norm].push({ woNum:wo.woNum, productSku:wo.productSkuRaw, productDesc:wo.productDesc, needed:comp.needed, short:comp.short, qtyToProduce:wo.qtyToProduce });
+        if (comp.optionDetails) comp.optionDetails.forEach(opt => { var on = normalizeStr(opt.sku); if (on !== norm) { if (!compToFG[on]) compToFG[on]=[]; compToFG[on].push({ woNum:wo.woNum, productSku:wo.productSkuRaw, productDesc:wo.productDesc, needed:comp.needed, short:comp.short, qtyToProduce:wo.qtyToProduce }); } });
+      });
+    });
+    var byMaterial = {};
+    deliveries.forEach(d => { if (!byMaterial[d.skuNorm]) byMaterial[d.skuNorm] = { sku:d.sku, desc:d.desc, deliveries:[], affectedWOs:compToFG[d.skuNorm]||[] }; byMaterial[d.skuNorm].deliveries.push(d); });
+    var today = new Date().toISOString().slice(0,10);
+    var allDO = deliveries.map(d => d.dateObj); var minD = new Date(Math.min(...allDO, Date.now())); var maxD = new Date(Math.max(...allDO, Date.now()));
+    minD.setDate(minD.getDate()-1); maxD.setDate(maxD.getDate()+3);
+    var days = []; var cursor = new Date(minD); while (cursor <= maxD) { days.push(cursor.toISOString().slice(0,10)); cursor.setDate(cursor.getDate()+1); }
+    var woTimelines = analysis.results.map(wo => {
+      var cd = []; wo.components.forEach(comp => { if (comp.short <= 0) return; var allS = [normalizeStr(comp.sku)]; if (comp.optionDetails) comp.optionDetails.forEach(o => allS.push(normalizeStr(o.sku)));
+      [...new Set(allS)].forEach(sn => { var md = byMaterial[sn]; if (md) md.deliveries.forEach(d => { cd.push(Object.assign({}, d, { componentSku:comp.sku, short:comp.short, needed:comp.needed })); }); }); });
+      var dueDateStr = ""; if (wo.dueDate) { var p = new Date(wo.dueDate); if (!isNaN(p)) dueDateStr = p.toISOString().slice(0,10); }
+      var delByDate = {}; cd.forEach(d => { if (!delByDate[d.date]) delByDate[d.date] = { items:[], totalQty:0 }; delByDate[d.date].items.push(d); delByDate[d.date].totalQty += d.qty; });
+      return { woNum:wo.woNum, productSku:wo.productSkuRaw, productDesc:wo.productDesc, qtyToProduce:wo.qtyToProduce, readiness:wo.readiness, runStatus:wo.runStatus, maxRunnable:wo.maxRunnable, dueDate:dueDateStr, hasDeliveries:cd.length>0, deliveries:cd, delByDate:delByDate, totalIncoming:cd.reduce((s,d)=>s+d.qty,0) };
+    }).filter(w => w.hasDeliveries).sort((a,b) => (a.dueDate||"zzz").localeCompare(b.dueDate||"zzz"));
+    return { days:days, today:today, woTimelines:woTimelines, deliveries:deliveries, byMaterial:byMaterial, totalDeliveries:deliveries.length, matchedToBOM:deliveries.filter(d=>(compToFG[d.skuNorm]||[]).length>0).length, withDockAppt:deliveries.filter(d=>d.dockStatus).length };
+  }, [edrData, dockData, analysis]);
+
+  return { analysis, summary, criticalItems, woStatuses, woCustomers, poCheck, timelineData };
+}
