@@ -2,7 +2,6 @@ import { useState, useMemo, useEffect } from "react";
 import { useTheme } from "../theme";
 import { useStyles } from "../hooks/useStyles";
 import { fmtDate, triggerDownload, buildExportHTML, normalizeStr } from "../utils";
-import Dot from "../components/Dot";
 
 function parseDateValue(value) {
   if (!value) return null;
@@ -37,6 +36,25 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
   const [sortDir, setSortDir] = useState("desc");
   const [expandedWO, setExpandedWO] = useState(null);
 
+  var runStatusMeta = function(s) {
+    if (s === "ready") return { label:"RDY", color:C.ok, bg:C.okSoft || C.accentSoft };
+    if (s === "partial") return { label:"PRT", color:C.warn, bg:C.warnSoft };
+    if (s === "nobom") return { label:"BOM", color:C.accent, bg:C.accentSoft };
+    return { label:"BLK", color:C.bad, bg:C.badSoft };
+  };
+  var shortWoStatus = function(status) {
+    var raw = String(status || "").trim();
+    if (!raw) return "--";
+    var norm = normalizeStr(raw);
+    if (norm.includes("book")) return "BKD";
+    if (norm.includes("sched")) return "SCH";
+    if (norm.includes("release")) return "REL";
+    if (norm.includes("complete")) return "CMP";
+    if (norm.includes("close")) return "CLS";
+    if (norm.includes("cancel")) return "CXL";
+    return raw.length > 4 ? raw.slice(0, 4).toUpperCase() : raw.toUpperCase();
+  };
+
   useEffect(() => {
     if (!prefilterCustomer) return;
     setFilterCustomer(prefilterCustomer);
@@ -57,6 +75,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
       var c = 0;
       if (sortField==="woNum") c=a.woNum.localeCompare(b.woNum);
       else if (sortField==="product") c=a.productSkuRaw.localeCompare(b.productSkuRaw);
+      else if (sortField==="desc") c=(a.productDesc||"").localeCompare(b.productDesc||"");
       else if (sortField==="customer") c=(a.customer||"").localeCompare(b.customer||"");
       else if (sortField==="qty") c=a.qtyToProduce-b.qtyToProduce;
       else if (sortField==="produced") c=a.unitsProduced-b.unitsProduced;
@@ -101,18 +120,23 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
   var SortTh = function(props) { return <th onClick={() => handleSort(props.field)} style={Object.assign({}, thC(sortField===props.field), props.style||{})}>{props.children}{sortField===props.field ? (sortDir==="asc" ? " \u2191" : " \u2193") : ""}</th>; };
 
   var renderWORows = () => {
-    if (filteredResults.length === 0) return <tr><td colSpan={14} style={{ padding:36, textAlign:"center", color:C.dim, fontSize:14 }}>No work orders match filters.</td></tr>;
+    if (filteredResults.length === 0) return <tr><td colSpan={15} style={{ padding:36, textAlign:"center", color:C.dim, fontSize:14 }}>No work orders match filters.</td></tr>;
     var out = [];
     filteredResults.forEach((wo, idx) => {
       var isX = expandedWO === wo.woNum + idx;
+      var rs = runStatusMeta(wo.runStatus);
       out.push(
         <tr key={"r"+idx} onClick={() => setExpandedWO(isX ? null : wo.woNum + idx)} style={{ cursor:"pointer", borderBottom:"1px solid "+C.border, background:isX?C.raised:"transparent" }}
           onMouseEnter={e => { if (!isX) e.currentTarget.style.background = C.hover; }} onMouseLeave={e => { if (!isX) e.currentTarget.style.background = isX ? C.raised : "transparent"; }}>
           <td style={tdToggle}>{isX ? "\u25BE" : "\u25B8"}</td>
           <td style={Object.assign({}, tdM, { fontWeight:600, color:C.bright })}>{wo.woNum}</td>
           <td style={tdM}>{wo.productSkuRaw}</td>
+          <td style={Object.assign({}, tdN, { color:C.dim }, truncate(220))}>{wo.productDesc || "--"}</td>
           <td style={Object.assign({}, tdN, { color:C.dim }, truncate(140))}>{wo.customer || "--"}</td>
-          <td style={tdN}><Dot status={wo.runStatus} />{wo.status ? <span style={{ marginLeft:6, fontSize:12, color:C.dim }}>{wo.status}</span> : ""}</td>
+          <td style={Object.assign({}, tdN, { whiteSpace:"nowrap" })}>
+            <span title={wo.runStatus || ""} style={{ display:"inline-block", minWidth:34, textAlign:"center", padding:"2px 6px", borderRadius:999, fontSize:11, fontWeight:700, color:rs.color, background:rs.bg, marginRight:4 }}>{rs.label}</span>
+            <span title={wo.status || ""} style={{ display:"inline-block", minWidth:34, textAlign:"center", padding:"2px 6px", borderRadius:999, fontSize:11, fontWeight:700, color:C.dim, background:C.raised }}>{shortWoStatus(wo.status)}</span>
+          </td>
           <td style={Object.assign({}, tdM, { color:C.text })}>{fmtDate(wo.dueDate)}</td>
           <td style={Object.assign({}, tdM, { color:C.bright })}>{wo.qtyToProduce.toLocaleString()}</td>
           <td style={Object.assign({}, tdM, { color:wo.unitsProduced>0?C.ok:C.dim })}>{wo.unitsProduced>0?wo.unitsProduced.toLocaleString():"--"}</td>
@@ -176,7 +200,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
           </div>
         );
         out.push(
-          <tr key={"d"+idx}><td colSpan={14} style={{ padding:"0 12px 14px 36px", background:C.raised }}>
+          <tr key={"d"+idx}><td colSpan={15} style={{ padding:"0 12px 14px 36px", background:C.raised }}>
             {details}
           </td></tr>
         );
@@ -208,6 +232,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
             <th style={{ width:24, padding:"0 8px", borderBottom:"1px solid "+C.border }} />
             <SortTh field="woNum">WO#</SortTh>
             <SortTh field="product">Product</SortTh>
+            <SortTh field="desc">Product Description</SortTh>
             <SortTh field="customer">Customer</SortTh>
             <SortTh field="status">WO Status</SortTh>
             <SortTh field="dueDate">Due</SortTh>
