@@ -2,6 +2,17 @@ import { useState, useMemo, useCallback, useEffect } from "react";
 import * as XLSX from "xlsx";
 import { parseCSV, safeNum, normalizeStr, autoMapColumns, INV_PAT, BOM_PAT, WO_PAT, PO_PAT } from "../utils";
 
+function areMappingsEqual(a, b) {
+  var ka = Object.keys(a || {});
+  var kb = Object.keys(b || {});
+  if (ka.length !== kb.length) return false;
+  for (var i = 0; i < ka.length; i++) {
+    var k = ka[i];
+    if ((a || {})[k] !== (b || {})[k]) return false;
+  }
+  return true;
+}
+
 export function useDataSources() {
   const [inventory, setInventory] = useState(null);
   const [boms, setBoms] = useState(null);
@@ -107,7 +118,7 @@ export function useDataSources() {
         if (descCandidate) next.description = descCandidate;
       }
     }
-    setBomMapping(next);
+    if (!areMappingsEqual(next, bomMapping)) setBomMapping(next);
   }, [bomHeaders, bomMapping]);
   useMemo(() => { if (woHeaders.length && !woMapping.woNumber) setWoMapping(autoMapColumns(woHeaders, WO_PAT)); }, [woHeaders]);
   var allUploaded = inventory && workOrders;
