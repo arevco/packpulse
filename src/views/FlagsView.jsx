@@ -57,7 +57,7 @@ export default function FlagsView({ flags }) {
       <div style={{ overflowX:"auto" }}>
         <table style={{ width:"100%", borderCollapse:"collapse" }}>
           <thead><tr style={{ background:C.raised }}>
-            {[{f:"severity",l:"Severity"},{f:"type",l:"Type"},{f:"sku",l:"SKU"},{f:"desc",l:"Description"},{f:"source",l:"Source"},{f:"detail",l:"Action Needed"},{f:"affectedWOs",l:"Affected WOs"}].map(col =>
+            {[{f:"sku",l:"SKU"},{f:"desc",l:"Description"},{f:"type",l:"Type"},{f:"severity",l:"Severity"},{f:"source",l:"Source"},{f:"detail",l:"Action Needed"},{f:"affectedWOs",l:"Affected WOs"}].map(col =>
               <th key={col.f} onClick={() => handleFlagSort(col.f)} style={thC(flagSort===col.f)}>
                 {col.l}{flagSort===col.f ? (flagSortDir==="asc" ? " \u2191" : " \u2193") : ""}
               </th>
@@ -66,10 +66,10 @@ export default function FlagsView({ flags }) {
           <tbody>
             {filteredFlags.length === 0 && <tr><td colSpan={7} style={{ padding:36, textAlign:"center", color:C.dim, fontSize:14 }}>No data flags found. All clear!</td></tr>}
             {filteredFlags.map(f => <tr key={f.id} style={{ borderBottom:"1px solid "+C.border }}>
-              <td style={tdN}><span style={{ fontSize:12, fontWeight:600, padding:"2px 8px", borderRadius:10, color:f.severity==="bad"?"#fff":C.warn, background:f.severity==="bad"?C.bad:C.warnSoft }}>{f.severity==="bad"?"ERROR":"WARN"}</span></td>
-              <td style={Object.assign({}, tdN, { fontSize:13, whiteSpace:"nowrap" })}>{FLAG_LABELS[f.type]||f.type}</td>
               <td style={Object.assign({}, tdM, { fontWeight:600, color:C.bright })}>{f.sku}</td>
               <td style={Object.assign({}, tdN, { color:C.dim, maxWidth:180, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" })}>{f.desc || "--"}</td>
+              <td style={Object.assign({}, tdN, { fontSize:13, whiteSpace:"nowrap" })}>{FLAG_LABELS[f.type]||f.type}</td>
+              <td style={tdN}><span style={{ fontSize:12, fontWeight:600, padding:"2px 8px", borderRadius:10, color:f.severity==="bad"?"#fff":C.warn, background:f.severity==="bad"?C.bad:C.warnSoft }}>{f.severity==="bad"?"ERROR":"WARN"}</span></td>
               <td style={Object.assign({}, tdN, { fontSize:13 })}>{f.source}</td>
               <td style={Object.assign({}, tdN, { fontSize:13, color:C.text })}>{f.detail}</td>
               <td style={Object.assign({}, tdN, { fontSize:13, color:f.affectedWOs.length?C.accent:C.dim })}>{f.affectedWOs.length ? f.affectedWOs.slice(0,3).join(", ")+(f.affectedWOs.length>3?" +"+String(f.affectedWOs.length-3)+" more":"") : "--"}</td>

@@ -98,8 +98,11 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, boms, wo
   var criticalItems = useMemo(() => {
     if (!analysis) return [];
     var m = {};
-    analysis.results.forEach(wo => { wo.components.forEach(comp => { if (comp.short <= 0) return; var k = normalizeStr(comp.sku); if (!m[k]) m[k] = { sku:comp.sku, desc:comp.desc, onHand:comp.onHand, totalShort:0, affectedWOs:[], unlockedUnits:0, isZeroStock:comp.onHand===0 }; m[k].totalShort += comp.short; m[k].unlockedUnits += wo.qtyToProduce - wo.maxRunnable; m[k].affectedWOs.push({ woNum:wo.woNum, productSku:wo.productSkuRaw, qtyToProduce:wo.qtyToProduce, needed:comp.needed, short:comp.short, dueDate:wo.dueDate }); }); });
-    return Object.values(m);
+    analysis.results.forEach(wo => { wo.components.forEach(comp => { if (comp.short <= 0) return; var k = normalizeStr(comp.sku); if (!m[k]) m[k] = { sku:comp.sku, desc:comp.desc, onHand:comp.onHand, totalShort:0, affectedWOs:[], unlockedUnits:0, isZeroStock:comp.onHand===0, customersMap:{} }; m[k].totalShort += comp.short; m[k].unlockedUnits += wo.qtyToProduce - wo.maxRunnable; m[k].affectedWOs.push({ woNum:wo.woNum, productSku:wo.productSkuRaw, customer:wo.customer||"", qtyToProduce:wo.qtyToProduce, needed:comp.needed, short:comp.short, dueDate:wo.dueDate }); if (wo.customer) m[k].customersMap[wo.customer] = true; }); });
+    return Object.values(m).map(function(item) {
+      var customers = Object.keys(item.customersMap || {});
+      return Object.assign({}, item, { customers:customers, customerLabel:customers.length ? customers.join(", ") : "--" });
+    });
   }, [analysis]);
 
   var woStatuses = useMemo(() => { if (!analysis) return []; return [...new Set(analysis.results.map(r => r.status).filter(Boolean))].sort(); }, [analysis]);

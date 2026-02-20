@@ -34,7 +34,7 @@ export default function POCheckView({ poCheck }) {
     <div style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, overflow:"hidden" }}>
       <table style={{ width:"100%", borderCollapse:"collapse" }}>
         <thead><tr style={{ background:C.raised }}>
-          {["Status","Material","Description","PO Qty","WO Qty","Diff","WOs","Produced"].map(h =>
+          {["Material","Description","Status","PO Qty","WO Qty","Diff","WOs","Produced"].map(h =>
             <th key={h} style={thS}>{h}</th>
           )}
         </tr></thead>
@@ -43,9 +43,9 @@ export default function POCheckView({ poCheck }) {
             var sc = ln.status==="matched"?C.ok:ln.status==="qty_mismatch"?C.warn:C.bad;
             var sl = ln.status==="matched"?"\u2713 Matched":ln.status==="qty_mismatch"?"\u26A0 Qty Mismatch":"\u2717 Missing WO";
             return <tr key={i} style={{ borderBottom:"1px solid "+C.border }}>
-              <td style={Object.assign({}, tdN, { fontWeight:600, color:sc, whiteSpace:"nowrap" })}>{sl}</td>
               <td style={Object.assign({}, tdM, { fontWeight:600, color:C.bright })}>{ln.material}</td>
               <td style={Object.assign({}, tdN, { color:C.dim, maxWidth:200, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" })}>{ln.description || "--"}</td>
+              <td style={Object.assign({}, tdN, { fontWeight:600, color:sc, whiteSpace:"nowrap" })}>{sl}</td>
               <td style={Object.assign({}, tdM, { color:C.bright })}>{ln.poQty.toLocaleString()}</td>
               <td style={Object.assign({}, tdM, { color:ln.woCount>0?C.bright:C.dim })}>{ln.woCount>0?ln.woTotalQty.toLocaleString():"--"}</td>
               <td style={Object.assign({}, tdM, { fontWeight:600, color:ln.qtyDiff===0?C.dim:ln.qtyDiff>0?C.ok:C.bad })}>{ln.woCount>0?(ln.qtyDiff>0?"+":"")+ln.qtyDiff.toLocaleString():"--"}</td>

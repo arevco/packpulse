@@ -28,7 +28,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers }) {
     return r;
   }, [analysis, filterStatus, filterWoStatus, filterCustomer, searchTerm, sortField, sortDir]);
 
-  var exportCSV = () => { if (!analysis) return; var h = ["Work Order","Product SKU","Description","Customer","Order Qty","Produced","Remaining","Complete %","Can Make","Ready %","Est Hours","Status","WO Status","Due Date","Planned Start","Planned End","Reference"]; var rows = analysis.results.map(w => [w.woNum, w.productSkuRaw, '"'+(w.productDesc||"").replace(/"/g,'""')+'"', '"'+(w.customer||"")+'"', w.qtyToProduce, w.unitsProduced, w.unitsRemaining, w.prodPct, w.maxRunnable, w.readiness<0?"N/A":Math.round(w.readiness), w.estHours||"", w.runStatus, w.status||"", w.dueDate||"", w.plannedStart||"", w.plannedEnd||"", '"'+(w.reference1||"").replace(/"/g,'""')+'"']); triggerDownload([h.join(",")].concat(rows.map(r => r.join(","))).join("\n"), "packpulse_" + new Date().toISOString().slice(0,10) + ".csv", "text/csv"); };
+  var exportCSV = () => { if (!analysis) return; var h = ["Work Order","Product SKU","Description","Customer","WO Status","Due Date","Planned Start","Planned End","Order Qty","Produced","Remaining","Complete %","Ready %","Can Make","Est Hours","Run Status","Reference"]; var rows = analysis.results.map(w => [w.woNum, w.productSkuRaw, '"'+(w.productDesc||"").replace(/"/g,'""')+'"', '"'+(w.customer||"")+'"', w.status||"", w.dueDate||"", w.plannedStart||"", w.plannedEnd||"", w.qtyToProduce, w.unitsProduced, w.unitsRemaining, w.prodPct, w.readiness<0?"N/A":Math.round(w.readiness), w.maxRunnable, w.estHours||"", w.runStatus, '"'+(w.reference1||"").replace(/"/g,'""')+'"']); triggerDownload([h.join(",")].concat(rows.map(r => r.join(","))).join("\n"), "packpulse_" + new Date().toISOString().slice(0,10) + ".csv", "text/csv"); };
   var exportPDF = () => { if (!analysis) return; var th = ["WO#","Product","Customer","Qty","Produced","Remaining","Complete","Ready","Est Hrs","Status","Due"].map(h => "<th>"+h+"</th>").join(""); var tb = analysis.results.map(w => "<tr><td>"+w.woNum+"</td><td>"+w.productSkuRaw+"</td><td>"+(w.customer||"--")+"</td><td>"+w.qtyToProduce.toLocaleString()+"</td><td>"+w.unitsProduced.toLocaleString()+"</td><td>"+w.unitsRemaining.toLocaleString()+"</td><td>"+w.prodPct+"%</td><td>"+(w.readiness<0?"N/A":Math.round(w.readiness)+"%")+'</td><td>'+(w.estHours||"--")+'</td><td class="'+w.runStatus+'">'+w.runStatus+"</td><td>"+fmtDate(w.dueDate)+"</td></tr>").join(""); triggerDownload(buildExportHTML("PackPulse Report", th, tb), "packpulse_" + new Date().toISOString().slice(0,10) + ".html", "text/html"); };
 
   var SortTh = function(props) { return <th onClick={() => handleSort(props.field)} style={Object.assign({}, thC(sortField===props.field), props.style||{})}>{props.children}{sortField===props.field ? (sortDir==="asc" ? " \u2191" : " \u2193") : ""}</th>; };
@@ -45,6 +45,10 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers }) {
           <td style={Object.assign({}, tdM, { fontWeight:600, color:C.bright })}>{wo.woNum}</td>
           <td style={tdM}>{wo.productSkuRaw}</td>
           <td style={Object.assign({}, tdN, { color:C.dim, maxWidth:140, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" })}>{wo.customer || "--"}</td>
+          <td style={tdN}><Dot status={wo.runStatus} />{wo.status ? <span style={{ marginLeft:6, fontSize:12, color:C.dim }}>{wo.status}</span> : ""}</td>
+          <td style={Object.assign({}, tdM, { color:C.text })}>{fmtDate(wo.dueDate)}</td>
+          <td style={Object.assign({}, tdM, { color:C.dim, fontSize:12 })}>{fmtDate(wo.plannedStart)}</td>
+          <td style={Object.assign({}, tdM, { color:C.dim, fontSize:12 })}>{fmtDate(wo.plannedEnd)}</td>
           <td style={Object.assign({}, tdM, { color:C.bright })}>{wo.qtyToProduce.toLocaleString()}</td>
           <td style={Object.assign({}, tdM, { color:wo.unitsProduced>0?C.ok:C.dim })}>{wo.unitsProduced>0?wo.unitsProduced.toLocaleString():"--"}</td>
           <td style={Object.assign({}, tdM, { color:C.bright })}>{wo.unitsRemaining.toLocaleString()}</td>
@@ -52,10 +56,6 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers }) {
           <td style={Object.assign({}, tdM, { fontWeight:600, color:wo.readiness>=100?C.ok:wo.readiness>=70?C.warn:C.bad })}>{wo.readiness < 0 ? <span style={{color:C.dim}}>--</span> : Math.round(wo.readiness)+"%"}</td>
           <td style={Object.assign({}, tdM, { fontWeight:600, color:wo.runStatus==="ready"?C.ok:wo.runStatus==="nobom"?C.dim:wo.maxRunnable>0?C.warn:C.bad })}>{wo.runStatus==="nobom" ? "--" : wo.maxRunnable.toLocaleString()}</td>
           <td style={Object.assign({}, tdM, { color:wo.estHours>0?C.bright:C.dim })}>{wo.estHours > 0 ? wo.estHours+"h" : "--"}</td>
-          <td style={Object.assign({}, tdM, { color:C.text })}>{fmtDate(wo.dueDate)}</td>
-          <td style={Object.assign({}, tdM, { color:C.dim, fontSize:12 })}>{fmtDate(wo.plannedStart)}</td>
-          <td style={Object.assign({}, tdM, { color:C.dim, fontSize:12 })}>{fmtDate(wo.plannedEnd)}</td>
-          <td style={tdN}><Dot status={wo.runStatus} />{wo.status ? <span style={{ marginLeft:6, fontSize:12, color:C.dim }}>{wo.status}</span> : ""}</td>
         </tr>
       );
       if (isX) {
@@ -138,6 +138,10 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers }) {
             <SortTh field="woNum">WO#</SortTh>
             <SortTh field="product">Product</SortTh>
             <SortTh field="customer">Customer</SortTh>
+            <SortTh field="status">WO Status</SortTh>
+            <SortTh field="dueDate">Due</SortTh>
+            <SortTh field="plannedStart">Start</SortTh>
+            <SortTh field="plannedEnd">End</SortTh>
             <SortTh field="qty">Order Qty</SortTh>
             <SortTh field="produced">Produced</SortTh>
             <SortTh field="remaining">Remaining</SortTh>
@@ -145,10 +149,6 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers }) {
             <SortTh field="readiness">Ready</SortTh>
             <SortTh field="maxRunnable">Can Make</SortTh>
             <SortTh field="estHours">Est Hrs</SortTh>
-            <SortTh field="dueDate">Due</SortTh>
-            <SortTh field="plannedStart">Start</SortTh>
-            <SortTh field="plannedEnd">End</SortTh>
-            <SortTh field="status">WO Status</SortTh>
           </tr></thead>
           <tbody>{renderWORows()}</tbody>
         </table>
