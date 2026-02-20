@@ -409,9 +409,6 @@ export default function ProductionReadiness() {
             <button onClick={fetchOpenDockApi} disabled={dockApiLoading} style={{ padding:"4px 10px", borderRadius:6, border:"1px solid "+(dockApiLoading?C.border:C.accentLine), background:dockApiLoading?C.raised:C.accentSoft, cursor:dockApiLoading?"not-allowed":"pointer", color:dockApiLoading?C.dim:C.accent, fontFamily:sans, fontSize:13 }}>
               {dockApiLoading ? "Syncing OpenDock..." : "Sync OpenDock API"}
             </button>
-            <button onClick={() => setShowDataSetup(v => !v)} style={{ padding:"4px 10px", borderRadius:6, border:"1px solid "+C.border, background:"transparent", cursor:"pointer", color:C.dim, fontFamily:sans, fontSize:13 }}>
-              {showDataSetup ? "Close Data Setup" : "Open Data Setup"}
-            </button>
           </div>
         )}
         {showDataStatusPanel && (
