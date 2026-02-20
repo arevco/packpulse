@@ -51,10 +51,16 @@ const REPORT_CONFIGS = {
   bom: {
     report: "bom",
     columnSets: [
+      ["finished_good_code", "subcomponent_code", "subcomponent_description",
+       "subcomponent_unit_quantity", "subcomponent_uom", "substitute_for", "priority", "version_name"],
+      ["finished_good_code", "subcomponent_code", "subcomponent_name",
+       "subcomponent_unit_quantity", "subcomponent_uom", "substitute_for", "priority"],
+      ["finished_good_code", "subcomponent_code", "material_description",
+       "subcomponent_unit_quantity", "substitute_for", "priority"],
       ["finished_good_code", "subcomponent_code", "subcomponent_unit_quantity",
-       "subcomponent_uom", "substitute_for", "priority", "version_name"],
+       "subcomponent_uom", "substitute_for", "priority"],
       ["finished_good_code", "subcomponent_code", "subcomponent_unit_quantity",
-       "substitute_for", "priority"],
+       "substitute_for", "priority", "version_name"],
       ["finished_good_code", "subcomponent_code", "subcomponent_unit_quantity"]
     ]
   }
