@@ -1,5 +1,42 @@
 # PackPulse — Nulogy API Integration
 
+## Fast Local Prototyping
+
+Use this when you want to iterate on UI/UX quickly before pushing to production.
+
+1. Create `.env.local` in project root.
+2. Add:
+
+```bash
+VITE_DEV_BYPASS_AUTH=true
+VITE_DEV_BYPASS_EMAIL=dev@revcopack.local
+VITE_DEV_BYPASS_NAME=PackPulse Dev
+VITE_DEV_SEED_DATA=true
+VITE_GOOGLE_CLIENT_ID=optional_for_local_if_not_bypassing
+```
+
+3. Install dependencies:
+
+```bash
+npm install
+```
+
+4. Start dev server:
+
+```bash
+npm run dev -- --host 127.0.0.1 --port 5173
+```
+
+With `VITE_DEV_BYPASS_AUTH=true`, the app skips Google sign-in in local development and loads directly as a dev user.
+`VITE_DEV_SEED_DATA=true` is only honored in local dev (`npm run dev`) and is ignored in production builds for safety.
+
+By default, local Vite runs in manual mode (no automatic Nulogy/OpenDock bootstrap) because `/api/*` routes are not executed by Vite.
+If you want to force local auto-sync behavior, set:
+
+```bash
+VITE_DEV_AUTO_SYNC=true
+```
+
 ## What This Adds
 Adds a "Sync from Nulogy" panel to PackPulse's data upload screen. Pulls inventory, work orders, and BOMs directly from Nulogy's Operational Solution Reports API, eliminating the need for manual CSV exports.
 

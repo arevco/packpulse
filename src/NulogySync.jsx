@@ -20,8 +20,8 @@ const MAX_POLLS = 60; // max ~4 minutes of polling
 
 export default function NulogySync({ onDataLoaded, theme, autoStart = false, hideToggle = false }) {
   const C = theme;
-  const sans = "'IBM Plex Sans', -apple-system, sans-serif";
-  const mono = "'IBM Plex Mono', monospace";
+  const sans = "'Inter', -apple-system, sans-serif";
+  const mono = "'Roboto Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
 
   const [expanded, setExpanded] = useState(autoStart || hideToggle);
   const [connectionStatus, setConnectionStatus] = useState(null); // null | {configured, connected, message}
@@ -222,12 +222,12 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
 
   // Status icon helper
   const StatusIcon = ({ status }) => {
-    if (status === DONE) return <span style={{ color: C.ok, fontWeight: 700 }}>✓</span>;
-    if (status === ERROR) return <span style={{ color: C.bad, fontWeight: 700 }}>✗</span>;
-    if (status === IDLE) return <span style={{ color: C.dim }}>○</span>;
+    if (status === DONE) return <span role="img" aria-label="Complete" style={{ color: C.ok, fontWeight: 700 }}>✓</span>;
+    if (status === ERROR) return <span role="img" aria-label="Error" style={{ color: C.bad, fontWeight: 700 }}>✗</span>;
+    if (status === IDLE) return <span role="img" aria-label="Not started" style={{ color: C.dim }}>○</span>;
     // Spinning for active states
     return (
-      <span style={{
+      <span role="img" aria-label="In progress" style={{
         display: "inline-block", width: 14, height: 14,
         border: "2px solid " + C.border, borderTopColor: C.accent,
         borderRadius: "50%", animation: "nulogy-spin 0.8s linear infinite",
@@ -243,17 +243,26 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
 
   return (
     <div style={{ marginBottom: 16 }}>
-      <style>{`@keyframes nulogy-spin { to { transform: rotate(360deg); } }`}</style>
+      <style>{`
+        @keyframes nulogy-spin { to { transform: rotate(360deg); } }
+        @media (prefers-reduced-motion: reduce) {
+          * { animation: none !important; transition: none !important; }
+        }
+      `}</style>
 
       {!hideToggle && (
-        <div
+        <button
+          type="button"
+          aria-expanded={expanded}
+          aria-label={expanded ? "Collapse Nulogy sync panel" : "Expand Nulogy sync panel"}
           onClick={() => setExpanded(!expanded)}
           style={{
             display: "flex", alignItems: "center", gap: 10,
-            padding: "12px 14px", border: "1px solid " + (connectionStatus?.connected ? C.okLine : C.border),
+            width: "100%", padding: "12px 14px", border: "1px solid " + (connectionStatus?.connected ? C.okLine : C.border),
             borderRadius: expanded ? "8px 8px 0 0" : 8,
             cursor: "pointer",
-            background: connectionStatus?.connected ? C.okSoft : C.surface
+            background: connectionStatus?.connected ? C.okSoft : C.surface,
+            textAlign: "left"
           }}
         >
           <div style={{
@@ -277,11 +286,11 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
                 : "Pull inventory, WOs, and BOMs from Nulogy"}
             </div>
           </div>
-          <span style={{
+          <span aria-hidden="true" style={{
             width: 8, height: 8, borderRadius: "50%", background: connDot, flexShrink: 0
           }} />
-          <span style={{ fontSize: 13, color: C.dim, transform: expanded ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>▸</span>
-        </div>
+          <span aria-hidden="true" style={{ fontSize: 13, color: C.dim, transform: expanded ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>▸</span>
+        </button>
       )}
 
       {/* Expanded panel */}
@@ -293,8 +302,8 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
         }}>
           {/* Connection status */}
           {connectionStatus?.testing && (
-            <div style={{ fontSize: 13, color: C.dim, marginBottom: 12, display: "flex", alignItems: "center", gap: 6 }}>
-              <span style={{
+            <div style={{ fontSize: 13, color: C.dim, marginBottom: 12, display: "flex", alignItems: "center", gap: 6 }} aria-live="polite">
+              <span aria-hidden="true" style={{
                 display: "inline-block", width: 12, height: 12,
                 border: "2px solid " + C.border, borderTopColor: C.accent,
                 borderRadius: "50%", animation: "nulogy-spin 0.8s linear infinite"
@@ -341,7 +350,7 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
                 fontSize: 13, color: C.ok, marginBottom: 12,
                 display: "flex", alignItems: "center", gap: 6
               }}>
-                <span style={{ width: 6, height: 6, borderRadius: "50%", background: C.ok }} />
+                <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: "50%", background: C.ok }} />
                 Connected to {connectionStatus.url || "app.nulogy.net"}
                 {connectionStatus.user && (
                   <span style={{ color: C.dim }}> as {connectionStatus.user}</span>
@@ -368,7 +377,7 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
                           display: "flex", alignItems: "center", gap: 5
                         }}
                       >
-                        {on ? "✓" : ""} {rt.label}
+                        {on ? <span aria-hidden="true">✓</span> : ""} {rt.label}
                         {rt.required && <span style={{ fontSize: 11, opacity: 0.5 }}>req</span>}
                         {st.status === DONE && (
                           <span style={{ fontSize: 11, color: C.ok }}>{st.rowCount.toLocaleString()}</span>
@@ -381,7 +390,7 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
 
               {/* Sync progress */}
               {syncing && (
-                <div style={{ marginBottom: 12 }}>
+                <div style={{ marginBottom: 12 }} aria-live="polite">
                   {syncTypes.map(type => {
                     const st = reportStates[type];
                     const rt = REPORT_TYPES.find(r => r.key === type);
@@ -440,7 +449,7 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
 
                 {!syncing && Object.values(reportStates).some(s => s.status === DONE) && (
                   <span style={{ fontSize: 13, color: C.ok }}>
-                    ✓ Data loaded — click Analyze to continue
+                    <span aria-hidden="true">✓ </span>Data loaded — click Analyze to continue
                   </span>
                 )}
               </div>

@@ -288,7 +288,8 @@ function resolveDockName(appt, dockNameById) {
   var cleaned = normalizeDisplayName(rawDockValue, "");
   if (!cleaned) return "";
   if (isUuidLike(cleaned) && dockNameById[cleaned]) return dockNameById[cleaned];
-  return isUuidLike(cleaned) ? "" : cleaned;
+  // Keep UUID visible if lookup misses, so field is never blanked unexpectedly.
+  return cleaned;
 }
 
 function resolveLoadTypeName(appt, loadTypeNameById) {
@@ -300,37 +301,66 @@ function resolveLoadTypeName(appt, loadTypeNameById) {
   var cleaned = normalizeDisplayName(rawLoadType, "");
   if (!cleaned) return "";
   if (isUuidLike(cleaned) && loadTypeNameById[cleaned]) return loadTypeNameById[cleaned];
-  return isUuidLike(cleaned) ? "" : cleaned;
+  return cleaned;
 }
 
-function resolveCarrierName(appt) {
+function resolveCarrierName(appt, carrierNameById) {
   var rawCarrier =
     pickName(appt ? appt.carrier : null, ["name", "carrierName", "label"]) ||
     asCleanString(getNestedValue(appt, ["carrierName"])) ||
     asCleanString(getNestedValue(appt, ["carrier", "name"])) ||
+    asCleanString(getNestedValue(appt, ["carrier", "id"])) ||
+    asCleanString(getNestedValue(appt, ["carrierId"])) ||
     findStringDeepByKeys(appt, ["carrier"], 0);
-  return normalizeDisplayName(rawCarrier, "");
+  var cleaned = normalizeDisplayName(rawCarrier, "");
+  if (!cleaned) return "";
+  if (isUuidLike(cleaned) && carrierNameById && carrierNameById[cleaned]) return carrierNameById[cleaned];
+  return cleaned;
 }
 
-function normalizeAppointmentRow(appt, dockNameById, loadTypeNameById) {
+function resolveReferenceNumber(appt) {
+  var direct =
+    asCleanString(getNestedValue(appt, ["refNumber"])) ||
+    asCleanString(getNestedValue(appt, ["reference"])) ||
+    asCleanString(getNestedValue(appt, ["referenceNumber"])) ||
+    asCleanString(getNestedValue(appt, ["po"])) ||
+    asCleanString(getNestedValue(appt, ["poNumber"])) ||
+    asCleanString(getNestedValue(appt, ["purchaseOrder"])) ||
+    asCleanString(getNestedValue(appt, ["purchaseOrderNumber"]));
+  if (direct) return direct;
+  var cf = appt && appt.customFields && typeof appt.customFields === "object" ? appt.customFields : {};
+  var cfKeys = Object.keys(cf);
+  for (var i = 0; i < cfKeys.length; i++) {
+    var key = cfKeys[i];
+    var norm = key.toLowerCase();
+    if (norm.includes("po") || norm.includes("ref") || norm.includes("bol")) {
+      var val = flattenCustomFieldValue(cf[key]);
+      if (val) return val;
+    }
+  }
+  return "";
+}
+
+function normalizeAppointmentRow(appt, dockNameById, loadTypeNameById, carrierNameById) {
   var start = appt && appt.start ? appt.start : "";
   var end = appt && appt.end ? appt.end : "";
   var startLocal = toCentralDateTime(start);
   var endLocal = toCentralDateTime(end);
   var customFields = appt && appt.customFields && typeof appt.customFields === "object" ? appt.customFields : {};
-  var carrier = resolveCarrierName(appt);
+  var carrier = resolveCarrierName(appt, carrierNameById || {});
   var loadType = resolveLoadTypeName(appt, loadTypeNameById || {});
   var dock = resolveDockName(appt, dockNameById || {});
+  var referenceNumber = resolveReferenceNumber(appt);
 
   var row = {
-    PO: appt && appt.refNumber ? String(appt.refNumber) : "",
+    PO: referenceNumber,
     Status: appt && appt.status ? String(appt.status) : "",
     "Appt Date": startLocal.date,
     "Appt Time": startLocal.time,
     Carrier: carrier,
     "Load Type": loadType,
     Dock: dock,
-    "Reference / PO Number": appt && appt.refNumber ? String(appt.refNumber) : "",
+    "Reference / PO Number": referenceNumber,
     Start: startLocal.iso,
     End: endLocal.iso,
     "Duration (min)": calcDurationMinutes(start, end),
@@ -501,8 +531,9 @@ export default async function handler(req, res) {
 
     var dockNameById = await fetchLookupMap(baseUrl, token, "/dock", ["id", "dockId", "uuid"], ["name", "dockName", "label"]);
     var loadTypeNameById = await fetchLookupMap(baseUrl, token, "/loadtype", ["id", "loadTypeId", "uuid"], ["name", "label", "type"]);
+    var carrierNameById = await fetchLookupMap(baseUrl, token, "/carrier", ["id", "carrierId", "uuid"], ["name", "carrierName", "label"]);
     var rows = filtered.map(function (appt) {
-      return normalizeAppointmentRow(appt, dockNameById, loadTypeNameById);
+      return normalizeAppointmentRow(appt, dockNameById, loadTypeNameById, carrierNameById);
     });
 
     return res.status(200).json({
