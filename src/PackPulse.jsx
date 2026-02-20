@@ -138,6 +138,13 @@ export default function ProductionReadiness() {
     dockApiError ||
     (nulogySyncState && nulogySyncState.errorCount > 0)
   );
+  var goToDashboard = function() {
+    setShowDataSetup(false);
+    setTimeout(function() {
+      var el = document.getElementById("dashboard-main");
+      if (el && el.scrollIntoView) el.scrollIntoView({ behavior:"smooth", block:"start" });
+    }, 0);
+  };
 
   /* ====== MAIN RENDER ====== */
   return (
@@ -170,6 +177,14 @@ export default function ProductionReadiness() {
       )}
 
       {(showDataSetup || (!ds.mappingConfirmed && !showAutoBootstrap)) && (<div>
+        <div style={{ marginBottom:12, display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, flexWrap:"wrap" }}>
+          <div style={{ fontSize:12, color:C.dim }}>
+            Dashboard / <span style={{ color:C.bright, fontWeight:600 }}>Data Setup</span>
+          </div>
+          <button onClick={goToDashboard} style={{ padding:"6px 12px", borderRadius:6, border:"1px solid "+C.border, background:"transparent", color:C.dim, fontFamily:sans, fontSize:13, cursor:"pointer" }}>
+            Back to Dashboard
+          </button>
+        </div>
         {showAutoBootstrap && !showDataSetup && (
           <div style={{ marginBottom:16, border:"1px solid "+C.border, borderRadius:10, background:C.surface, padding:"12px 14px", display:"flex", flexWrap:"wrap", alignItems:"center", gap:10 }}>
             <div style={{ display:"flex", flexDirection:"column", gap:2, minWidth:260 }}>
@@ -291,7 +306,7 @@ export default function ProductionReadiness() {
         </div>}
       </div>)}
 
-      <div>
+      <div id="dashboard-main">
         <input ref={ds.invRefreshRef} type="file" accept=".csv" style={{display:"none"}} onChange={e => {ds.handleRefreshFile("inv",e.target.files[0]);e.target.value="";}} />
         <input ref={ds.bomRefreshRef} type="file" accept=".csv,.xlsx,.xls" style={{display:"none"}} onChange={e => {ds.handleRefreshFile("bom",e.target.files[0]);e.target.value="";}} />
         <input ref={ds.woRefreshRef} type="file" accept=".csv" style={{display:"none"}} onChange={e => {ds.handleRefreshFile("wo",e.target.files[0]);e.target.value="";}} />
