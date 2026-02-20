@@ -1,10 +1,10 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useTheme } from "../theme";
 import { useStyles } from "../hooks/useStyles";
 import { fmtDate, triggerDownload, buildExportHTML, normalizeStr } from "../utils";
 import Dot from "../components/Dot";
 
-export default function WorkOrdersView({ analysis, woStatuses, woCustomers }) {
+export default function WorkOrdersView({ analysis, woStatuses, woCustomers, prefilterCustomer, prefilterNonce }) {
   const { C, sans, mono } = useTheme();
   const { thC, tdN, tdM, tdToggle, thDS, tdDN, tdDM, truncate, inp, sel, pill } = useStyles();
 
@@ -15,6 +15,14 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers }) {
   const [sortField, setSortField] = useState("readiness");
   const [sortDir, setSortDir] = useState("desc");
   const [expandedWO, setExpandedWO] = useState(null);
+
+  useEffect(() => {
+    if (!prefilterCustomer) return;
+    setFilterCustomer(prefilterCustomer);
+    setFilterStatus("all");
+    setFilterWoStatus("all");
+    setSearchTerm("");
+  }, [prefilterCustomer, prefilterNonce]);
 
   var handleSort = f => { if (sortField === f) setSortDir(d => d==="asc"?"desc":"asc"); else { setSortField(f); setSortDir("desc"); } };
 

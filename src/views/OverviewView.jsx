@@ -3,7 +3,7 @@ import { useTheme } from "../theme";
 import { useStyles } from "../hooks/useStyles";
 import { fmtDate } from "../utils";
 
-export default function OverviewView({ analysis, woStatuses }) {
+export default function OverviewView({ analysis, woStatuses, onSelectCustomer }) {
   const { C, sans, mono } = useTheme();
   const { thS, tdN, tdM, inp, pill } = useStyles();
 
@@ -90,7 +90,9 @@ export default function OverviewView({ analysis, woStatuses }) {
           <tbody>
             {overview.byCustomer.map((c, i) => {
               var pct = c.orderQty > 0 ? Math.round(c.produced / c.orderQty * 100) : 0;
-              return <tr key={i} style={{ borderBottom:"1px solid "+C.border }}>
+              return <tr key={i} onClick={() => onSelectCustomer && onSelectCustomer(c.name)} style={{ borderBottom:"1px solid "+C.border, cursor:onSelectCustomer?"pointer":"default" }}
+                onMouseEnter={e => { if (onSelectCustomer) e.currentTarget.style.background = C.hover; }}
+                onMouseLeave={e => { if (onSelectCustomer) e.currentTarget.style.background = "transparent"; }}>
                 <td style={Object.assign({}, tdN, { fontWeight:600, color:C.bright })}>{c.name}</td>
                 <td style={Object.assign({}, tdM, { color:C.dim })}>{c.count}</td>
                 <td style={Object.assign({}, tdM, { color:C.bright })}>{c.orderQty.toLocaleString()}</td>

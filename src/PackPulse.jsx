@@ -30,6 +30,8 @@ export default function ProductionReadiness() {
   const [showDataSetup, setShowDataSetup] = useState(false);
   const [showDataControlsPanel, setShowDataControlsPanel] = useState(false);
   const [showDataStatusPanel, setShowDataStatusPanel] = useState(false);
+  const [workOrdersPrefilterCustomer, setWorkOrdersPrefilterCustomer] = useState("");
+  const [workOrdersPrefilterNonce, setWorkOrdersPrefilterNonce] = useState(0);
   const [autoBootstrapEnabled, setAutoBootstrapEnabled] = useState(true);
   const [syncNonce, setSyncNonce] = useState(0);
   const [nulogySyncState, setNulogySyncState] = useState(null);
@@ -159,6 +161,15 @@ export default function ProductionReadiness() {
       if (el && el.scrollIntoView) el.scrollIntoView({ behavior:"smooth", block:"start" });
     }, 0);
   };
+  var openWorkOrdersForCustomer = useCallback(function(customerName) {
+    setWorkOrdersPrefilterCustomer(customerName || "");
+    setWorkOrdersPrefilterNonce(function(v) { return v + 1; });
+    setActiveView("workorders");
+    setTimeout(function() {
+      var el = document.getElementById("dashboard-main");
+      if (el && el.scrollIntoView) el.scrollIntoView({ behavior:"smooth", block:"start" });
+    }, 0);
+  }, []);
 
   /* ====== MAIN RENDER ====== */
   return (
@@ -429,8 +440,8 @@ export default function ProductionReadiness() {
           )}
         </div>
 
-        {activeView === "overview" && <OverviewView analysis={analysisForUI} woStatuses={woStatusesForUI} />}
-        {activeView === "workorders" && <WorkOrdersView analysis={analysisForUI} woStatuses={woStatusesForUI} woCustomers={woCustomersForUI} />}
+        {activeView === "overview" && <OverviewView analysis={analysisForUI} woStatuses={woStatusesForUI} onSelectCustomer={openWorkOrdersForCustomer} />}
+        {activeView === "workorders" && <WorkOrdersView analysis={analysisForUI} woStatuses={woStatusesForUI} woCustomers={woCustomersForUI} prefilterCustomer={workOrdersPrefilterCustomer} prefilterNonce={workOrdersPrefilterNonce} />}
         {activeView === "criticalitems" && <CriticalItemsView rawCriticalItems={criticalItemsForUI} />}
         {activeView === "flags" && <FlagsView flags={analysisForUI.flags} />}
         {activeView === "pocheck" && <POCheckView poCheck={poCheck} />}
