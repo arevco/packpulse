@@ -11,6 +11,10 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
   const [ovDateFrom, setOvDateFrom] = useState("");
   const [ovDateTo, setOvDateTo] = useState("");
   const [lateCollapsed, setLateCollapsed] = useState(false);
+  const [custSortField, setCustSortField] = useState("remaining");
+  const [custSortDir, setCustSortDir] = useState("desc");
+  const [lateSortField, setLateSortField] = useState("daysLate");
+  const [lateSortDir, setLateSortDir] = useState("desc");
 
   var overview = useMemo(() => {
     if (!analysis) return null;
@@ -53,6 +57,46 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
 
   if (!overview) return null;
 
+  var onCustSort = function(field) {
+    if (custSortField === field) setCustSortDir(custSortDir === "asc" ? "desc" : "asc");
+    else { setCustSortField(field); setCustSortDir(field === "name" ? "asc" : "desc"); }
+  };
+  var onLateSort = function(field) {
+    if (lateSortField === field) setLateSortDir(lateSortDir === "asc" ? "desc" : "asc");
+    else { setLateSortField(field); setLateSortDir(field === "woNum" || field === "productSkuRaw" || field === "customer" || field === "dueDate" ? "asc" : "desc"); }
+  };
+
+  var sortedByCustomer = overview.byCustomer.slice().sort(function(a, b) {
+    var c = 0;
+    if (custSortField === "name") c = (a.name || "").localeCompare(b.name || "");
+    else if (custSortField === "count") c = (a.count || 0) - (b.count || 0);
+    else if (custSortField === "orderQty") c = (a.orderQty || 0) - (b.orderQty || 0);
+    else if (custSortField === "produced") c = (a.produced || 0) - (b.produced || 0);
+    else if (custSortField === "remaining") c = (a.remaining || 0) - (b.remaining || 0);
+    else if (custSortField === "canMake") c = (a.canMake || 0) - (b.canMake || 0);
+    else if (custSortField === "complete") {
+      var ap = a.orderQty > 0 ? Math.round(a.produced / a.orderQty * 100) : 0;
+      var bp = b.orderQty > 0 ? Math.round(b.produced / b.orderQty * 100) : 0;
+      c = ap - bp;
+    } else if (custSortField === "late") c = (a.late || 0) - (b.late || 0);
+    return custSortDir === "desc" ? -c : c;
+  });
+
+  var sortedLateWOs = overview.lateWOs.slice().sort(function(a, b) {
+    var c = 0;
+    if (lateSortField === "daysLate") c = (a.daysLate || 0) - (b.daysLate || 0);
+    else if (lateSortField === "woNum") c = (a.woNum || "").localeCompare(b.woNum || "");
+    else if (lateSortField === "productSkuRaw") c = (a.productSkuRaw || "").localeCompare(b.productSkuRaw || "");
+    else if (lateSortField === "customer") c = (a.customer || "").localeCompare(b.customer || "");
+    else if (lateSortField === "qtyToProduce") c = (a.qtyToProduce || 0) - (b.qtyToProduce || 0);
+    else if (lateSortField === "unitsRemaining") c = (a.unitsRemaining || 0) - (b.unitsRemaining || 0);
+    else if (lateSortField === "prodPct") c = (a.prodPct || 0) - (b.prodPct || 0);
+    else if (lateSortField === "readiness") c = (a.readiness || 0) - (b.readiness || 0);
+    else if (lateSortField === "maxRunnable") c = (a.maxRunnable || 0) - (b.maxRunnable || 0);
+    else if (lateSortField === "dueDate") c = (a.dueDate || "").localeCompare(b.dueDate || "");
+    return lateSortDir === "desc" ? -c : c;
+  });
+
   return (<div>
     <div style={{ display:"flex", gap:8, marginBottom:16, flexWrap:"wrap", alignItems:"center" }}>
       {["all"].concat(woStatuses).map(f => <button key={f} onClick={() => setOvWoStatus(f)} style={pill(ovWoStatus===f)}>{f==="all"?"All WO Status":f}</button>)}
@@ -83,12 +127,14 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
       <div style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, overflow:"hidden" }}>
         <table style={{ width:"100%", borderCollapse:"collapse" }}>
           <thead><tr style={{ background:C.raised }}>
-            {["Customer","WOs","Order Qty","Produced","Remaining","Can Make","Complete","Late"].map(h =>
-              <th key={h} style={thS}>{h}</th>
-            )}
+            {[{l:"Customer",f:"name"},{l:"WOs",f:"count"},{l:"Order Qty",f:"orderQty"},{l:"Produced",f:"produced"},{l:"Remaining",f:"remaining"},{l:"Can Make",f:"canMake"},{l:"Complete",f:"complete"},{l:"Late",f:"late"}].map(function(col) {
+              var active = custSortField === col.f;
+              var arrow = active ? (custSortDir === "asc" ? " \u2191" : " \u2193") : "";
+              return <th key={col.f} onClick={function() { onCustSort(col.f); }} style={Object.assign({}, thS, { cursor:"pointer", color:active ? C.accent : thS.color })}>{col.l + arrow}</th>;
+            })}
           </tr></thead>
           <tbody>
-            {overview.byCustomer.map((c, i) => {
+            {sortedByCustomer.map((c, i) => {
               var pct = c.orderQty > 0 ? Math.round(c.produced / c.orderQty * 100) : 0;
               return <tr key={i} onClick={() => onSelectCustomer && onSelectCustomer(c.name)} style={{ borderBottom:"1px solid "+C.border, cursor:onSelectCustomer?"pointer":"default" }}
                 onMouseEnter={e => { if (onSelectCustomer) e.currentTarget.style.background = C.hover; }}
@@ -123,12 +169,14 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
       {!lateCollapsed && <div style={{ background:C.surface, border:"1px solid "+C.badLine, borderRadius:8, overflow:"hidden" }}>
         <table style={{ width:"100%", borderCollapse:"collapse" }}>
           <thead><tr style={{ background:C.raised }}>
-            {["Days Late","WO#","Product","Customer","Order Qty","Remaining","Complete","Ready","Can Make","Due Date"].map(h =>
-              <th key={h} style={thS}>{h}</th>
-            )}
+            {[{l:"Days Late",f:"daysLate"},{l:"WO#",f:"woNum"},{l:"Product",f:"productSkuRaw"},{l:"Customer",f:"customer"},{l:"Order Qty",f:"qtyToProduce"},{l:"Remaining",f:"unitsRemaining"},{l:"Complete",f:"prodPct"},{l:"Ready",f:"readiness"},{l:"Can Make",f:"maxRunnable"},{l:"Due Date",f:"dueDate"}].map(function(col) {
+              var active = lateSortField === col.f;
+              var arrow = active ? (lateSortDir === "asc" ? " \u2191" : " \u2193") : "";
+              return <th key={col.f} onClick={function() { onLateSort(col.f); }} style={Object.assign({}, thS, { cursor:"pointer", color:active ? C.accent : thS.color })}>{col.l + arrow}</th>;
+            })}
           </tr></thead>
           <tbody>
-            {overview.lateWOs.map((wo, i) => <tr key={i} style={{ borderBottom:"1px solid "+C.border }}>
+            {sortedLateWOs.map((wo, i) => <tr key={i} style={{ borderBottom:"1px solid "+C.border }}>
               <td style={Object.assign({}, tdM, { fontWeight:700, color:C.bad })}>{wo.daysLate}d</td>
               <td style={Object.assign({}, tdM, { fontWeight:600, color:C.bright })}>{wo.woNum}</td>
               <td style={tdM}>{wo.productSkuRaw}</td>
