@@ -27,13 +27,16 @@ export default function ProductionReadiness() {
 
   const [activeView, setActiveView] = useState("overview");
   const [showSettings, setShowSettings] = useState(false);
+  const [showDataSetup, setShowDataSetup] = useState(false);
   const [autoBootstrapEnabled, setAutoBootstrapEnabled] = useState(true);
+  const [syncNonce, setSyncNonce] = useState(0);
+  const [nulogySyncState, setNulogySyncState] = useState(null);
   const [autoDockAttempted, setAutoDockAttempted] = useState(false);
   const [dockApiLoading, setDockApiLoading] = useState(false);
   const [dockApiError, setDockApiError] = useState("");
   const [dockApiInfo, setDockApiInfo] = useState("");
 
-  var showAutoBootstrap = !ds.mappingConfirmed && autoBootstrapEnabled;
+  var showAutoBootstrap = autoBootstrapEnabled;
 
   var fmtTs = ts => { if (!ts) return "--"; var d = Date.now() - ts; return d < 60000 ? "now" : d < 3600000 ? Math.floor(d/60000) + "m" : d < 86400000 ? Math.floor(d/3600000) + "h" : Math.floor(d/86400000) + "d"; };
   var staleLevel = (ts, cad) => { if (!ts) return "stale"; var h = (Date.now()-ts)/3600000; if (cad==="daily") return h<8?"fresh":h<24?"stale":"old"; if (cad==="rare") return h<720?"fresh":"stale"; return h<168?"fresh":"stale"; };
@@ -108,27 +111,54 @@ export default function ProductionReadiness() {
         </div>
       </header>
       <main style={{ padding:"20px 28px", maxWidth:1440, margin:"0 auto" }}>
+      {showAutoBootstrap && (
+        <NulogySync
+          key={"auto-sync-" + syncNonce}
+          onDataLoaded={handleNulogyData}
+          theme={C}
+          autoStart
+          hideToggle
+          silent
+          onSyncStateChange={setNulogySyncState}
+        />
+      )}
 
       {!ds.mappingConfirmed && (<div>
-        <div style={{ marginBottom:16 }}>
-          <div style={{ fontSize:15, fontWeight:600, color:C.bright }}>{showAutoBootstrap ? "Syncing Live Data" : "Data Sources"}</div>
-          <div style={{ fontSize:14, color:C.dim, marginTop:2 }}>{showAutoBootstrap ? "Pulling Nulogy + OpenDock feeds and entering the dashboard automatically." : "Sync from Nulogy or upload CSV files to begin."}</div>
-        </div>
-        <NulogySync onDataLoaded={handleNulogyData} theme={C} autoStart={showAutoBootstrap} hideToggle={showAutoBootstrap} />
-        {showAutoBootstrap && (
-          <div style={{ marginTop:10, marginBottom:16, display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
-            <button onClick={fetchOpenDockApi} disabled={dockApiLoading} style={{ padding:"8px 14px", borderRadius:6, border:"1px solid "+(dockApiLoading?C.border:C.accentLine), background:dockApiLoading?C.raised:C.accentSoft, color:dockApiLoading?C.dim:C.accent, fontFamily:sans, fontSize:14, fontWeight:600, cursor:dockApiLoading?"not-allowed":"pointer" }}>
-              {dockApiLoading ? "Loading OpenDock..." : "Refresh OpenDock API"}
+        {showAutoBootstrap && !showDataSetup && (
+          <div style={{ marginBottom:16, border:"1px solid "+C.border, borderRadius:10, background:C.surface, padding:"12px 14px", display:"flex", flexWrap:"wrap", alignItems:"center", gap:10 }}>
+            <div style={{ display:"flex", flexDirection:"column", gap:2, minWidth:260 }}>
+              <div style={{ fontSize:14, fontWeight:600, color:C.bright }}>
+                Syncing live data in background
+              </div>
+              <div style={{ fontSize:12, color:C.dim }}>
+                {nulogySyncState && nulogySyncState.syncing
+                  ? "Pulling Nulogy + OpenDock now. You will enter the dashboard automatically."
+                  : "Preparing live feeds. You can open manual setup at any time."}
+              </div>
+            </div>
+            {dockApiLoading && <span style={pill("info")}>Loading OpenDock…</span>}
+            {nulogySyncState && nulogySyncState.syncing && <span style={pill("info")}>Loading Nulogy…</span>}
+            {dockApiInfo && <span style={pill("ok")}>{dockApiInfo}</span>}
+            {dockApiError && <span style={pill("bad")}>OpenDock: {dockApiError}</span>}
+            {nulogySyncState && nulogySyncState.errorCount > 0 && <span style={pill("bad")}>Nulogy sync has errors</span>}
+            {!dockApiLoading && (!nulogySyncState || !nulogySyncState.syncing) && (
+              <button onClick={() => { setDockApiInfo(""); setDockApiError(""); setAutoDockAttempted(false); setSyncNonce(n => n + 1); }} style={{ padding:"6px 12px", borderRadius:6, border:"1px solid "+C.border, background:"transparent", color:C.dim, fontFamily:sans, fontSize:13, cursor:"pointer" }}>
+                Retry Sync
+              </button>
+            )}
+            <button onClick={() => setShowDataSetup(true)} style={{ padding:"6px 12px", borderRadius:6, border:"1px solid "+C.border, background:"transparent", color:C.dim, fontFamily:sans, fontSize:13, cursor:"pointer" }}>
+              Open Data Setup
             </button>
-            {dockApiInfo && <span style={{ fontSize:12, color:C.ok }}>{dockApiInfo}</span>}
-            {dockApiError && <span style={{ fontSize:12, color:C.bad }}>OpenDock API error: {dockApiError}</span>}
-            <button onClick={() => setAutoBootstrapEnabled(false)} style={{ padding:"6px 12px", borderRadius:6, border:"1px solid "+C.border, background:"transparent", color:C.dim, fontFamily:sans, fontSize:13, cursor:"pointer" }}>
+            <button onClick={() => { setAutoBootstrapEnabled(false); setShowDataSetup(true); }} style={{ padding:"6px 12px", borderRadius:6, border:"1px solid "+C.border, background:"transparent", color:C.dim, fontFamily:sans, fontSize:13, cursor:"pointer" }}>
               Switch to Manual Upload
             </button>
           </div>
         )}
-        {!showAutoBootstrap && <div style={{ fontSize:13, fontWeight:600, color:C.dim, textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>Or upload files manually</div>}
-        {!showAutoBootstrap && (<>
+        {(!showAutoBootstrap || showDataSetup) && <div style={{ fontSize:13, fontWeight:600, color:C.dim, textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>Data setup</div>}
+        {(!showAutoBootstrap || showDataSetup) && (
+          <NulogySync onDataLoaded={handleNulogyData} theme={C} autoStart={false} hideToggle={false} />
+        )}
+        {(!showAutoBootstrap || showDataSetup) && (<>
         <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(230px, 1fr))", gap:8, marginBottom:20 }}>
           <FileUploader label="Inventory" uploaded={!!ds.inventory} fileName={ds.invFileName} onData={(d,n) => {ds.setInventory(d);ds.setInvFileName(n);ds.setInvTimestamp(new Date());}} subtitle="Daily stock levels (.csv)" />
           <FileUploader label="Work Orders" uploaded={!!ds.workOrders} fileName={ds.woFileName} onData={(d,n) => {ds.setWorkOrders(d);ds.setWoFileName(n);ds.setWoTimestamp(new Date());}} subtitle="Open work orders (.csv)" />
@@ -165,7 +195,7 @@ export default function ProductionReadiness() {
           </div>
         )}
 
-        {!showAutoBootstrap && <div style={{ marginTop:28, borderTop:"1px solid "+C.border, paddingTop:24 }}>
+        {(!showAutoBootstrap || showDataSetup) && <div style={{ marginTop:28, borderTop:"1px solid "+C.border, paddingTop:24 }}>
           <div style={{ fontSize:15, fontWeight:700, color:C.bright, marginBottom:16 }}>How PackPulse Works</div>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(280px, 1fr))", gap:16 }}>
 
@@ -221,6 +251,16 @@ export default function ProductionReadiness() {
         <input ref={ds.woRefreshRef} type="file" accept=".csv" style={{display:"none"}} onChange={e => {ds.handleRefreshFile("wo",e.target.files[0]);e.target.value="";}} />
         <input ref={ds.edrRefreshRef} type="file" accept=".xlsx,.xls,.csv" style={{display:"none"}} onChange={e => {ds.handleRefreshFile("edr",e.target.files[0]);e.target.value="";}} />
         <input ref={ds.dockRefreshRef} type="file" accept=".xlsx,.xls,.csv" style={{display:"none"}} onChange={e => {ds.handleRefreshFile("dock",e.target.files[0]);e.target.value="";}} />
+
+        {(nulogySyncState && nulogySyncState.syncing) || dockApiLoading ? (
+          <div style={{ marginBottom:10, border:"1px solid "+C.border, borderRadius:8, background:C.surface, padding:"8px 10px", display:"flex", flexWrap:"wrap", alignItems:"center", gap:8 }}>
+            <span style={{ fontSize:13, color:C.dim }}>
+              Refreshing live data in background...
+            </span>
+            {nulogySyncState && nulogySyncState.syncing && <span style={pill("info")}>Nulogy</span>}
+            {dockApiLoading && <span style={pill("info")}>OpenDock</span>}
+          </div>
+        ) : null}
 
         <div style={{ display:"flex", gap:6, marginBottom:16, flexWrap:"wrap", alignItems:"center" }}>
           {[

@@ -18,7 +18,7 @@ const REPORT_TYPES = [
 const POLL_INTERVAL = 4000; // 4 seconds between polls
 const MAX_POLLS = 60; // max ~4 minutes of polling
 
-export default function NulogySync({ onDataLoaded, theme, autoStart = false, hideToggle = false }) {
+export default function NulogySync({ onDataLoaded, theme, autoStart = false, hideToggle = false, silent = false, onSyncStateChange }) {
   const C = theme;
   const sans = "'Inter', -apple-system, sans-serif";
   const mono = "'Roboto Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
@@ -220,6 +220,19 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
     });
   }, []);
 
+  useEffect(() => {
+    if (!onSyncStateChange) return;
+    var doneCount = Object.values(reportStates).filter(function(r) { return r.status === DONE; }).length;
+    var errorCount = Object.values(reportStates).filter(function(r) { return r.status === ERROR; }).length;
+    onSyncStateChange({
+      syncing: syncing,
+      connectionStatus: connectionStatus,
+      doneCount: doneCount,
+      errorCount: errorCount,
+      reportStates: reportStates
+    });
+  }, [onSyncStateChange, syncing, connectionStatus, reportStates]);
+
   // Status icon helper
   const StatusIcon = ({ status }) => {
     if (status === DONE) return <span role="img" aria-label="Complete" style={{ color: C.ok, fontWeight: 700 }}>✓</span>;
@@ -240,6 +253,8 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
     : connectionStatus?.configured ? C.warn
     : connectionStatus?.testing ? C.dim
     : C.border;
+
+  if (silent) return null;
 
   return (
     <div style={{ marginBottom: 16 }}>
