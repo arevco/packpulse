@@ -76,7 +76,20 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
         if (aMissing && bMissing) return 0;
         c = aDate.getTime() - bDate.getTime();
         return sortDir==="desc" ? -c : c;
-      } else if (sortField==="status") c=(a.status||"").localeCompare(b.status||"");
+      } else if (sortField==="status") {
+        c = (a.status||"").localeCompare(b.status||"");
+        if (c === 0) {
+          // Deterministic secondary sort so repeated clicks always visibly re-order.
+          var aDue = parseDateValue(a.dueDate);
+          var bDue = parseDateValue(b.dueDate);
+          var aDueMissing = !aDue;
+          var bDueMissing = !bDue;
+          if (aDueMissing && !bDueMissing) c = 1;
+          else if (!aDueMissing && bDueMissing) c = -1;
+          else if (!aDueMissing && !bDueMissing) c = aDue.getTime() - bDue.getTime();
+          if (c === 0) c = (a.woNum || "").localeCompare(b.woNum || "");
+        }
+      }
       return sortDir==="desc"?-c:c;
     });
     return r;
