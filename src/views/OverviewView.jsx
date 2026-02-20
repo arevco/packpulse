@@ -8,6 +8,7 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
   const { thS, tdN, tdM, inp, pill } = useStyles();
 
   const [ovWoStatus, setOvWoStatus] = useState("all");
+  const [ovCustomer, setOvCustomer] = useState("all");
   const [ovDateFrom, setOvDateFrom] = useState("");
   const [ovDateTo, setOvDateTo] = useState("");
   const [lateCollapsed, setLateCollapsed] = useState(false);
@@ -21,6 +22,8 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
     var r = analysis.results.slice();
     // WO status filter
     if (ovWoStatus !== "all") r = r.filter(w => w.status === ovWoStatus);
+    // Customer filter
+    if (ovCustomer !== "all") r = r.filter(function(w) { return (w.customer || "Unassigned") === ovCustomer; });
     // Date range filter on due date
     if (ovDateFrom) { var from = new Date(ovDateFrom); from.setHours(0,0,0,0); r = r.filter(w => { if (!w.dueDate) return false; var d = new Date(w.dueDate); return !isNaN(d) && d >= from; }); }
     if (ovDateTo) { var to = new Date(ovDateTo); to.setHours(23,59,59,999); r = r.filter(w => { if (!w.dueDate) return false; var d = new Date(w.dueDate); return !isNaN(d) && d <= to; }); }
@@ -53,7 +56,14 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
     var completionPct = totalOrderQty > 0 ? Math.round(totalProduced / totalOrderQty * 100) : 0;
     var custArr = Object.entries(byCustomer).map(([name, d]) => Object.assign({ name:name }, d)).sort((a,b) => b.remaining - a.remaining);
     return { totalOrderQty:totalOrderQty, totalProduced:totalProduced, totalRemaining:totalRemaining, totalCanMake:totalCanMake, totalEstHours:Math.round(totalEstHours*10)/10, completionPct:completionPct, lateWOs:lateWOs, byCustomer:custArr, woCount:woCount, noDueDate:noDueDate };
-  }, [analysis, ovWoStatus, ovDateFrom, ovDateTo]);
+  }, [analysis, ovWoStatus, ovCustomer, ovDateFrom, ovDateTo]);
+
+  var customerOptions = useMemo(function() {
+    if (!analysis || !analysis.results) return [];
+    var set = new Set();
+    analysis.results.forEach(function(w) { set.add(w.customer || "Unassigned"); });
+    return Array.from(set).sort();
+  }, [analysis]);
 
   if (!overview) return null;
 
@@ -100,11 +110,15 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
   return (<div>
     <div style={{ display:"flex", gap:8, marginBottom:16, flexWrap:"wrap", alignItems:"center" }}>
       {["all"].concat(woStatuses).map(f => <button key={f} onClick={() => setOvWoStatus(f)} style={pill(ovWoStatus===f)}>{f==="all"?"All WO Status":f}</button>)}
+      <select value={ovCustomer} onChange={function(e) { setOvCustomer(e.target.value); }} style={Object.assign({}, inp, { width:220 })}>
+        <option value="all">All Customers</option>
+        {customerOptions.map(function(c) { return <option key={c} value={c}>{c}</option>; })}
+      </select>
       <span style={{ fontSize:13, color:C.dim, marginLeft:4 }}>Due from</span>
       <input type="date" value={ovDateFrom} onChange={e => setOvDateFrom(e.target.value)} style={Object.assign({}, inp, { width:140 })} />
       <span style={{ fontSize:13, color:C.dim }}>to</span>
       <input type="date" value={ovDateTo} onChange={e => setOvDateTo(e.target.value)} style={Object.assign({}, inp, { width:140 })} />
-      {(ovWoStatus!=="all" || ovDateFrom || ovDateTo) && <button onClick={() => {setOvWoStatus("all");setOvDateFrom("");setOvDateTo("");}} style={Object.assign({}, pill(false), { fontSize:12, color:C.bad, borderColor:C.badLine })}>Clear</button>}
+      {(ovWoStatus!=="all" || ovCustomer!=="all" || ovDateFrom || ovDateTo) && <button onClick={() => {setOvWoStatus("all");setOvCustomer("all");setOvDateFrom("");setOvDateTo("");}} style={Object.assign({}, pill(false), { fontSize:12, color:C.bad, borderColor:C.badLine })}>Clear</button>}
       <span style={{ fontSize:13, color:C.dim, marginLeft:4 }}>{overview.woCount} of {analysis.results.length} WOs{overview.noDueDate > 0 && ovDateFrom ? " ("+overview.noDueDate+" excluded \u2014 no due date)" : ""}</span>
     </div>
     <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(150px, 1fr))", gap:10, marginBottom:20 }}>
