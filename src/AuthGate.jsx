@@ -16,21 +16,34 @@ export default function AuthGate({ children }) {
   const btnRef = useRef(null);
   const initializedRef = useRef(false);
 
-  // Check existing session on mount
-  useEffect(() => {
+  const checkSession = useCallback(async (opts = {}) => {
+    const silent = !!opts.silent;
     if (DEV_BYPASS_AUTH) {
       setUser(DEV_BYPASS_USER);
       setChecking(false);
       return;
     }
-    fetch("/api/auth/check", { credentials: "include" })
-      .then(r => r.json())
-      .then(data => {
-        if (data.authenticated) setUser(data.user);
-        setChecking(false);
-      })
-      .catch(() => setChecking(false));
+    if (!silent) setChecking(true);
+    try {
+      const r = await fetch("/api/auth/check", { credentials: "include" });
+      const data = await r.json();
+      if (data && data.authenticated) {
+        setUser(data.user || null);
+        setError("");
+      } else if (!silent) {
+        setUser(null);
+      }
+    } catch (_) {
+      if (!silent) setUser(null);
+    } finally {
+      if (!silent) setChecking(false);
+    }
   }, []);
+
+  // Check existing session on mount
+  useEffect(() => {
+    checkSession();
+  }, [checkSession]);
 
   const handleCredentialResponse = useCallback(async (response) => {
     setError("");
@@ -43,6 +56,8 @@ export default function AuthGate({ children }) {
       });
       const data = await res.json();
       if (res.ok && data.ok) {
+        // Re-check from server so cookie state is the source of truth.
+        await checkSession({ silent: true });
         setUser({ email: data.email, name: data.name, picture: data.picture });
       } else {
         setError(data.error || "Sign-in failed");
@@ -50,7 +65,7 @@ export default function AuthGate({ children }) {
     } catch (err) {
       setError("Connection error. Please try again.");
     }
-  }, []);
+  }, [checkSession]);
 
   // Initialize Google Sign-In once script is loaded AND button div is ready
   const tryInitGoogle = useCallback(() => {
@@ -110,6 +125,21 @@ export default function AuthGate({ children }) {
     return () => clearInterval(interval);
   }, [user, checking, tryInitGoogle]);
 
+  // Mobile reliability: if auth completes in another context (popup/webview/email),
+  // refresh session on focus/visibility and with light polling while logged out.
+  useEffect(() => {
+    if (user || checking) return;
+    const refresh = () => checkSession({ silent: true });
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    const interval = setInterval(refresh, 5000);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+      clearInterval(interval);
+    };
+  }, [user, checking, checkSession]);
+
   const handleLogout = useCallback(async () => {
     if (DEV_BYPASS_AUTH) {
       setUser(DEV_BYPASS_USER);
@@ -164,6 +194,12 @@ export default function AuthGate({ children }) {
               {error}
             </div>
           )}
+          <button
+            onClick={() => checkSession()}
+            style={{ marginTop: 12, padding: "8px 12px", borderRadius: 8, border: "1px solid #d1d5db", background: "#fff", color: "#374151", fontSize: 13, cursor: "pointer" }}
+          >
+            I verified, continue
+          </button>
           <div style={{ marginTop: 20, fontSize: 13, color: "#6b7280" }}>
             Restricted to authorized accounts
           </div>
