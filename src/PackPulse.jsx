@@ -38,6 +38,7 @@ export default function ProductionReadiness() {
   const [dockApiLoading, setDockApiLoading] = useState(false);
   const [dockApiError, setDockApiError] = useState("");
   const [dockApiInfo, setDockApiInfo] = useState("");
+  const [syncVisualPct, setSyncVisualPct] = useState(0);
 
   var showAutoBootstrap = autoBootstrapEnabled;
 
@@ -149,6 +150,32 @@ export default function ProductionReadiness() {
     dockApiError ||
     (nulogySyncState && nulogySyncState.errorCount > 0)
   );
+  var isActivelySyncing = showAutoBootstrap && (
+    !ds.mappingConfirmed ||
+    dockApiLoading ||
+    (nulogySyncState && nulogySyncState.syncing)
+  );
+  var syncBarColor = isActivelySyncing ? C.accent : C.ok;
+  var syncPctColor = C.dim;
+  useEffect(() => {
+    if (!showSyncBanner) {
+      setSyncVisualPct(0);
+      return;
+    }
+    if (!isActivelySyncing) {
+      setSyncVisualPct(100);
+      return;
+    }
+    var id = setInterval(function() {
+      setSyncVisualPct(function(prev) {
+        var floor = Math.max(8, Math.min(88, syncProgress.pct));
+        var base = Math.max(prev, floor);
+        if (base >= 96) return 96;
+        return Math.min(96, base + (Math.random() * 4 + 1));
+      });
+    }, 420);
+    return function() { clearInterval(id); };
+  }, [showSyncBanner, isActivelySyncing, syncProgress.pct]);
   useEffect(() => {
     if (!ds.mappingConfirmed || !showDataSetup) return;
     setShowDataSetup(false);
@@ -340,22 +367,22 @@ export default function ProductionReadiness() {
           <div style={{ marginBottom:10, border:"1px solid "+C.border, borderRadius:8, background:C.surface, padding:"8px 10px", display:"flex", flexWrap:"wrap", alignItems:"center", gap:8 }}>
             <span style={{ fontSize:13, fontWeight:600, color:C.bright }}>Live Sync</span>
             <span style={{ fontSize:12, color:C.dim }}>
-              {nulogySyncState && nulogySyncState.syncing ? "Syncing data..." : "Up to date"}
+              {isActivelySyncing ? "Syncing data..." : "Up to date"}
             </span>
-            <span style={{ fontSize:12, color:C.dim }}>
-              {syncProgress.done}/{syncProgress.total}
+            <span style={{ fontSize:12, color:syncPctColor, minWidth:44, textAlign:"right", fontVariantNumeric:"tabular-nums" }}>
+              {Math.round(syncVisualPct)}%
             </span>
             <div style={{ width:180, height:6, borderRadius:999, background:C.raised, overflow:"hidden", border:"1px solid "+C.border }}>
-              <div style={{ width:syncProgress.pct+"%", height:"100%", background:syncProgress.errors>0?C.bad:C.accent, transition:"width 240ms ease" }} />
+              <div style={{ width:syncVisualPct+"%", height:"100%", background:syncBarColor, transition:"width 280ms ease" }} />
             </div>
-            {syncProgress.pct < 100 && (
-              <span style={{ fontSize:12, color:syncProgress.errors>0?C.bad:C.dim }}>
+            {syncVisualPct < 100 && (
+              <span style={{ fontSize:12, color:C.dim }}>
                 {syncProgress.activeText}
               </span>
             )}
             {nulogySyncState && nulogySyncState.syncing && <span style={pill("info")}>Nulogy</span>}
             {dockApiLoading && <span style={pill("info")}>OpenDock</span>}
-            {dockApiInfo && syncProgress.pct < 100 && <span style={pill("ok")}>{dockApiInfo}</span>}
+            {dockApiInfo && syncVisualPct < 100 && <span style={pill("ok")}>{dockApiInfo}</span>}
             {dockApiError && <span style={pill("bad")}>OpenDock: {dockApiError}</span>}
             {nulogySyncState && nulogySyncState.errorCount > 0 && <span style={pill("bad")}>Nulogy sync has errors</span>}
             {!dockApiLoading && (!nulogySyncState || !nulogySyncState.syncing) && !ds.mappingConfirmed && (
