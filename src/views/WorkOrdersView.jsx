@@ -101,7 +101,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
   var SortTh = function(props) { return <th onClick={() => handleSort(props.field)} style={Object.assign({}, thC(sortField===props.field), props.style||{})}>{props.children}{sortField===props.field ? (sortDir==="asc" ? " \u2191" : " \u2193") : ""}</th>; };
 
   var renderWORows = () => {
-    if (filteredResults.length === 0) return <tr><td colSpan={16} style={{ padding:36, textAlign:"center", color:C.dim, fontSize:14 }}>No work orders match filters.</td></tr>;
+    if (filteredResults.length === 0) return <tr><td colSpan={14} style={{ padding:36, textAlign:"center", color:C.dim, fontSize:14 }}>No work orders match filters.</td></tr>;
     var out = [];
     filteredResults.forEach((wo, idx) => {
       var isX = expandedWO === wo.woNum + idx;
@@ -114,8 +114,6 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
           <td style={Object.assign({}, tdN, { color:C.dim }, truncate(140))}>{wo.customer || "--"}</td>
           <td style={tdN}><Dot status={wo.runStatus} />{wo.status ? <span style={{ marginLeft:6, fontSize:12, color:C.dim }}>{wo.status}</span> : ""}</td>
           <td style={Object.assign({}, tdM, { color:C.text })}>{fmtDate(wo.dueDate)}</td>
-          <td style={Object.assign({}, tdM, { color:C.dim, fontSize:12 })}>{fmtDate(wo.plannedStart)}</td>
-          <td style={Object.assign({}, tdM, { color:C.dim, fontSize:12 })}>{fmtDate(wo.plannedEnd)}</td>
           <td style={Object.assign({}, tdM, { color:C.bright })}>{wo.qtyToProduce.toLocaleString()}</td>
           <td style={Object.assign({}, tdM, { color:wo.unitsProduced>0?C.ok:C.dim })}>{wo.unitsProduced>0?wo.unitsProduced.toLocaleString():"--"}</td>
           <td style={Object.assign({}, tdM, { color:C.bright })}>{wo.unitsRemaining.toLocaleString()}</td>
@@ -128,6 +126,12 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
       if (isX) {
         var details = [];
         if (wo.reference1) details.push(<div key="ref" style={{ fontSize:13, color:C.text, marginBottom:8 }}><span style={{ fontSize:12, fontWeight:600, color:C.dim, textTransform:"uppercase", letterSpacing:0.6, marginRight:6 }}>Notes</span>{wo.reference1}</div>);
+        if (wo.plannedStart || wo.plannedEnd) details.push(
+          <div key="sched" style={{ fontSize:13, color:C.dim, marginBottom:8, display:"flex", gap:16, flexWrap:"wrap" }}>
+            <span>Start: <span style={{ color:C.bright, fontFamily:mono }}>{fmtDate(wo.plannedStart)}</span></span>
+            <span>End: <span style={{ color:C.bright, fontFamily:mono }}>{fmtDate(wo.plannedEnd)}</span></span>
+          </div>
+        );
         if (wo.unitsPerHour > 0 || wo.standardPeople > 0) details.push(<div key="ops" style={{ fontSize:13, color:C.dim, marginBottom:8, display:"flex", gap:16 }}>
           {wo.unitsPerHour > 0 && <span><span style={{ fontWeight:600, color:C.bright }}>{wo.unitsPerHour}</span> units/hr</span>}
           {wo.standardPeople > 0 && <span><span style={{ fontWeight:600, color:C.bright }}>{wo.standardPeople}</span> crew</span>}
@@ -172,7 +176,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
           </div>
         );
         out.push(
-          <tr key={"d"+idx}><td colSpan={16} style={{ padding:"0 12px 14px 36px", background:C.raised }}>
+          <tr key={"d"+idx}><td colSpan={14} style={{ padding:"0 12px 14px 36px", background:C.raised }}>
             {details}
           </td></tr>
         );
@@ -207,8 +211,6 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
             <SortTh field="customer">Customer</SortTh>
             <SortTh field="status">WO Status</SortTh>
             <SortTh field="dueDate">Due</SortTh>
-            <SortTh field="plannedStart">Start</SortTh>
-            <SortTh field="plannedEnd">End</SortTh>
             <SortTh field="qty">Order Qty</SortTh>
             <SortTh field="produced">Produced</SortTh>
             <SortTh field="remaining">Remaining</SortTh>
