@@ -78,7 +78,7 @@ export default function OverviewView({ analysis, woStatuses }) {
       </div>)}
     </div>
 
-    {overview.byCustomer.length > 0 && (<div style={{ marginBottom:20 }}>
+    <div style={{ marginBottom:20 }}>
       <div style={{ fontSize:14, fontWeight:600, color:C.bright, marginBottom:10 }}>By Customer</div>
       <div style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, overflow:"hidden" }}>
         <table style={{ width:"100%", borderCollapse:"collapse" }}>
@@ -101,12 +101,19 @@ export default function OverviewView({ analysis, woStatuses }) {
                 <td style={Object.assign({}, tdM, { fontWeight:600, color:c.late>0?C.bad:C.dim })}>{c.late > 0 ? c.late : "--"}</td>
               </tr>;
             })}
+            {overview.byCustomer.length === 0 && (
+              <tr>
+                <td colSpan={8} style={{ padding:24, textAlign:"center", color:C.dim }}>
+                  No customer data available.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
-    </div>)}
+    </div>
 
-    {overview.lateWOs.length > 0 && (<div style={{ marginBottom:20 }}>
+    <div style={{ marginBottom:20 }}>
       <div onClick={() => setLateCollapsed(!lateCollapsed)} style={{ fontSize:14, fontWeight:600, color:C.bad, marginBottom:lateCollapsed?0:10, display:"flex", alignItems:"center", gap:8, cursor:"pointer", userSelect:"none" }}>
         <span style={{ fontSize:13, color:C.dim }}>{lateCollapsed ? "\u25B8" : "\u25BE"}</span>
         <span style={{ fontSize:16 }}>{"\u26A0"}</span> Past Due Work Orders ({overview.lateWOs.length})
@@ -131,9 +138,16 @@ export default function OverviewView({ analysis, woStatuses }) {
               <td style={Object.assign({}, tdM, { fontWeight:600, color:wo.runStatus==="ready"?C.ok:wo.maxRunnable>0?C.warn:C.bad })}>{wo.runStatus==="nobom"?"--":wo.maxRunnable.toLocaleString()}</td>
               <td style={Object.assign({}, tdM, { color:C.bad })}>{fmtDate(wo.dueDate)}</td>
             </tr>)}
+            {overview.lateWOs.length === 0 && (
+              <tr>
+                <td colSpan={10} style={{ padding:24, textAlign:"center", color:C.dim }}>
+                  No past due work orders.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>}
-    </div>)}
+    </div>
   </div>);
 }

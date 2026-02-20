@@ -267,8 +267,9 @@ export default function ProductionReadiness() {
             {k:"inv",l:"Inventory",ts:ds.invTimestamp,cad:"daily",ref:() => window.__invR && window.__invR.click()},
             {k:"wo",l:"Work Orders",ts:ds.woTimestamp,cad:"monthly",ref:() => window.__woR && window.__woR.click()},
             {k:"bom",l:"BOMs",ts:ds.bomTimestamp,cad:"rare",ref:() => window.__bomR && window.__bomR.click()},
-          ].concat(ds.edrData ? [{k:"edr",l:"EDR",ts:ds.edrTimestamp,cad:"monthly",ref:() => window.__edrR && window.__edrR.click()}] : [])
-           .concat(ds.dockData ? [{k:"dock",l:"OpenDock",ts:ds.dockTimestamp,cad:"daily",ref:() => window.__dockR && window.__dockR.click()}] : [])
+            {k:"edr",l:"EDR",ts:ds.edrTimestamp,cad:"monthly",ref:() => window.__edrR && window.__edrR.click()},
+            {k:"dock",l:"OpenDock",ts:ds.dockTimestamp,cad:"daily",ref:() => window.__dockR && window.__dockR.click()},
+          ]
            .map(s => {
             var sl = staleLevel(s.ts, s.cad); var dc = sl==="fresh"?C.ok:sl==="stale"?C.warn:C.bad;
             return <button key={s.k} onClick={s.ref} style={{ display:"inline-flex", alignItems:"center", gap:5, padding:"4px 10px", borderRadius:6, border:"1px solid "+C.border, background:C.surface, cursor:"pointer", color:C.dim, fontFamily:sans, fontSize:13, fontWeight:500 }}>
@@ -314,7 +315,7 @@ export default function ProductionReadiness() {
 
         <div style={{ display:"flex", gap:0, marginBottom:16, borderBottom:"1px solid "+C.border }}>
           {[{key:"overview",label:"Overview",count:null,alert:false},{key:"workorders",label:"Work Orders",count:summary.total},{key:"criticalitems",label:"Critical Items",count:criticalItems.length}]
-            .concat(poCheck?[{key:"pocheck",label:"PO Check",count:poCheck.missing+poCheck.qtyMismatch,alert:poCheck.missing+poCheck.qtyMismatch>0}]:[])
+            .concat([{key:"pocheck",label:"PO Check",count:poCheck ? poCheck.missing+poCheck.qtyMismatch : 0,alert:poCheck ? poCheck.missing+poCheck.qtyMismatch>0 : false}])
             .concat([{key:"timeline",label:"Deliveries",count:timelineData ? timelineData.woTimelines.length : 0,alert:false}]).map(t =>
               <button key={t.key} onClick={() => setActiveView(t.key)} style={{ padding:"8px 16px", border:"none", fontFamily:sans, fontSize:14, fontWeight:500, cursor:"pointer", background:"transparent", color:activeView===t.key?C.bright:C.dim, borderBottom:activeView===t.key?"2px solid "+C.accent:"2px solid transparent", marginBottom:-1 }}>
                 {t.label} {t.count != null && <span style={{ opacity:t.alert?1:0.45, fontSize:13, color:t.alert?C.bad:undefined }}>{t.alert?"\u26A0 ":""}{t.count}</span>}

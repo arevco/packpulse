@@ -8,6 +8,7 @@ var FLAG_LABELS = { "missing-desc":"Missing Description", "not-in-inventory":"No
 export default function FlagsView({ flags }) {
   const { C, sans, mono } = useTheme();
   const { thC, thS, tdN, tdM, inp, sel, pill } = useStyles();
+  var safeFlags = Array.isArray(flags) ? flags : [];
 
   const [flagSearch, setFlagSearch] = useState("");
   const [flagFilterType, setFlagFilterType] = useState("all");
@@ -18,20 +19,17 @@ export default function FlagsView({ flags }) {
   var handleFlagSort = f => { if (flagSort === f) setFlagSortDir(d => d==="asc"?"desc":"asc"); else { setFlagSort(f); setFlagSortDir("desc"); } };
 
   var filteredFlags = useMemo(() => {
-    if (!flags) return [];
-    var f = flags.slice();
+    var f = safeFlags.slice();
     if (flagFilterType !== "all") f = f.filter(x => x.type === flagFilterType);
     if (flagFilterSeverity !== "all") f = f.filter(x => x.severity === flagFilterSeverity);
     if (flagSearch) { var q = flagSearch.toLowerCase(); f = f.filter(x => x.sku.toLowerCase().includes(q) || (x.desc||"").toLowerCase().includes(q) || x.detail.toLowerCase().includes(q) || x.affectedWOs.some(w => w.toLowerCase().includes(q))); }
     var sevOrd = { bad:0, warn:1, info:2 };
     f.sort((a,b) => { var c = 0; if (flagSort==="severity") c = (sevOrd[a.severity]||9) - (sevOrd[b.severity]||9); else if (flagSort==="sku") c = a.sku.localeCompare(b.sku); else if (flagSort==="type") c = a.type.localeCompare(b.type); else if (flagSort==="source") c = a.source.localeCompare(b.source); else if (flagSort==="affectedWOs") c = a.affectedWOs.length - b.affectedWOs.length; return flagSortDir==="desc" ? -c : c; });
     return f;
-  }, [flags, flagFilterType, flagFilterSeverity, flagSearch, flagSort, flagSortDir]);
+  }, [safeFlags, flagFilterType, flagFilterSeverity, flagSearch, flagSort, flagSortDir]);
 
   var exportFlagsCSV = () => { if (!filteredFlags.length) return; var h = ["Severity","Type","SKU","Description","Source","Detail","Affected WOs"]; var rows = filteredFlags.map(f => [f.severity.toUpperCase(), FLAG_LABELS[f.type]||f.type, f.sku, '"'+(f.desc||"").replace(/"/g,'""')+'"', f.source, '"'+f.detail.replace(/"/g,'""')+'"', '"'+f.affectedWOs.join("; ")+'"']); triggerDownload([h.join(",")].concat(rows.map(r=>r.join(","))).join("\n"), "data_flags_"+new Date().toISOString().slice(0,10)+".csv", "text/csv"); };
   var exportFlagsPDF = () => { if (!filteredFlags.length) return; var th = ["Severity","Type","SKU","Description","Source","Detail","WOs"].map(h=>"<th>"+h+"</th>").join(""); var tb = filteredFlags.map(f => '<tr><td class="'+(f.severity==="bad"?"blocked":"partial")+'">'+f.severity.toUpperCase()+"</td><td>"+(FLAG_LABELS[f.type]||f.type)+"</td><td>"+f.sku+"</td><td>"+(f.desc||"--")+"</td><td>"+f.source+"</td><td>"+f.detail+"</td><td>"+f.affectedWOs.join(", ")+"</td></tr>").join(""); triggerDownload(buildExportHTML("Data Flags Report", th, tb), "data_flags_"+new Date().toISOString().slice(0,10)+".html", "text/html"); };
-
-  if (!flags) return null;
 
   return (<div>
     <div style={{ display:"flex", gap:6, marginBottom:12, flexWrap:"wrap", alignItems:"center" }}>
@@ -49,7 +47,7 @@ export default function FlagsView({ flags }) {
         <option value="bad">Error</option>
         <option value="warn">Warning</option>
       </select>
-      <span style={{ fontSize:13, color:C.dim }}><span style={{ color:C.bad, fontWeight:600 }}>{flags.filter(f=>f.severity==="bad").length}</span> errors | <span style={{ color:C.warn, fontWeight:600 }}>{flags.filter(f=>f.severity==="warn").length}</span> warnings</span>
+      <span style={{ fontSize:13, color:C.dim }}><span style={{ color:C.bad, fontWeight:600 }}>{safeFlags.filter(f=>f.severity==="bad").length}</span> errors | <span style={{ color:C.warn, fontWeight:600 }}>{safeFlags.filter(f=>f.severity==="warn").length}</span> warnings</span>
       {(flagSearch || flagFilterType!=="all" || flagFilterSeverity!=="all") && <button onClick={() => {setFlagSearch("");setFlagFilterType("all");setFlagFilterSeverity("all");}} style={Object.assign({}, pill(false), { fontSize:12, color:C.bad, borderColor:C.badLine })}>Clear</button>}
       <div style={{ flex:1 }} />
       <button onClick={exportFlagsCSV} style={Object.assign({}, pill(false), { fontSize:13 })}>CSV</button>
@@ -80,6 +78,6 @@ export default function FlagsView({ flags }) {
         </table>
       </div>
     </div>
-    <div style={{ marginTop:8, fontSize:13, color:C.dim }}>{filteredFlags.length} of {flags.length} flags</div>
+    <div style={{ marginTop:8, fontSize:13, color:C.dim }}>{filteredFlags.length} of {safeFlags.length} flags</div>
   </div>);
 }

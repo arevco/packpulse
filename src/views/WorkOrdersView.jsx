@@ -118,14 +118,14 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers }) {
     <div style={{ display:"flex", gap:6, marginBottom:12, flexWrap:"wrap", alignItems:"center" }}>
       <input type="text" placeholder="Search WO, SKU, customer, notes..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} style={Object.assign({}, inp, { width:220 })} />
       {["all","ready","partial","blocked","nobom"].map(f => <button key={f} onClick={() => setFilterStatus(f)} style={pill(filterStatus===f)}>{f==="all"?"All":f==="ready"?"Ready":f==="partial"?"Partial":f==="blocked"?"Blocked":"No BOM"}</button>)}
-      {woStatuses.length > 1 && <select value={filterWoStatus} onChange={e => setFilterWoStatus(e.target.value)} style={Object.assign({}, sel, { fontSize:13 })}>
+      <select value={filterWoStatus} onChange={e => setFilterWoStatus(e.target.value)} style={Object.assign({}, sel, { fontSize:13 })}>
         <option value="all">All WO Status</option>
         {woStatuses.map(s => <option key={s} value={s}>{s}</option>)}
-      </select>}
-      {woCustomers.length > 1 && <select value={filterCustomer} onChange={e => setFilterCustomer(e.target.value)} style={Object.assign({}, sel, { fontSize:13 })}>
+      </select>
+      <select value={filterCustomer} onChange={e => setFilterCustomer(e.target.value)} style={Object.assign({}, sel, { fontSize:13 })}>
         <option value="all">All Customers</option>
         {woCustomers.map(s => <option key={s} value={s}>{s}</option>)}
-      </select>}
+      </select>
       <div style={{ flex:1 }} />
       <button onClick={exportCSV} style={Object.assign({}, pill(false), { fontSize:13 })}>CSV</button>
       <button onClick={exportPDF} style={Object.assign({}, pill(false), { fontSize:13 })}>PDF</button>
