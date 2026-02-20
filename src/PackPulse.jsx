@@ -13,12 +13,13 @@ import CriticalItemsView from "./views/CriticalItemsView";
 import FlagsView from "./views/FlagsView";
 import POCheckView from "./views/POCheckView";
 import TimelineView from "./views/TimelineView";
+import InboundCoverageView from "./views/InboundCoverageView";
 
 export default function ProductionReadiness() {
   const { C, theme, setTheme, sans, mono, FONTS_CSS, A11Y_CSS } = useTheme();
   const { pill } = useStyles();
   const ds = useDataSources();
-  const { analysis, summary, criticalItems, woStatuses, woCustomers, poCheck, timelineData } = useAnalysis({
+  const { analysis, summary, criticalItems, woStatuses, woCustomers, poCheck, timelineData, inboundCoverage } = useAnalysis({
     mappingConfirmed: ds.mappingConfirmed, allUploaded: ds.allUploaded,
     inventory: ds.inventory, boms: ds.boms, workOrders: ds.workOrders,
     invMapping: ds.invMapping, bomMapping: ds.bomMapping, woMapping: ds.woMapping,
@@ -433,6 +434,7 @@ export default function ProductionReadiness() {
           {[{key:"overview",label:"Overview",count:null,alert:false},{key:"workorders",label:"Work Orders",count:summaryForUI.total},{key:"criticalitems",label:"Critical Items",count:criticalItemsForUI.length}]
             .concat([{key:"flags",label:"Data Flags",count:analysisForUI.flags.length,alert:analysisForUI.flags.length>0}])
             .concat([{key:"pocheck",label:"PO Check",count:poCheck ? poCheck.missing+poCheck.qtyMismatch : 0,alert:poCheck ? poCheck.missing+poCheck.qtyMismatch>0 : false}])
+            .concat([{key:"inboundcoverage",label:"Inbound Coverage",count:inboundCoverage ? inboundCoverage.summary.atRisk : 0,alert:inboundCoverage ? inboundCoverage.summary.atRisk > 0 : false}])
             .concat([{key:"timeline",label:"Deliveries",count:timelineData ? timelineData.woTimelines.length : 0,alert:false}]).map(t =>
               <button key={t.key} onClick={() => setActiveView(t.key)} style={{ padding:"8px 16px", border:"none", fontFamily:sans, fontSize:14, fontWeight:500, cursor:"pointer", background:"transparent", color:activeView===t.key?C.bright:C.dim, borderBottom:activeView===t.key?"2px solid "+C.accent:"2px solid transparent", marginBottom:-1 }}>
                 {t.label} {t.count != null && <span style={{ opacity:t.alert?1:0.45, fontSize:13, color:t.alert?C.bad:undefined }}>{t.alert?"\u26A0 ":""}{t.count}</span>}
@@ -445,6 +447,7 @@ export default function ProductionReadiness() {
         {activeView === "criticalitems" && <CriticalItemsView rawCriticalItems={criticalItemsForUI} />}
         {activeView === "flags" && <FlagsView flags={analysisForUI.flags} />}
         {activeView === "pocheck" && <POCheckView poCheck={poCheck} />}
+        {activeView === "inboundcoverage" && <InboundCoverageView inboundCoverage={inboundCoverage} />}
         {activeView === "timeline" && <TimelineView timelineData={timelineData} />}
 
       </div>

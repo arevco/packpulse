@@ -196,5 +196,219 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, boms, wo
     return { days:days, today:today, woTimelines:woTimelines, deliveries:deliveries, byMaterial:byMaterial, totalDeliveries:deliveries.length, matchedToBOM:deliveries.filter(d=>(compToFG[d.skuNorm]||[]).length>0).length, withDockAppt:deliveries.filter(d=>d.dockStatus).length };
   }, [edrData, dockData, analysis]);
 
-  return { analysis, summary, criticalItems, woStatuses, woCustomers, poCheck, timelineData };
+  /* ====== INBOUND COVERAGE (CRITICAL ITEMS) ====== */
+  var inboundCoverage = useMemo(() => {
+    if (!analysis || !criticalItems || !criticalItems.length) return null;
+    var horizonDays = 30;
+    var now = new Date();
+    var horizonEnd = new Date(now.getTime() + horizonDays * 86400000);
+
+    var edrRows = Array.isArray(edrData) ? edrData : [];
+    var dockRows = Array.isArray(dockData) ? dockData : [];
+    if (!edrRows.length) {
+      return {
+        horizonDays: horizonDays,
+        summary: {
+          totalCriticalItems: criticalItems.length,
+          covered: 0, partial: 0, unscheduled: 0, missing: criticalItems.length,
+          atRisk: criticalItems.length, dueSoon: 0,
+          totalShortQty: criticalItems.reduce(function(s, i) { return s + (i.totalShort || 0); }, 0),
+          totalInboundQty: 0, totalScheduledQty: 0
+        },
+        rows: criticalItems.map(function(item) {
+          return {
+            sku: item.sku,
+            desc: item.desc || "",
+            customerLabel: item.customerLabel || "--",
+            shortQty: item.totalShort || 0,
+            affectedWOCount: item.affectedWOs ? item.affectedWOs.length : 0,
+            earliestDueDate: "",
+            earliestInboundDate: "",
+            earliestScheduledDate: "",
+            inboundQty: 0,
+            scheduledQty: 0,
+            unscheduledQty: 0,
+            coveragePct: 0,
+            scheduledCoveragePct: 0,
+            dueBeforeScheduled: false,
+            dueWithin48h: false,
+            status: "missing",
+            riskLevel: "high",
+            dockStatuses: [],
+            openPOs: [],
+            scheduledPOs: [],
+          };
+        })
+      };
+    }
+
+    var edrCols = Object.keys(edrRows[0] || {});
+    var findEdrCol = function(cands) {
+      return edrCols.find(function(c) { return cands.some(function(p) { return normalizeStr(c).includes(p); }); });
+    };
+    var colMat = findEdrCol(["material"]) || findEdrCol(["sku", "itemcode"]);
+    var colDate = findEdrCol(["deliverydate", "delivery"]) || findEdrCol(["reqdely"]);
+    var colPO = findEdrCol(["purchasingdocument", "purchasedoc", "ponumber", "po"]);
+    var colQtyOpen = findEdrCol(["stilltobedelivered", "openqty", "stillto"]);
+    var colQtyOrd = findEdrCol(["orderquantity", "orderqty"]);
+    if (!colMat || !colDate) return null;
+
+    var dockScheduledByPO = {};
+    var dockStatusesByPO = {};
+    if (dockRows.length) {
+      var dockCols = Object.keys(dockRows[0] || {});
+      var findDockCol = function(cands) {
+        return dockCols.find(function(c) { return cands.some(function(p) { return normalizeStr(c).includes(p); }); });
+      };
+      var dPO = findDockCol(["po", "ponumber", "reference"]);
+      var dStatus = findDockCol(["status"]);
+      if (dPO && dStatus) {
+        dockRows.forEach(function(row) {
+          var po = (row[dPO] || "").toString().trim();
+          if (!po) return;
+          var status = (row[dStatus] || "").toString().trim();
+          if (!status) return;
+          var statusNorm = normalizeStr(status);
+          if (!dockStatusesByPO[po]) dockStatusesByPO[po] = {};
+          dockStatusesByPO[po][status] = true;
+          if (statusNorm === "scheduled") dockScheduledByPO[po] = true;
+        });
+      }
+    }
+
+    var inboundBySku = {};
+    edrRows.forEach(function(row) {
+      var skuRaw = (row[colMat] || "").toString().trim();
+      var skuNorm = normalizeStr(skuRaw);
+      if (!skuNorm) return;
+      var rawDate = row[colDate];
+      var dateObj = rawDate instanceof Date ? rawDate : new Date(rawDate);
+      if (isNaN(dateObj)) return;
+      if (dateObj < now || dateObj > horizonEnd) return;
+      var po = colPO ? (row[colPO] || "").toString().trim() : "";
+      var qtyOpen = colQtyOpen ? safeNum(row[colQtyOpen]) : 0;
+      var qtyOrd = colQtyOrd ? safeNum(row[colQtyOrd]) : 0;
+      var qty = qtyOpen > 0 ? qtyOpen : qtyOrd;
+      if (qty <= 0) return;
+      if (!inboundBySku[skuNorm]) inboundBySku[skuNorm] = [];
+      inboundBySku[skuNorm].push({
+        sku: skuRaw,
+        qty: qty,
+        po: po,
+        dateObj: dateObj,
+        date: dateObj.toISOString().slice(0, 10),
+        isScheduled: !!(po && dockScheduledByPO[po]),
+      });
+    });
+
+    var rows = criticalItems.map(function(item) {
+      var skuNorm = normalizeStr(item.sku);
+      var inboundRows = inboundBySku[skuNorm] || [];
+      var shortQty = Math.max(0, safeNum(item.totalShort || 0));
+      var inboundQty = inboundRows.reduce(function(s, r) { return s + r.qty; }, 0);
+      var scheduledRows = inboundRows.filter(function(r) { return r.isScheduled; });
+      var scheduledQty = scheduledRows.reduce(function(s, r) { return s + r.qty; }, 0);
+      var unscheduledQty = Math.max(0, inboundQty - scheduledQty);
+      var coveragePct = shortQty > 0 ? Math.min(100, Math.round(inboundQty / shortQty * 100)) : 100;
+      var scheduledCoveragePct = shortQty > 0 ? Math.min(100, Math.round(scheduledQty / shortQty * 100)) : 100;
+
+      var earliestInboundDate = inboundRows.length
+        ? inboundRows.slice().sort(function(a, b) { return a.dateObj - b.dateObj; })[0].date
+        : "";
+      var earliestScheduledDate = scheduledRows.length
+        ? scheduledRows.slice().sort(function(a, b) { return a.dateObj - b.dateObj; })[0].date
+        : "";
+
+      var earliestDue = "";
+      if (item.affectedWOs && item.affectedWOs.length) {
+        var dueDates = item.affectedWOs
+          .map(function(w) {
+            var d = w && w.dueDate ? new Date(w.dueDate) : null;
+            return d && !isNaN(d) ? d : null;
+          })
+          .filter(Boolean)
+          .sort(function(a, b) { return a - b; });
+        if (dueDates.length) earliestDue = dueDates[0].toISOString().slice(0, 10);
+      }
+
+      var dueWithin48h = false;
+      var dueBeforeScheduled = false;
+      if (earliestDue) {
+        var dueObj = new Date(earliestDue);
+        dueWithin48h = dueObj.getTime() - now.getTime() <= 48 * 3600000;
+        if (earliestScheduledDate) {
+          dueBeforeScheduled = dueObj < new Date(earliestScheduledDate);
+        } else if (shortQty > 0) {
+          dueBeforeScheduled = true;
+        }
+      }
+
+      var status = "covered";
+      if (scheduledQty <= 0 && inboundQty <= 0) status = "missing";
+      else if (scheduledQty <= 0 && inboundQty > 0) status = "unscheduled";
+      else if (scheduledQty < shortQty) status = "partial";
+
+      var riskLevel = "low";
+      if (status === "missing" || dueBeforeScheduled) riskLevel = "high";
+      else if (status === "unscheduled" || status === "partial" || dueWithin48h) riskLevel = "medium";
+
+      var openPOs = Array.from(new Set(inboundRows.map(function(r) { return r.po; }).filter(Boolean)));
+      var scheduledPOs = Array.from(new Set(scheduledRows.map(function(r) { return r.po; }).filter(Boolean)));
+      var dockStatuses = Array.from(
+        new Set(
+          openPOs.flatMap(function(po) { return Object.keys(dockStatusesByPO[po] || {}); })
+        )
+      );
+
+      return {
+        sku: item.sku,
+        desc: item.desc || "",
+        customerLabel: item.customerLabel || "--",
+        shortQty: shortQty,
+        affectedWOCount: item.affectedWOs ? item.affectedWOs.length : 0,
+        earliestDueDate: earliestDue,
+        earliestInboundDate: earliestInboundDate,
+        earliestScheduledDate: earliestScheduledDate,
+        inboundQty: inboundQty,
+        scheduledQty: scheduledQty,
+        unscheduledQty: unscheduledQty,
+        coveragePct: coveragePct,
+        scheduledCoveragePct: scheduledCoveragePct,
+        dueBeforeScheduled: dueBeforeScheduled,
+        dueWithin48h: dueWithin48h,
+        status: status,
+        riskLevel: riskLevel,
+        dockStatuses: dockStatuses,
+        openPOs: openPOs,
+        scheduledPOs: scheduledPOs,
+      };
+    }).sort(function(a, b) {
+      if (a.riskLevel !== b.riskLevel) {
+        var rank = { high: 0, medium: 1, low: 2 };
+        return rank[a.riskLevel] - rank[b.riskLevel];
+      }
+      if (a.status !== b.status) {
+        var sRank = { missing: 0, unscheduled: 1, partial: 2, covered: 3 };
+        return sRank[a.status] - sRank[b.status];
+      }
+      return b.shortQty - a.shortQty;
+    });
+
+    var summary = {
+      totalCriticalItems: rows.length,
+      covered: rows.filter(function(r) { return r.status === "covered"; }).length,
+      partial: rows.filter(function(r) { return r.status === "partial"; }).length,
+      unscheduled: rows.filter(function(r) { return r.status === "unscheduled"; }).length,
+      missing: rows.filter(function(r) { return r.status === "missing"; }).length,
+      atRisk: rows.filter(function(r) { return r.riskLevel !== "low"; }).length,
+      dueSoon: rows.filter(function(r) { return r.dueWithin48h; }).length,
+      totalShortQty: rows.reduce(function(s, r) { return s + r.shortQty; }, 0),
+      totalInboundQty: rows.reduce(function(s, r) { return s + r.inboundQty; }, 0),
+      totalScheduledQty: rows.reduce(function(s, r) { return s + r.scheduledQty; }, 0),
+    };
+
+    return { horizonDays: horizonDays, summary: summary, rows: rows };
+  }, [analysis, criticalItems, edrData, dockData]);
+
+  return { analysis, summary, criticalItems, woStatuses, woCustomers, poCheck, timelineData, inboundCoverage };
 }
