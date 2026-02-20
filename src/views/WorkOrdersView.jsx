@@ -68,9 +68,14 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
       else if (sortField==="dueDate" || sortField==="plannedStart" || sortField==="plannedEnd") {
         var aDate = parseDateValue(sortField==="dueDate" ? a.dueDate : sortField==="plannedStart" ? a.plannedStart : a.plannedEnd);
         var bDate = parseDateValue(sortField==="dueDate" ? b.dueDate : sortField==="plannedStart" ? b.plannedStart : b.plannedEnd);
-        var aTs = aDate ? aDate.getTime() : Number.POSITIVE_INFINITY;
-        var bTs = bDate ? bDate.getTime() : Number.POSITIVE_INFINITY;
-        c = aTs - bTs;
+        var aMissing = !aDate;
+        var bMissing = !bDate;
+        // Keep missing/invalid dates at the bottom regardless of sort direction.
+        if (aMissing && !bMissing) return 1;
+        if (!aMissing && bMissing) return -1;
+        if (aMissing && bMissing) return 0;
+        c = aDate.getTime() - bDate.getTime();
+        return sortDir==="desc" ? -c : c;
       } else if (sortField==="status") c=(a.status||"").localeCompare(b.status||"");
       return sortDir==="desc"?-c:c;
     });
