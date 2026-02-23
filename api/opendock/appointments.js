@@ -341,6 +341,27 @@ function resolveReferenceNumber(appt) {
   return "";
 }
 
+function resolveConfirmationNumber(appt) {
+  var direct =
+    asCleanString(getNestedValue(appt, ["confirmationNumber"])) ||
+    asCleanString(getNestedValue(appt, ["confirmation"])) ||
+    asCleanString(getNestedValue(appt, ["confirmationNo"])) ||
+    asCleanString(getNestedValue(appt, ["id"])) ||
+    asCleanString(getNestedValue(appt, ["appointmentId"]));
+  if (direct) return direct;
+  var cf = appt && appt.customFields && typeof appt.customFields === "object" ? appt.customFields : {};
+  var cfKeys = Object.keys(cf);
+  for (var i = 0; i < cfKeys.length; i++) {
+    var key = cfKeys[i];
+    var norm = key.toLowerCase();
+    if (norm.includes("confirm")) {
+      var val = flattenCustomFieldValue(cf[key]);
+      if (val) return val;
+    }
+  }
+  return "";
+}
+
 function normalizeAppointmentRow(appt, dockNameById, loadTypeNameById, carrierNameById) {
   var start = appt && appt.start ? appt.start : "";
   var end = appt && appt.end ? appt.end : "";
@@ -351,9 +372,11 @@ function normalizeAppointmentRow(appt, dockNameById, loadTypeNameById, carrierNa
   var loadType = resolveLoadTypeName(appt, loadTypeNameById || {});
   var dock = resolveDockName(appt, dockNameById || {});
   var referenceNumber = resolveReferenceNumber(appt);
+  var confirmationNumber = resolveConfirmationNumber(appt);
 
   var row = {
     PO: referenceNumber,
+    Confirmation: confirmationNumber,
     Status: appt && appt.status ? String(appt.status) : "",
     "Appt Date": startLocal.date,
     "Appt Time": startLocal.time,

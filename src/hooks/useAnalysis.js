@@ -319,7 +319,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       return out;
     };
     if (dockData && dockData.length) {
-      var dC = Object.keys(dockData[0]); var dPO = dC.find(c=>normalizeStr(c)==="po") || dC.find(c=>normalizeStr(c).includes("po")); var dSt = dC.find(c=>normalizeStr(c)==="status"); var dDt = dC.find(c=>normalizeStr(c).includes("apptdate")); var dTm = dC.find(c=>normalizeStr(c).includes("appttime"));
+      var dC = Object.keys(dockData[0]); var dPO = dC.find(c=>normalizeStr(c)==="po") || dC.find(c=>normalizeStr(c).includes("po")); var dConf = dC.find(c=>normalizeStr(c).includes("confirmation")); var dSt = dC.find(c=>normalizeStr(c)==="status"); var dDt = dC.find(c=>normalizeStr(c).includes("apptdate")); var dTm = dC.find(c=>normalizeStr(c).includes("appttime"));
       var isInboundDockRow = function(row) {
         if (!row) return false;
         var vals = [
@@ -338,7 +338,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
         var po = dPO ? (row[dPO]||"").toString().trim() : "";
         var poNorm = normalizePoKey(po);
         var apptDate = toIsoDate((row[dDt]||"").toString().trim()) || (row[dDt]||"").toString().trim();
-        var appt = { id:"dock-" + idx, status:(row[dSt]||"").toString().trim(), apptDate:apptDate, po:po, poNorm:poNorm };
+        var appt = { id:"dock-" + idx, status:(row[dSt]||"").toString().trim(), apptDate:apptDate, po:po, poNorm:poNorm, confirmation:dConf ? (row[dConf]||"").toString().trim() : "" };
         appt.tokens = collectReferenceTokens(row, [{ value:po, kind:"po" }]);
         dockApptAll.push(appt);
         appt.tokens.forEach(function(tp) {
@@ -414,7 +414,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
         else if (best && best.kind === "date") matchDiagnostics.dateProximityOnly += 1;
         var skuKeys = buildSkuMatchKeys(mat);
         if (!skuKeys.length) return;
-        deliveries.push({ sku:mat, skuNorm:skuKeys[0], skuKeys:skuKeys, desc:desc, date:dateStr, dateObj:dateObj, qty:qty, po:po, poNorm:poNorm, tab:tab, dockStatus:bestDock?bestDock.status:"", dockApptDate:bestDock?bestDock.apptDate:"", isMatched:strongMatch, qtyOrd:qtyOrd, dockMatchKind:best ? best.kind : "none", dockMatchScore:best ? best.score : 0 });
+        deliveries.push({ sku:mat, skuNorm:skuKeys[0], skuKeys:skuKeys, desc:desc, date:dateStr, dateObj:dateObj, qty:qty, po:po, poNorm:poNorm, tab:tab, dockStatus:bestDock?bestDock.status:"", dockApptDate:bestDock?bestDock.apptDate:"", confirmation:bestDock?bestDock.confirmation:"", isMatched:strongMatch, qtyOrd:qtyOrd, dockMatchKind:best ? best.kind : "none", dockMatchScore:best ? best.score : 0 });
       });
       // Keep OpenDock as execution truth: append scheduled appointments that did not map to EDR.
       dockApptAll.forEach(function(appt, idx) {
@@ -425,10 +425,10 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
         var poText = appt.po || "";
         var refKey = "od-unmatched-" + idx + "-" + (appt.id || dateStr);
         deliveries.push({
-          sku: poText || ("OD-" + idx),
+          sku: "Unknown",
           skuNorm: normalizeStr(refKey),
           skuKeys: [normalizeStr(refKey)],
-          desc: "OpenDock scheduled inbound",
+          desc: "",
           date: dateStr,
           dateObj: dateObj,
           qty: 0,
@@ -437,6 +437,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
           tab: "",
           dockStatus: appt.status || "",
           dockApptDate: appt.apptDate,
+          confirmation: appt.confirmation || "",
           isMatched: false,
           qtyOrd: 0,
           dockMatchKind: "opendock-only",
@@ -446,6 +447,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
     } else if (hasDock) {
       var dC2 = Object.keys(dockData[0] || {});
       var dPO2 = dC2.find(c=>normalizeStr(c)==="po") || dC2.find(c=>normalizeStr(c).includes("po"));
+      var dConf2 = dC2.find(c=>normalizeStr(c).includes("confirmation"));
       var dSt2 = dC2.find(c=>normalizeStr(c)==="status");
       var dDt2 = dC2.find(c=>normalizeStr(c).includes("apptdate")) || dC2.find(c=>normalizeStr(c).includes("date"));
       dockData.forEach(function(row, idx) {
@@ -457,10 +459,10 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
         var poNorm = normalizePoKey(po);
         var refKey = "od" + idx + (poNorm || dateStr);
         deliveries.push({
-          sku: po || ("OD-" + idx),
+          sku: "Unknown",
           skuNorm: normalizeStr(refKey),
           skuKeys: [normalizeStr(refKey)],
-          desc: "OpenDock scheduled inbound",
+          desc: "",
           date: dateStr,
           dateObj: dateObj,
           qty: 0,
@@ -469,6 +471,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
           tab: "",
           dockStatus: dSt2 ? (row[dSt2]||"").toString().trim() : "",
           dockApptDate: dateStr,
+          confirmation: dConf2 ? (row[dConf2]||"").toString().trim() : "",
           isMatched: false,
           qtyOrd: 0
         });
@@ -625,6 +628,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
         po:d.po || "",
         etaDate:d.date,
         scheduledDate:d.dockApptDate || "",
+        confirmation:d.confirmation || "",
         materialSku:d.sku,
         materialDesc:d.desc || "",
         qty:safeNum(d.qty || 0),

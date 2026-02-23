@@ -153,7 +153,8 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
         return (
           (r.materialSku || "").toLowerCase().includes(q) ||
           (r.materialDesc || "").toLowerCase().includes(q) ||
-          (r.po || "").toLowerCase().includes(q)
+          (r.po || "").toLowerCase().includes(q) ||
+          (r.confirmation || "").toLowerCase().includes(q)
         );
       });
     }
@@ -304,7 +305,7 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
       <div style={{ overflowX:"auto", borderBottom:"1px solid "+C.border }}>
         <table style={{ width:"100%", borderCollapse:"collapse" }}>
           <thead><tr style={{ background:C.raised }}>
-            {["Scheduled Date","Expected Date","PO","Material","Qty","Match State","At Risk WO","Linked WOs","Units Unlocked"].map(function(h) { return <th key={h} style={thC(false)}>{h}</th>; })}
+            {["Scheduled Date","Expected Date","PO","Confirmation","Material","Qty","Match State","At Risk WO","Linked WOs","Units Unlocked"].map(function(h) { return <th key={h} style={thC(false)}>{h}</th>; })}
           </tr></thead>
           <tbody>
             {executionQueueRows.slice(0, 25).map(function(r, i) {
@@ -315,6 +316,7 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
                 <td style={tdM}>{fmtDateShort(r.scheduledDate)}</td>
                 <td style={tdM}>{fmtDateShort(r.etaDate)}</td>
                 <td style={Object.assign({}, tdN, { maxWidth:120, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" })}>{r.po || "--"}</td>
+                <td style={Object.assign({}, tdN, { maxWidth:120, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" })}>{r.confirmation || "--"}</td>
                 <td style={Object.assign({}, tdN, { maxWidth:260, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" })}>{r.materialSku} {r.materialDesc ? ("| " + formatDescriptionForDisplay(r.materialDesc)) : ""}</td>
                 <td style={Object.assign({}, tdM, { color:C.bright })}>{Math.round(r.qty || 0).toLocaleString()}</td>
                 <td style={Object.assign({}, tdM, { fontWeight:600 })}>
@@ -329,7 +331,7 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
                 <td style={Object.assign({}, tdM, { color:(r.unitsUnlocked || 0) > 0 ? C.accent : C.dim, fontWeight:600 })}>{Math.round(r.unitsUnlocked || 0).toLocaleString()}</td>
               </tr>;
             })}
-            {executionQueueRows.length === 0 && <tr><td colSpan={9} style={{ padding:18, color:C.dim, textAlign:"center" }}>No OpenDock loads match current queue filters.</td></tr>}
+            {executionQueueRows.length === 0 && <tr><td colSpan={10} style={{ padding:18, color:C.dim, textAlign:"center" }}>No OpenDock loads match current queue filters.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -339,7 +341,7 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
       <div style={{ overflowX:"auto" }}>
         <table style={{ width:"100%", borderCollapse:"collapse" }}>
           <thead><tr style={{ background:C.raised }}>
-            {["Scheduled Date","Expected Date","PO","Material","Qty","Match State","At Risk WO","Linked WOs","Units Unlocked"].map(function(h) { return <th key={h} style={thC(false)}>{h}</th>; })}
+            {["Scheduled Date","Expected Date","PO","Confirmation","Material","Qty","Match State","At Risk WO","Linked WOs","Units Unlocked"].map(function(h) { return <th key={h} style={thC(false)}>{h}</th>; })}
           </tr></thead>
           <tbody>
             {coverageQueueRows.slice(0, 25).map(function(r, i) {
@@ -350,6 +352,7 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
                 <td style={tdM}>{fmtDateShort(r.scheduledDate)}</td>
                 <td style={tdM}>{fmtDateShort(r.etaDate)}</td>
                 <td style={Object.assign({}, tdN, { maxWidth:120, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" })}>{r.po || "--"}</td>
+                <td style={Object.assign({}, tdN, { maxWidth:120, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" })}>{r.confirmation || "--"}</td>
                 <td style={Object.assign({}, tdN, { maxWidth:260, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" })}>{r.materialSku} {r.materialDesc ? ("| " + formatDescriptionForDisplay(r.materialDesc)) : ""}</td>
                 <td style={Object.assign({}, tdM, { color:C.bright })}>{Math.round(r.qty || 0).toLocaleString()}</td>
                 <td style={Object.assign({}, tdM, { fontWeight:600 })}>
@@ -364,7 +367,7 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
                 <td style={Object.assign({}, tdM, { color:(r.unitsUnlocked || 0) > 0 ? C.accent : C.dim, fontWeight:600 })}>{Math.round(r.unitsUnlocked || 0).toLocaleString()}</td>
               </tr>;
             })}
-            {coverageQueueRows.length === 0 && <tr><td colSpan={9} style={{ padding:18, color:C.dim, textAlign:"center" }}>No material-resolved loads in selected window.</td></tr>}
+            {coverageQueueRows.length === 0 && <tr><td colSpan={10} style={{ padding:18, color:C.dim, textAlign:"center" }}>No material-resolved loads in selected window.</td></tr>}
           </tbody>
         </table>
       </div>
