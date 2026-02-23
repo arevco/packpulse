@@ -194,15 +194,6 @@ export default function AuthGate({ children }) {
               {error}
             </div>
           )}
-          <button
-            onClick={() => checkSession()}
-            style={{ marginTop: 12, padding: "8px 12px", borderRadius: 8, border: "1px solid #d1d5db", background: "#fff", color: "#374151", fontSize: 13, cursor: "pointer" }}
-          >
-            I verified, continue
-          </button>
-          <div style={{ marginTop: 20, fontSize: 13, color: "#6b7280" }}>
-            Restricted to authorized accounts
-          </div>
         </div>
         <style>{FONTS_CSS + spinnerCSS}</style>
       </div>
