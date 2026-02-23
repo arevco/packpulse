@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useTheme } from "../theme";
 import { useStyles } from "../hooks/useStyles";
 import { formatDescriptionForDisplay } from "../utils";
@@ -13,6 +13,11 @@ export default function TimelineView({ timelineData }) {
   const [matFilterDock, setMatFilterDock] = useState("all");
   const [matFilterWO, setMatFilterWO] = useState("all");
   const [matSearch, setMatSearch] = useState("");
+  const [tlSearch, setTlSearch] = useState("");
+  const [tlCustomer, setTlCustomer] = useState("all");
+  const [tlStatus, setTlStatus] = useState("all");
+  const [tlSort, setTlSort] = useState("dueDate");
+  const [tlSortDir, setTlSortDir] = useState("asc");
 
   if (!timelineData) {
     return (
@@ -25,6 +30,43 @@ export default function TimelineView({ timelineData }) {
     );
   }
 
+  var timelineCustomers = useMemo(function() {
+    var set = new Set((timelineData.woTimelines || []).map(function(wo) { return wo.customer || ""; }).filter(Boolean));
+    return Array.from(set).sort();
+  }, [timelineData]);
+
+  var filteredWoTimelines = useMemo(function() {
+    var rows = (timelineData.woTimelines || []).slice();
+    if (tlSearch) {
+      var q = tlSearch.toLowerCase();
+      rows = rows.filter(function(wo) {
+        return (
+          (wo.woNum || "").toLowerCase().includes(q) ||
+          (wo.productSku || "").toLowerCase().includes(q) ||
+          (wo.productDesc || "").toLowerCase().includes(q) ||
+          (wo.customer || "").toLowerCase().includes(q)
+        );
+      });
+    }
+    if (tlCustomer !== "all") rows = rows.filter(function(wo) { return (wo.customer || "") === tlCustomer; });
+    if (tlStatus !== "all") rows = rows.filter(function(wo) { return (wo.runStatus || "") === tlStatus; });
+    rows.sort(function(a, b) {
+      var c = 0;
+      if (tlSort === "woNum") c = (a.woNum || "").localeCompare(b.woNum || "");
+      else if (tlSort === "product") c = (a.productSku || "").localeCompare(b.productSku || "");
+      else if (tlSort === "customer") c = (a.customer || "").localeCompare(b.customer || "");
+      else if (tlSort === "status") c = (a.runStatus || "").localeCompare(b.runStatus || "");
+      else if (tlSort === "incoming") c = (a.totalIncoming || 0) - (b.totalIncoming || 0);
+      else if (tlSort === "maxRunnable") c = (a.maxRunnable || 0) - (b.maxRunnable || 0);
+      else if (tlSort === "readiness") c = (a.readiness || 0) - (b.readiness || 0);
+      else c = (a.dueDate || "").localeCompare(b.dueDate || "");
+      return tlSortDir === "desc" ? -c : c;
+    });
+    return rows;
+  }, [timelineData, tlSearch, tlCustomer, tlStatus, tlSort, tlSortDir]);
+
+  var timelineHasFilters = !!tlSearch || tlCustomer !== "all" || tlStatus !== "all";
+
   return (<div>
     <div style={{ display:"flex", gap:20, marginBottom:16 }}>
       {[{l:"Inbound",v:timelineData.totalDeliveries,c:C.accent},{l:"BOM Matched",v:timelineData.matchedToBOM,c:C.ok},{l:"Dock Appts",v:timelineData.withDockAppt,c:C.bright},{l:"WOs Waiting",v:timelineData.woTimelines.length,c:C.warn}].map((s,i) =>
@@ -34,6 +76,31 @@ export default function TimelineView({ timelineData }) {
     <div style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, overflow:"hidden", marginBottom:16 }}>
       <div style={{ padding:"12px 16px", borderBottom:"1px solid "+C.border }}>
         <div style={{ fontSize:15, fontWeight:600, color:C.bright }}>Delivery Timeline</div>
+        <div style={{ marginTop:10, display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
+          <input value={tlSearch} onChange={function(e) { setTlSearch(e.target.value); }} placeholder="Search WO, SKU, customer..." style={Object.assign({}, inp, { width:220, fontSize:13 })} />
+          <select value={tlCustomer} onChange={function(e) { setTlCustomer(e.target.value); }} style={Object.assign({}, sel, { fontSize:13 })}>
+            <option value="all">All Customers</option>
+            {timelineCustomers.map(function(c) { return <option key={c} value={c}>{c}</option>; })}
+          </select>
+          {["all","ready","partial","blocked","nobom"].map(function(s) {
+            return <button key={s} onClick={function() { setTlStatus(function(curr) { return curr === s && s !== "all" ? "all" : s; }); }} style={pill(tlStatus===s)}>{s==="all"?"All":s==="nobom"?"No BOM":s.charAt(0).toUpperCase()+s.slice(1)}</button>;
+          })}
+          <select value={tlSort} onChange={function(e) { setTlSort(e.target.value); }} style={Object.assign({}, sel, { fontSize:13 })}>
+            <option value="dueDate">Sort: Due Date</option>
+            <option value="incoming">Sort: Incoming Qty</option>
+            <option value="readiness">Sort: Readiness</option>
+            <option value="maxRunnable">Sort: Can Make</option>
+            <option value="customer">Sort: Customer</option>
+            <option value="woNum">Sort: WO#</option>
+            <option value="product">Sort: Product</option>
+            <option value="status">Sort: Status</option>
+          </select>
+          <button onClick={function() { setTlSortDir(function(d) { return d === "asc" ? "desc" : "asc"; }); }} style={Object.assign({}, pill(false), { fontSize:12 })}>
+            {tlSortDir === "asc" ? "Asc" : "Desc"}
+          </button>
+          {timelineHasFilters && <button onClick={function() { setTlSearch(""); setTlCustomer("all"); setTlStatus("all"); }} style={Object.assign({}, pill(false), { fontSize:12, color:C.bad, borderColor:C.badLine })}>Clear</button>}
+          <span style={{ fontSize:12, color:C.dim, marginLeft:4 }}>{filteredWoTimelines.length} of {timelineData.woTimelines.length} WOs</span>
+        </div>
       </div>
       <div style={{ overflowX:"auto" }}>
         <div style={{ minWidth:Math.max(800, timelineData.days.length*40 + 340), display:"flex", flexDirection:"column" }}>
@@ -50,7 +117,7 @@ export default function TimelineView({ timelineData }) {
               })}
             </div>
           </div>
-          {timelineData.woTimelines.map((wo, wI) => {
+          {filteredWoTimelines.map((wo, wI) => {
             var sc = wo.runStatus==="ready"?C.ok:wo.runStatus==="partial"?C.warn:wo.runStatus==="nobom"?C.accent:C.bad;
             return <div key={wI} style={{ display:"flex", borderBottom:"1px solid "+C.border, minHeight:46 }}>
               <div style={{ minWidth:320, padding:"6px 12px", display:"flex", flexDirection:"column", justifyContent:"center", flexShrink:0, borderRight:"1px solid "+C.border }}>
@@ -59,7 +126,9 @@ export default function TimelineView({ timelineData }) {
                   <span style={{ width:6, height:6, borderRadius:"50%", background:sc }} />
                 </div>
                 <div style={{ fontSize:12, color:C.dim, marginTop:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:290 }}>{wo.productSku} | {formatDescriptionForDisplay(wo.productDesc)||""}</div>
-                <div style={{ fontSize:13, color:C.dim, fontFamily:mono, marginTop:1 }}>{"Need "+wo.qtyToProduce.toLocaleString()+" | Can make "+wo.maxRunnable.toLocaleString()+" | +"+wo.totalIncoming.toLocaleString()+" incoming"}</div>
+                <div style={{ fontSize:13, color:C.dim, fontFamily:mono, marginTop:1 }}>
+                  {(wo.customer ? (wo.customer + " | ") : "") + "Need " + wo.qtyToProduce.toLocaleString() + " | Can make " + wo.maxRunnable.toLocaleString() + " | +" + wo.totalIncoming.toLocaleString() + " incoming"}
+                </div>
               </div>
               <div style={{ display:"flex", flex:1 }}>
                 {timelineData.days.map(day => {
@@ -76,6 +145,11 @@ export default function TimelineView({ timelineData }) {
               </div>
             </div>;
           })}
+          {filteredWoTimelines.length === 0 && (
+            <div style={{ padding:"16px 12px", color:C.dim, fontSize:13 }}>
+              No work orders match the current Deliveries filters.
+            </div>
+          )}
         </div>
       </div>
       <div style={{ padding:"8px 16px", borderTop:"1px solid "+C.border, display:"flex", gap:14, flexWrap:"wrap" }}>

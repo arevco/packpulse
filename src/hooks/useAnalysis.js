@@ -287,7 +287,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       [...new Set(allS)].forEach(sn => { var md = byMaterial[sn]; if (md) md.deliveries.forEach(d => { cd.push(Object.assign({}, d, { componentSku:comp.sku, short:comp.short, needed:comp.needed })); }); }); });
       var dueDateStr = ""; if (wo.dueDate) { var p = new Date(wo.dueDate); if (!isNaN(p)) dueDateStr = p.toISOString().slice(0,10); }
       var delByDate = {}; cd.forEach(d => { if (!delByDate[d.date]) delByDate[d.date] = { items:[], totalQty:0 }; delByDate[d.date].items.push(d); delByDate[d.date].totalQty += d.qty; });
-      return { woNum:wo.woNum, productSku:wo.productSkuRaw, productDesc:wo.productDesc, qtyToProduce:wo.qtyToProduce, readiness:wo.readiness, runStatus:wo.runStatus, maxRunnable:wo.maxRunnable, dueDate:dueDateStr, hasDeliveries:cd.length>0, deliveries:cd, delByDate:delByDate, totalIncoming:cd.reduce((s,d)=>s+d.qty,0) };
+      return { woNum:wo.woNum, productSku:wo.productSkuRaw, productDesc:wo.productDesc, customer:wo.customer || "", qtyToProduce:wo.qtyToProduce, readiness:wo.readiness, runStatus:wo.runStatus, maxRunnable:wo.maxRunnable, dueDate:dueDateStr, hasDeliveries:cd.length>0, deliveries:cd, delByDate:delByDate, totalIncoming:cd.reduce((s,d)=>s+d.qty,0) };
     }).filter(w => w.hasDeliveries).sort((a,b) => (a.dueDate||"zzz").localeCompare(b.dueDate||"zzz"));
     return { days:days, today:today, woTimelines:woTimelines, deliveries:deliveries, byMaterial:byMaterial, totalDeliveries:deliveries.length, matchedToBOM:deliveries.filter(d=>(compToFG[d.skuNorm]||[]).length>0).length, withDockAppt:deliveries.filter(d=>d.dockStatus).length };
   }, [edrData, dockData, analysis]);
