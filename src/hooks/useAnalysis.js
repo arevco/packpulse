@@ -135,9 +135,10 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       var extra = { customer:customer, unitsProduced:unitsProduced, unitsRemaining:unitsRemaining, unitsPerHour:unitsPerHour, standardPeople:standardPeople, plannedStart:plannedStart, plannedEnd:plannedEnd, reference1:reference1, estHours:estHours, prodPct:prodPct };
       var bom = bomMap[productSku];
       if (!bom) return Object.assign({ woNum:woNum, productSkuRaw:productSkuRaw, productDesc:resolveItemDescription(productSku, productSkuRaw, ""), qtyToProduce:qtyToProduce, dueDate:dueDate, status:status, readiness:-1, runStatus:"nobom", components:[], maxRunnable:0, couldMake:0, zeroStockCount:0, normalizedSku:productSku }, extra);
+      var demandUnits = Math.max(0, unitsRemaining);
       var minFill = Infinity, maxRun = Infinity, couldMk = Infinity, zeroCount = 0; var components = [];
       bom.groups.forEach(group => {
-        var qp = group.primary.qtyPer; var needed = qp * qtyToProduce; if (needed <= 0) return;
+        var qp = group.primary.qtyPer; var needed = qp * demandUnits; if (needed <= 0) return;
         var combined = 0;
         var optDet = group.allOptions.map(opt => { var oh = invMap[opt.sku]||0; combined += oh; return { sku:opt.skuRaw, desc:resolveItemDescription(opt.sku, opt.skuRaw, bomDescBySku[opt.sku] || opt.descRaw || ""), onHand:oh, priority:opt.priority, isSub:!!opt.substituteFor, foundInInventory:invMap.hasOwnProperty(opt.sku) }; });
         var fill = (combined/needed)*100; var canMake = qp > 0 ? Math.floor(combined/qp) : Infinity; var short = Math.max(0, needed - combined);
@@ -147,8 +148,8 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       });
       var readiness = minFill === Infinity ? 100 : Math.min(minFill, 100);
       var runStatus = readiness >= 100 ? "ready" : maxRun > 0 ? "partial" : "blocked";
-      if (maxRun === Infinity) maxRun = qtyToProduce; if (couldMk === Infinity) couldMk = qtyToProduce;
-      return Object.assign({ woNum:woNum, productSkuRaw:productSkuRaw, productDesc:resolveItemDescription(productSku, productSkuRaw, ""), qtyToProduce:qtyToProduce, dueDate:dueDate, status:status, readiness:readiness, runStatus:runStatus, components:components, maxRunnable:Math.min(maxRun, qtyToProduce), couldMake:Math.min(couldMk, qtyToProduce), zeroStockCount:zeroCount, normalizedSku:productSku }, extra);
+      if (maxRun === Infinity) maxRun = demandUnits; if (couldMk === Infinity) couldMk = demandUnits;
+      return Object.assign({ woNum:woNum, productSkuRaw:productSkuRaw, productDesc:resolveItemDescription(productSku, productSkuRaw, ""), qtyToProduce:qtyToProduce, dueDate:dueDate, status:status, readiness:readiness, runStatus:runStatus, components:components, maxRunnable:Math.min(maxRun, demandUnits), couldMake:Math.min(couldMk, demandUnits), zeroStockCount:zeroCount, normalizedSku:productSku }, extra);
     });
     var diag = { invCount:inventory.length, invUniqueSkus:Object.keys(invMap).length, itemMasterRows:(itemMaster||[]).length, itemMasterSkus:Object.keys(itemMasterBySku).length, invSampleQtys:Object.entries(invMap).slice(0,6).map(function(e){return{key:e[0],qty:e[1]}}), bomParentCount:Object.keys(bomMap).length, bomSampleParents:Object.keys(bomMap).slice(0,8), bomTotalLines:boms?boms.length:0, woCount:workOrders.length, woUniqueSkus:[...new Set(results.map(r=>r.normalizedSku))], woUnmatched:[...new Set(results.filter(r=>r.runStatus==="nobom").map(r=>({raw:r.productSkuRaw,norm:r.normalizedSku})))].slice(0,10), woMatchedCount:results.filter(r=>r.runStatus!=="nobom").length };
 
@@ -193,7 +194,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
   var criticalItems = useMemo(() => {
     if (!analysis) return [];
     var m = {};
-    analysis.results.filter(function(wo) { return !isWorkOrderClosed(wo); }).forEach(wo => { wo.components.forEach(comp => { if (comp.short <= 0) return; var k = normalizeStr(comp.sku); if (!m[k]) m[k] = { sku:comp.sku, desc:comp.desc, onHand:comp.onHand, totalShort:0, affectedWOs:[], unlockedUnits:0, isZeroStock:comp.onHand===0, customersMap:{} }; m[k].desc = pickBetterDescription(m[k].desc || "", comp.desc || "", m[k].sku); m[k].totalShort += comp.short; m[k].unlockedUnits += wo.qtyToProduce - wo.maxRunnable; m[k].affectedWOs.push({ woNum:wo.woNum, productSku:wo.productSkuRaw, customer:wo.customer||"", qtyToProduce:wo.qtyToProduce, needed:comp.needed, short:comp.short, dueDate:wo.dueDate }); if (wo.customer) m[k].customersMap[wo.customer] = true; }); });
+    analysis.results.filter(function(wo) { return !isWorkOrderClosed(wo); }).forEach(wo => { wo.components.forEach(comp => { if (comp.short <= 0) return; var k = normalizeStr(comp.sku); if (!m[k]) m[k] = { sku:comp.sku, desc:comp.desc, onHand:comp.onHand, totalShort:0, affectedWOs:[], unlockedUnits:0, isZeroStock:comp.onHand===0, customersMap:{} }; m[k].desc = pickBetterDescription(m[k].desc || "", comp.desc || "", m[k].sku); m[k].totalShort += comp.short; m[k].unlockedUnits += Math.max(0, wo.unitsRemaining - wo.maxRunnable); m[k].affectedWOs.push({ woNum:wo.woNum, productSku:wo.productSkuRaw, customer:wo.customer||"", qtyToProduce:wo.qtyToProduce, needed:comp.needed, short:comp.short, dueDate:wo.dueDate }); if (wo.customer) m[k].customersMap[wo.customer] = true; }); });
     return Object.values(m).map(function(item) {
       var customers = Object.keys(item.customersMap || {});
       return Object.assign({}, item, { customers:customers, customerLabel:customers.length ? customers.join(", ") : "--" });
