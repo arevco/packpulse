@@ -18,6 +18,7 @@ export default function TimelineView({ timelineData }) {
   const [tlStatus, setTlStatus] = useState("all");
   const [tlSort, setTlSort] = useState("dueDate");
   const [tlSortDir, setTlSortDir] = useState("asc");
+  const [windowDays, setWindowDays] = useState(14);
 
   if (!timelineData) {
     return (
@@ -30,13 +31,90 @@ export default function TimelineView({ timelineData }) {
     );
   }
 
+  var windowOptions = [
+    { key:1, label:"Today" },
+    { key:7, label:"7d" },
+    { key:14, label:"14d" },
+    { key:30, label:"30d" }
+  ];
+  var todayStr = timelineData.today;
+  var windowEndDate = useMemo(function() {
+    var d = new Date(todayStr + "T00:00:00");
+    d.setDate(d.getDate() + Math.max(0, windowDays - 1));
+    return d;
+  }, [todayStr, windowDays]);
+  var windowEndStr = useMemo(function() {
+    return windowEndDate.toISOString().slice(0, 10);
+  }, [windowEndDate]);
+  var visibleDays = useMemo(function() {
+    return (timelineData.days || []).filter(function(day) { return day >= todayStr && day <= windowEndStr; });
+  }, [timelineData, todayStr, windowEndStr]);
+  var windowDeliveries = useMemo(function() {
+    return (timelineData.deliveries || []).filter(function(d) { return d.date >= todayStr && d.date <= windowEndStr; });
+  }, [timelineData, todayStr, windowEndStr]);
+  var windowWoTimelines = useMemo(function() {
+    return (timelineData.woTimelines || []).map(function(wo) {
+      var wd = (wo.deliveries || []).filter(function(d) { return d.date >= todayStr && d.date <= windowEndStr; });
+      var byDate = {};
+      wd.forEach(function(d) {
+        if (!byDate[d.date]) byDate[d.date] = { items:[], totalQty:0 };
+        byDate[d.date].items.push(d);
+        byDate[d.date].totalQty += d.qty;
+      });
+      return Object.assign({}, wo, {
+        deliveries: wd,
+        delByDate: byDate,
+        totalIncoming: wd.reduce(function(s, d) { return s + d.qty; }, 0),
+        hasWindowDeliveries: wd.length > 0
+      });
+    }).filter(function(wo) { return wo.hasWindowDeliveries; });
+  }, [timelineData, todayStr, windowEndStr]);
+  var windowSummary = useMemo(function() {
+    var matched = windowDeliveries.filter(function(d) {
+      return !!(timelineData.byMaterial[d.skuNorm] && (timelineData.byMaterial[d.skuNorm].affectedWOs || []).length);
+    }).length;
+    return {
+      inbound: windowDeliveries.length,
+      matched: matched,
+      dock: windowDeliveries.filter(function(d) { return !!d.dockStatus; }).length,
+      waiting: windowWoTimelines.length
+    };
+  }, [windowDeliveries, windowWoTimelines, timelineData]);
+  var riskSummary = useMemo(function() {
+    var dueBeforeInbound = 0;
+    var unscheduled = 0;
+    var noInbound = 0;
+    var dockConflict = 0;
+    (timelineData.woTimelines || []).forEach(function(wo) {
+      var wd = (wo.deliveries || []).filter(function(d) { return d.date >= todayStr && d.date <= windowEndStr; });
+      var dueObj = wo.dueDate ? new Date(wo.dueDate + "T00:00:00") : null;
+      var dueInWindow = !!(dueObj && !isNaN(dueObj) && dueObj <= windowEndDate);
+      if (dueInWindow && wd.length === 0) noInbound++;
+      if (dueInWindow && wd.length > 0) {
+        var firstInbound = wd.slice().sort(function(a, b) { return a.date.localeCompare(b.date); })[0];
+        if (wo.dueDate && firstInbound && firstInbound.date > wo.dueDate) dueBeforeInbound++;
+      }
+      if (wd.some(function(d) {
+        var s = (d.dockStatus || "").toLowerCase();
+        return !s || (s !== "scheduled" && s !== "completed" && s !== "arrived");
+      })) unscheduled++;
+      if (wd.some(function(d) { return (d.dockStatus || "").toLowerCase().includes("cancel"); })) dockConflict++;
+    });
+    return {
+      dueBeforeInbound: dueBeforeInbound,
+      unscheduled: unscheduled,
+      noInbound: noInbound,
+      dockConflict: dockConflict
+    };
+  }, [timelineData, todayStr, windowEndStr, windowEndDate]);
+
   var timelineCustomers = useMemo(function() {
     var set = new Set((timelineData.woTimelines || []).map(function(wo) { return wo.customer || ""; }).filter(Boolean));
     return Array.from(set).sort();
   }, [timelineData]);
 
   var filteredWoTimelines = useMemo(function() {
-    var rows = (timelineData.woTimelines || []).slice();
+    var rows = windowWoTimelines.slice();
     if (tlSearch) {
       var q = tlSearch.toLowerCase();
       rows = rows.filter(function(wo) {
@@ -63,15 +141,38 @@ export default function TimelineView({ timelineData }) {
       return tlSortDir === "desc" ? -c : c;
     });
     return rows;
-  }, [timelineData, tlSearch, tlCustomer, tlStatus, tlSort, tlSortDir]);
+  }, [windowWoTimelines, tlSearch, tlCustomer, tlStatus, tlSort, tlSortDir]);
 
   var timelineHasFilters = !!tlSearch || tlCustomer !== "all" || tlStatus !== "all";
 
   return (<div>
-    <div style={{ display:"flex", gap:20, marginBottom:16 }}>
-      {[{l:"Inbound",v:timelineData.totalDeliveries,c:C.accent},{l:"BOM Matched",v:timelineData.matchedToBOM,c:C.ok},{l:"Dock Appts",v:timelineData.withDockAppt,c:C.bright},{l:"WOs Waiting",v:timelineData.woTimelines.length,c:C.warn}].map((s,i) =>
+    <div style={{ display:"flex", gap:6, marginBottom:10, flexWrap:"wrap", alignItems:"center" }}>
+      <span style={{ fontSize:12, color:C.dim, marginRight:4 }}>Window</span>
+      {windowOptions.map(function(opt) {
+        return <button key={opt.key} onClick={function() { setWindowDays(opt.key); }} style={pill(windowDays===opt.key)}>{opt.label}</button>;
+      })}
+    </div>
+    <div style={{ display:"flex", gap:20, marginBottom:8, flexWrap:"wrap" }}>
+      {[{l:"Inbound",v:windowSummary.inbound,c:C.accent},{l:"BOM Matched",v:windowSummary.matched,c:C.ok},{l:"Dock Appts",v:windowSummary.dock,c:C.bright},{l:"WOs Waiting",v:windowSummary.waiting,c:C.warn}].map((s,i) =>
         <div key={i}><div style={{ fontSize:24, fontWeight:700, fontFamily:mono, color:s.c, lineHeight:1 }}>{s.v}</div><div style={{ fontSize:13, color:C.dim, marginTop:3, letterSpacing:0.1 }}>{s.l}</div></div>
       )}
+    </div>
+    <div style={{ display:"flex", gap:6, marginBottom:12, flexWrap:"wrap", alignItems:"center" }}>
+      {[
+        { label:"Due Before Inbound", value:riskSummary.dueBeforeInbound, tone:riskSummary.dueBeforeInbound>0?"bad":"dim" },
+        { label:"Unscheduled PO", value:riskSummary.unscheduled, tone:riskSummary.unscheduled>0?"warn":"dim" },
+        { label:"No Inbound", value:riskSummary.noInbound, tone:riskSummary.noInbound>0?"bad":"dim" },
+        { label:"Dock Conflict", value:riskSummary.dockConflict, tone:riskSummary.dockConflict>0?"warn":"dim" }
+      ].map(function(r) {
+        var color = r.tone==="bad" ? C.bad : r.tone==="warn" ? C.warn : C.dim;
+        var bg = r.tone==="bad" ? C.badSoft : r.tone==="warn" ? C.warnSoft : C.raised;
+        return <span key={r.label} style={{ display:"inline-flex", alignItems:"center", gap:5, fontSize:12, fontWeight:600, color:color, background:bg, border:"1px solid "+C.border, borderRadius:999, padding:"3px 9px" }}>
+          <span style={{ fontFamily:mono }}>{r.value}</span>{r.label}
+        </span>;
+      })}
+    </div>
+    <div style={{ fontSize:12, color:C.dim, marginBottom:16 }}>
+      Counts reflect the selected window (today forward).
     </div>
     <div style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, overflow:"hidden", marginBottom:16 }}>
       <div style={{ padding:"12px 16px", borderBottom:"1px solid "+C.border }}>
@@ -99,20 +200,20 @@ export default function TimelineView({ timelineData }) {
             {tlSortDir === "asc" ? "Asc" : "Desc"}
           </button>
           {timelineHasFilters && <button onClick={function() { setTlSearch(""); setTlCustomer("all"); setTlStatus("all"); }} style={Object.assign({}, pill(false), { fontSize:12, color:C.bad, borderColor:C.badLine })}>Clear</button>}
-          <span style={{ fontSize:12, color:C.dim, marginLeft:4 }}>{filteredWoTimelines.length} of {timelineData.woTimelines.length} WOs</span>
+          <span style={{ fontSize:12, color:C.dim, marginLeft:4 }}>{filteredWoTimelines.length} of {windowWoTimelines.length} WOs</span>
         </div>
       </div>
       <div style={{ overflowX:"auto" }}>
-        <div style={{ minWidth:Math.max(800, timelineData.days.length*40 + 340), display:"flex", flexDirection:"column" }}>
+        <div style={{ minWidth:Math.max(800, visibleDays.length*40 + 340), display:"flex", flexDirection:"column" }}>
           <div style={{ display:"flex", position:"sticky", top:0, zIndex:2, background:C.raised }}>
             <div style={{ minWidth:320, padding:"6px 12px", fontSize:13, fontWeight:600, fontFamily:sans, letterSpacing:0.1, color:C.dim, borderBottom:"1px solid "+C.border, flexShrink:0 }}>Work Order</div>
             <div style={{ display:"flex", flex:1 }}>
-              {timelineData.days.map(day => {
+              {visibleDays.map(day => {
                 var dt = new Date(day + "T12:00:00"); var isT = day === timelineData.today; var isW = dt.getDay()===0||dt.getDay()===6;
                 return <div key={day} style={{ minWidth:40, flex:"0 0 40px", textAlign:"center", padding:"3px 0", borderBottom:"1px solid "+(isT?C.accent:C.border), background:isT?C.accentSoft:isW?C.raised:"transparent" }}>
                   <div style={{ fontSize:12, fontFamily:sans, fontWeight:600, color:isT?C.accent:C.dim }}>{"SMTWTFS"[dt.getDay()]}</div>
                   <div style={{ fontSize:12, fontFamily:mono, fontWeight:isT?700:400, color:isT?C.accent:C.bright }}>{dt.getDate()}</div>
-                  {(dt.getDate()===1||day===timelineData.days[0]) && <div style={{ fontSize:12, color:C.dim }}>{dt.toLocaleDateString("en-US",{month:"short"})}</div>}
+                  {(dt.getDate()===1||day===visibleDays[0]) && <div style={{ fontSize:12, color:C.dim }}>{dt.toLocaleDateString("en-US",{month:"short"})}</div>}
                 </div>;
               })}
             </div>
@@ -131,7 +232,7 @@ export default function TimelineView({ timelineData }) {
                 </div>
               </div>
               <div style={{ display:"flex", flex:1 }}>
-                {timelineData.days.map(day => {
+                {visibleDays.map(day => {
                   var dt = new Date(day+"T12:00:00"); var isT = day===timelineData.today; var isW = dt.getDay()===0||dt.getDay()===6; var isDue = day===wo.dueDate;
                   var dd = wo.delByDate[day]; var badge = null;
                   if (dd) { var sts = dd.items.map(d=>d.dockStatus).filter(Boolean); var bg = sts.includes("Completed")?C.ok:sts.includes("Scheduled")?C.accent:sts.includes("Cancelled")?C.bad:C.dim; var ic = sts.includes("Completed")?"\u2713":sts.includes("Scheduled")?"\u25C9":sts.includes("Cancelled")?"\u2717":"\u25CF"; badge = { bg:bg, ic:ic }; }
@@ -161,7 +262,13 @@ export default function TimelineView({ timelineData }) {
 
     {/* Material Summary */}
     {(function() {
-      var matRows = Object.entries(timelineData.byMaterial).map(function(entry) {
+      var byMaterialWindow = {};
+      windowDeliveries.forEach(function(d) {
+        var ref = timelineData.byMaterial[d.skuNorm] || { sku:d.sku, desc:d.desc, affectedWOs:[] };
+        if (!byMaterialWindow[d.skuNorm]) byMaterialWindow[d.skuNorm] = { sku:ref.sku || d.sku, desc:ref.desc || d.desc, deliveries:[], affectedWOs:ref.affectedWOs || [] };
+        byMaterialWindow[d.skuNorm].deliveries.push(d);
+      });
+      var matRows = Object.entries(byMaterialWindow).map(function(entry) {
         var sn = entry[0]; var item = entry[1];
         var dels = item.deliveries; var totalOpen = dels.reduce(function(s,d){return s+d.qty},0); var tab = dels[0] ? dels[0].tab : "";
         var ds = {}; dels.forEach(function(d) { if (d.dockStatus) ds[d.dockStatus] = (ds[d.dockStatus]||0)+1; });

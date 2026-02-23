@@ -276,12 +276,16 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
         if (comp.optionDetails) comp.optionDetails.forEach(opt => { var on = normalizeStr(opt.sku); if (on !== norm) { if (!compToFG[on]) compToFG[on]=[]; compToFG[on].push({ woNum:wo.woNum, productSku:wo.productSkuRaw, productDesc:wo.productDesc, needed:comp.needed, short:comp.short, qtyToProduce:wo.qtyToProduce }); } });
       });
     });
-    var byMaterial = {};
-    deliveries.forEach(d => { if (!byMaterial[d.skuNorm]) byMaterial[d.skuNorm] = { sku:d.sku, desc:d.desc, deliveries:[], affectedWOs:compToFG[d.skuNorm]||[] }; byMaterial[d.skuNorm].deliveries.push(d); });
     var today = new Date().toISOString().slice(0,10);
     var todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
-    var allDO = deliveries.map(function(d) { return d.dateObj; });
+    var visibleDeliveries = deliveries.filter(function(d) { return d.dateObj >= todayStart; });
+    var byMaterial = {};
+    visibleDeliveries.forEach(function(d) {
+      if (!byMaterial[d.skuNorm]) byMaterial[d.skuNorm] = { sku:d.sku, desc:d.desc, deliveries:[], affectedWOs:compToFG[d.skuNorm]||[] };
+      byMaterial[d.skuNorm].deliveries.push(d);
+    });
+    var allDO = visibleDeliveries.map(function(d) { return d.dateObj; });
     var maxD = new Date(Math.max.apply(null, allDO.concat([todayStart])));
     var minD = new Date(todayStart);
     maxD.setDate(maxD.getDate() + 3);
@@ -293,7 +297,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       var delByDate = {}; cd.forEach(d => { if (!delByDate[d.date]) delByDate[d.date] = { items:[], totalQty:0 }; delByDate[d.date].items.push(d); delByDate[d.date].totalQty += d.qty; });
       return { woNum:wo.woNum, productSku:wo.productSkuRaw, productDesc:wo.productDesc, customer:wo.customer || "", qtyToProduce:wo.qtyToProduce, readiness:wo.readiness, runStatus:wo.runStatus, maxRunnable:wo.maxRunnable, dueDate:dueDateStr, hasDeliveries:cd.length>0, deliveries:cd, delByDate:delByDate, totalIncoming:cd.reduce((s,d)=>s+d.qty,0) };
     }).filter(w => w.hasDeliveries).sort((a,b) => (a.dueDate||"zzz").localeCompare(b.dueDate||"zzz"));
-    return { days:days, today:today, woTimelines:woTimelines, deliveries:deliveries, byMaterial:byMaterial, totalDeliveries:deliveries.length, matchedToBOM:deliveries.filter(d=>(compToFG[d.skuNorm]||[]).length>0).length, withDockAppt:deliveries.filter(d=>d.dockStatus).length };
+    return { days:days, today:today, woTimelines:woTimelines, deliveries:visibleDeliveries, byMaterial:byMaterial, totalDeliveries:visibleDeliveries.length, matchedToBOM:visibleDeliveries.filter(function(d){return (compToFG[d.skuNorm]||[]).length>0;}).length, withDockAppt:visibleDeliveries.filter(function(d){return d.dockStatus;}).length };
   }, [edrData, dockData, analysis]);
 
   /* ====== INBOUND COVERAGE (CRITICAL ITEMS) ====== */
