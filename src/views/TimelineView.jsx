@@ -3,7 +3,7 @@ import { useTheme } from "../theme";
 import { useStyles } from "../hooks/useStyles";
 import { formatDescriptionForDisplay } from "../utils";
 
-export default function TimelineView({ timelineData }) {
+export default function TimelineView({ timelineData, deliveriesV2 }) {
   const { C, sans, mono } = useTheme();
   const { thC, tdN, tdM, inp, sel, pill } = useStyles();
 
@@ -18,6 +18,8 @@ export default function TimelineView({ timelineData }) {
   const [tlSort, setTlSort] = useState("atRisk");
   const [tlSortDir, setTlSortDir] = useState("desc");
   const [windowDays, setWindowDays] = useState(14);
+  const [pqSearch, setPqSearch] = useState("");
+  const [pqAtRiskOnly, setPqAtRiskOnly] = useState(false);
 
   if (!timelineData) {
     return (
@@ -51,34 +53,6 @@ export default function TimelineView({ timelineData }) {
   var windowDeliveries = useMemo(function() {
     return (timelineData.deliveries || []).filter(function(d) { return d.date >= todayStr && d.date <= windowEndStr; });
   }, [timelineData, todayStr, windowEndStr]);
-  var windowWoTimelines = useMemo(function() {
-    return (timelineData.woTimelines || []).map(function(wo) {
-      var wd = (wo.deliveries || []).filter(function(d) { return d.date >= todayStr && d.date <= windowEndStr; });
-      var byDate = {};
-      wd.forEach(function(d) {
-        if (!byDate[d.date]) byDate[d.date] = { items:[], totalQty:0 };
-        byDate[d.date].items.push(d);
-        byDate[d.date].totalQty += d.qty;
-      });
-      return Object.assign({}, wo, {
-        deliveries: wd,
-        delByDate: byDate,
-        totalIncoming: wd.reduce(function(s, d) { return s + d.qty; }, 0),
-        hasWindowDeliveries: wd.length > 0
-      });
-    }).filter(function(wo) { return wo.hasWindowDeliveries; });
-  }, [timelineData, todayStr, windowEndStr]);
-  var windowSummary = useMemo(function() {
-    var matched = windowDeliveries.filter(function(d) {
-      return !!(timelineData.byMaterial[d.skuNorm] && (timelineData.byMaterial[d.skuNorm].affectedWOs || []).length);
-    }).length;
-    return {
-      inbound: windowDeliveries.length,
-      matched: matched,
-      dock: windowDeliveries.filter(function(d) { return !!d.dockStatus; }).length,
-      waiting: windowWoTimelines.length
-    };
-  }, [windowDeliveries, windowWoTimelines, timelineData]);
   var riskSummary = useMemo(function() {
     var dueBeforeInbound = 0;
     var unscheduled = 0;
@@ -106,6 +80,51 @@ export default function TimelineView({ timelineData }) {
       dockConflict: dockConflict
     };
   }, [timelineData, todayStr, windowEndStr, windowEndDate]);
+  var commandBoard = useMemo(function() {
+    if (deliveriesV2 && deliveriesV2.todayBoard) return deliveriesV2.todayBoard;
+    var todayLoads = windowDeliveries.filter(function(d) { return d.date === todayStr; });
+    return {
+      openDockAppointmentsToday: todayLoads.filter(function(d) { return !!d.dockStatus; }).length,
+      edrLoadsToday: todayLoads.length,
+      matchedLoadsToday: todayLoads.filter(function(d) { return !!d.isMatched; }).length,
+      unmatchedLoadsToday: todayLoads.filter(function(d) { return !d.isMatched; }).length,
+      atRiskLoadsToday: todayLoads.filter(function(d) { return !!d.isAtRisk; }).length,
+      unitsPotentiallyUnlockedToday: todayLoads.filter(function(d) { return !!d.isAtRisk; }).reduce(function(s, d) { return s + (d.qty || 0); }, 0)
+    };
+  }, [deliveriesV2, windowDeliveries, todayStr]);
+  var reconciliation = deliveriesV2 && deliveriesV2.reconciliation ? deliveriesV2.reconciliation : {
+    edrTodayTotal: commandBoard.edrLoadsToday,
+    matchedToday: commandBoard.matchedLoadsToday,
+    unmatchedToday: commandBoard.unmatchedLoadsToday
+  };
+  var exceptions = deliveriesV2 && deliveriesV2.exceptions ? deliveriesV2.exceptions : {
+    edrWithoutOpenDock: 0,
+    openDockWithoutEdr: 0,
+    lateForDueWos: 0,
+    cancelledAtRisk: 0
+  };
+  var priorityQueueRows = useMemo(function() {
+    var src = deliveriesV2 && deliveriesV2.priorityQueue ? deliveriesV2.priorityQueue.slice() : [];
+    var rows = src.filter(function(r) { return r.etaDate >= todayStr && r.etaDate <= windowEndStr; });
+    if (pqAtRiskOnly) rows = rows.filter(function(r) { return !!r.isAtRisk; });
+    if (pqSearch) {
+      var q = pqSearch.toLowerCase();
+      rows = rows.filter(function(r) {
+        return (
+          (r.materialSku || "").toLowerCase().includes(q) ||
+          (r.materialDesc || "").toLowerCase().includes(q) ||
+          (r.po || "").toLowerCase().includes(q) ||
+          (r.recommendedAction || "").toLowerCase().includes(q)
+        );
+      });
+    }
+    rows.sort(function(a, b) {
+      if (!!a.isAtRisk !== !!b.isAtRisk) return a.isAtRisk ? -1 : 1;
+      if ((a.unitsUnlocked || 0) !== (b.unitsUnlocked || 0)) return (b.unitsUnlocked || 0) - (a.unitsUnlocked || 0);
+      return String(a.etaDate || "").localeCompare(String(b.etaDate || ""));
+    });
+    return rows;
+  }, [deliveriesV2, todayStr, windowEndStr, pqAtRiskOnly, pqSearch]);
 
   var timelineRows = useMemo(function() {
     var grouped = {};
@@ -173,7 +192,7 @@ export default function TimelineView({ timelineData }) {
       })}
     </div>
     <div style={{ display:"flex", gap:20, marginBottom:8, flexWrap:"wrap" }}>
-      {[{l:"Inbound",v:windowSummary.inbound,c:C.accent},{l:"BOM Matched",v:windowSummary.matched,c:C.ok},{l:"Dock Appts",v:windowSummary.dock,c:C.bright},{l:"WOs Waiting",v:windowSummary.waiting,c:C.warn}].map((s,i) =>
+      {[{l:"OpenDock Today",v:commandBoard.openDockAppointmentsToday,c:C.accent},{l:"EDR Loads Today",v:commandBoard.edrLoadsToday,c:C.bright},{l:"Matched Today",v:commandBoard.matchedLoadsToday,c:C.ok},{l:"At-Risk Loads Today",v:commandBoard.atRiskLoadsToday,c:C.warn},{l:"Units Unlocked Today",v:Math.round(commandBoard.unitsPotentiallyUnlockedToday || 0).toLocaleString(),c:C.accent}].map((s,i) =>
         <div key={i}><div style={{ fontSize:24, fontWeight:700, fontFamily:mono, color:s.c, lineHeight:1 }}>{s.v}</div><div style={{ fontSize:13, color:C.dim, marginTop:3, letterSpacing:0.1 }}>{s.l}</div></div>
       )}
     </div>
@@ -192,7 +211,48 @@ export default function TimelineView({ timelineData }) {
       })}
     </div>
     <div style={{ fontSize:12, color:C.dim, marginBottom:16 }}>
-      Counts reflect the selected window (today forward).
+      Reconciliation (today): EDR {reconciliation.edrTodayTotal} = matched {reconciliation.matchedToday} + unmatched {reconciliation.unmatchedToday}.
+    </div>
+    <div style={{ marginBottom:16, background:C.surface, border:"1px solid "+C.border, borderRadius:8, padding:"10px 12px" }}>
+      <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
+        {[{l:"EDR w/o OpenDock",v:exceptions.edrWithoutOpenDock},{l:"OpenDock w/o EDR",v:exceptions.openDockWithoutEdr},{l:"Late vs WO Due",v:exceptions.lateForDueWos},{l:"Cancelled At-Risk",v:exceptions.cancelledAtRisk}].map(function(x) {
+          var hot = x.v > 0;
+          return <span key={x.l} style={{ display:"inline-flex", alignItems:"center", gap:5, border:"1px solid "+C.border, borderRadius:999, padding:"3px 9px", fontSize:12, fontWeight:600, color:hot?C.bad:C.dim, background:hot?C.badSoft:C.raised }}>
+            <span style={{ fontFamily:mono }}>{x.v}</span>{x.l}
+          </span>;
+        })}
+      </div>
+    </div>
+    <div style={{ marginBottom:16, background:C.surface, border:"1px solid "+C.border, borderRadius:8, overflow:"hidden" }}>
+      <div style={{ padding:"10px 12px", borderBottom:"1px solid "+C.border, display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
+        <div style={{ fontSize:14, fontWeight:700, color:C.bright, marginRight:8 }}>Inbound Priority Queue</div>
+        <input value={pqSearch} onChange={function(e) { setPqSearch(e.target.value); }} placeholder="Search PO, material..." style={Object.assign({}, inp, { width:190, fontSize:13 })} />
+        <button onClick={function() { setPqAtRiskOnly(function(v) { return !v; }); }} style={pill(pqAtRiskOnly)}>{pqAtRiskOnly ? "At-Risk Only" : "All Loads"}</button>
+        <span style={{ fontSize:12, color:C.dim }}>{priorityQueueRows.length} loads</span>
+      </div>
+      <div style={{ overflowX:"auto" }}>
+        <table style={{ width:"100%", borderCollapse:"collapse" }}>
+          <thead><tr style={{ background:C.raised }}>
+            {["ETA","PO","Material","Qty","Matched","At-Risk","Linked WOs","Units Unlocked","Action"].map(function(h) { return <th key={h} style={thC(false)}>{h}</th>; })}
+          </tr></thead>
+          <tbody>
+            {priorityQueueRows.slice(0, 25).map(function(r, i) {
+              return <tr key={i} style={{ borderBottom:"1px solid "+C.border }}>
+                <td style={tdM}>{r.etaDate}</td>
+                <td style={Object.assign({}, tdN, { maxWidth:120, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" })}>{r.po || "--"}</td>
+                <td style={Object.assign({}, tdN, { maxWidth:260, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" })}>{r.materialSku} {r.materialDesc ? ("| " + formatDescriptionForDisplay(r.materialDesc)) : ""}</td>
+                <td style={Object.assign({}, tdM, { color:C.bright })}>{Math.round(r.qty || 0).toLocaleString()}</td>
+                <td style={Object.assign({}, tdM, { color:r.isMatched ? C.ok : C.bad, fontWeight:600 })}>{r.isMatched ? "Yes" : "No"}</td>
+                <td style={Object.assign({}, tdM, { color:r.isAtRisk ? C.warn : C.dim, fontWeight:600 })}>{r.isAtRisk ? "Yes" : "No"}</td>
+                <td style={tdM}>{r.linkedWOCount || 0}</td>
+                <td style={Object.assign({}, tdM, { color:(r.unitsUnlocked || 0) > 0 ? C.accent : C.dim, fontWeight:600 })}>{Math.round(r.unitsUnlocked || 0).toLocaleString()}</td>
+                <td style={Object.assign({}, tdN, { color:C.dim })}>{r.recommendedAction || "--"}</td>
+              </tr>;
+            })}
+            {priorityQueueRows.length === 0 && <tr><td colSpan={9} style={{ padding:18, color:C.dim, textAlign:"center" }}>No loads match current queue filters.</td></tr>}
+          </tbody>
+        </table>
+      </div>
     </div>
     <div style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, overflow:"hidden", marginBottom:16 }}>
       <div style={{ padding:"12px 16px", borderBottom:"1px solid "+C.border }}>
@@ -261,7 +321,7 @@ export default function TimelineView({ timelineData }) {
           })}
           {filteredTimelineRows.length === 0 && (
             <div style={{ padding:"16px 12px", color:C.dim, fontSize:13 }}>
-              {windowSummary.inbound > 0 ? "No inbound materials match the current Deliveries filters." : "No deliveries are available in the selected window."}
+              {windowDeliveries.length > 0 ? "No inbound materials match the current Deliveries filters." : "No deliveries are available in the selected window."}
             </div>
           )}
         </div>
