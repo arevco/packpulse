@@ -641,6 +641,60 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
         matchState: !d.isMatched ? "opendock-only" : (edrLevel === "fresh" ? "matched-fresh" : (edrLevel === "aging" ? "matched-aging" : "matched-stale"))
       };
     });
+    var loadsByKey = {};
+    priorityQueue.forEach(function(r) {
+      var key = [
+        r.scheduledDate || r.etaDate || "",
+        normalizePoKey(r.po || ""),
+        normalizePoKey(r.confirmation || ""),
+        normalizeStr(r.status || "")
+      ].join("|");
+      if (!loadsByKey[key]) {
+        loadsByKey[key] = {
+          key: key,
+          scheduledDate: r.scheduledDate || "",
+          expectedDate: r.etaDate || "",
+          po: r.po || "",
+          confirmation: r.confirmation || "",
+          status: r.status || "",
+          matchState: r.matchState || "opendock-only",
+          isMatched: !!r.isMatched,
+          materialLineCount: 0,
+          totalQty: 0,
+          linkedWOCount: 0,
+          unitsUnlocked: 0,
+          materials: []
+        };
+      }
+      var load = loadsByKey[key];
+      if (r.etaDate && (!load.expectedDate || r.etaDate < load.expectedDate)) load.expectedDate = r.etaDate;
+      load.isMatched = load.isMatched || !!r.isMatched;
+      if ((r.matchState || "") === "matched-fresh") load.matchState = "matched-fresh";
+      else if ((r.matchState || "") === "matched-aging" && load.matchState !== "matched-fresh") load.matchState = "matched-aging";
+      else if ((r.matchState || "") === "matched-stale" && load.matchState === "opendock-only") load.matchState = "matched-stale";
+      if ((r.materialSku || "").toLowerCase() !== "unknown") {
+        load.materialLineCount += 1;
+        load.totalQty += safeNum(r.qty || 0);
+      }
+      load.linkedWOCount += safeNum(r.linkedWOCount || 0);
+      load.unitsUnlocked += safeNum(r.unitsUnlocked || 0);
+      load.materials.push({
+        materialSku: r.materialSku || "Unknown",
+        materialDesc: r.materialDesc || "",
+        qty: safeNum(r.qty || 0),
+        expectedDate: r.etaDate || "",
+        matchState: r.matchState || "opendock-only",
+        linkedWOCount: safeNum(r.linkedWOCount || 0),
+        unitsUnlocked: safeNum(r.unitsUnlocked || 0)
+      });
+    });
+    var loads = Object.values(loadsByKey).map(function(load) {
+      load.linkedWOCount = Math.round(load.linkedWOCount);
+      load.unitsUnlocked = Math.round(load.unitsUnlocked);
+      return load;
+    }).sort(function(a, b) {
+      return String(a.scheduledDate || "").localeCompare(String(b.scheduledDate || "")) || String(a.po || "").localeCompare(String(b.po || ""));
+    });
     var exceptions = {
       edrWithoutOpenDock: todayLoads.filter(function(d) { return !d.isMatched; }).length,
       openDockWithoutEdr: Math.max(0, openDockAppointmentsToday - matchedLoadsToday),
@@ -677,7 +731,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
         unitsPotentiallyUnlockedToday: Math.round(unitsPotentiallyUnlockedToday)
       },
       summary: {
-        openDockScheduled: priorityQueue.length,
+        openDockScheduled: loads.length,
         materialResolved: materialResolvedLoads,
         materialUnknown: unknownMaterialLoads,
         atRiskWOsWaiting: atRiskWOsWaiting,
@@ -689,6 +743,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
         confidence: { score: confidenceScore, label: confidenceLabel }
       },
       priorityQueue: priorityQueue,
+      loads: loads,
       exceptions: exceptions,
       reconciliation: {
         edrTodayTotal: todayLoads.length,
