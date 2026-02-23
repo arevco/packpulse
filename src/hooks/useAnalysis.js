@@ -408,13 +408,14 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
         }
         var bestDock = best ? best.appt : null;
         var strongMatch = !!(best && best.score >= 85);
+        var attachDockMeta = strongMatch;
         if (strongMatch && best && best.appt && best.appt.id) matchedDockApptIds[best.appt.id] = true;
         if (strongMatch && best.kind === "po") matchDiagnostics.matchedByPo += 1;
         else if (strongMatch && best.kind === "reference") matchDiagnostics.matchedByReference += 1;
         else if (best && best.kind === "date") matchDiagnostics.dateProximityOnly += 1;
         var skuKeys = buildSkuMatchKeys(mat);
         if (!skuKeys.length) return;
-        deliveries.push({ sku:mat, skuNorm:skuKeys[0], skuKeys:skuKeys, desc:desc, date:dateStr, dateObj:dateObj, qty:qty, po:po, poNorm:poNorm, tab:tab, dockStatus:bestDock?bestDock.status:"", dockApptDate:bestDock?bestDock.apptDate:"", confirmation:bestDock?bestDock.confirmation:"", isMatched:strongMatch, qtyOrd:qtyOrd, dockMatchKind:best ? best.kind : "none", dockMatchScore:best ? best.score : 0 });
+        deliveries.push({ sku:mat, skuNorm:skuKeys[0], skuKeys:skuKeys, desc:desc, date:dateStr, dateObj:dateObj, qty:qty, po:po, poNorm:poNorm, tab:tab, dockStatus:attachDockMeta && bestDock ? bestDock.status : "", dockApptDate:attachDockMeta && bestDock ? bestDock.apptDate : "", confirmation:attachDockMeta && bestDock ? bestDock.confirmation : "", isMatched:strongMatch, qtyOrd:qtyOrd, dockMatchKind:best ? best.kind : "none", dockMatchScore:best ? best.score : 0 });
       });
       // Keep OpenDock as execution truth: append scheduled appointments that did not map to EDR.
       dockApptAll.forEach(function(appt, idx) {
