@@ -7,34 +7,18 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
   const { C } = useTheme();
   const { thC, tdN, tdM, tdToggle, thDS, tdDN, tdDM, truncate, inp, sel, pill } = useStyles();
 
-  const [ciMode, setCiMode] = useState("material");
-  const [ciSearch, setCiSearch] = useState("");
-  const [ciCustomerFilter, setCiCustomerFilter] = useState("all");
-  const [ciStockFilter, setCiStockFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const [customerFilter, setCustomerFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [riskFilter, setRiskFilter] = useState("all");
+  const [sortField, setSortField] = useState("uncoveredQty");
+  const [sortDir, setSortDir] = useState("desc");
+  const [expanded, setExpanded] = useState(null);
 
-  const [ciSort, setCiSort] = useState("unlockedUnits");
-  const [ciSortDir, setCiSortDir] = useState("desc");
-
-  const [covStatusFilter, setCovStatusFilter] = useState("all");
-  const [covRiskFilter, setCovRiskFilter] = useState("all");
-  const [covSort, setCovSort] = useState("uncoveredQty");
-  const [covSortDir, setCovSortDir] = useState("desc");
-
-  const [expandedWO, setExpandedWO] = useState(null);
   const ITEM_TRUNCATE_LEN = 14;
   var truncateItem = function(v) {
     var s = String(v || "");
     return s.length > ITEM_TRUNCATE_LEN ? (s.slice(0, ITEM_TRUNCATE_LEN) + "...") : s;
-  };
-
-  var handleCiSort = function(f) {
-    if (ciSort === f) setCiSortDir(function(d) { return d === "asc" ? "desc" : "asc"; });
-    else { setCiSort(f); setCiSortDir("desc"); }
-  };
-
-  var handleCovSort = function(f) {
-    if (covSort === f) setCovSortDir(function(d) { return d === "asc" ? "desc" : "asc"; });
-    else { setCovSort(f); setCovSortDir("desc"); }
   };
 
   var customerOptions = useMemo(function() {
@@ -45,211 +29,202 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
     return Array.from(set).sort();
   }, [rawCriticalItems]);
 
-  var criticalItems = useMemo(function() {
-    var items = (rawCriticalItems || []).slice();
-    if (ciSearch) {
-      var q = ciSearch.toLowerCase();
-      items = items.filter(function(i) {
-        return i.sku.toLowerCase().includes(q) || (i.desc || "").toLowerCase().includes(q) || (i.customerLabel || "").toLowerCase().includes(q);
-      });
-    }
-    if (ciCustomerFilter !== "all") {
-      items = items.filter(function(i) { return (i.customers || []).includes(ciCustomerFilter); });
-    }
-    if (ciStockFilter !== "all") {
-      items = items.filter(function(i) { return ciStockFilter === "zero" ? i.isZeroStock : !i.isZeroStock; });
-    }
-    items.sort(function(a, b) {
-      var c = 0;
-      if (ciSort === "sku") c = a.sku.localeCompare(b.sku);
-      else if (ciSort === "desc") c = (a.desc || "").localeCompare(b.desc || "");
-      else if (ciSort === "customer") c = (a.customerLabel || "").localeCompare(b.customerLabel || "");
-      else if (ciSort === "onHand") c = a.onHand - b.onHand;
-      else if (ciSort === "totalShort") c = a.totalShort - b.totalShort;
-      else if (ciSort === "affectedWOs") c = a.affectedWOs.length - b.affectedWOs.length;
-      else c = a.unlockedUnits - b.unlockedUnits;
-      return ciSortDir === "desc" ? -c : c;
-    });
-    return items;
-  }, [rawCriticalItems, ciSort, ciSortDir, ciSearch, ciCustomerFilter, ciStockFilter]);
-
-  var coverageItems = useMemo(function() {
-    if (!inboundCoverage || !inboundCoverage.rows) return [];
-    var bySku = {};
-    (rawCriticalItems || []).forEach(function(item) { bySku[normalizeStr(item.sku)] = item; });
-
-    var items = inboundCoverage.rows.map(function(row) {
-      var base = bySku[normalizeStr(row.sku)] || {};
-      return Object.assign({}, row, {
-        desc: row.desc || base.desc || "",
-        customerLabel: row.customerLabel || base.customerLabel || "--",
-        affectedWOs: base.affectedWOs || [],
-        onHand: base.onHand || 0,
-      });
+  var consolidatedItems = useMemo(function() {
+    var baseBySku = {};
+    (rawCriticalItems || []).forEach(function(item) {
+      var key = normalizeStr(item.sku);
+      baseBySku[key] = {
+        sku: item.sku,
+        desc: item.desc || "",
+        customerLabel: item.customerLabel || "--",
+        customers: item.customers || [],
+        onHand: item.onHand || 0,
+        shortQty: Math.max(0, item.totalShort || 0),
+        affectedWOs: item.affectedWOs || [],
+        unlockedUnits: item.unlockedUnits || 0,
+        isZeroStock: !!item.isZeroStock
+      };
     });
 
-    if (ciSearch) {
-      var q = ciSearch.toLowerCase();
-      items = items.filter(function(r) {
+    var rows = (inboundCoverage && inboundCoverage.rows && inboundCoverage.rows.length)
+      ? inboundCoverage.rows.map(function(row) {
+        var key = normalizeStr(row.sku);
+        var base = baseBySku[key] || {
+          sku: row.sku,
+          desc: row.desc || "",
+          customerLabel: row.customerLabel || "--",
+          customers: String(row.customerLabel || "").split(",").map(function(v) { return v.trim(); }).filter(Boolean),
+          onHand: 0,
+          shortQty: Math.max(0, row.shortQty || 0),
+          affectedWOs: [],
+          unlockedUnits: 0,
+          isZeroStock: false
+        };
+        return {
+          sku: row.sku || base.sku,
+          desc: row.desc || base.desc || "",
+          customerLabel: row.customerLabel || base.customerLabel || "--",
+          customers: base.customers || [],
+          onHand: base.onHand || 0,
+          shortQty: Math.max(0, row.shortQty || base.shortQty || 0),
+          scheduledQty: Math.max(0, row.scheduledQty || 0),
+          inboundQty: Math.max(0, row.inboundQty || 0),
+          uncoveredQty: Math.max(0, row.uncoveredQty != null ? row.uncoveredQty : (row.shortQty || 0) - (row.scheduledQty || 0)),
+          scheduledCoveragePct: Math.max(0, row.scheduledCoveragePct || 0),
+          coveragePct: Math.max(0, row.coveragePct || 0),
+          riskLevel: row.riskLevel || "high",
+          status: row.status || "missing",
+          recommendedAction: row.recommendedAction || "Monitor",
+          earliestDueDate: row.earliestDueDate || "",
+          earliestInboundDate: row.earliestInboundDate || "",
+          earliestScheduledDate: row.earliestScheduledDate || "",
+          dueBeforeScheduled: !!row.dueBeforeScheduled,
+          openPOs: row.openPOs || [],
+          affectedWOs: base.affectedWOs || [],
+          unlockedUnits: base.unlockedUnits || 0,
+          isZeroStock: !!base.isZeroStock
+        };
+      })
+      : Object.values(baseBySku).map(function(base) {
+        return {
+          sku: base.sku,
+          desc: base.desc,
+          customerLabel: base.customerLabel,
+          customers: base.customers,
+          onHand: base.onHand,
+          shortQty: base.shortQty,
+          scheduledQty: 0,
+          inboundQty: 0,
+          uncoveredQty: base.shortQty,
+          scheduledCoveragePct: 0,
+          coveragePct: 0,
+          riskLevel: "high",
+          status: "missing",
+          recommendedAction: "Create / Expedite PO",
+          earliestDueDate: "",
+          earliestInboundDate: "",
+          earliestScheduledDate: "",
+          dueBeforeScheduled: false,
+          openPOs: [],
+          affectedWOs: base.affectedWOs,
+          unlockedUnits: base.unlockedUnits,
+          isZeroStock: base.isZeroStock
+        };
+      });
+
+    if (search) {
+      var q = search.toLowerCase();
+      rows = rows.filter(function(r) {
         return (
-          r.sku.toLowerCase().includes(q) ||
+          (r.sku || "").toLowerCase().includes(q) ||
           (r.desc || "").toLowerCase().includes(q) ||
           (r.customerLabel || "").toLowerCase().includes(q) ||
+          (r.recommendedAction || "").toLowerCase().includes(q) ||
           (r.openPOs || []).join(",").toLowerCase().includes(q)
         );
       });
     }
-
-    if (covStatusFilter === "at-risk") items = items.filter(function(r) { return r.riskLevel !== "low"; });
-    else if (covStatusFilter !== "all") items = items.filter(function(r) { return r.status === covStatusFilter; });
-    if (covRiskFilter !== "all") items = items.filter(function(r) { return r.riskLevel === covRiskFilter; });
-    if (ciCustomerFilter !== "all") {
-      items = items.filter(function(i) {
-        return String(i.customerLabel || "").split(",").map(function(v) { return v.trim(); }).includes(ciCustomerFilter);
+    if (customerFilter !== "all") {
+      rows = rows.filter(function(r) {
+        return String(r.customerLabel || "").split(",").map(function(v) { return v.trim(); }).includes(customerFilter);
       });
     }
+    if (statusFilter === "at-risk") rows = rows.filter(function(r) { return r.riskLevel !== "low"; });
+    else if (statusFilter !== "all") rows = rows.filter(function(r) { return r.status === statusFilter; });
+    if (riskFilter !== "all") rows = rows.filter(function(r) { return r.riskLevel === riskFilter; });
 
-    items.sort(function(a, b) {
+    rows.sort(function(a, b) {
       var c = 0;
-      if (covSort === "sku") c = a.sku.localeCompare(b.sku);
-      else if (covSort === "risk") c = a.riskLevel.localeCompare(b.riskLevel);
-      else if (covSort === "shortQty") c = a.shortQty - b.shortQty;
-      else if (covSort === "scheduledQty") c = a.scheduledQty - b.scheduledQty;
-      else if (covSort === "uncoveredQty") c = (a.uncoveredQty || 0) - (b.uncoveredQty || 0);
-      else if (covSort === "inboundQty") c = a.inboundQty - b.inboundQty;
-      else if (covSort === "coverage") c = a.scheduledCoveragePct - b.scheduledCoveragePct;
-      else if (covSort === "action") c = (a.recommendedAction || "").localeCompare(b.recommendedAction || "");
-      else if (covSort === "dueDate") c = (a.earliestDueDate || "").localeCompare(b.earliestDueDate || "");
-      return covSortDir === "desc" ? -c : c;
+      if (sortField === "sku") c = (a.sku || "").localeCompare(b.sku || "");
+      else if (sortField === "desc") c = (a.desc || "").localeCompare(b.desc || "");
+      else if (sortField === "customer") c = (a.customerLabel || "").localeCompare(b.customerLabel || "");
+      else if (sortField === "onHand") c = (a.onHand || 0) - (b.onHand || 0);
+      else if (sortField === "shortQty") c = (a.shortQty || 0) - (b.shortQty || 0);
+      else if (sortField === "scheduledQty") c = (a.scheduledQty || 0) - (b.scheduledQty || 0);
+      else if (sortField === "uncoveredQty") c = (a.uncoveredQty || 0) - (b.uncoveredQty || 0);
+      else if (sortField === "coverage") c = (a.scheduledCoveragePct || 0) - (b.scheduledCoveragePct || 0);
+      else if (sortField === "risk") c = (a.riskLevel || "").localeCompare(b.riskLevel || "");
+      else if (sortField === "action") c = (a.recommendedAction || "").localeCompare(b.recommendedAction || "");
+      else if (sortField === "dueDate") c = (a.earliestDueDate || "").localeCompare(b.earliestDueDate || "");
+      return sortDir === "desc" ? -c : c;
     });
-    return items;
-  }, [inboundCoverage, rawCriticalItems, ciSearch, covStatusFilter, covRiskFilter, ciCustomerFilter, covSort, covSortDir]);
+    return rows;
+  }, [rawCriticalItems, inboundCoverage, search, customerFilter, statusFilter, riskFilter, sortField, sortDir]);
 
-  var exportCriticalCSV = function() {
-    if (ciMode === "coverage") {
-      var hC = ["Item Code", "Description", "Customer", "Risk", "Status", "Short Qty", "Scheduled Qty", "Uncovered Qty", "Inbound Qty", "Coverage %", "Action", "Earliest Due", "Earliest Scheduled", "POs"];
-      var rowsC = coverageItems.map(function(i) {
-        return [
-          i.sku,
-          '"' + (i.desc || "").replace(/"/g, '""') + '"',
-          '"' + (i.customerLabel || "--").replace(/"/g, '""') + '"',
-          i.riskLevel || "",
-          i.status || "",
-          Math.round(i.shortQty || 0),
-          Math.round(i.scheduledQty || 0),
-          Math.round(i.uncoveredQty || 0),
-          Math.round(i.inboundQty || 0),
-          (i.scheduledCoveragePct || 0) + "%",
-          '"' + (i.recommendedAction || "").replace(/"/g, '""') + '"',
-          i.earliestDueDate || "",
-          i.earliestScheduledDate || "",
-          '"' + ((i.openPOs || []).join(", ")).replace(/"/g, '""') + '"',
-        ];
-      });
-      triggerDownload([hC.join(",")].concat(rowsC.map(function(r) { return r.join(","); })).join("\n"), "inbound_coverage_" + new Date().toISOString().slice(0, 10) + ".csv", "text/csv");
-      return;
-    }
-
-    var h = ["Item Code", "Description", "Customer", "On Hand", "Total Short", "WOs Affected", "Production Unlocked"];
-    var rows = criticalItems.map(function(i) {
-      return [i.sku, '"' + (i.desc || "").replace(/"/g, '""') + '"', '"' + (i.customerLabel || "--").replace(/"/g, '""') + '"', Math.round(i.onHand), Math.round(i.totalShort), i.affectedWOs.length, Math.round(i.unlockedUnits)];
-    });
-    triggerDownload([h.join(",")].concat(rows.map(function(r) { return r.join(","); })).join("\n"), "critical_items_" + new Date().toISOString().slice(0, 10) + ".csv", "text/csv");
+  var handleSort = function(field) {
+    if (sortField === field) setSortDir(function(d) { return d === "asc" ? "desc" : "asc"; });
+    else { setSortField(field); setSortDir("desc"); }
   };
 
-  var exportCriticalPDF = function() {
-    var th = ["Item", "Desc", "Customer", "On Hand", "Short", "WOs", "Unlocked"].map(function(hd) { return "<th>" + hd + "</th>"; }).join("");
-    var tb = criticalItems.map(function(i) {
-      return "<tr><td>" + i.sku + "</td><td>" + (i.desc || "--") + "</td><td>" + (i.customerLabel || "--") + "</td><td>" + Math.round(i.onHand).toLocaleString() + "</td><td>" + Math.round(i.totalShort).toLocaleString() + "</td><td>" + i.affectedWOs.length + "</td><td>" + Math.round(i.unlockedUnits).toLocaleString() + "</td></tr>";
+  var hasActiveFilters = !!search || customerFilter !== "all" || statusFilter !== "all" || riskFilter !== "all";
+
+  var exportCSV = function() {
+    var h = ["Item Code", "Description", "Customer", "On Hand", "Short Qty", "Scheduled Qty", "Uncovered Qty", "Inbound Qty", "Coverage %", "Risk", "Action", "Earliest Due", "POs"];
+    var rows = consolidatedItems.map(function(i) {
+      return [
+        i.sku,
+        '"' + (i.desc || "").replace(/"/g, '""') + '"',
+        '"' + (i.customerLabel || "--").replace(/"/g, '""') + '"',
+        Math.round(i.onHand || 0),
+        Math.round(i.shortQty || 0),
+        Math.round(i.scheduledQty || 0),
+        Math.round(i.uncoveredQty || 0),
+        Math.round(i.inboundQty || 0),
+        (i.scheduledCoveragePct || 0) + "%",
+        i.riskLevel || "",
+        '"' + (i.recommendedAction || "").replace(/"/g, '""') + '"',
+        i.earliestDueDate || "",
+        '"' + ((i.openPOs || []).join(", ")).replace(/"/g, '""') + '"'
+      ];
+    });
+    triggerDownload([h.join(",")].concat(rows.map(function(r) { return r.join(","); })).join("\n"), "critical_materials_" + new Date().toISOString().slice(0, 10) + ".csv", "text/csv");
+  };
+
+  var exportPDF = function() {
+    var th = ["Item", "Desc", "Customer", "Short", "Scheduled", "Uncovered", "Coverage", "Risk", "Action", "Due"].map(function(hd) { return "<th>" + hd + "</th>"; }).join("");
+    var tb = consolidatedItems.map(function(i) {
+      return "<tr><td>" + i.sku + "</td><td>" + (i.desc || "--") + "</td><td>" + (i.customerLabel || "--") + "</td><td>" + Math.round(i.shortQty || 0).toLocaleString() + "</td><td>" + Math.round(i.scheduledQty || 0).toLocaleString() + "</td><td>" + Math.round(i.uncoveredQty || 0).toLocaleString() + "</td><td>" + (i.scheduledCoveragePct || 0) + "%</td><td>" + (i.riskLevel || "") + "</td><td>" + (i.recommendedAction || "") + "</td><td>" + fmtDate(i.earliestDueDate) + "</td></tr>";
     }).join("");
-    triggerDownload(buildExportHTML("Critical Items Report", th, tb), "critical_items_" + new Date().toISOString().slice(0, 10) + ".html", "text/html");
+    triggerDownload(buildExportHTML("Critical Materials Report", th, tb), "critical_materials_" + new Date().toISOString().slice(0, 10) + ".html", "text/html");
   };
 
-  var renderMaterialRows = function() {
-    if (criticalItems.length === 0) return <tr><td colSpan={8} style={{ padding:36, textAlign:"center", color:C.dim }}>All materials available.</td></tr>;
+  var riskColor = function(level) {
+    if (level === "high") return C.bad;
+    if (level === "medium") return C.warn;
+    return C.ok;
+  };
+
+  var renderRows = function() {
+    if (!consolidatedItems.length) return <tr><td colSpan={12} style={{ padding:36, textAlign:"center", color:C.dim }}>No critical materials match current filters.</td></tr>;
     var out = [];
-    criticalItems.forEach(function(ci, idx) {
-      var rowKey = "material-" + idx;
-      var isX = expandedWO === rowKey;
+    consolidatedItems.forEach(function(ci, idx) {
+      var rowKey = "cm-" + idx;
+      var isX = expanded === rowKey;
       out.push(
-        <tr key={"ci" + idx} onClick={function() { setExpandedWO(isX ? null : rowKey); }} style={{ cursor:"pointer", borderBottom:"1px solid " + C.border, background:isX ? C.raised : "transparent" }}
+        <tr key={rowKey} onClick={function() { setExpanded(isX ? null : rowKey); }} style={{ cursor:"pointer", borderBottom:"1px solid " + C.border, background:isX ? C.raised : "transparent" }}
           onMouseEnter={function(e) { if (!isX) e.currentTarget.style.background = C.hover; }} onMouseLeave={function(e) { if (!isX) e.currentTarget.style.background = isX ? C.raised : "transparent"; }}>
           <td style={tdToggle}>{isX ? "\u25BE" : "\u25B8"}</td>
           <td title={ci.sku} style={Object.assign({}, tdM, { fontWeight:600, color:C.bright }, truncate(140))}>{truncateItem(ci.sku)}</td>
-          <td style={Object.assign({}, tdN, { color:C.dim }, truncate(200))}>{formatDescriptionForDisplay(ci.desc) || "--"}</td>
+          <td style={Object.assign({}, tdN, { color:C.dim }, truncate(220))}>{formatDescriptionForDisplay(ci.desc) || "--"}</td>
           <td style={Object.assign({}, tdN, { color:C.dim }, truncate(220))}>{ci.customerLabel || "--"}</td>
-          <td style={Object.assign({}, tdM, { textAlign:"right", fontWeight:600, color:ci.isZeroStock ? C.bad : C.warn })}>{Math.round(ci.onHand).toLocaleString()}</td>
-          <td style={Object.assign({}, tdM, { textAlign:"right", fontWeight:600, color:C.bad })}>{Math.round(ci.totalShort).toLocaleString()}</td>
-          <td style={Object.assign({}, tdM, { textAlign:"right", color:C.bright })}>{ci.affectedWOs.length}</td>
-          <td style={Object.assign({}, tdM, { textAlign:"right", fontWeight:600, color:C.ok })}>{Math.round(ci.unlockedUnits).toLocaleString()}</td>
-        </tr>
-      );
-      if (isX) {
-        out.push(
-          <tr key={"cd" + idx}><td colSpan={8} style={{ padding:"0 12px 14px 36px", background:C.raised }}>
-            <div style={{ fontSize:12, fontWeight:600, color:C.accent, marginBottom:6, marginTop:10, letterSpacing:0.1 }}>Affected Work Orders</div>
-            <table style={{ width:"100%", borderCollapse:"collapse" }}>
-              <thead><tr>{["WO#", "Product", "Customer", "WO Qty", "Needed", "Short", "Due"].map(function(h) { return <th key={h} style={thDS}>{h}</th>; })}</tr></thead>
-              <tbody>
-                {ci.affectedWOs.map(function(wo, wi) {
-                  return <tr key={wi} style={{ borderBottom:"1px solid " + C.border }}>
-                    <td style={Object.assign({}, tdDM, { fontWeight:600, color:C.bright })}>{wo.woNum}</td>
-                    <td style={tdDM}>{wo.productSku}</td>
-                    <td style={Object.assign({}, tdDN, { color:C.dim })}>{wo.customer || "--"}</td>
-                    <td style={Object.assign({}, tdDM, { color:C.bright })}>{wo.qtyToProduce.toLocaleString()}</td>
-                    <td style={tdDM}>{Math.round(wo.needed).toLocaleString()}</td>
-                    <td style={Object.assign({}, tdDM, { fontWeight:600, color:C.bad })}>{Math.round(wo.short).toLocaleString()}</td>
-                    <td style={tdDM}>{fmtDate(wo.dueDate)}</td>
-                  </tr>;
-                })}
-              </tbody>
-            </table>
-          </td></tr>
-        );
-      }
-    });
-    return out;
-  };
-
-  var renderCoverageRows = function() {
-    if (!coverageItems.length) return <tr><td colSpan={11} style={{ padding:36, textAlign:"center", color:C.dim }}>No inbound coverage rows match the filters.</td></tr>;
-    var out = [];
-    coverageItems.forEach(function(ci, idx) {
-      var rowKey = "coverage-" + idx;
-      var isX = expandedWO === rowKey;
-      var riskColor = ci.riskLevel === "high" ? C.bad : ci.riskLevel === "medium" ? C.warn : C.ok;
-      var statusText = ci.status === "missing" ? "Missing" : ci.status === "unscheduled" ? "Unscheduled" : ci.status === "partial" ? "Partial" : "Covered";
-      var actionColor = ci.status === "covered" ? C.ok : ci.status === "partial" ? C.warn : C.bad;
-      out.push(
-        <tr key={"cov" + idx} onClick={function() { setExpandedWO(isX ? null : rowKey); }} style={{ cursor:"pointer", borderBottom:"1px solid " + C.border, background:isX ? C.raised : "transparent" }}
-          onMouseEnter={function(e) { if (!isX) e.currentTarget.style.background = C.hover; }} onMouseLeave={function(e) { if (!isX) e.currentTarget.style.background = isX ? C.raised : "transparent"; }}>
-          <td style={tdToggle}>{isX ? "\u25BE" : "\u25B8"}</td>
-          <td title={ci.sku} style={Object.assign({}, tdM, { fontWeight:600, color:C.bright }, truncate(140))}>{truncateItem(ci.sku)}</td>
-          <td style={Object.assign({}, tdN, { color:C.dim }, truncate(210))}>{formatDescriptionForDisplay(ci.desc) || "--"}</td>
-          <td style={Object.assign({}, tdN, { color:C.dim }, truncate(220))}>{ci.customerLabel || "--"}</td>
-          <td style={Object.assign({}, tdN, { color:riskColor, fontWeight:600 })}>
-            <span style={{ display:"inline-block", padding:"2px 7px", borderRadius:999, fontSize:11, fontWeight:700, color:riskColor, background:ci.riskLevel === "high" ? C.badSoft : ci.riskLevel === "medium" ? C.warnSoft : C.okSoft }}>{ci.riskLevel === "high" ? "High" : ci.riskLevel === "medium" ? "Medium" : "Low"}</span>
-          </td>
+          <td style={Object.assign({}, tdM, { textAlign:"right", fontWeight:600, color:ci.isZeroStock ? C.bad : C.warn })}>{Math.round(ci.onHand || 0).toLocaleString()}</td>
           <td style={Object.assign({}, tdM, { textAlign:"right", fontWeight:600, color:C.bad })}>{Math.round(ci.shortQty || 0).toLocaleString()}</td>
-          <td style={Object.assign({}, tdM, { textAlign:"right", fontWeight:600, color:C.accent })}>{Math.round(ci.scheduledQty || 0).toLocaleString()}</td>
+          <td style={Object.assign({}, tdM, { textAlign:"right", color:C.accent })}>{Math.round(ci.scheduledQty || 0).toLocaleString()}</td>
           <td style={Object.assign({}, tdM, { textAlign:"right", fontWeight:700, color:(ci.uncoveredQty || 0) > 0 ? C.bad : C.ok })}>{Math.round(ci.uncoveredQty || 0).toLocaleString()}</td>
-          <td style={Object.assign({}, tdM, { textAlign:"right", color:C.dim })}>{Math.round(ci.inboundQty || 0).toLocaleString()}</td>
-          <td style={Object.assign({}, tdM, { textAlign:"right", fontWeight:600, color:(ci.scheduledCoveragePct || 0) >= 100 ? C.ok : (ci.scheduledCoveragePct || 0) >= 50 ? C.warn : C.bad })}>
-            {(ci.scheduledCoveragePct || 0)}% / {(ci.coveragePct || 0)}%
-          </td>
-          <td style={Object.assign({}, tdN, { color:actionColor, fontWeight:600 })}>
-            <span title={"Status: " + statusText} style={{ display:"inline-block", padding:"2px 7px", borderRadius:999, fontSize:11, fontWeight:700, color:actionColor, background:ci.status === "covered" ? C.okSoft : ci.status === "partial" ? C.warnSoft : C.badSoft }}>{ci.recommendedAction || "Monitor"}</span>
-          </td>
+          <td style={Object.assign({}, tdM, { textAlign:"right", fontWeight:600, color:(ci.scheduledCoveragePct || 0) >= 100 ? C.ok : (ci.scheduledCoveragePct || 0) >= 50 ? C.warn : C.bad })}>{(ci.scheduledCoveragePct || 0)}%</td>
+          <td style={Object.assign({}, tdN, { color:riskColor(ci.riskLevel), fontWeight:600 })}>{ci.riskLevel === "high" ? "High" : ci.riskLevel === "medium" ? "Medium" : "Low"}</td>
+          <td style={Object.assign({}, tdN, { color:(ci.status === "covered" ? C.ok : ci.status === "partial" ? C.warn : C.bad), fontWeight:600 }, truncate(170))}>{ci.recommendedAction || "Monitor"}</td>
           <td style={Object.assign({}, tdM, { color:ci.dueBeforeScheduled ? C.bad : C.dim })}>{fmtDate(ci.earliestDueDate)}</td>
         </tr>
       );
       if (isX) {
         out.push(
-          <tr key={"covd" + idx}><td colSpan={11} style={{ padding:"0 12px 14px 36px", background:C.raised }}>
+          <tr key={rowKey + "-detail"}><td colSpan={12} style={{ padding:"0 12px 14px 36px", background:C.raised }}>
             <div style={{ display:"flex", gap:14, flexWrap:"wrap", marginTop:10, marginBottom:8, fontSize:12 }}>
               <span style={{ color:C.dim }}>Earliest Inbound: <span style={{ color:C.bright, fontFamily:"monospace" }}>{fmtDate(ci.earliestInboundDate)}</span></span>
               <span style={{ color:C.dim }}>Earliest Scheduled: <span style={{ color:C.bright, fontFamily:"monospace" }}>{fmtDate(ci.earliestScheduledDate)}</span></span>
               <span style={{ color:C.dim }}>POs: <span style={{ color:C.bright }}>{(ci.openPOs || []).length ? ci.openPOs.join(", ") : "--"}</span></span>
+              <span style={{ color:C.dim }}>Unlocked Units: <span style={{ color:C.bright }}>{Math.round(ci.unlockedUnits || 0).toLocaleString()}</span></span>
             </div>
             <div style={{ fontSize:12, fontWeight:600, color:C.accent, marginBottom:6, letterSpacing:0.1 }}>Affected Work Orders</div>
             <table style={{ width:"100%", borderCollapse:"collapse" }}>
@@ -260,9 +235,9 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
                     <td style={Object.assign({}, tdDM, { fontWeight:600, color:C.bright })}>{wo.woNum}</td>
                     <td style={tdDM}>{wo.productSku}</td>
                     <td style={Object.assign({}, tdDN, { color:C.dim })}>{wo.customer || "--"}</td>
-                    <td style={Object.assign({}, tdDM, { color:C.bright })}>{wo.qtyToProduce.toLocaleString()}</td>
-                    <td style={tdDM}>{Math.round(wo.needed).toLocaleString()}</td>
-                    <td style={Object.assign({}, tdDM, { fontWeight:600, color:C.bad })}>{Math.round(wo.short).toLocaleString()}</td>
+                    <td style={Object.assign({}, tdDM, { color:C.bright })}>{(wo.qtyToProduce || 0).toLocaleString()}</td>
+                    <td style={tdDM}>{Math.round(wo.needed || 0).toLocaleString()}</td>
+                    <td style={Object.assign({}, tdDM, { fontWeight:600, color:C.bad })}>{Math.round(wo.short || 0).toLocaleString()}</td>
                     <td style={tdDM}>{fmtDate(wo.dueDate)}</td>
                   </tr>;
                 })}
@@ -278,44 +253,32 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
     return out;
   };
 
-  var coverageSummary = inboundCoverage ? inboundCoverage.summary : null;
-  var hasActiveFilters = !!ciSearch || ciCustomerFilter !== "all" || (ciMode === "material" ? ciStockFilter !== "all" : (covStatusFilter !== "all" || covRiskFilter !== "all"));
+  var summary = useMemo(function() {
+    var atRisk = consolidatedItems.filter(function(r) { return r.riskLevel !== "low"; }).length;
+    var uncovered = consolidatedItems.reduce(function(s, r) { return s + (r.uncoveredQty || 0); }, 0);
+    return { atRisk:atRisk, uncovered:uncovered, total:consolidatedItems.length };
+  }, [consolidatedItems]);
 
   return (<div>
     <div style={{ display:"flex", gap:6, marginBottom:12, flexWrap:"wrap", alignItems:"center" }}>
-      <button onClick={function() { setCiMode("material"); }} style={pill(ciMode === "material")}>Material Risk</button>
-      <button onClick={function() { setCiMode("coverage"); }} style={pill(ciMode === "coverage")}>Inbound Coverage</button>
-      <input type="text" placeholder={ciMode === "coverage" ? "Search SKU, customer, PO..." : "Search..."} value={ciSearch} onChange={function(e) { setCiSearch(e.target.value); }} style={Object.assign({}, inp, { width:220 })} />
-      <select value={ciCustomerFilter} onChange={function(e) { setCiCustomerFilter(e.target.value); }} style={Object.assign({}, sel, { fontSize:13 })}>
+      <input type="text" placeholder="Search SKU, customer, PO, action..." value={search} onChange={function(e) { setSearch(e.target.value); }} style={Object.assign({}, inp, { width:250 })} />
+      <select value={customerFilter} onChange={function(e) { setCustomerFilter(e.target.value); }} style={Object.assign({}, sel, { fontSize:13 })}>
         <option value="all">All Customers</option>
         {customerOptions.map(function(c) { return <option key={c} value={c}>{c}</option>; })}
       </select>
-
-      {ciMode === "material" ? (
-        <>
-          {[{ key:"all", label:"All Stock" }, { key:"zero", label:"Zero Stock" }, { key:"low", label:"Low Stock" }].map(function(f) {
-            return <button key={f.key} onClick={function() { setCiStockFilter(f.key); }} style={pill(ciStockFilter === f.key)}>{f.label}</button>;
-          })}
-          <span style={{ fontSize:13, color:C.dim }}><span style={{ color:C.bad, fontWeight:600 }}>{criticalItems.filter(function(i) { return i.isZeroStock; }).length}</span> zero | <span style={{ color:C.warn, fontWeight:600 }}>{criticalItems.filter(function(i) { return !i.isZeroStock; }).length}</span> low</span>
-        </>
-      ) : (
-        <>
-          {[{ key:"all", label:"All" }, { key:"at-risk", label:"At Risk" }, { key:"missing", label:"Missing" }, { key:"unscheduled", label:"Unscheduled" }, { key:"partial", label:"Partial" }, { key:"covered", label:"Covered" }].map(function(f) {
-            return <button key={f.key} onClick={function() { setCovStatusFilter(f.key); }} style={pill(covStatusFilter === f.key)}>{f.label}</button>;
-          })}
-          {[{ key:"all", label:"All Risk" }, { key:"high", label:"High Risk" }, { key:"medium", label:"Medium Risk" }, { key:"low", label:"Low Risk" }].map(function(f) {
-            return <button key={f.key} onClick={function() { setCovRiskFilter(f.key); }} style={pill(covRiskFilter === f.key)}>{f.label}</button>;
-          })}
-          {coverageSummary && <span style={{ fontSize:13, color:C.dim }}><span style={{ color:C.bad, fontWeight:600 }}>{coverageSummary.atRisk}</span> at risk | <span style={{ color:C.bad, fontWeight:600 }}>{Math.round(coverageSummary.totalUncoveredQty || 0).toLocaleString()}</span> uncovered units | <span style={{ color:C.ok, fontWeight:600 }}>{coverageSummary.covered}</span> covered</span>}
-        </>
-      )}
-
+      {[{ key:"all", label:"All" }, { key:"at-risk", label:"At Risk" }, { key:"missing", label:"Missing" }, { key:"unscheduled", label:"Unscheduled" }, { key:"partial", label:"Partial" }, { key:"covered", label:"Covered" }].map(function(f) {
+        return <button key={f.key} onClick={function() { setStatusFilter(f.key); }} style={pill(statusFilter === f.key)}>{f.label}</button>;
+      })}
+      {[{ key:"all", label:"All Risk" }, { key:"high", label:"High" }, { key:"medium", label:"Medium" }, { key:"low", label:"Low" }].map(function(f) {
+        return <button key={f.key} onClick={function() { setRiskFilter(f.key); }} style={pill(riskFilter === f.key)}>{f.label}</button>;
+      })}
+      <span style={{ fontSize:13, color:C.dim }}><span style={{ color:C.bad, fontWeight:600 }}>{summary.atRisk}</span> at risk | <span style={{ color:C.bad, fontWeight:600 }}>{Math.round(summary.uncovered).toLocaleString()}</span> uncovered units</span>
       <div style={{ flex:1 }} />
       {hasActiveFilters && (
-        <button onClick={function() { setCiSearch(""); setCiCustomerFilter("all"); setCiStockFilter("all"); setCovStatusFilter("all"); setCovRiskFilter("all"); }} style={Object.assign({}, pill(false), { fontSize:13, color:C.bad, borderColor:C.badLine })}>Clear Filters</button>
+        <button onClick={function() { setSearch(""); setCustomerFilter("all"); setStatusFilter("all"); setRiskFilter("all"); }} style={Object.assign({}, pill(false), { fontSize:13, color:C.bad, borderColor:C.badLine })}>Clear Filters</button>
       )}
-      <button onClick={exportCriticalCSV} style={Object.assign({}, pill(false), { fontSize:13 })}>CSV</button>
-      {ciMode === "material" && <button onClick={exportCriticalPDF} style={Object.assign({}, pill(false), { fontSize:13 })}>PDF</button>}
+      <button onClick={exportCSV} style={Object.assign({}, pill(false), { fontSize:13 })}>CSV</button>
+      <button onClick={exportPDF} style={Object.assign({}, pill(false), { fontSize:13 })}>PDF</button>
     </div>
 
     <div style={{ background:C.surface, border:"1px solid " + C.border, borderRadius:8, overflow:"hidden" }}>
@@ -323,25 +286,17 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
         <table style={{ width:"100%", borderCollapse:"collapse" }}>
           <thead><tr style={{ background:C.raised }}>
             <th style={{ width:24, padding:"0 8px", borderBottom:"1px solid " + C.border }} />
-            {ciMode === "material" ? (
-              [{ f:"sku", l:"Item" }, { f:"desc", l:"Description" }, { f:"customer", l:"Customer" }, { f:"onHand", l:"On Hand" }, { f:"totalShort", l:"Short" }, { f:"affectedWOs", l:"WOs" }, { f:"unlockedUnits", l:"Units Unlocked" }].map(function(col) {
-                return <th key={col.f} onClick={function() { handleCiSort(col.f); }} style={Object.assign({}, thC(ciSort===col.f), { textAlign:col.f==="sku"||col.f==="desc"||col.f==="customer"?"left":"right" })}>{col.l}{ciSort===col.f ? (ciSortDir==="asc" ? " \u2191" : " \u2193") : ""}</th>;
-              })
-            ) : (
-              [{ f:"sku", l:"Item" }, { f:"desc", l:"Description" }, { f:"customer", l:"Customer" }, { f:"risk", l:"Risk" }, { f:"shortQty", l:"Short" }, { f:"scheduledQty", l:"Scheduled" }, { f:"uncoveredQty", l:"Uncovered" }, { f:"inboundQty", l:"Inbound" }, { f:"coverage", l:"Coverage" }, { f:"action", l:"Action" }, { f:"dueDate", l:"Earliest Due" }].map(function(col) {
-                return <th key={col.f} onClick={function() { handleCovSort(col.f); }} style={Object.assign({}, thC(covSort===col.f), { textAlign:col.f==="sku"||col.f==="desc"||col.f==="customer"||col.f==="risk"||col.f==="action"?"left":"right" })}>{col.l}{covSort===col.f ? (covSortDir==="asc" ? " \u2191" : " \u2193") : ""}</th>;
-              })
-            )}
+            {[{ f:"sku", l:"Item" }, { f:"desc", l:"Description" }, { f:"customer", l:"Customer" }, { f:"onHand", l:"On Hand" }, { f:"shortQty", l:"Short" }, { f:"scheduledQty", l:"Scheduled" }, { f:"uncoveredQty", l:"Uncovered" }, { f:"coverage", l:"Coverage" }, { f:"risk", l:"Risk" }, { f:"action", l:"Action" }, { f:"dueDate", l:"Earliest Due" }].map(function(col) {
+              return <th key={col.f} onClick={function() { handleSort(col.f); }} style={Object.assign({}, thC(sortField===col.f), { textAlign:col.f==="sku"||col.f==="desc"||col.f==="customer"||col.f==="risk"||col.f==="action"?"left":"right" })}>{col.l}{sortField===col.f ? (sortDir==="asc" ? " \u2191" : " \u2193") : ""}</th>;
+            })}
           </tr></thead>
-          <tbody>{ciMode === "material" ? renderMaterialRows() : renderCoverageRows()}</tbody>
+          <tbody>{renderRows()}</tbody>
         </table>
       </div>
     </div>
 
     <div style={{ marginTop:8, fontSize:13, color:C.dim }}>
-      {ciMode === "material"
-        ? (criticalItems.length + " critical items")
-        : (coverageItems.length + " inbound coverage rows" + (inboundCoverage ? (" · horizon " + inboundCoverage.horizonDays + "d") : ""))}
+      {summary.total + " critical materials" + (inboundCoverage ? (" · horizon " + inboundCoverage.horizonDays + "d") : "")}
     </div>
   </div>);
 }
