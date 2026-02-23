@@ -14,10 +14,9 @@ export default function TimelineView({ timelineData }) {
   const [matFilterWO, setMatFilterWO] = useState("all");
   const [matSearch, setMatSearch] = useState("");
   const [tlSearch, setTlSearch] = useState("");
-  const [tlCustomer, setTlCustomer] = useState("all");
-  const [tlStatus, setTlStatus] = useState("all");
-  const [tlSort, setTlSort] = useState("dueDate");
-  const [tlSortDir, setTlSortDir] = useState("asc");
+  const [tlRiskFilter, setTlRiskFilter] = useState("all");
+  const [tlSort, setTlSort] = useState("atRisk");
+  const [tlSortDir, setTlSortDir] = useState("desc");
   const [windowDays, setWindowDays] = useState(14);
 
   if (!timelineData) {
@@ -108,42 +107,63 @@ export default function TimelineView({ timelineData }) {
     };
   }, [timelineData, todayStr, windowEndStr, windowEndDate]);
 
-  var timelineCustomers = useMemo(function() {
-    var set = new Set((timelineData.woTimelines || []).map(function(wo) { return wo.customer || ""; }).filter(Boolean));
-    return Array.from(set).sort();
-  }, [timelineData]);
+  var timelineRows = useMemo(function() {
+    var grouped = {};
+    windowDeliveries.forEach(function(d) {
+      if (!grouped[d.skuNorm]) grouped[d.skuNorm] = { skuNorm:d.skuNorm, sku:d.sku, desc:d.desc || "", deliveries:[] };
+      grouped[d.skuNorm].deliveries.push(d);
+    });
+    return Object.values(grouped).map(function(g) {
+      var byDate = {};
+      g.deliveries.forEach(function(d) {
+        if (!byDate[d.date]) byDate[d.date] = { items:[], totalQty:0 };
+        byDate[d.date].items.push(d);
+        byDate[d.date].totalQty += d.qty;
+      });
+      var linkedWOs = (timelineData.byMaterial[g.skuNorm] && timelineData.byMaterial[g.skuNorm].affectedWOs) ? timelineData.byMaterial[g.skuNorm].affectedWOs : [];
+      var atRiskWONums = Array.from(new Set(linkedWOs.filter(function(w) { return (w.short || 0) > 0; }).map(function(w) { return w.woNum; })));
+      var atRisk = atRiskWONums.length > 0;
+      var dockStatuses = Array.from(new Set(g.deliveries.map(function(d) { return d.dockStatus || ""; }).filter(Boolean)));
+      var topDock = dockStatuses.includes("Scheduled") ? "Scheduled" : dockStatuses.includes("Completed") ? "Completed" : dockStatuses.includes("Arrived") ? "Arrived" : dockStatuses.includes("Cancelled") ? "Cancelled" : "";
+      return {
+        sku:g.sku,
+        desc:g.desc,
+        delByDate:byDate,
+        totalIncoming:g.deliveries.reduce(function(s, d) { return s + d.qty; }, 0),
+        deliveryCount:g.deliveries.length,
+        atRisk:atRisk,
+        atRiskWONums:atRiskWONums,
+        topDock:topDock
+      };
+    });
+  }, [windowDeliveries, timelineData]);
 
-  var filteredWoTimelines = useMemo(function() {
-    var rows = windowWoTimelines.slice();
+  var filteredTimelineRows = useMemo(function() {
+    var rows = timelineRows.slice();
     if (tlSearch) {
       var q = tlSearch.toLowerCase();
-      rows = rows.filter(function(wo) {
+      rows = rows.filter(function(r) {
         return (
-          (wo.woNum || "").toLowerCase().includes(q) ||
-          (wo.productSku || "").toLowerCase().includes(q) ||
-          (wo.productDesc || "").toLowerCase().includes(q) ||
-          (wo.customer || "").toLowerCase().includes(q)
+          (r.sku || "").toLowerCase().includes(q) ||
+          (r.desc || "").toLowerCase().includes(q) ||
+          (r.atRiskWONums || []).some(function(wo) { return (wo || "").toLowerCase().includes(q); })
         );
       });
     }
-    if (tlCustomer !== "all") rows = rows.filter(function(wo) { return (wo.customer || "") === tlCustomer; });
-    if (tlStatus !== "all") rows = rows.filter(function(wo) { return (wo.runStatus || "") === tlStatus; });
+    if (tlRiskFilter === "atrisk") rows = rows.filter(function(r) { return r.atRisk; });
     rows.sort(function(a, b) {
       var c = 0;
-      if (tlSort === "woNum") c = (a.woNum || "").localeCompare(b.woNum || "");
-      else if (tlSort === "product") c = (a.productSku || "").localeCompare(b.productSku || "");
-      else if (tlSort === "customer") c = (a.customer || "").localeCompare(b.customer || "");
-      else if (tlSort === "status") c = (a.runStatus || "").localeCompare(b.runStatus || "");
+      if (tlSort === "material") c = (a.sku || "").localeCompare(b.sku || "");
+      else if (tlSort === "dock") c = (a.topDock || "").localeCompare(b.topDock || "");
+      else if (tlSort === "deliveries") c = (a.deliveryCount || 0) - (b.deliveryCount || 0);
       else if (tlSort === "incoming") c = (a.totalIncoming || 0) - (b.totalIncoming || 0);
-      else if (tlSort === "maxRunnable") c = (a.maxRunnable || 0) - (b.maxRunnable || 0);
-      else if (tlSort === "readiness") c = (a.readiness || 0) - (b.readiness || 0);
-      else c = (a.dueDate || "").localeCompare(b.dueDate || "");
+      else c = (a.atRisk ? 1 : 0) - (b.atRisk ? 1 : 0);
       return tlSortDir === "desc" ? -c : c;
     });
     return rows;
-  }, [windowWoTimelines, tlSearch, tlCustomer, tlStatus, tlSort, tlSortDir]);
+  }, [timelineRows, tlSearch, tlRiskFilter, tlSort, tlSortDir]);
 
-  var timelineHasFilters = !!tlSearch || tlCustomer !== "all" || tlStatus !== "all";
+  var timelineHasFilters = !!tlSearch || tlRiskFilter !== "all";
 
   return (<div>
     <div style={{ display:"flex", gap:6, marginBottom:10, flexWrap:"wrap", alignItems:"center" }}>
@@ -178,35 +198,28 @@ export default function TimelineView({ timelineData }) {
       <div style={{ padding:"12px 16px", borderBottom:"1px solid "+C.border }}>
         <div style={{ fontSize:15, fontWeight:600, color:C.bright }}>Delivery Timeline</div>
         <div style={{ marginTop:10, display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
-          <input value={tlSearch} onChange={function(e) { setTlSearch(e.target.value); }} placeholder="Search WO, SKU, customer..." style={Object.assign({}, inp, { width:220, fontSize:13 })} />
-          <select value={tlCustomer} onChange={function(e) { setTlCustomer(e.target.value); }} style={Object.assign({}, sel, { fontSize:13 })}>
-            <option value="all">All Customers</option>
-            {timelineCustomers.map(function(c) { return <option key={c} value={c}>{c}</option>; })}
-          </select>
-          {["all","ready","partial","blocked","nobom"].map(function(s) {
-            return <button key={s} onClick={function() { setTlStatus(function(curr) { return curr === s && s !== "all" ? "all" : s; }); }} style={pill(tlStatus===s)}>{s==="all"?"All":s==="nobom"?"No BOM":s.charAt(0).toUpperCase()+s.slice(1)}</button>;
+          <input value={tlSearch} onChange={function(e) { setTlSearch(e.target.value); }} placeholder="Search material, desc, WO..." style={Object.assign({}, inp, { width:220, fontSize:13 })} />
+          {[{key:"all",label:"All"},{key:"atrisk",label:"At-Risk"}].map(function(s) {
+            return <button key={s.key} onClick={function() { setTlRiskFilter(function(curr) { return curr === s.key && s.key !== "all" ? "all" : s.key; }); }} style={pill(tlRiskFilter===s.key)}>{s.label}</button>;
           })}
           <select value={tlSort} onChange={function(e) { setTlSort(e.target.value); }} style={Object.assign({}, sel, { fontSize:13 })}>
-            <option value="dueDate">Sort: Due Date</option>
+            <option value="atRisk">Sort: At-Risk</option>
             <option value="incoming">Sort: Incoming Qty</option>
-            <option value="readiness">Sort: Readiness</option>
-            <option value="maxRunnable">Sort: Can Make</option>
-            <option value="customer">Sort: Customer</option>
-            <option value="woNum">Sort: WO#</option>
-            <option value="product">Sort: Product</option>
-            <option value="status">Sort: Status</option>
+            <option value="deliveries">Sort: Deliveries</option>
+            <option value="dock">Sort: Dock Status</option>
+            <option value="material">Sort: Material</option>
           </select>
           <button onClick={function() { setTlSortDir(function(d) { return d === "asc" ? "desc" : "asc"; }); }} style={Object.assign({}, pill(false), { fontSize:12 })}>
             {tlSortDir === "asc" ? "Asc" : "Desc"}
           </button>
-          {timelineHasFilters && <button onClick={function() { setTlSearch(""); setTlCustomer("all"); setTlStatus("all"); }} style={Object.assign({}, pill(false), { fontSize:12, color:C.bad, borderColor:C.badLine })}>Clear</button>}
-          <span style={{ fontSize:12, color:C.dim, marginLeft:4 }}>{filteredWoTimelines.length} of {windowWoTimelines.length} WOs</span>
+          {timelineHasFilters && <button onClick={function() { setTlSearch(""); setTlRiskFilter("all"); }} style={Object.assign({}, pill(false), { fontSize:12, color:C.bad, borderColor:C.badLine })}>Clear</button>}
+          <span style={{ fontSize:12, color:C.dim, marginLeft:4 }}>{filteredTimelineRows.length} of {timelineRows.length} materials</span>
         </div>
       </div>
       <div style={{ overflowX:"auto" }}>
         <div style={{ minWidth:Math.max(800, visibleDays.length*40 + 340), display:"flex", flexDirection:"column" }}>
           <div style={{ display:"flex", position:"sticky", top:0, zIndex:2, background:C.raised }}>
-            <div style={{ minWidth:320, padding:"6px 12px", fontSize:13, fontWeight:600, fontFamily:sans, letterSpacing:0.1, color:C.dim, borderBottom:"1px solid "+C.border, flexShrink:0 }}>Work Order</div>
+            <div style={{ minWidth:320, padding:"6px 12px", fontSize:13, fontWeight:600, fontFamily:sans, letterSpacing:0.1, color:C.dim, borderBottom:"1px solid "+C.border, flexShrink:0 }}>Inbound Material</div>
             <div style={{ display:"flex", flex:1 }}>
               {visibleDays.map(day => {
                 var dt = new Date(day + "T12:00:00"); var isT = day === timelineData.today; var isW = dt.getDay()===0||dt.getDay()===6;
@@ -218,39 +231,37 @@ export default function TimelineView({ timelineData }) {
               })}
             </div>
           </div>
-          {filteredWoTimelines.map((wo, wI) => {
-            var sc = wo.runStatus==="ready"?C.ok:wo.runStatus==="partial"?C.warn:wo.runStatus==="nobom"?C.accent:C.bad;
+          {filteredTimelineRows.map((row, wI) => {
+            var sc = row.atRisk ? C.warn : C.ok;
             return <div key={wI} style={{ display:"flex", borderBottom:"1px solid "+C.border, minHeight:46 }}>
               <div style={{ minWidth:320, padding:"6px 12px", display:"flex", flexDirection:"column", justifyContent:"center", flexShrink:0, borderRight:"1px solid "+C.border }}>
                 <div style={{ display:"flex", alignItems:"center", gap:5 }}>
-                  <span style={{ fontSize:13, fontWeight:600, fontFamily:mono, color:C.bright }}>{wo.woNum}</span>
+                  <span style={{ fontSize:13, fontWeight:600, fontFamily:mono, color:C.bright }}>{row.sku}</span>
                   <span style={{ width:6, height:6, borderRadius:"50%", background:sc }} />
+                  {row.atRisk && <span style={{ fontSize:11, fontWeight:700, color:C.warn, background:C.warnSoft, borderRadius:999, padding:"2px 6px" }}>At-Risk</span>}
                 </div>
-                <div style={{ fontSize:12, color:C.dim, marginTop:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:290 }}>{wo.productSku} | {formatDescriptionForDisplay(wo.productDesc)||""}</div>
+                <div style={{ fontSize:12, color:C.dim, marginTop:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:290 }}>{formatDescriptionForDisplay(row.desc)||"--"}</div>
                 <div style={{ fontSize:13, color:C.dim, fontFamily:mono, marginTop:1 }}>
-                  {(wo.customer ? (wo.customer + " | ") : "") + "Need " + wo.qtyToProduce.toLocaleString() + " | Can make " + wo.maxRunnable.toLocaleString() + " | +" + wo.totalIncoming.toLocaleString() + " incoming"}
+                  {"Deliveries " + row.deliveryCount.toLocaleString() + " | +" + row.totalIncoming.toLocaleString() + " incoming" + (row.atRiskWONums.length ? (" | WOs " + row.atRiskWONums.slice(0,3).join(", ")) : "")}
                 </div>
               </div>
               <div style={{ display:"flex", flex:1 }}>
                 {visibleDays.map(day => {
-                  var dt = new Date(day+"T12:00:00"); var isT = day===timelineData.today; var isW = dt.getDay()===0||dt.getDay()===6; var isDue = day===wo.dueDate;
-                  var dd = wo.delByDate[day]; var badge = null;
+                  var dt = new Date(day+"T12:00:00"); var isT = day===timelineData.today; var isW = dt.getDay()===0||dt.getDay()===6;
+                  var dd = row.delByDate[day]; var badge = null;
                   if (dd) { var sts = dd.items.map(d=>d.dockStatus).filter(Boolean); var bg = sts.includes("Completed")?C.ok:sts.includes("Scheduled")?C.accent:sts.includes("Cancelled")?C.bad:C.dim; var ic = sts.includes("Completed")?"\u2713":sts.includes("Scheduled")?"\u25C9":sts.includes("Cancelled")?"\u2717":"\u25CF"; badge = { bg:bg, ic:ic }; }
-                  return <div key={day} style={{ minWidth:40, flex:"0 0 40px", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:1, background:isDue?C.badSoft:isT?C.accentSoft:isW?C.raised:"transparent", borderLeft:isDue?"2px solid "+C.bad:isT?"2px solid "+C.accent:"none" }}>
+                  return <div key={day} style={{ minWidth:40, flex:"0 0 40px", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:1, background:isT?C.accentSoft:isW?C.raised:"transparent", borderLeft:isT?"2px solid "+C.accent:"none" }}>
                     {dd && <div title={dd.items.map(d => d.sku+": "+d.qty.toLocaleString()+" ("+(d.dockStatus||"pending")+")").join("\n")} style={{ fontSize:14, fontFamily:mono, fontWeight:700, color:"#fff", background:badge?badge.bg:C.dim, borderRadius:3, padding:"2px 4px", lineHeight:1.3, textAlign:"center", minWidth:30, cursor:"default" }}>
                       {dd.totalQty >= 1000 ? (dd.totalQty/1000).toFixed(1)+"k" : dd.totalQty}
                     </div>}
-                    {isDue && <div style={{ fontSize:12, fontWeight:700, color:C.bad }}>DUE</div>}
                   </div>;
                 })}
               </div>
             </div>;
           })}
-          {filteredWoTimelines.length === 0 && (
+          {filteredTimelineRows.length === 0 && (
             <div style={{ padding:"16px 12px", color:C.dim, fontSize:13 }}>
-              {windowSummary.inbound > 0
-                ? "No at-risk work orders are linked to inbound deliveries in this window. Inbound appointments are still listed below."
-                : "No deliveries are available in the selected window."}
+              {windowSummary.inbound > 0 ? "No inbound materials match the current Deliveries filters." : "No deliveries are available in the selected window."}
             </div>
           )}
         </div>
