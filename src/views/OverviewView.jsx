@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useTheme } from "../theme";
 import { useStyles } from "../hooks/useStyles";
-import { fmtDate } from "../utils";
+import { fmtDate, formatDescriptionForDisplay } from "../utils";
 
 export default function OverviewView({ analysis, woStatuses, onSelectCustomer }) {
   const { C, sans, mono } = useTheme();
@@ -97,6 +97,7 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
     if (lateSortField === "daysLate") c = (a.daysLate || 0) - (b.daysLate || 0);
     else if (lateSortField === "woNum") c = (a.woNum || "").localeCompare(b.woNum || "");
     else if (lateSortField === "productSkuRaw") c = (a.productSkuRaw || "").localeCompare(b.productSkuRaw || "");
+    else if (lateSortField === "productDesc") c = (a.productDesc || "").localeCompare(b.productDesc || "");
     else if (lateSortField === "customer") c = (a.customer || "").localeCompare(b.customer || "");
     else if (lateSortField === "qtyToProduce") c = (a.qtyToProduce || 0) - (b.qtyToProduce || 0);
     else if (lateSortField === "unitsRemaining") c = (a.unitsRemaining || 0) - (b.unitsRemaining || 0);
@@ -183,7 +184,7 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
       {!lateCollapsed && <div style={{ background:C.surface, border:"1px solid "+C.badLine, borderRadius:8, overflow:"hidden" }}>
         <table style={{ width:"100%", borderCollapse:"collapse" }}>
           <thead><tr style={{ background:C.raised }}>
-            {[{l:"Days Late",f:"daysLate"},{l:"WO#",f:"woNum"},{l:"Product",f:"productSkuRaw"},{l:"Customer",f:"customer"},{l:"Order Qty",f:"qtyToProduce"},{l:"Remaining",f:"unitsRemaining"},{l:"Complete",f:"prodPct"},{l:"Ready",f:"readiness"},{l:"Can Make",f:"maxRunnable"},{l:"Due Date",f:"dueDate"}].map(function(col) {
+            {[{l:"Days Late",f:"daysLate"},{l:"WO#",f:"woNum"},{l:"Product",f:"productSkuRaw"},{l:"Product Description",f:"productDesc"},{l:"Customer",f:"customer"},{l:"Order Qty",f:"qtyToProduce"},{l:"Remaining",f:"unitsRemaining"},{l:"Complete",f:"prodPct"},{l:"Ready",f:"readiness"},{l:"Can Make",f:"maxRunnable"},{l:"Due Date",f:"dueDate"}].map(function(col) {
               var active = lateSortField === col.f;
               var arrow = active ? (lateSortDir === "asc" ? " \u2191" : " \u2193") : "";
               return <th key={col.f} onClick={function() { onLateSort(col.f); }} style={Object.assign({}, thS, { cursor:"pointer", color:active ? C.accent : thS.color })}>{col.l + arrow}</th>;
@@ -194,6 +195,7 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
               <td style={Object.assign({}, tdM, { fontWeight:700, color:C.bad })}>{wo.daysLate}d</td>
               <td style={Object.assign({}, tdM, { fontWeight:600, color:C.bright })}>{wo.woNum}</td>
               <td style={tdM}>{wo.productSkuRaw}</td>
+              <td style={Object.assign({}, tdN, { color:C.dim, maxWidth:220, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" })}>{formatDescriptionForDisplay(wo.productDesc) || "--"}</td>
               <td style={Object.assign({}, tdN, { color:C.dim })}>{wo.customer || "--"}</td>
               <td style={Object.assign({}, tdM, { color:C.bright })}>{wo.qtyToProduce.toLocaleString()}</td>
               <td style={Object.assign({}, tdM, { color:C.warn })}>{wo.unitsRemaining.toLocaleString()}</td>
@@ -204,7 +206,7 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
             </tr>)}
             {overview.lateWOs.length === 0 && (
               <tr>
-                <td colSpan={10} style={{ padding:24, textAlign:"center", color:C.dim }}>
+                <td colSpan={11} style={{ padding:24, textAlign:"center", color:C.dim }}>
                   No past due work orders.
                 </td>
               </tr>
