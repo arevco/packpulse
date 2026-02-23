@@ -101,7 +101,11 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
   var reconciliation = {
     edrTotal: windowBoard.edrLoads,
     matched: windowBoard.matched,
-    unmatched: windowBoard.unmatched
+    unmatched: windowBoard.unmatched,
+    materialColumn: (deliveriesV2 && deliveriesV2.reconciliation && deliveriesV2.reconciliation.materialColumn) || "",
+    exactSkuMatched: (deliveriesV2 && deliveriesV2.reconciliation && deliveriesV2.reconciliation.exactSkuMatched) || 0,
+    leadingZeroMatched: (deliveriesV2 && deliveriesV2.reconciliation && deliveriesV2.reconciliation.leadingZeroMatched) || 0,
+    unmatchedSkuRows: (deliveriesV2 && deliveriesV2.reconciliation && deliveriesV2.reconciliation.unmatchedSkuRows) || 0
   };
   var fmtDateShort = function(v) {
     if (!v) return "--";
@@ -224,6 +228,21 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
     </div>
     <div style={{ fontSize:12, color:C.dim, marginBottom:16 }}>
       Reconciliation ({windowDays === 1 ? "today" : (windowDays + "d")}): EDR {reconciliation.edrTotal} = matched {reconciliation.matched} + unmatched {reconciliation.unmatched}.
+    </div>
+    <div style={{ display:"flex", gap:6, marginBottom:14, flexWrap:"wrap", alignItems:"center" }}>
+      <span style={{ fontSize:12, color:C.dim }}>Match diagnostics</span>
+      <span style={{ display:"inline-flex", alignItems:"center", gap:4, fontSize:12, color:C.dim, background:C.raised, border:"1px solid "+C.border, borderRadius:999, padding:"3px 8px" }}>
+        Material col: <span style={{ fontFamily:mono, color:C.bright }}>{reconciliation.materialColumn || "--"}</span>
+      </span>
+      <span style={{ display:"inline-flex", alignItems:"center", gap:4, fontSize:12, color:C.ok, background:C.okSoft, border:"1px solid "+C.okLine, borderRadius:999, padding:"3px 8px" }}>
+        Exact: <span style={{ fontFamily:mono }}>{reconciliation.exactSkuMatched}</span>
+      </span>
+      <span style={{ display:"inline-flex", alignItems:"center", gap:4, fontSize:12, color:C.accent, background:C.accentSoft, border:"1px solid "+C.accentLine, borderRadius:999, padding:"3px 8px" }}>
+        Zero-trim: <span style={{ fontFamily:mono }}>{reconciliation.leadingZeroMatched}</span>
+      </span>
+      <span style={{ display:"inline-flex", alignItems:"center", gap:4, fontSize:12, color:C.bad, background:C.badSoft, border:"1px solid "+C.badLine, borderRadius:999, padding:"3px 8px" }}>
+        Unmatched: <span style={{ fontFamily:mono }}>{reconciliation.unmatchedSkuRows}</span>
+      </span>
     </div>
     <div style={{ marginBottom:16, background:C.surface, border:"1px solid "+C.border, borderRadius:8, padding:"10px 12px" }}>
       <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>

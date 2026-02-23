@@ -11,6 +11,42 @@ function normalizePoKey(value) {
   return normalizeStr(s);
 }
 
+function buildSkuMatchKeys(value) {
+  var raw = (value || "").toString().trim();
+  if (!raw) return [];
+  var noDecimal = raw.replace(/\.0+$/, "");
+  var norm = normalizeStr(noDecimal);
+  if (!norm) return [];
+  var keys = [norm];
+  var stripped = norm.replace(/^0+/, "");
+  if (stripped && stripped !== norm) keys.push(stripped);
+  return Array.from(new Set(keys));
+}
+
+function scoreEdrMaterialColumn(colName) {
+  var n = normalizeStr(colName || "");
+  if (!n) return -100;
+  if (n.includes("description") || n.includes("shorttext") || n.includes("matdesc")) return -50;
+  if (n === "material" || n === "materialcode" || n === "itemcode" || n === "sku") return 120;
+  if (n.includes("materialcode") || n.includes("itemcode") || n.includes("componentcode")) return 100;
+  if (n.includes("material") || n.includes("item") || n.includes("sku") || n.includes("component")) return 60;
+  return 0;
+}
+
+function pickEdrMaterialColumn(headers) {
+  if (!headers || !headers.length) return "";
+  var best = "";
+  var bestScore = -999;
+  headers.forEach(function(h) {
+    var s = scoreEdrMaterialColumn(h);
+    if (s > bestScore) {
+      bestScore = s;
+      best = h;
+    }
+  });
+  return bestScore > 0 ? best : "";
+}
+
 function isWorkOrderClosed(wo) {
   var st = normalizeStr(wo && wo.status ? wo.status : "");
   var closedTokens = ["closed", "complete", "completed", "done", "cancelled", "canceled", "archived"];
@@ -241,7 +277,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
     if (!edrData || !edrData.length || !analysis) return null;
     var edrCols = Object.keys(edrData[0]);
     var findCol = cands => edrCols.find(c => cands.some(p => normalizeStr(c).includes(p)));
-    var colMat = findCol(["material"]) || findCol(["sku","itemcode"]);
+    var colMat = pickEdrMaterialColumn(edrCols) || findCol(["material"]) || findCol(["sku","itemcode"]);
     var colDesc = findCol(["shorttext","matdesc","desc"]);
     var colDate = findCol(["deliverydate","delivery"]) || findCol(["reqdely"]);
     var colPO = findCol(["purchasingdocument","purchasedoc","ponumber"]);
@@ -281,6 +317,12 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       });
     }
     var deliveries = [];
+    var matchDiagnostics = {
+      materialColumn: colMat || "",
+      exactSkuMatched: 0,
+      leadingZeroMatched: 0,
+      unmatched: 0
+    };
     edrData.forEach(row => {
       var mat = (row[colMat]||"").toString().trim(); var desc = colDesc ? (row[colDesc]||"").toString().trim() : "";
       var rawDate = row[colDate]; var po = colPO ? (row[colPO]||"").toString().trim() : "";
@@ -292,7 +334,9 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       var dateStr = dateObj.toISOString().slice(0,10);
       var dockAppts = (poNorm && dockByPONorm[poNorm]) ? dockByPONorm[poNorm] : (dockByPO[po] || []);
       var bestDock = dockAppts.length > 0 ? dockAppts.sort((a,b) => { var o = {Completed:0,Arrived:1,Scheduled:2,Cancelled:3}; return (o[a.status]||9)-(o[b.status]||9); })[0] : null;
-      deliveries.push({ sku:mat, skuNorm:normalizeStr(mat), desc:desc, date:dateStr, dateObj:dateObj, qty:qty, po:po, poNorm:poNorm, tab:tab, dockStatus:bestDock?bestDock.status:"", isMatched:dockAppts.length > 0, qtyOrd:qtyOrd });
+      var skuKeys = buildSkuMatchKeys(mat);
+      if (!skuKeys.length) return;
+      deliveries.push({ sku:mat, skuNorm:skuKeys[0], skuKeys:skuKeys, desc:desc, date:dateStr, dateObj:dateObj, qty:qty, po:po, poNorm:poNorm, tab:tab, dockStatus:bestDock?bestDock.status:"", isMatched:dockAppts.length > 0, qtyOrd:qtyOrd });
     });
     if (!deliveries.length) return null;
     var compToFG = {};
@@ -301,17 +345,37 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       if (s && (s.includes("close") || s.includes("complete") || s.includes("cancel") || s.includes("archive") || s.includes("done"))) return true;
       return safeNum(unitsRemaining) <= 0;
     };
+    var addCompLink = function(skuRaw, payload) {
+      buildSkuMatchKeys(skuRaw).forEach(function(key) {
+        if (!compToFG[key]) compToFG[key] = [];
+        compToFG[key].push(payload);
+      });
+    };
     analysis.results.forEach(wo => {
       wo.components.forEach(comp => {
-        var norm = normalizeStr(comp.sku); if (!compToFG[norm]) compToFG[norm] = [];
-        compToFG[norm].push({ woNum:wo.woNum, productSku:wo.productSkuRaw, productDesc:wo.productDesc, dueDate:wo.dueDate || "", needed:comp.needed, short:comp.short, qtyToProduce:wo.qtyToProduce, unitsRemaining:wo.unitsRemaining || 0, status:wo.status || "", isOpen:!woIsClosed(wo.status, wo.unitsRemaining) });
-        if (comp.optionDetails) comp.optionDetails.forEach(opt => { var on = normalizeStr(opt.sku); if (on !== norm) { if (!compToFG[on]) compToFG[on]=[]; compToFG[on].push({ woNum:wo.woNum, productSku:wo.productSkuRaw, productDesc:wo.productDesc, dueDate:wo.dueDate || "", needed:comp.needed, short:comp.short, qtyToProduce:wo.qtyToProduce, unitsRemaining:wo.unitsRemaining || 0, status:wo.status || "", isOpen:!woIsClosed(wo.status, wo.unitsRemaining) }); } });
+        var linkPayload = { woNum:wo.woNum, productSku:wo.productSkuRaw, productDesc:wo.productDesc, dueDate:wo.dueDate || "", needed:comp.needed, short:comp.short, qtyToProduce:wo.qtyToProduce, unitsRemaining:wo.unitsRemaining || 0, status:wo.status || "", isOpen:!woIsClosed(wo.status, wo.unitsRemaining) };
+        addCompLink(comp.sku, linkPayload);
+        if (comp.optionDetails) comp.optionDetails.forEach(function(opt) { addCompLink(opt.sku, linkPayload); });
       });
     });
+    var getCompLinks = function(skuKeys) {
+      var keys = Array.isArray(skuKeys) && skuKeys.length ? skuKeys : buildSkuMatchKeys(skuKeys);
+      for (var i = 0; i < keys.length; i++) {
+        var key = keys[i];
+        if (compToFG[key] && compToFG[key].length) {
+          return { key:key, links:compToFG[key], via:i === 0 ? "exact" : "leading-zero" };
+        }
+      }
+      return { key:(keys && keys[0]) || "", links:[], via:"none" };
+    };
     deliveries = deliveries.map(function(d) {
-      var links = compToFG[d.skuNorm] || [];
+      var resolved = getCompLinks(d.skuKeys || [d.skuNorm]);
+      var links = resolved.links || [];
       var atRiskLinks = links.filter(function(w) { return w.isOpen && (w.short || 0) > 0; });
-      return Object.assign({}, d, { linkedWOCount:atRiskLinks.length, isAtRisk:atRiskLinks.length > 0 });
+      if (resolved.via === "exact" && links.length > 0) matchDiagnostics.exactSkuMatched += 1;
+      else if (resolved.via === "leading-zero" && links.length > 0) matchDiagnostics.leadingZeroMatched += 1;
+      else if (links.length === 0) matchDiagnostics.unmatched += 1;
+      return Object.assign({}, d, { skuNorm:resolved.key || d.skuNorm, linkedWOCount:atRiskLinks.length, isAtRisk:atRiskLinks.length > 0, matchVia:resolved.via });
     });
     var today = new Date().toISOString().slice(0,10);
     var todayStart = new Date();
@@ -319,7 +383,8 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
     var visibleDeliveries = deliveries.filter(function(d) { return d.dateObj >= todayStart; });
     var byMaterial = {};
     visibleDeliveries.forEach(function(d) {
-      if (!byMaterial[d.skuNorm]) byMaterial[d.skuNorm] = { sku:d.sku, desc:d.desc, deliveries:[], affectedWOs:compToFG[d.skuNorm]||[] };
+      var resolved = getCompLinks(d.skuNorm);
+      if (!byMaterial[d.skuNorm]) byMaterial[d.skuNorm] = { sku:d.sku, desc:d.desc, deliveries:[], affectedWOs:resolved.links||[] };
       byMaterial[d.skuNorm].deliveries.push(d);
     });
     var allDO = visibleDeliveries.map(function(d) { return d.dateObj; });
@@ -334,7 +399,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       var delByDate = {}; cd.forEach(d => { if (!delByDate[d.date]) delByDate[d.date] = { items:[], totalQty:0 }; delByDate[d.date].items.push(d); delByDate[d.date].totalQty += d.qty; });
       return { woNum:wo.woNum, productSku:wo.productSkuRaw, productDesc:wo.productDesc, customer:wo.customer || "", qtyToProduce:wo.qtyToProduce, readiness:wo.readiness, runStatus:wo.runStatus, maxRunnable:wo.maxRunnable, dueDate:dueDateStr, hasDeliveries:cd.length>0, deliveries:cd, delByDate:delByDate, totalIncoming:cd.reduce((s,d)=>s+d.qty,0) };
     }).filter(w => w.hasDeliveries).sort((a,b) => (a.dueDate||"zzz").localeCompare(b.dueDate||"zzz"));
-    return { days:days, today:today, woTimelines:woTimelines, deliveries:visibleDeliveries, byMaterial:byMaterial, totalDeliveries:visibleDeliveries.length, matchedToBOM:visibleDeliveries.filter(function(d){return (compToFG[d.skuNorm]||[]).length>0;}).length, withDockAppt:visibleDeliveries.filter(function(d){return d.dockStatus;}).length };
+    return { days:days, today:today, woTimelines:woTimelines, deliveries:visibleDeliveries, byMaterial:byMaterial, totalDeliveries:visibleDeliveries.length, matchedToBOM:visibleDeliveries.filter(function(d){ return (getCompLinks(d.skuNorm).links || []).length>0; }).length, withDockAppt:visibleDeliveries.filter(function(d){return d.dockStatus;}).length, matchDiagnostics:matchDiagnostics };
   }, [edrData, dockData, analysis]);
 
   var deliveriesV2 = useMemo(() => {
@@ -433,7 +498,11 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       reconciliation: {
         edrTodayTotal: todayLoads.length,
         matchedToday: matchedLoadsToday,
-        unmatchedToday: unmatchedLoadsToday
+        unmatchedToday: unmatchedLoadsToday,
+        materialColumn: (timelineData.matchDiagnostics && timelineData.matchDiagnostics.materialColumn) || "",
+        exactSkuMatched: (timelineData.matchDiagnostics && timelineData.matchDiagnostics.exactSkuMatched) || 0,
+        leadingZeroMatched: (timelineData.matchDiagnostics && timelineData.matchDiagnostics.leadingZeroMatched) || 0,
+        unmatchedSkuRows: (timelineData.matchDiagnostics && timelineData.matchDiagnostics.unmatched) || 0
       }
     };
   }, [timelineData, dockData]);
@@ -495,7 +564,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
     var findEdrCol = function(cands) {
       return edrCols.find(function(c) { return cands.some(function(p) { return normalizeStr(c).includes(p); }); });
     };
-    var colMat = findEdrCol(["material"]) || findEdrCol(["sku", "itemcode"]);
+    var colMat = pickEdrMaterialColumn(edrCols) || findEdrCol(["material"]) || findEdrCol(["sku", "itemcode"]);
     var colDate = findEdrCol(["deliverydate", "delivery"]) || findEdrCol(["reqdely"]);
     var colPO = findEdrCol(["purchasingdocument", "purchasedoc", "ponumber", "po"]);
     var colQtyOpen = findEdrCol(["stilltobedelivered", "openqty", "stillto"]);
@@ -529,8 +598,8 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
     var inboundBySku = {};
     edrRows.forEach(function(row) {
       var skuRaw = (row[colMat] || "").toString().trim();
-      var skuNorm = normalizeStr(skuRaw);
-      if (!skuNorm) return;
+      var skuKeys = buildSkuMatchKeys(skuRaw);
+      if (!skuKeys.length) return;
       var rawDate = row[colDate];
       var dateObj = rawDate instanceof Date ? rawDate : new Date(rawDate);
       if (isNaN(dateObj)) return;
@@ -543,21 +612,34 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       var qtyOrd = colQtyOrd ? safeNum(row[colQtyOrd]) : 0;
       var qty = qtyOpen > 0 ? qtyOpen : qtyOrd;
       if (qty <= 0) return;
-      if (!inboundBySku[skuNorm]) inboundBySku[skuNorm] = [];
-      inboundBySku[skuNorm].push({
-        sku: skuRaw,
-        qty: qty,
-        po: po,
-        poKey: poKey,
-        dateObj: dateOnly,
-        date: dateOnly.toISOString().slice(0, 10),
-        isScheduled: !!(poKey && dockScheduledByPO[poKey]),
+      skuKeys.forEach(function(skuNorm) {
+        if (!inboundBySku[skuNorm]) inboundBySku[skuNorm] = [];
+        inboundBySku[skuNorm].push({
+          sku: skuRaw,
+          qty: qty,
+          po: po,
+          poKey: poKey,
+          dateObj: dateOnly,
+          date: dateOnly.toISOString().slice(0, 10),
+          isScheduled: !!(poKey && dockScheduledByPO[poKey]),
+        });
       });
     });
 
     var rows = criticalItems.map(function(item) {
-      var skuNorm = normalizeStr(item.sku);
-      var inboundRows = inboundBySku[skuNorm] || [];
+      var inboundRows = [];
+      buildSkuMatchKeys(item.sku).forEach(function(k) {
+        if (inboundBySku[k] && inboundBySku[k].length) inboundRows = inboundRows.concat(inboundBySku[k]);
+      });
+      if (inboundRows.length > 1) {
+        var seenInbound = {};
+        inboundRows = inboundRows.filter(function(r) {
+          var key = [r.poKey || r.po || "", r.date || "", r.qty || 0].join("|");
+          if (seenInbound[key]) return false;
+          seenInbound[key] = true;
+          return true;
+        });
+      }
       var shortQty = Math.max(0, safeNum(item.totalShort || 0));
       var inboundQty = inboundRows.reduce(function(s, r) { return s + r.qty; }, 0);
       var scheduledRows = inboundRows.filter(function(r) { return r.isScheduled; });
