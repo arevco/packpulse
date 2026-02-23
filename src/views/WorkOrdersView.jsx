@@ -181,6 +181,23 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
     return { atRisk:atRisk, reducedUnits:reducedUnits };
   }, [analysis, commitmentMap]);
 
+  var sharedComponentUsage = useMemo(function() {
+    if (!analysis) return {};
+    var usage = {};
+    (analysis.results || []).forEach(function(wo) {
+      if (wo.runStatus === "nobom") return;
+      if (statusLooksClosed(wo.status)) return;
+      var seen = {};
+      (wo.components || []).forEach(function(comp) {
+        var key = normalizeStr(comp.sku || "");
+        if (!key || seen[key]) return;
+        seen[key] = true;
+        usage[key] = (usage[key] || 0) + 1;
+      });
+    });
+    return usage;
+  }, [analysis]);
+
   var filteredResults = useMemo(() => {
     if (!analysis) return []; var r = analysis.results.slice();
     if (filterStatus !== "all") r = r.filter(w => w.runStatus === filterStatus);
@@ -316,7 +333,18 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
                   var rows = [];
                   rows.push(
                     <tr key={"c"+ci} style={{ borderBottom:comp.hasSubs?"none":"1px solid "+C.border }}>
-                      <td style={Object.assign({}, tdDM, { color:C.bright })}>{comp.sku}{comp.hasSubs && <span style={{ fontSize:13, color:C.accent, marginLeft:3 }}>+alt</span>}</td>
+                      <td style={Object.assign({}, tdDM, { color:C.bright })}>
+                        {comp.sku}
+                        {comp.hasSubs && <span style={{ fontSize:13, color:C.accent, marginLeft:3 }}>+alt</span>}
+                        {(sharedComponentUsage[normalizeStr(comp.sku || "")] || 0) > 1 && (
+                          <span
+                            title={"Shared component: used in " + sharedComponentUsage[normalizeStr(comp.sku || "")] + " active work orders"}
+                            style={{ display:"inline-block", marginLeft:6, padding:"1px 6px", borderRadius:999, fontSize:10, fontWeight:700, color:C.bad, background:C.badSoft }}
+                          >
+                            Shared
+                          </span>
+                        )}
+                      </td>
                       <td style={Object.assign({}, tdDN, { color:C.dim }, truncate(150))}>{formatDescriptionForDisplay(comp.desc) || "--"}</td>
                       <td style={tdDM}>{comp.qtyPer}</td>
                       <td style={Object.assign({}, tdDM, { color:C.bright })}>{comp.needed.toLocaleString()}</td>
