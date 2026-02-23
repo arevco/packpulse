@@ -279,8 +279,12 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
     var byMaterial = {};
     deliveries.forEach(d => { if (!byMaterial[d.skuNorm]) byMaterial[d.skuNorm] = { sku:d.sku, desc:d.desc, deliveries:[], affectedWOs:compToFG[d.skuNorm]||[] }; byMaterial[d.skuNorm].deliveries.push(d); });
     var today = new Date().toISOString().slice(0,10);
-    var allDO = deliveries.map(d => d.dateObj); var minD = new Date(Math.min(...allDO, Date.now())); var maxD = new Date(Math.max(...allDO, Date.now()));
-    minD.setDate(minD.getDate()-1); maxD.setDate(maxD.getDate()+3);
+    var todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    var allDO = deliveries.map(function(d) { return d.dateObj; });
+    var maxD = new Date(Math.max.apply(null, allDO.concat([todayStart])));
+    var minD = new Date(todayStart);
+    maxD.setDate(maxD.getDate() + 3);
     var days = []; var cursor = new Date(minD); while (cursor <= maxD) { days.push(cursor.toISOString().slice(0,10)); cursor.setDate(cursor.getDate()+1); }
     var woTimelines = analysis.results.map(wo => {
       var cd = []; wo.components.forEach(comp => { if (comp.short <= 0) return; var allS = [normalizeStr(comp.sku)]; if (comp.optionDetails) comp.optionDetails.forEach(o => allS.push(normalizeStr(o.sku)));
