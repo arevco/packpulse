@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useTheme } from "../theme";
 import { useStyles } from "../hooks/useStyles";
-import { fmtDate, formatDescriptionForDisplay } from "../utils";
+import { fmtDate, formatDescriptionForDisplay, normalizeStr } from "../utils";
 
 export default function OverviewView({ analysis, woStatuses, onSelectCustomer }) {
   const { C, sans, mono } = useTheme();
@@ -16,6 +16,17 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
   const [lateSortField, setLateSortField] = useState("daysLate");
   const [lateSortDir, setLateSortDir] = useState("desc");
 
+  var statusLooksClosed = function(status) {
+    var s = normalizeStr(status || "");
+    if (!s) return false;
+    return s.includes("close") || s.includes("complete") || s.includes("cancel") || s.includes("archive") || s.includes("done");
+  };
+  var parseDueDateTs = function(v) {
+    if (!v) return Number.POSITIVE_INFINITY;
+    var d = new Date(v);
+    return isNaN(d) ? Number.POSITIVE_INFINITY : d.getTime();
+  };
+
   var overview = useMemo(() => {
     if (!analysis) return null;
     var r = analysis.results.slice();
@@ -26,35 +37,97 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
     // Date range filter on due date
     if (ovDateFrom) { var from = new Date(ovDateFrom); from.setHours(0,0,0,0); r = r.filter(w => { if (!w.dueDate) return false; var d = new Date(w.dueDate); return !isNaN(d) && d >= from; }); }
     if (ovDateTo) { var to = new Date(ovDateTo); to.setHours(23,59,59,999); r = r.filter(w => { if (!w.dueDate) return false; var d = new Date(w.dueDate); return !isNaN(d) && d <= to; }); }
+    var activeWOs = r.filter(function(wo) {
+      if (wo.runStatus === "nobom") return false;
+      if (statusLooksClosed(wo.status)) return false;
+      return true;
+    }).slice().sort(function(a, b) {
+      var dt = parseDueDateTs(a.dueDate) - parseDueDateTs(b.dueDate);
+      if (dt !== 0) return dt;
+      return (a.woNum || "").localeCompare(b.woNum || "");
+    });
+    var remainingBySku = {};
+    var woKey = function(wo) { return [wo.woNum || "", wo.productSkuRaw || "", wo.dueDate || ""].join("|"); };
+    activeWOs.forEach(function(wo) {
+      (wo.components || []).forEach(function(comp) {
+        var seen = {};
+        var optList = comp.optionDetails && comp.optionDetails.length ? comp.optionDetails : [{ sku:comp.sku, onHand:comp.onHand || 0 }];
+        optList.forEach(function(opt) {
+          var k = normalizeStr(opt.sku || "");
+          if (!k || seen[k]) return;
+          seen[k] = true;
+          var onHand = Number(opt.onHand || 0);
+          if (!Object.prototype.hasOwnProperty.call(remainingBySku, k) || onHand > remainingBySku[k]) remainingBySku[k] = onHand;
+        });
+      });
+    });
+    var netMakeByWo = {};
+    activeWOs.forEach(function(wo) {
+      var committed = Number.POSITIVE_INFINITY;
+      (wo.components || []).forEach(function(comp) {
+        var qtyPer = Number(comp.qtyPer || 0);
+        if (!(qtyPer > 0)) return;
+        var optionRows = comp.optionDetails && comp.optionDetails.length ? comp.optionDetails : [{ sku:comp.sku, onHand:comp.onHand || 0 }];
+        var options = optionRows.map(function(opt) { return { key:normalizeStr(opt.sku || ""), sku:opt.sku || "" }; }).filter(function(opt) { return !!opt.key; });
+        var available = options.reduce(function(sum, opt) { return sum + (remainingBySku[opt.key] || 0); }, 0);
+        committed = Math.min(committed, Math.floor(available / qtyPer));
+      });
+      if (!isFinite(committed)) committed = 0;
+      committed = Math.max(0, Math.min(committed, Number(wo.qtyToProduce || 0)));
+      netMakeByWo[woKey(wo)] = committed;
+      (wo.components || []).forEach(function(comp) {
+        var qtyPer = Number(comp.qtyPer || 0);
+        if (!(qtyPer > 0)) return;
+        var need = committed * qtyPer;
+        if (need <= 0) return;
+        var optionRows = comp.optionDetails && comp.optionDetails.length ? comp.optionDetails.slice() : [{ sku:comp.sku, onHand:comp.onHand || 0, isSub:false }];
+        optionRows.sort(function(a, b) {
+          if (!!a.isSub !== !!b.isSub) return a.isSub ? 1 : -1;
+          return Number(b.onHand || 0) - Number(a.onHand || 0);
+        });
+        var remainNeed = need;
+        optionRows.forEach(function(opt) {
+          if (remainNeed <= 0) return;
+          var key = normalizeStr(opt.sku || "");
+          if (!key) return;
+          var avail = remainingBySku[key] || 0;
+          if (avail <= 0) return;
+          var take = Math.min(avail, remainNeed);
+          remainingBySku[key] = avail - take;
+          remainNeed -= take;
+        });
+      });
+    });
+
     var today = new Date(); today.setHours(0,0,0,0);
-    var totalOrderQty = 0, totalProduced = 0, totalRemaining = 0, totalCanMake = 0, totalEstHours = 0, woCount = r.length;
+    var totalOrderQty = 0, totalProduced = 0, totalRemaining = 0, totalNetMake = 0, totalEstHours = 0, woCount = r.length;
     var lateWOs = [], byCustomer = {}, noDueDate = 0;
     r.forEach(wo => {
       totalOrderQty += wo.qtyToProduce;
       totalProduced += wo.unitsProduced;
       totalRemaining += wo.unitsRemaining;
-      if (wo.runStatus !== "nobom") totalCanMake += wo.maxRunnable;
+      if (wo.runStatus !== "nobom") totalNetMake += (netMakeByWo[woKey(wo)] || 0);
       totalEstHours += wo.estHours || 0;
       if (wo.dueDate) {
         var dd = new Date(wo.dueDate);
         if (!isNaN(dd) && dd < today && wo.unitsRemaining > 0) {
           var daysLate = Math.floor((today - dd) / 86400000);
-          lateWOs.push(Object.assign({}, wo, { daysLate:daysLate }));
+          lateWOs.push(Object.assign({}, wo, { daysLate:daysLate, netCanMake:netMakeByWo[woKey(wo)] || 0 }));
         }
       } else { noDueDate++; }
       var cust = wo.customer || "Unassigned";
-      if (!byCustomer[cust]) byCustomer[cust] = { orderQty:0, produced:0, remaining:0, canMake:0, count:0, late:0 };
+      if (!byCustomer[cust]) byCustomer[cust] = { orderQty:0, produced:0, remaining:0, netMake:0, count:0, late:0 };
       byCustomer[cust].orderQty += wo.qtyToProduce;
       byCustomer[cust].produced += wo.unitsProduced;
       byCustomer[cust].remaining += wo.unitsRemaining;
-      if (wo.runStatus !== "nobom") byCustomer[cust].canMake += wo.maxRunnable;
+      if (wo.runStatus !== "nobom") byCustomer[cust].netMake += (netMakeByWo[woKey(wo)] || 0);
       byCustomer[cust].count++;
     });
     lateWOs.sort((a,b) => b.daysLate - a.daysLate);
     lateWOs.forEach(w => { var cust = w.customer || "Unassigned"; if (byCustomer[cust]) byCustomer[cust].late++; });
     var completionPct = totalOrderQty > 0 ? Math.round(totalProduced / totalOrderQty * 100) : 0;
     var custArr = Object.entries(byCustomer).map(([name, d]) => Object.assign({ name:name }, d)).sort((a,b) => b.remaining - a.remaining);
-    return { totalOrderQty:totalOrderQty, totalProduced:totalProduced, totalRemaining:totalRemaining, totalCanMake:totalCanMake, totalEstHours:Math.round(totalEstHours*10)/10, completionPct:completionPct, lateWOs:lateWOs, byCustomer:custArr, woCount:woCount, noDueDate:noDueDate };
+    return { totalOrderQty:totalOrderQty, totalProduced:totalProduced, totalRemaining:totalRemaining, totalNetMake:totalNetMake, totalEstHours:Math.round(totalEstHours*10)/10, completionPct:completionPct, lateWOs:lateWOs, byCustomer:custArr, woCount:woCount, noDueDate:noDueDate };
   }, [analysis, ovWoStatus, ovCustomer, ovDateFrom, ovDateTo]);
 
   var customerOptions = useMemo(function() {
@@ -82,7 +155,7 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
     else if (custSortField === "orderQty") c = (a.orderQty || 0) - (b.orderQty || 0);
     else if (custSortField === "produced") c = (a.produced || 0) - (b.produced || 0);
     else if (custSortField === "remaining") c = (a.remaining || 0) - (b.remaining || 0);
-    else if (custSortField === "canMake") c = (a.canMake || 0) - (b.canMake || 0);
+    else if (custSortField === "netMake") c = (a.netMake || 0) - (b.netMake || 0);
     else if (custSortField === "complete") {
       var ap = a.orderQty > 0 ? Math.round(a.produced / a.orderQty * 100) : 0;
       var bp = b.orderQty > 0 ? Math.round(b.produced / b.orderQty * 100) : 0;
@@ -102,7 +175,7 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
     else if (lateSortField === "unitsRemaining") c = (a.unitsRemaining || 0) - (b.unitsRemaining || 0);
     else if (lateSortField === "prodPct") c = (a.prodPct || 0) - (b.prodPct || 0);
     else if (lateSortField === "readiness") c = (a.readiness || 0) - (b.readiness || 0);
-    else if (lateSortField === "maxRunnable") c = (a.maxRunnable || 0) - (b.maxRunnable || 0);
+    else if (lateSortField === "netCanMake") c = (a.netCanMake || 0) - (b.netCanMake || 0);
     else if (lateSortField === "dueDate") c = (a.dueDate || "").localeCompare(b.dueDate || "");
     return lateSortDir === "desc" ? -c : c;
   });
@@ -126,7 +199,7 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
         {l:"Total Order Qty", v:overview.totalOrderQty.toLocaleString(), c:C.bright},
         {l:"Produced", v:overview.totalProduced.toLocaleString(), c:C.ok},
         {l:"Remaining", v:overview.totalRemaining.toLocaleString(), c:C.warn},
-        {l:"Can Make", v:overview.totalCanMake.toLocaleString(), c:C.accent},
+        {l:"Net Make", v:overview.totalNetMake.toLocaleString(), c:C.accent},
         {l:"Completion", v:overview.completionPct+"%", c:overview.completionPct>=80?C.ok:overview.completionPct>=50?C.warn:C.bad},
         {l:"Est Hours Left", v:overview.totalEstHours+"h", c:C.bright},
         {l:"Late WOs", v:overview.lateWOs.length, c:overview.lateWOs.length>0?C.bad:C.ok}
@@ -141,7 +214,7 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
       <div style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, overflow:"hidden" }}>
         <table style={{ width:"100%", borderCollapse:"collapse" }}>
           <thead><tr style={{ background:C.raised }}>
-            {[{l:"Customer",f:"name"},{l:"WOs",f:"count"},{l:"Order Qty",f:"orderQty"},{l:"Produced",f:"produced"},{l:"Remaining",f:"remaining"},{l:"Can Make",f:"canMake"},{l:"Complete",f:"complete"},{l:"Late",f:"late"}].map(function(col) {
+            {[{l:"Customer",f:"name"},{l:"WOs",f:"count"},{l:"Order Qty",f:"orderQty"},{l:"Produced",f:"produced"},{l:"Remaining",f:"remaining"},{l:"Net Make",f:"netMake"},{l:"Complete",f:"complete"},{l:"Late",f:"late"}].map(function(col) {
               var active = custSortField === col.f;
               var arrow = active ? (custSortDir === "asc" ? " \u2191" : " \u2193") : "";
               return <th key={col.f} onClick={function() { onCustSort(col.f); }} style={Object.assign({}, thS, { cursor:"pointer", color:active ? C.accent : thS.color })}>{col.l + arrow}</th>;
@@ -158,7 +231,7 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
                 <td style={Object.assign({}, tdM, { color:C.bright })}>{c.orderQty.toLocaleString()}</td>
                 <td style={Object.assign({}, tdM, { color:C.ok })}>{c.produced.toLocaleString()}</td>
                 <td style={Object.assign({}, tdM, { color:C.warn })}>{c.remaining.toLocaleString()}</td>
-                <td style={Object.assign({}, tdM, { color:C.accent })}>{c.canMake.toLocaleString()}</td>
+                <td style={Object.assign({}, tdM, { color:C.accent })}>{c.netMake.toLocaleString()}</td>
                 <td style={Object.assign({}, tdM, { fontWeight:600, color:pct>=80?C.ok:pct>=50?C.warn:pct>0?C.accent:C.dim })}>{pct+"%"}</td>
                 <td style={Object.assign({}, tdM, { fontWeight:600, color:c.late>0?C.bad:C.dim })}>{c.late > 0 ? c.late : "--"}</td>
               </tr>;
@@ -182,7 +255,7 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
       <div style={{ background:C.surface, border:"1px solid "+C.badLine, borderRadius:8, overflow:"hidden" }}>
         <table style={{ width:"100%", borderCollapse:"collapse" }}>
           <thead><tr style={{ background:C.raised }}>
-            {[{l:"Days Late",f:"daysLate"},{l:"WO#",f:"woNum"},{l:"Product",f:"productSkuRaw"},{l:"Product Description",f:"productDesc"},{l:"Customer",f:"customer"},{l:"Order Qty",f:"qtyToProduce"},{l:"Remaining",f:"unitsRemaining"},{l:"Complete",f:"prodPct"},{l:"Ready",f:"readiness"},{l:"Can Make",f:"maxRunnable"},{l:"Due Date",f:"dueDate"}].map(function(col) {
+            {[{l:"Days Late",f:"daysLate"},{l:"WO#",f:"woNum"},{l:"Product",f:"productSkuRaw"},{l:"Product Description",f:"productDesc"},{l:"Customer",f:"customer"},{l:"Order Qty",f:"qtyToProduce"},{l:"Remaining",f:"unitsRemaining"},{l:"Complete",f:"prodPct"},{l:"Ready",f:"readiness"},{l:"Net Make",f:"netCanMake"},{l:"Due Date",f:"dueDate"}].map(function(col) {
               var active = lateSortField === col.f;
               var arrow = active ? (lateSortDir === "asc" ? " \u2191" : " \u2193") : "";
               return <th key={col.f} onClick={function() { onLateSort(col.f); }} style={Object.assign({}, thS, { cursor:"pointer", color:active ? C.accent : thS.color })}>{col.l + arrow}</th>;
@@ -199,7 +272,7 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
               <td style={Object.assign({}, tdM, { color:C.warn })}>{wo.unitsRemaining.toLocaleString()}</td>
               <td style={Object.assign({}, tdM, { fontWeight:600, color:wo.prodPct>=100?C.ok:wo.prodPct>0?C.accent:C.dim })}>{wo.prodPct>0?wo.prodPct+"%":"--"}</td>
               <td style={Object.assign({}, tdM, { fontWeight:600, color:wo.readiness>=100?C.ok:wo.readiness>=70?C.warn:C.bad })}>{wo.readiness<0?"--":Math.round(wo.readiness)+"%"}</td>
-              <td style={Object.assign({}, tdM, { fontWeight:600, color:wo.runStatus==="ready"?C.ok:wo.maxRunnable>0?C.warn:C.bad })}>{wo.runStatus==="nobom"?"--":wo.maxRunnable.toLocaleString()}</td>
+              <td style={Object.assign({}, tdM, { fontWeight:600, color:wo.runStatus==="ready"?C.ok:(wo.netCanMake||0)>0?C.warn:C.bad })}>{wo.runStatus==="nobom"?"--":(wo.netCanMake||0).toLocaleString()}</td>
               <td style={Object.assign({}, tdM, { color:C.bad })}>{fmtDate(wo.dueDate)}</td>
             </tr>)}
             {overview.lateWOs.length === 0 && (

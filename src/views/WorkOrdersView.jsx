@@ -278,8 +278,8 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
           </td>
           <td style={Object.assign({}, tdN, { whiteSpace:"nowrap" })}>
             {(commitment.commitmentGap > 0) ? (
-              <span title={"Shared material demand across active work orders. Allocation order: earliest due date, then WO #. Local: " + wo.maxRunnable.toLocaleString() + " | After commitments: " + commitment.committedCanMake.toLocaleString() + " | Gap: " + commitment.commitmentGap.toLocaleString()} style={{ display:"inline-block", padding:"2px 7px", borderRadius:999, fontSize:11, fontWeight:700, color:C.bad, background:C.badSoft }}>
-                Shared Material
+              <span title={"Shared material demand across active work orders. Order: earliest due date, then WO #. Make: " + wo.maxRunnable.toLocaleString() + " | Net: " + commitment.committedCanMake.toLocaleString() + " | Gap: " + commitment.commitmentGap.toLocaleString()} style={{ display:"inline-block", padding:"2px 7px", borderRadius:999, fontSize:11, fontWeight:700, color:C.bad, background:C.badSoft }}>
+                Shared
               </span>
             ) : (
               <span style={{ color:C.dim }}>--</span>
@@ -354,7 +354,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
     <div style={{ display:"flex", gap:6, marginBottom:12, flexWrap:"wrap", alignItems:"center" }}>
       <input type="text" placeholder="Search WO, SKU, customer, notes..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} style={Object.assign({}, inp, { width:220 })} />
       {["all","ready","partial","blocked","nobom"].map(f => <button key={f} onClick={() => setFilterStatus(f)} style={pill(filterStatus===f)}>{f==="all"?"All":f==="ready"?"Ready":f==="partial"?"Partial":f==="blocked"?"Blocked":"No BOM"}</button>)}
-      {["all","shared","reduced"].map(function(f) { return <button key={f} onClick={function() { setFilterCommitment(f); }} style={pill(filterCommitment===f)}>{f==="all"?"All Commitments":f==="shared"?"Shared Material": "Net Reduced"}</button>; })}
+      {["all","shared","reduced"].map(function(f) { return <button key={f} onClick={function() { setFilterCommitment(f); }} style={pill(filterCommitment===f)}>{f==="all"?"All Cap":f==="shared"?"Shared": "Net Gap"}</button>; })}
       <select value={filterWoStatus} onChange={e => setFilterWoStatus(e.target.value)} style={Object.assign({}, sel, { fontSize:13 })}>
         <option value="all">All WO Status</option>
         {woStatuses.map(s => <option key={s} value={s}>{s}</option>)}
@@ -369,7 +369,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
     </div>
     {commitmentSummary && (
       <div style={{ marginBottom:10, fontSize:13, color:C.dim }}>
-        Commitment Risk: <span style={{ color:C.bad, fontWeight:600 }}>{commitmentSummary.atRisk}</span> work orders | Net Reduction: <span style={{ color:C.bad, fontWeight:600 }}>{commitmentSummary.reducedUnits.toLocaleString()}</span> units
+        Gap: <span style={{ color:C.bad, fontWeight:600 }}>{commitmentSummary.atRisk}</span> WOs | <span style={{ color:C.bad, fontWeight:600 }}>{commitmentSummary.reducedUnits.toLocaleString()}</span> units
       </div>
     )}
     <div style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, overflow:"hidden" }}>
@@ -388,9 +388,9 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
             <SortTh field="remaining">Remaining</SortTh>
             <SortTh field="complete">Complete</SortTh>
             <SortTh field="readiness">Ready</SortTh>
-            <SortTh field="maxRunnable">Can Make (This WO)</SortTh>
-            <SortTh field="committedCanMake">Can Make (After Commitments)</SortTh>
-            <SortTh field="commitmentGap">Commitment</SortTh>
+            <SortTh field="maxRunnable"><span title="Capacity if this work order runs in isolation">Make</span></SortTh>
+            <SortTh field="committedCanMake"><span title="Capacity after shared-material commitments across active work orders">Net</span></SortTh>
+            <SortTh field="commitmentGap"><span title="Difference between isolated make and commitment-aware net capacity">Gap</span></SortTh>
             <SortTh field="estHours">Est Hrs</SortTh>
           </tr></thead>
           <tbody>{renderWORows()}</tbody>
