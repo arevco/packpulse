@@ -278,16 +278,26 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       var dateStr = dateObj.toISOString().slice(0,10);
       var dockAppts = (poNorm && dockByPONorm[poNorm]) ? dockByPONorm[poNorm] : (dockByPO[po] || []);
       var bestDock = dockAppts.length > 0 ? dockAppts.sort((a,b) => { var o = {Completed:0,Arrived:1,Scheduled:2,Cancelled:3}; return (o[a.status]||9)-(o[b.status]||9); })[0] : null;
-      deliveries.push({ sku:mat, skuNorm:normalizeStr(mat), desc:desc, date:dateStr, dateObj:dateObj, qty:qty, po:po, tab:tab, dockStatus:bestDock?bestDock.status:"", qtyOrd:qtyOrd });
+      deliveries.push({ sku:mat, skuNorm:normalizeStr(mat), desc:desc, date:dateStr, dateObj:dateObj, qty:qty, po:po, poNorm:poNorm, tab:tab, dockStatus:bestDock?bestDock.status:"", isMatched:dockAppts.length > 0, qtyOrd:qtyOrd });
     });
     if (!deliveries.length) return null;
     var compToFG = {};
+    var woIsClosed = function(status, unitsRemaining) {
+      var s = normalizeStr(status || "");
+      if (s && (s.includes("close") || s.includes("complete") || s.includes("cancel") || s.includes("archive") || s.includes("done"))) return true;
+      return safeNum(unitsRemaining) <= 0;
+    };
     analysis.results.forEach(wo => {
       wo.components.forEach(comp => {
         var norm = normalizeStr(comp.sku); if (!compToFG[norm]) compToFG[norm] = [];
-        compToFG[norm].push({ woNum:wo.woNum, productSku:wo.productSkuRaw, productDesc:wo.productDesc, needed:comp.needed, short:comp.short, qtyToProduce:wo.qtyToProduce });
-        if (comp.optionDetails) comp.optionDetails.forEach(opt => { var on = normalizeStr(opt.sku); if (on !== norm) { if (!compToFG[on]) compToFG[on]=[]; compToFG[on].push({ woNum:wo.woNum, productSku:wo.productSkuRaw, productDesc:wo.productDesc, needed:comp.needed, short:comp.short, qtyToProduce:wo.qtyToProduce }); } });
+        compToFG[norm].push({ woNum:wo.woNum, productSku:wo.productSkuRaw, productDesc:wo.productDesc, dueDate:wo.dueDate || "", needed:comp.needed, short:comp.short, qtyToProduce:wo.qtyToProduce, unitsRemaining:wo.unitsRemaining || 0, status:wo.status || "", isOpen:!woIsClosed(wo.status, wo.unitsRemaining) });
+        if (comp.optionDetails) comp.optionDetails.forEach(opt => { var on = normalizeStr(opt.sku); if (on !== norm) { if (!compToFG[on]) compToFG[on]=[]; compToFG[on].push({ woNum:wo.woNum, productSku:wo.productSkuRaw, productDesc:wo.productDesc, dueDate:wo.dueDate || "", needed:comp.needed, short:comp.short, qtyToProduce:wo.qtyToProduce, unitsRemaining:wo.unitsRemaining || 0, status:wo.status || "", isOpen:!woIsClosed(wo.status, wo.unitsRemaining) }); } });
       });
+    });
+    deliveries = deliveries.map(function(d) {
+      var links = compToFG[d.skuNorm] || [];
+      var atRiskLinks = links.filter(function(w) { return w.isOpen && (w.short || 0) > 0; });
+      return Object.assign({}, d, { linkedWOCount:atRiskLinks.length, isAtRisk:atRiskLinks.length > 0 });
     });
     var today = new Date().toISOString().slice(0,10);
     var todayStart = new Date();
@@ -312,6 +322,93 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
     }).filter(w => w.hasDeliveries).sort((a,b) => (a.dueDate||"zzz").localeCompare(b.dueDate||"zzz"));
     return { days:days, today:today, woTimelines:woTimelines, deliveries:visibleDeliveries, byMaterial:byMaterial, totalDeliveries:visibleDeliveries.length, matchedToBOM:visibleDeliveries.filter(function(d){return (compToFG[d.skuNorm]||[]).length>0;}).length, withDockAppt:visibleDeliveries.filter(function(d){return d.dockStatus;}).length };
   }, [edrData, dockData, analysis]);
+
+  var deliveriesV2 = useMemo(() => {
+    if (!timelineData) return null;
+    var today = timelineData.today;
+    var todayLoads = (timelineData.deliveries || []).filter(function(d) { return d.date === today; });
+    var openDockAppointmentsToday = 0;
+    if (dockData && dockData.length) {
+      var dCols = Object.keys(dockData[0] || {});
+      var dDate = dCols.find(function(c) { return normalizeStr(c).includes("apptdate"); }) || dCols.find(function(c) { return normalizeStr(c).includes("date"); });
+      if (dDate) {
+        openDockAppointmentsToday = dockData.filter(function(row) {
+          var raw = row[dDate];
+          if (!raw) return false;
+          var d = new Date(raw);
+          if (isNaN(d)) return false;
+          return d.toISOString().slice(0,10) === today;
+        }).length;
+      }
+    }
+    var matchedLoadsToday = todayLoads.filter(function(d) { return !!d.isMatched; }).length;
+    var unmatchedLoadsToday = Math.max(0, todayLoads.length - matchedLoadsToday);
+    var atRiskLoadsToday = todayLoads.filter(function(d) { return !!d.isAtRisk; }).length;
+    var unitsPotentiallyUnlockedToday = todayLoads.reduce(function(sum, d) {
+      if (!d.isAtRisk) return sum;
+      var links = (timelineData.byMaterial[d.skuNorm] && timelineData.byMaterial[d.skuNorm].affectedWOs) ? timelineData.byMaterial[d.skuNorm].affectedWOs : [];
+      var shortUnits = links.reduce(function(s, w) { return s + Math.max(0, safeNum(w.short || 0)); }, 0);
+      return sum + Math.min(safeNum(d.qty || 0), shortUnits);
+    }, 0);
+
+    var priorityQueue = (timelineData.deliveries || []).map(function(d) {
+      var links = (timelineData.byMaterial[d.skuNorm] && timelineData.byMaterial[d.skuNorm].affectedWOs) ? timelineData.byMaterial[d.skuNorm].affectedWOs : [];
+      var atRiskLinks = links.filter(function(w) { return safeNum(w.short || 0) > 0; });
+      var unitsUnlocked = Math.min(
+        safeNum(d.qty || 0),
+        atRiskLinks.reduce(function(s, w) { return s + Math.max(0, safeNum(w.short || 0)); }, 0)
+      );
+      var status = (d.dockStatus || "").toLowerCase();
+      var recommendedAction = "Monitor";
+      if (!status) recommendedAction = "Schedule in OpenDock";
+      else if (status.includes("cancel")) recommendedAction = "Reschedule / Expedite";
+      else if (atRiskLinks.length > 0) recommendedAction = "Protect Receiving Window";
+      return {
+        po:d.po || "",
+        etaDate:d.date,
+        materialSku:d.sku,
+        materialDesc:d.desc || "",
+        qty:safeNum(d.qty || 0),
+        isMatched:!!d.isMatched,
+        isAtRisk:atRiskLinks.length > 0,
+        linkedWOCount:atRiskLinks.length,
+        unitsUnlocked:unitsUnlocked,
+        status:d.dockStatus || "",
+        recommendedAction:recommendedAction
+      };
+    });
+    var exceptions = {
+      edrWithoutOpenDock: todayLoads.filter(function(d) { return !d.isMatched; }).length,
+      openDockWithoutEdr: Math.max(0, openDockAppointmentsToday - matchedLoadsToday),
+      lateForDueWos: todayLoads.filter(function(d) {
+        var links = (timelineData.byMaterial[d.skuNorm] && timelineData.byMaterial[d.skuNorm].affectedWOs) ? timelineData.byMaterial[d.skuNorm].affectedWOs : [];
+        return links.some(function(w) {
+          if (!w || !w.isOpen || !w.short || !w.woNum) return false;
+          if (!w.dueDate) return false;
+          return String(d.date || "") > String(w.dueDate || "");
+        });
+      }).length,
+      cancelledAtRisk: todayLoads.filter(function(d) { return d.isAtRisk && normalizeStr(d.dockStatus || "").includes("cancel"); }).length
+    };
+
+    return {
+      todayBoard: {
+        openDockAppointmentsToday: openDockAppointmentsToday,
+        edrLoadsToday: todayLoads.length,
+        matchedLoadsToday: matchedLoadsToday,
+        unmatchedLoadsToday: unmatchedLoadsToday,
+        atRiskLoadsToday: atRiskLoadsToday,
+        unitsPotentiallyUnlockedToday: Math.round(unitsPotentiallyUnlockedToday)
+      },
+      priorityQueue: priorityQueue,
+      exceptions: exceptions,
+      reconciliation: {
+        edrTodayTotal: todayLoads.length,
+        matchedToday: matchedLoadsToday,
+        unmatchedToday: unmatchedLoadsToday
+      }
+    };
+  }, [timelineData, dockData]);
 
   /* ====== INBOUND COVERAGE (CRITICAL ITEMS) ====== */
   var inboundCoverage = useMemo(() => {
@@ -701,5 +798,5 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
     });
   }, [analysis, inboundCoverage, boms, edrData, dockData]);
 
-  return { analysis, summary, criticalItems, woStatuses, woCustomers, poCheck, timelineData, inboundCoverage, recommendations };
+  return { analysis, summary, criticalItems, woStatuses, woCustomers, poCheck, timelineData, deliveriesV2, inboundCoverage, recommendations };
 }

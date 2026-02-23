@@ -17,7 +17,7 @@ export default function ProductionReadiness() {
   const { C, theme, setTheme, sans, mono, FONTS_CSS, A11Y_CSS } = useTheme();
   const { pill } = useStyles();
   const ds = useDataSources();
-  const { analysis, summary, criticalItems, woStatuses, woCustomers, timelineData, inboundCoverage, recommendations } = useAnalysis({
+  const { analysis, summary, criticalItems, woStatuses, woCustomers, timelineData, deliveriesV2, inboundCoverage, recommendations } = useAnalysis({
     mappingConfirmed: ds.mappingConfirmed, allUploaded: ds.allUploaded,
     inventory: ds.inventory, itemMaster: ds.itemMaster, boms: ds.boms, workOrders: ds.workOrders,
     invMapping: ds.invMapping, bomMapping: ds.bomMapping, woMapping: ds.woMapping,
@@ -487,7 +487,7 @@ export default function ProductionReadiness() {
         {activeView === "criticalitems" && <CriticalItemsView rawCriticalItems={criticalItemsForUI} inboundCoverage={inboundCoverage} />}
         {activeView === "recommendations" && <RecommendationsView recommendations={recommendationsForUI} onOpenRecommendation={openRecommendation} />}
         {activeView === "flags" && <FlagsView flags={analysisForUI.flags} />}
-        {activeView === "timeline" && <TimelineView timelineData={timelineData} />}
+        {activeView === "timeline" && <TimelineView timelineData={timelineData} deliveriesV2={deliveriesV2} />}
 
       </div>
       </main>
