@@ -264,11 +264,12 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
       <div style={{ overflowX:"auto" }}>
         <table style={{ width:"100%", borderCollapse:"collapse" }}>
           <thead><tr style={{ background:C.raised }}>
-            {["ETA","PO","Material","Qty","OD + EDR Match","At Risk WO","Linked WOs","Units Unlocked","Action"].map(function(h) { return <th key={h} style={thC(false)}>{h}</th>; })}
+            {["Scheduled Date","Expected Date","PO","Material","Qty","OD + EDR Match","At Risk WO","Linked WOs","Units Unlocked"].map(function(h) { return <th key={h} style={thC(false)}>{h}</th>; })}
           </tr></thead>
           <tbody>
             {priorityQueueRows.slice(0, 25).map(function(r, i) {
               return <tr key={i} style={{ borderBottom:"1px solid "+C.border }}>
+                <td style={tdM}>{fmtDateShort(r.scheduledDate)}</td>
                 <td style={tdM}>{fmtDateShort(r.etaDate)}</td>
                 <td style={Object.assign({}, tdN, { maxWidth:120, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" })}>{r.po || "--"}</td>
                 <td style={Object.assign({}, tdN, { maxWidth:260, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" })}>{r.materialSku} {r.materialDesc ? ("| " + formatDescriptionForDisplay(r.materialDesc)) : ""}</td>
@@ -285,7 +286,6 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
                 </td>
                 <td style={tdM}>{r.linkedWOCount || 0}</td>
                 <td style={Object.assign({}, tdM, { color:(r.unitsUnlocked || 0) > 0 ? C.accent : C.dim, fontWeight:600 })}>{Math.round(r.unitsUnlocked || 0).toLocaleString()}</td>
-                <td style={Object.assign({}, tdN, { color:C.dim })}>{r.recommendedAction || "--"}</td>
               </tr>;
             })}
             {priorityQueueRows.length === 0 && <tr><td colSpan={9} style={{ padding:18, color:C.dim, textAlign:"center" }}>No loads match current queue filters.</td></tr>}

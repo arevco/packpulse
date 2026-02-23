@@ -47,6 +47,13 @@ function pickEdrMaterialColumn(headers) {
   return bestScore > 0 ? best : "";
 }
 
+function toIsoDate(value) {
+  if (!value) return "";
+  var d = value instanceof Date ? value : new Date(value);
+  if (isNaN(d)) return "";
+  return d.toISOString().slice(0, 10);
+}
+
 function isWorkOrderClosed(wo) {
   var st = normalizeStr(wo && wo.status ? wo.status : "");
   var closedTokens = ["closed", "complete", "completed", "done", "cancelled", "canceled", "archived"];
@@ -307,7 +314,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
         var po = (row[dPO]||"").toString().trim();
         if (!po) return;
         var poNorm = normalizePoKey(po);
-        var appt = { status:(row[dSt]||"").toString().trim(), apptDate:(row[dDt]||"").toString().trim() };
+        var appt = { status:(row[dSt]||"").toString().trim(), apptDate:toIsoDate((row[dDt]||"").toString().trim()) || (row[dDt]||"").toString().trim() };
         if (!dockByPO[po]) dockByPO[po] = [];
         dockByPO[po].push(appt);
         if (poNorm) {
@@ -336,7 +343,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       var bestDock = dockAppts.length > 0 ? dockAppts.sort((a,b) => { var o = {Completed:0,Arrived:1,Scheduled:2,Cancelled:3}; return (o[a.status]||9)-(o[b.status]||9); })[0] : null;
       var skuKeys = buildSkuMatchKeys(mat);
       if (!skuKeys.length) return;
-      deliveries.push({ sku:mat, skuNorm:skuKeys[0], skuKeys:skuKeys, desc:desc, date:dateStr, dateObj:dateObj, qty:qty, po:po, poNorm:poNorm, tab:tab, dockStatus:bestDock?bestDock.status:"", isMatched:dockAppts.length > 0, qtyOrd:qtyOrd });
+      deliveries.push({ sku:mat, skuNorm:skuKeys[0], skuKeys:skuKeys, desc:desc, date:dateStr, dateObj:dateObj, qty:qty, po:po, poNorm:poNorm, tab:tab, dockStatus:bestDock?bestDock.status:"", dockApptDate:bestDock?bestDock.apptDate:"", isMatched:dockAppts.length > 0, qtyOrd:qtyOrd });
     });
     if (!deliveries.length) return null;
     var compToFG = {};
@@ -459,6 +466,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       return {
         po:d.po || "",
         etaDate:d.date,
+        scheduledDate:d.dockApptDate || "",
         materialSku:d.sku,
         materialDesc:d.desc || "",
         qty:safeNum(d.qty || 0),
