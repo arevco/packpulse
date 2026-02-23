@@ -11,7 +11,6 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
   const [ovCustomer, setOvCustomer] = useState("all");
   const [ovDateFrom, setOvDateFrom] = useState("");
   const [ovDateTo, setOvDateTo] = useState("");
-  const [lateCollapsed, setLateCollapsed] = useState(false);
   const [custSortField, setCustSortField] = useState("remaining");
   const [custSortDir, setCustSortDir] = useState("desc");
   const [lateSortField, setLateSortField] = useState("daysLate");
@@ -177,11 +176,10 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
     </div>
 
     <div style={{ marginBottom:20 }}>
-      <div onClick={() => setLateCollapsed(!lateCollapsed)} style={{ fontSize:14, fontWeight:600, color:C.bad, marginBottom:lateCollapsed?0:10, display:"flex", alignItems:"center", gap:8, cursor:"pointer", userSelect:"none" }}>
-        <span style={{ fontSize:13, color:C.dim }}>{lateCollapsed ? "\u25B8" : "\u25BE"}</span>
+      <div style={{ fontSize:14, fontWeight:600, color:C.bad, marginBottom:10, display:"flex", alignItems:"center", gap:8 }}>
         <span style={{ fontSize:16 }}>{"\u26A0"}</span> Past Due Work Orders ({overview.lateWOs.length})
       </div>
-      {!lateCollapsed && <div style={{ background:C.surface, border:"1px solid "+C.badLine, borderRadius:8, overflow:"hidden" }}>
+      <div style={{ background:C.surface, border:"1px solid "+C.badLine, borderRadius:8, overflow:"hidden" }}>
         <table style={{ width:"100%", borderCollapse:"collapse" }}>
           <thead><tr style={{ background:C.raised }}>
             {[{l:"Days Late",f:"daysLate"},{l:"WO#",f:"woNum"},{l:"Product",f:"productSkuRaw"},{l:"Product Description",f:"productDesc"},{l:"Customer",f:"customer"},{l:"Order Qty",f:"qtyToProduce"},{l:"Remaining",f:"unitsRemaining"},{l:"Complete",f:"prodPct"},{l:"Ready",f:"readiness"},{l:"Can Make",f:"maxRunnable"},{l:"Due Date",f:"dueDate"}].map(function(col) {
@@ -213,7 +211,7 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
             )}
           </tbody>
         </table>
-      </div>}
+      </div>
     </div>
   </div>);
 }
