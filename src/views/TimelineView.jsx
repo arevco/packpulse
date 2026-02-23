@@ -80,22 +80,34 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
       dockConflict: dockConflict
     };
   }, [timelineData, todayStr, windowEndStr, windowEndDate]);
-  var commandBoard = useMemo(function() {
-    if (deliveriesV2 && deliveriesV2.todayBoard) return deliveriesV2.todayBoard;
-    var todayLoads = windowDeliveries.filter(function(d) { return d.date === todayStr; });
+  var windowBoard = useMemo(function() {
+    var matched = windowDeliveries.filter(function(d) { return !!d.isMatched; }).length;
+    var atRisk = windowDeliveries.filter(function(d) { return !!d.isAtRisk; }).length;
+    var unitsUnlocked = windowDeliveries.reduce(function(sum, d) {
+      if (!d.isAtRisk) return sum;
+      var links = (timelineData.byMaterial[d.skuNorm] && timelineData.byMaterial[d.skuNorm].affectedWOs) ? timelineData.byMaterial[d.skuNorm].affectedWOs : [];
+      var shortUnits = links.reduce(function(s, w) { return s + Math.max(0, (w.short || 0)); }, 0);
+      return sum + Math.min(d.qty || 0, shortUnits);
+    }, 0);
     return {
-      openDockAppointmentsToday: todayLoads.filter(function(d) { return !!d.dockStatus; }).length,
-      edrLoadsToday: todayLoads.length,
-      matchedLoadsToday: todayLoads.filter(function(d) { return !!d.isMatched; }).length,
-      unmatchedLoadsToday: todayLoads.filter(function(d) { return !d.isMatched; }).length,
-      atRiskLoadsToday: todayLoads.filter(function(d) { return !!d.isAtRisk; }).length,
-      unitsPotentiallyUnlockedToday: todayLoads.filter(function(d) { return !!d.isAtRisk; }).reduce(function(s, d) { return s + (d.qty || 0); }, 0)
+      openDockInboundAppts: windowDeliveries.filter(function(d) { return !!d.dockStatus; }).length,
+      edrLoads: windowDeliveries.length,
+      matched: matched,
+      unmatched: Math.max(0, windowDeliveries.length - matched),
+      atRisk: atRisk,
+      unitsUnlocked: Math.round(unitsUnlocked)
     };
-  }, [deliveriesV2, windowDeliveries, todayStr]);
-  var reconciliation = deliveriesV2 && deliveriesV2.reconciliation ? deliveriesV2.reconciliation : {
-    edrTodayTotal: commandBoard.edrLoadsToday,
-    matchedToday: commandBoard.matchedLoadsToday,
-    unmatchedToday: commandBoard.unmatchedLoadsToday
+  }, [windowDeliveries, timelineData]);
+  var reconciliation = {
+    edrTotal: windowBoard.edrLoads,
+    matched: windowBoard.matched,
+    unmatched: windowBoard.unmatched
+  };
+  var fmtDateShort = function(v) {
+    if (!v) return "--";
+    var d = new Date(String(v) + "T12:00:00");
+    if (isNaN(d)) return String(v);
+    return d.toLocaleDateString("en-US", { month:"numeric", day:"numeric" });
   };
   var exceptions = deliveriesV2 && deliveriesV2.exceptions ? deliveriesV2.exceptions : {
     edrWithoutOpenDock: 0,
@@ -192,7 +204,7 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
       })}
     </div>
     <div style={{ display:"flex", gap:20, marginBottom:8, flexWrap:"wrap" }}>
-      {[{l:"OpenDock Today",v:commandBoard.openDockAppointmentsToday,c:C.accent},{l:"EDR Loads Today",v:commandBoard.edrLoadsToday,c:C.bright},{l:"Matched Today",v:commandBoard.matchedLoadsToday,c:C.ok},{l:"At-Risk Loads Today",v:commandBoard.atRiskLoadsToday,c:C.warn},{l:"Units Unlocked Today",v:Math.round(commandBoard.unitsPotentiallyUnlockedToday || 0).toLocaleString(),c:C.accent}].map((s,i) =>
+      {[{l:"OpenDock Inbound",v:windowBoard.openDockInboundAppts,c:C.accent},{l:"EDR Inbounds",v:windowBoard.edrLoads,c:C.bright},{l:"OD + EDR Match",v:windowBoard.matched,c:C.ok},{l:"At Risk WO",v:windowBoard.atRisk,c:C.warn},{l:"Units Unlocked",v:windowBoard.unitsUnlocked.toLocaleString(),c:C.accent}].map((s,i) =>
         <div key={i}><div style={{ fontSize:24, fontWeight:700, fontFamily:mono, color:s.c, lineHeight:1 }}>{s.v}</div><div style={{ fontSize:13, color:C.dim, marginTop:3, letterSpacing:0.1 }}>{s.l}</div></div>
       )}
     </div>
@@ -211,7 +223,7 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
       })}
     </div>
     <div style={{ fontSize:12, color:C.dim, marginBottom:16 }}>
-      Reconciliation (today): EDR {reconciliation.edrTodayTotal} = matched {reconciliation.matchedToday} + unmatched {reconciliation.unmatchedToday}.
+      Reconciliation ({windowDays === 1 ? "today" : (windowDays + "d")}): EDR {reconciliation.edrTotal} = matched {reconciliation.matched} + unmatched {reconciliation.unmatched}.
     </div>
     <div style={{ marginBottom:16, background:C.surface, border:"1px solid "+C.border, borderRadius:8, padding:"10px 12px" }}>
       <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
@@ -233,17 +245,25 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
       <div style={{ overflowX:"auto" }}>
         <table style={{ width:"100%", borderCollapse:"collapse" }}>
           <thead><tr style={{ background:C.raised }}>
-            {["ETA","PO","Material","Qty","Matched","At-Risk","Linked WOs","Units Unlocked","Action"].map(function(h) { return <th key={h} style={thC(false)}>{h}</th>; })}
+            {["ETA","PO","Material","Qty","OD + EDR Match","At Risk WO","Linked WOs","Units Unlocked","Action"].map(function(h) { return <th key={h} style={thC(false)}>{h}</th>; })}
           </tr></thead>
           <tbody>
             {priorityQueueRows.slice(0, 25).map(function(r, i) {
               return <tr key={i} style={{ borderBottom:"1px solid "+C.border }}>
-                <td style={tdM}>{r.etaDate}</td>
+                <td style={tdM}>{fmtDateShort(r.etaDate)}</td>
                 <td style={Object.assign({}, tdN, { maxWidth:120, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" })}>{r.po || "--"}</td>
                 <td style={Object.assign({}, tdN, { maxWidth:260, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" })}>{r.materialSku} {r.materialDesc ? ("| " + formatDescriptionForDisplay(r.materialDesc)) : ""}</td>
                 <td style={Object.assign({}, tdM, { color:C.bright })}>{Math.round(r.qty || 0).toLocaleString()}</td>
-                <td style={Object.assign({}, tdM, { color:r.isMatched ? C.ok : C.bad, fontWeight:600 })}>{r.isMatched ? "Yes" : "No"}</td>
-                <td style={Object.assign({}, tdM, { color:r.isAtRisk ? C.warn : C.dim, fontWeight:600 })}>{r.isAtRisk ? "Yes" : "No"}</td>
+                <td style={Object.assign({}, tdM, { fontWeight:600 })}>
+                  <span style={{ display:"inline-block", padding:"2px 7px", borderRadius:999, fontSize:11, color:r.isMatched ? C.ok : C.bad, background:r.isMatched ? C.okSoft : C.badSoft }}>
+                    {r.isMatched ? "Matched" : "No Match"}
+                  </span>
+                </td>
+                <td style={Object.assign({}, tdM, { fontWeight:600 })}>
+                  <span style={{ display:"inline-block", padding:"2px 7px", borderRadius:999, fontSize:11, color:r.isAtRisk ? C.warn : C.dim, background:r.isAtRisk ? C.warnSoft : C.raised }}>
+                    {r.isAtRisk ? "Yes" : "No"}
+                  </span>
+                </td>
                 <td style={tdM}>{r.linkedWOCount || 0}</td>
                 <td style={Object.assign({}, tdM, { color:(r.unitsUnlocked || 0) > 0 ? C.accent : C.dim, fontWeight:600 })}>{Math.round(r.unitsUnlocked || 0).toLocaleString()}</td>
                 <td style={Object.assign({}, tdN, { color:C.dim })}>{r.recommendedAction || "--"}</td>

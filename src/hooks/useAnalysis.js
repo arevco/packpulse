@@ -253,7 +253,21 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
     var dockByPONorm = {};
     if (dockData && dockData.length) {
       var dC = Object.keys(dockData[0]); var dPO = dC.find(c=>normalizeStr(c)==="po") || dC.find(c=>normalizeStr(c).includes("po")); var dSt = dC.find(c=>normalizeStr(c)==="status"); var dDt = dC.find(c=>normalizeStr(c).includes("apptdate")); var dTm = dC.find(c=>normalizeStr(c).includes("appttime"));
+      var isInboundDockRow = function(row) {
+        if (!row) return false;
+        var vals = [
+          dC.find(function(c) { return normalizeStr(c).includes("dock"); }),
+          dC.find(function(c) { return normalizeStr(c).includes("loadtype"); }),
+          dC.find(function(c) { return normalizeStr(c).includes("direction"); }),
+          dC.find(function(c) { return normalizeStr(c).includes("type"); })
+        ].filter(Boolean).map(function(k) { return normalizeStr(row[k] || ""); }).join(" ");
+        if (!vals) return true;
+        if (vals.includes("outbound") || vals.includes("shipping")) return false;
+        if (vals.includes("inbound") || vals.includes("receiv")) return true;
+        return true;
+      };
       if (dPO) dockData.forEach(row => {
+        if (!isInboundDockRow(row)) return;
         var po = (row[dPO]||"").toString().trim();
         if (!po) return;
         var poNorm = normalizePoKey(po);
@@ -331,8 +345,22 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
     if (dockData && dockData.length) {
       var dCols = Object.keys(dockData[0] || {});
       var dDate = dCols.find(function(c) { return normalizeStr(c).includes("apptdate"); }) || dCols.find(function(c) { return normalizeStr(c).includes("date"); });
+      var isInboundDockRow = function(row) {
+        if (!row) return false;
+        var vals = [
+          dCols.find(function(c) { return normalizeStr(c).includes("dock"); }),
+          dCols.find(function(c) { return normalizeStr(c).includes("loadtype"); }),
+          dCols.find(function(c) { return normalizeStr(c).includes("direction"); }),
+          dCols.find(function(c) { return normalizeStr(c).includes("type"); })
+        ].filter(Boolean).map(function(k) { return normalizeStr(row[k] || ""); }).join(" ");
+        if (!vals) return true;
+        if (vals.includes("outbound") || vals.includes("shipping")) return false;
+        if (vals.includes("inbound") || vals.includes("receiv")) return true;
+        return true;
+      };
       if (dDate) {
         openDockAppointmentsToday = dockData.filter(function(row) {
+          if (!isInboundDockRow(row)) return false;
           var raw = row[dDate];
           if (!raw) return false;
           var d = new Date(raw);
