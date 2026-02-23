@@ -298,6 +298,10 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
     var horizonDays = 30;
     var now = new Date();
     var horizonEnd = new Date(now.getTime() + horizonDays * 86400000);
+    var windowStart = new Date(now);
+    windowStart.setHours(0, 0, 0, 0);
+    var windowEnd = new Date(horizonEnd);
+    windowEnd.setHours(23, 59, 59, 999);
 
     var edrRows = Array.isArray(edrData) ? edrData : [];
     var dockRows = Array.isArray(dockData) ? dockData : [];
@@ -384,7 +388,9 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       var rawDate = row[colDate];
       var dateObj = rawDate instanceof Date ? rawDate : new Date(rawDate);
       if (isNaN(dateObj)) return;
-      if (dateObj < now || dateObj > horizonEnd) return;
+      var dateOnly = new Date(dateObj);
+      dateOnly.setHours(0, 0, 0, 0);
+      if (dateOnly < windowStart || dateOnly > windowEnd) return;
       var po = colPO ? (row[colPO] || "").toString().trim() : "";
       var poKey = normalizePoKey(po);
       var qtyOpen = colQtyOpen ? safeNum(row[colQtyOpen]) : 0;
@@ -397,8 +403,8 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
         qty: qty,
         po: po,
         poKey: poKey,
-        dateObj: dateObj,
-        date: dateObj.toISOString().slice(0, 10),
+        dateObj: dateOnly,
+        date: dateOnly.toISOString().slice(0, 10),
         isScheduled: !!(poKey && dockScheduledByPO[poKey]),
       });
     });

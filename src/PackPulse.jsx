@@ -195,10 +195,6 @@ export default function ProductionReadiness() {
     }, 420);
     return function() { clearInterval(id); };
   }, [showSyncBanner, isActivelySyncing, syncProgress.pct]);
-  useEffect(() => {
-    if (!ds.mappingConfirmed || !showDataSetup) return;
-    setShowDataSetup(false);
-  }, [ds.mappingConfirmed, showDataSetup]);
   var goToDashboard = function() {
     setShowDataSetup(false);
     setTimeout(function() {

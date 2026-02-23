@@ -55,14 +55,14 @@ export default function RecommendationsView({ recommendations, onOpenRecommendat
   return (
     <div>
       <div style={{ display:"flex", gap:6, marginBottom:12, flexWrap:"wrap", alignItems:"center" }}>
-        {["all", "now", "today", "week"].map(function(w) {
-          return <button key={w} onClick={function() { setWindowFilter(function(curr) { return curr === w && w !== "all" ? "all" : w; }); }} style={pill(windowFilter === w)}>{w === "all" ? "All" : windowLabel(w)}</button>;
-        })}
+        <input type="text" placeholder="Search action, reason, source..." value={search} onChange={function(e) { setSearch(e.target.value); }} style={Object.assign({}, inp, { width:240 })} />
         <select value={ownerFilter} onChange={function(e) { setOwnerFilter(e.target.value); }} style={Object.assign({}, inp, { fontSize:13 })}>
           <option value="all">All Owners</option>
           {owners.map(function(o) { return <option key={o} value={o}>{o}</option>; })}
         </select>
-        <input type="text" placeholder="Search action, reason, source..." value={search} onChange={function(e) { setSearch(e.target.value); }} style={Object.assign({}, inp, { width:240 })} />
+        {["all", "now", "today", "week"].map(function(w) {
+          return <button key={w} onClick={function() { setWindowFilter(function(curr) { return curr === w && w !== "all" ? "all" : w; }); }} style={pill(windowFilter === w)}>{w === "all" ? "All" : windowLabel(w)}</button>;
+        })}
         <div style={{ flex:1 }} />
         <span style={{ fontSize:13, color:C.dim }}>{rows.length} recommendations</span>
       </div>

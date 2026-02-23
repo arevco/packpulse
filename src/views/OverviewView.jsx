@@ -7,6 +7,7 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
   const { C, sans, mono } = useTheme();
   const { thS, tdN, tdM, inp, pill } = useStyles();
 
+  const [ovSearch, setOvSearch] = useState("");
   const [ovWoStatus, setOvWoStatus] = useState("all");
   const [ovCustomer, setOvCustomer] = useState("all");
   const [ovDateFrom, setOvDateFrom] = useState("");
@@ -30,6 +31,17 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
   var overview = useMemo(() => {
     if (!analysis) return null;
     var r = analysis.results.slice();
+    if (ovSearch) {
+      var q = ovSearch.toLowerCase();
+      r = r.filter(function(w) {
+        return (
+          (w.woNum || "").toLowerCase().includes(q) ||
+          (w.productSkuRaw || "").toLowerCase().includes(q) ||
+          (w.productDesc || "").toLowerCase().includes(q) ||
+          (w.customer || "").toLowerCase().includes(q)
+        );
+      });
+    }
     // WO status filter
     if (ovWoStatus !== "all") r = r.filter(w => w.status === ovWoStatus);
     // Customer filter
@@ -128,7 +140,7 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
     var completionPct = totalOrderQty > 0 ? Math.round(totalProduced / totalOrderQty * 100) : 0;
     var custArr = Object.entries(byCustomer).map(([name, d]) => Object.assign({ name:name }, d)).sort((a,b) => b.remaining - a.remaining);
     return { totalOrderQty:totalOrderQty, totalProduced:totalProduced, totalRemaining:totalRemaining, totalNetMake:totalNetMake, totalEstHours:Math.round(totalEstHours*10)/10, completionPct:completionPct, lateWOs:lateWOs, byCustomer:custArr, woCount:woCount, noDueDate:noDueDate };
-  }, [analysis, ovWoStatus, ovCustomer, ovDateFrom, ovDateTo]);
+  }, [analysis, ovSearch, ovWoStatus, ovCustomer, ovDateFrom, ovDateTo]);
 
   var customerOptions = useMemo(function() {
     if (!analysis || !analysis.results) return [];
@@ -182,18 +194,19 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
 
   return (<div>
     <div style={{ display:"flex", gap:8, marginBottom:16, flexWrap:"wrap", alignItems:"center" }}>
-      {["all"].concat(woStatuses).map(function(f) {
-        return <button key={f} onClick={function() { setOvWoStatus(function(curr) { return curr === f && f !== "all" ? "all" : f; }); }} style={pill(ovWoStatus===f)}>{f==="all"?"All WO Status":f}</button>;
-      })}
+      <input type="text" placeholder="Search WO, SKU, customer..." value={ovSearch} onChange={function(e) { setOvSearch(e.target.value); }} style={Object.assign({}, inp, { width:220 })} />
       <select value={ovCustomer} onChange={function(e) { setOvCustomer(e.target.value); }} style={Object.assign({}, inp, { width:220 })}>
         <option value="all">All Customers</option>
         {customerOptions.map(function(c) { return <option key={c} value={c}>{c}</option>; })}
       </select>
+      {["all"].concat(woStatuses).map(function(f) {
+        return <button key={f} onClick={function() { setOvWoStatus(function(curr) { return curr === f && f !== "all" ? "all" : f; }); }} style={pill(ovWoStatus===f)}>{f==="all"?"All WO Status":f}</button>;
+      })}
       <span style={{ fontSize:13, color:C.dim, marginLeft:4 }}>Due from</span>
       <input type="date" value={ovDateFrom} onChange={e => setOvDateFrom(e.target.value)} style={Object.assign({}, inp, { width:140 })} />
       <span style={{ fontSize:13, color:C.dim }}>to</span>
       <input type="date" value={ovDateTo} onChange={e => setOvDateTo(e.target.value)} style={Object.assign({}, inp, { width:140 })} />
-      {(ovWoStatus!=="all" || ovCustomer!=="all" || ovDateFrom || ovDateTo) && <button onClick={() => {setOvWoStatus("all");setOvCustomer("all");setOvDateFrom("");setOvDateTo("");}} style={Object.assign({}, pill(false), { fontSize:12, color:C.bad, borderColor:C.badLine })}>Clear</button>}
+      {(ovSearch || ovWoStatus!=="all" || ovCustomer!=="all" || ovDateFrom || ovDateTo) && <button onClick={() => {setOvSearch("");setOvWoStatus("all");setOvCustomer("all");setOvDateFrom("");setOvDateTo("");}} style={Object.assign({}, pill(false), { fontSize:12, color:C.bad, borderColor:C.badLine })}>Clear</button>}
       <span style={{ fontSize:13, color:C.dim, marginLeft:4 }}>{overview.woCount} of {analysis.results.length} WOs{overview.noDueDate > 0 && ovDateFrom ? " ("+overview.noDueDate+" excluded \u2014 no due date)" : ""}</span>
     </div>
     <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(150px, 1fr))", gap:10, marginBottom:20 }}>
