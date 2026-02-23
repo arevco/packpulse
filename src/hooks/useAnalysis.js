@@ -311,11 +311,12 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
           totalInboundQty: 0, totalScheduledQty: 0
         },
         rows: criticalItems.map(function(item) {
+          var shortQty = item.totalShort || 0;
           return {
             sku: item.sku,
             desc: item.desc || "",
             customerLabel: item.customerLabel || "--",
-            shortQty: item.totalShort || 0,
+            shortQty: shortQty,
             affectedWOCount: item.affectedWOs ? item.affectedWOs.length : 0,
             earliestDueDate: "",
             earliestInboundDate: "",
@@ -323,6 +324,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
             inboundQty: 0,
             scheduledQty: 0,
             unscheduledQty: 0,
+            uncoveredQty: shortQty,
             coveragePct: 0,
             scheduledCoveragePct: 0,
             dueBeforeScheduled: false,
@@ -332,6 +334,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
             dockStatuses: [],
             openPOs: [],
             scheduledPOs: [],
+            recommendedAction: "Create / Expedite PO",
           };
         })
       };
@@ -407,6 +410,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       var scheduledRows = inboundRows.filter(function(r) { return r.isScheduled; });
       var scheduledQty = scheduledRows.reduce(function(s, r) { return s + r.qty; }, 0);
       var unscheduledQty = Math.max(0, inboundQty - scheduledQty);
+      var uncoveredQty = Math.max(0, shortQty - scheduledQty);
       var coveragePct = shortQty > 0 ? Math.min(100, Math.round(inboundQty / shortQty * 100)) : 100;
       var scheduledCoveragePct = shortQty > 0 ? Math.min(100, Math.round(scheduledQty / shortQty * 100)) : 100;
 
@@ -449,6 +453,11 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       var riskLevel = "low";
       if (status === "missing" || dueBeforeScheduled) riskLevel = "high";
       else if (status === "unscheduled" || status === "partial" || dueWithin48h) riskLevel = "medium";
+      var recommendedAction = "Monitor";
+      if (status === "missing") recommendedAction = "Create / Expedite PO";
+      else if (status === "unscheduled") recommendedAction = "Schedule OpenDock";
+      else if (status === "partial") recommendedAction = "Expedite Balance";
+      if (dueBeforeScheduled) recommendedAction = "Resequence WO / Expedite";
 
       var openPOs = Array.from(new Set(inboundRows.map(function(r) { return r.po; }).filter(Boolean)));
       var scheduledPOs = Array.from(new Set(scheduledRows.map(function(r) { return r.po; }).filter(Boolean)));
@@ -471,6 +480,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
         inboundQty: inboundQty,
         scheduledQty: scheduledQty,
         unscheduledQty: unscheduledQty,
+        uncoveredQty: uncoveredQty,
         coveragePct: coveragePct,
         scheduledCoveragePct: scheduledCoveragePct,
         dueBeforeScheduled: dueBeforeScheduled,
@@ -480,6 +490,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
         dockStatuses: dockStatuses,
         openPOs: openPOs,
         scheduledPOs: scheduledPOs,
+        recommendedAction: recommendedAction,
       };
     }).sort(function(a, b) {
       if (a.riskLevel !== b.riskLevel) {
@@ -502,6 +513,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       atRisk: rows.filter(function(r) { return r.riskLevel !== "low"; }).length,
       dueSoon: rows.filter(function(r) { return r.dueWithin48h; }).length,
       totalShortQty: rows.reduce(function(s, r) { return s + r.shortQty; }, 0),
+      totalUncoveredQty: rows.reduce(function(s, r) { return s + (r.uncoveredQty || 0); }, 0),
       totalInboundQty: rows.reduce(function(s, r) { return s + r.inboundQty; }, 0),
       totalScheduledQty: rows.reduce(function(s, r) { return s + r.scheduledQty; }, 0),
     };

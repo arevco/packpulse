@@ -17,7 +17,7 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
 
   const [covStatusFilter, setCovStatusFilter] = useState("all");
   const [covRiskFilter, setCovRiskFilter] = useState("all");
-  const [covSort, setCovSort] = useState("shortQty");
+  const [covSort, setCovSort] = useState("uncoveredQty");
   const [covSortDir, setCovSortDir] = useState("desc");
 
   const [expandedWO, setExpandedWO] = useState(null);
@@ -112,12 +112,13 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
     items.sort(function(a, b) {
       var c = 0;
       if (covSort === "sku") c = a.sku.localeCompare(b.sku);
-      else if (covSort === "status") c = a.status.localeCompare(b.status);
       else if (covSort === "risk") c = a.riskLevel.localeCompare(b.riskLevel);
       else if (covSort === "shortQty") c = a.shortQty - b.shortQty;
       else if (covSort === "scheduledQty") c = a.scheduledQty - b.scheduledQty;
+      else if (covSort === "uncoveredQty") c = (a.uncoveredQty || 0) - (b.uncoveredQty || 0);
       else if (covSort === "inboundQty") c = a.inboundQty - b.inboundQty;
       else if (covSort === "coverage") c = a.scheduledCoveragePct - b.scheduledCoveragePct;
+      else if (covSort === "action") c = (a.recommendedAction || "").localeCompare(b.recommendedAction || "");
       else if (covSort === "dueDate") c = (a.earliestDueDate || "").localeCompare(b.earliestDueDate || "");
       return covSortDir === "desc" ? -c : c;
     });
@@ -126,7 +127,7 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
 
   var exportCriticalCSV = function() {
     if (ciMode === "coverage") {
-      var hC = ["Item Code", "Description", "Customer", "Risk", "Status", "Short Qty", "Scheduled Qty", "Inbound Qty", "Coverage %", "Earliest Due", "Earliest Scheduled", "POs"];
+      var hC = ["Item Code", "Description", "Customer", "Risk", "Status", "Short Qty", "Scheduled Qty", "Uncovered Qty", "Inbound Qty", "Coverage %", "Action", "Earliest Due", "Earliest Scheduled", "POs"];
       var rowsC = coverageItems.map(function(i) {
         return [
           i.sku,
@@ -136,8 +137,10 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
           i.status || "",
           Math.round(i.shortQty || 0),
           Math.round(i.scheduledQty || 0),
+          Math.round(i.uncoveredQty || 0),
           Math.round(i.inboundQty || 0),
           (i.scheduledCoveragePct || 0) + "%",
+          '"' + (i.recommendedAction || "").replace(/"/g, '""') + '"',
           i.earliestDueDate || "",
           i.earliestScheduledDate || "",
           '"' + ((i.openPOs || []).join(", ")).replace(/"/g, '""') + '"',
@@ -209,33 +212,40 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
   };
 
   var renderCoverageRows = function() {
-    if (!coverageItems.length) return <tr><td colSpan={10} style={{ padding:36, textAlign:"center", color:C.dim }}>No inbound coverage rows match the filters.</td></tr>;
+    if (!coverageItems.length) return <tr><td colSpan={11} style={{ padding:36, textAlign:"center", color:C.dim }}>No inbound coverage rows match the filters.</td></tr>;
     var out = [];
     coverageItems.forEach(function(ci, idx) {
       var rowKey = "coverage-" + idx;
       var isX = expandedWO === rowKey;
       var riskColor = ci.riskLevel === "high" ? C.bad : ci.riskLevel === "medium" ? C.warn : C.ok;
       var statusText = ci.status === "missing" ? "Missing" : ci.status === "unscheduled" ? "Unscheduled" : ci.status === "partial" ? "Partial" : "Covered";
+      var actionColor = ci.status === "covered" ? C.ok : ci.status === "partial" ? C.warn : C.bad;
       out.push(
         <tr key={"cov" + idx} onClick={function() { setExpandedWO(isX ? null : rowKey); }} style={{ cursor:"pointer", borderBottom:"1px solid " + C.border, background:isX ? C.raised : "transparent" }}
           onMouseEnter={function(e) { if (!isX) e.currentTarget.style.background = C.hover; }} onMouseLeave={function(e) { if (!isX) e.currentTarget.style.background = isX ? C.raised : "transparent"; }}>
           <td style={tdToggle}>{isX ? "\u25BE" : "\u25B8"}</td>
           <td title={ci.sku} style={Object.assign({}, tdM, { fontWeight:600, color:C.bright }, truncate(140))}>{truncateItem(ci.sku)}</td>
+          <td style={Object.assign({}, tdN, { color:C.dim }, truncate(210))}>{formatDescriptionForDisplay(ci.desc) || "--"}</td>
           <td style={Object.assign({}, tdN, { color:C.dim }, truncate(220))}>{ci.customerLabel || "--"}</td>
-          <td style={Object.assign({}, tdN, { color:riskColor, fontWeight:600 })}>{ci.riskLevel === "high" ? "High" : ci.riskLevel === "medium" ? "Medium" : "Low"}</td>
-          <td style={Object.assign({}, tdN, { color:C.dim })}>{statusText}</td>
+          <td style={Object.assign({}, tdN, { color:riskColor, fontWeight:600 })}>
+            <span style={{ display:"inline-block", padding:"2px 7px", borderRadius:999, fontSize:11, fontWeight:700, color:riskColor, background:ci.riskLevel === "high" ? C.badSoft : ci.riskLevel === "medium" ? C.warnSoft : C.okSoft }}>{ci.riskLevel === "high" ? "High" : ci.riskLevel === "medium" ? "Medium" : "Low"}</span>
+          </td>
           <td style={Object.assign({}, tdM, { textAlign:"right", fontWeight:600, color:C.bad })}>{Math.round(ci.shortQty || 0).toLocaleString()}</td>
           <td style={Object.assign({}, tdM, { textAlign:"right", fontWeight:600, color:C.accent })}>{Math.round(ci.scheduledQty || 0).toLocaleString()}</td>
+          <td style={Object.assign({}, tdM, { textAlign:"right", fontWeight:700, color:(ci.uncoveredQty || 0) > 0 ? C.bad : C.ok })}>{Math.round(ci.uncoveredQty || 0).toLocaleString()}</td>
           <td style={Object.assign({}, tdM, { textAlign:"right", color:C.dim })}>{Math.round(ci.inboundQty || 0).toLocaleString()}</td>
           <td style={Object.assign({}, tdM, { textAlign:"right", fontWeight:600, color:(ci.scheduledCoveragePct || 0) >= 100 ? C.ok : (ci.scheduledCoveragePct || 0) >= 50 ? C.warn : C.bad })}>
             {(ci.scheduledCoveragePct || 0)}% / {(ci.coveragePct || 0)}%
+          </td>
+          <td style={Object.assign({}, tdN, { color:actionColor, fontWeight:600 })}>
+            <span title={"Status: " + statusText} style={{ display:"inline-block", padding:"2px 7px", borderRadius:999, fontSize:11, fontWeight:700, color:actionColor, background:ci.status === "covered" ? C.okSoft : ci.status === "partial" ? C.warnSoft : C.badSoft }}>{ci.recommendedAction || "Monitor"}</span>
           </td>
           <td style={Object.assign({}, tdM, { color:ci.dueBeforeScheduled ? C.bad : C.dim })}>{fmtDate(ci.earliestDueDate)}</td>
         </tr>
       );
       if (isX) {
         out.push(
-          <tr key={"covd" + idx}><td colSpan={10} style={{ padding:"0 12px 14px 36px", background:C.raised }}>
+          <tr key={"covd" + idx}><td colSpan={11} style={{ padding:"0 12px 14px 36px", background:C.raised }}>
             <div style={{ display:"flex", gap:14, flexWrap:"wrap", marginTop:10, marginBottom:8, fontSize:12 }}>
               <span style={{ color:C.dim }}>Earliest Inbound: <span style={{ color:C.bright, fontFamily:"monospace" }}>{fmtDate(ci.earliestInboundDate)}</span></span>
               <span style={{ color:C.dim }}>Earliest Scheduled: <span style={{ color:C.bright, fontFamily:"monospace" }}>{fmtDate(ci.earliestScheduledDate)}</span></span>
@@ -296,7 +306,7 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
           {[{ key:"all", label:"All Risk" }, { key:"high", label:"High Risk" }, { key:"medium", label:"Medium Risk" }, { key:"low", label:"Low Risk" }].map(function(f) {
             return <button key={f.key} onClick={function() { setCovRiskFilter(f.key); }} style={pill(covRiskFilter === f.key)}>{f.label}</button>;
           })}
-          {coverageSummary && <span style={{ fontSize:13, color:C.dim }}><span style={{ color:C.bad, fontWeight:600 }}>{coverageSummary.atRisk}</span> at risk | <span style={{ color:C.ok, fontWeight:600 }}>{coverageSummary.covered}</span> covered</span>}
+          {coverageSummary && <span style={{ fontSize:13, color:C.dim }}><span style={{ color:C.bad, fontWeight:600 }}>{coverageSummary.atRisk}</span> at risk | <span style={{ color:C.bad, fontWeight:600 }}>{Math.round(coverageSummary.totalUncoveredQty || 0).toLocaleString()}</span> uncovered units | <span style={{ color:C.ok, fontWeight:600 }}>{coverageSummary.covered}</span> covered</span>}
         </>
       )}
 
@@ -318,8 +328,8 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
                 return <th key={col.f} onClick={function() { handleCiSort(col.f); }} style={Object.assign({}, thC(ciSort===col.f), { textAlign:col.f==="sku"||col.f==="desc"||col.f==="customer"?"left":"right" })}>{col.l}{ciSort===col.f ? (ciSortDir==="asc" ? " \u2191" : " \u2193") : ""}</th>;
               })
             ) : (
-              [{ f:"sku", l:"Item" }, { f:"customer", l:"Customer" }, { f:"risk", l:"Risk" }, { f:"status", l:"Status" }, { f:"shortQty", l:"Short" }, { f:"scheduledQty", l:"Scheduled" }, { f:"inboundQty", l:"Inbound" }, { f:"coverage", l:"Coverage" }, { f:"dueDate", l:"Earliest Due" }].map(function(col) {
-                return <th key={col.f} onClick={function() { handleCovSort(col.f); }} style={Object.assign({}, thC(covSort===col.f), { textAlign:col.f==="sku"||col.f==="customer"||col.f==="risk"||col.f==="status"?"left":"right" })}>{col.l}{covSort===col.f ? (covSortDir==="asc" ? " \u2191" : " \u2193") : ""}</th>;
+              [{ f:"sku", l:"Item" }, { f:"desc", l:"Description" }, { f:"customer", l:"Customer" }, { f:"risk", l:"Risk" }, { f:"shortQty", l:"Short" }, { f:"scheduledQty", l:"Scheduled" }, { f:"uncoveredQty", l:"Uncovered" }, { f:"inboundQty", l:"Inbound" }, { f:"coverage", l:"Coverage" }, { f:"action", l:"Action" }, { f:"dueDate", l:"Earliest Due" }].map(function(col) {
+                return <th key={col.f} onClick={function() { handleCovSort(col.f); }} style={Object.assign({}, thC(covSort===col.f), { textAlign:col.f==="sku"||col.f==="desc"||col.f==="customer"||col.f==="risk"||col.f==="action"?"left":"right" })}>{col.l}{covSort===col.f ? (covSortDir==="asc" ? " \u2191" : " \u2193") : ""}</th>;
               })
             )}
           </tr></thead>
