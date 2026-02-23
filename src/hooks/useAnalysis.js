@@ -357,6 +357,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       matchedByReference: 0,
       dateProximityOnly: 0
     };
+    var matchedDockApptIds = {};
     if (hasEdr) {
       edrData.forEach(row => {
         var mat = (row[colMat]||"").toString().trim(); var desc = colDesc ? (row[colDesc]||"").toString().trim() : "";
@@ -407,12 +408,40 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
         }
         var bestDock = best ? best.appt : null;
         var strongMatch = !!(best && best.score >= 85);
+        if (strongMatch && best && best.appt && best.appt.id) matchedDockApptIds[best.appt.id] = true;
         if (strongMatch && best.kind === "po") matchDiagnostics.matchedByPo += 1;
         else if (strongMatch && best.kind === "reference") matchDiagnostics.matchedByReference += 1;
         else if (best && best.kind === "date") matchDiagnostics.dateProximityOnly += 1;
         var skuKeys = buildSkuMatchKeys(mat);
         if (!skuKeys.length) return;
         deliveries.push({ sku:mat, skuNorm:skuKeys[0], skuKeys:skuKeys, desc:desc, date:dateStr, dateObj:dateObj, qty:qty, po:po, poNorm:poNorm, tab:tab, dockStatus:bestDock?bestDock.status:"", dockApptDate:bestDock?bestDock.apptDate:"", isMatched:strongMatch, qtyOrd:qtyOrd, dockMatchKind:best ? best.kind : "none", dockMatchScore:best ? best.score : 0 });
+      });
+      // Keep OpenDock as execution truth: append scheduled appointments that did not map to EDR.
+      dockApptAll.forEach(function(appt, idx) {
+        if (!appt || !appt.apptDate || matchedDockApptIds[appt.id]) return;
+        var dateObj = new Date(appt.apptDate + "T00:00:00");
+        if (isNaN(dateObj)) return;
+        var dateStr = dateObj.toISOString().slice(0,10);
+        var poText = appt.po || "";
+        var refKey = "od-unmatched-" + idx + "-" + (appt.id || dateStr);
+        deliveries.push({
+          sku: poText || ("OD-" + idx),
+          skuNorm: normalizeStr(refKey),
+          skuKeys: [normalizeStr(refKey)],
+          desc: "OpenDock scheduled inbound",
+          date: dateStr,
+          dateObj: dateObj,
+          qty: 0,
+          po: poText,
+          poNorm: normalizePoKey(poText),
+          tab: "",
+          dockStatus: appt.status || "",
+          dockApptDate: appt.apptDate,
+          isMatched: false,
+          qtyOrd: 0,
+          dockMatchKind: "opendock-only",
+          dockMatchScore: 0
+        });
       });
     } else if (hasDock) {
       var dC2 = Object.keys(dockData[0] || {});
