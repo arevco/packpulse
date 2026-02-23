@@ -32,7 +32,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterWoStatus, setFilterWoStatus] = useState("Booked");
   const [filterCustomer, setFilterCustomer] = useState("all");
-  const [filterCommitment, setFilterCommitment] = useState("all");
+  const [filterShared, setFilterShared] = useState(false);
   const [sortField, setSortField] = useState("readiness");
   const [sortDir, setSortDir] = useState("desc");
   const [expandedWO, setExpandedWO] = useState(null);
@@ -61,7 +61,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
     setFilterCustomer(prefilterCustomer);
     setFilterStatus("all");
     setFilterWoStatus("all");
-    setFilterCommitment("all");
+    setFilterShared(false);
     setSearchTerm("");
   }, [prefilterCustomer, prefilterNonce]);
 
@@ -203,8 +203,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
     if (filterStatus !== "all") r = r.filter(w => w.runStatus === filterStatus);
     if (filterWoStatus !== "all") r = r.filter(w => w.status === filterWoStatus);
     if (filterCustomer !== "all") r = r.filter(w => w.customer === filterCustomer);
-    if (filterCommitment === "reduced") r = r.filter(function(w) { var c = commitmentMap[woCommitKey(w)]; return !!(c && c.commitmentGap > 0); });
-    else if (filterCommitment === "shared") r = r.filter(function(w) { var c = commitmentMap[woCommitKey(w)]; return !!(c && c.sharedConstraint); });
+    if (filterShared) r = r.filter(function(w) { var c = commitmentMap[woCommitKey(w)]; return !!(c && c.sharedConstraint); });
     if (searchTerm) { var q = searchTerm.toLowerCase(); r = r.filter(w => w.woNum.toLowerCase().includes(q) || w.productSkuRaw.toLowerCase().includes(q) || (w.productDesc||"").toLowerCase().includes(q) || (w.customer||"").toLowerCase().includes(q) || (w.reference1||"").toLowerCase().includes(q)); }
     r.sort((a,b) => {
       var c = 0;
@@ -257,7 +256,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
       return sortDir==="desc"?-c:c;
     });
     return r;
-  }, [analysis, filterStatus, filterWoStatus, filterCustomer, filterCommitment, searchTerm, sortField, sortDir, commitmentMap]);
+  }, [analysis, filterStatus, filterWoStatus, filterCustomer, filterShared, searchTerm, sortField, sortDir, commitmentMap]);
 
   var exportCSV = () => { if (!analysis) return; var h = ["Work Order","Product SKU","Description","Customer","WO Status","Due Date","Planned Start","Planned End","Order Qty","Produced","Remaining","Complete %","Ready %","Can Make","Est Hours","Run Status","Reference"]; var rows = analysis.results.map(w => [w.woNum, w.productSkuRaw, '"'+(w.productDesc||"").replace(/"/g,'""')+'"', '"'+(w.customer||"")+'"', w.status||"", w.dueDate||"", w.plannedStart||"", w.plannedEnd||"", w.qtyToProduce, w.unitsProduced, w.unitsRemaining, w.prodPct, w.readiness<0?"N/A":Math.round(w.readiness), w.maxRunnable, w.estHours||"", w.runStatus, '"'+(w.reference1||"").replace(/"/g,'""')+'"']); triggerDownload([h.join(",")].concat(rows.map(r => r.join(","))).join("\n"), "packpulse_" + new Date().toISOString().slice(0,10) + ".csv", "text/csv"); };
   var exportPDF = () => { if (!analysis) return; var th = ["WO#","Product","Customer","Qty","Produced","Remaining","Complete","Ready","Est Hrs","Status","Due"].map(h => "<th>"+h+"</th>").join(""); var tb = analysis.results.map(w => "<tr><td>"+w.woNum+"</td><td>"+w.productSkuRaw+"</td><td>"+(w.customer||"--")+"</td><td>"+w.qtyToProduce.toLocaleString()+"</td><td>"+w.unitsProduced.toLocaleString()+"</td><td>"+w.unitsRemaining.toLocaleString()+"</td><td>"+w.prodPct+"%</td><td>"+(w.readiness<0?"N/A":Math.round(w.readiness)+"%")+'</td><td>'+(w.estHours||"--")+'</td><td class="'+w.runStatus+'">'+w.runStatus+"</td><td>"+fmtDate(w.dueDate)+"</td></tr>").join(""); triggerDownload(buildExportHTML("PackPulse Report", th, tb), "packpulse_" + new Date().toISOString().slice(0,10) + ".html", "text/html"); };
@@ -384,7 +383,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
     <div style={{ display:"flex", gap:6, marginBottom:12, flexWrap:"wrap", alignItems:"center" }}>
       <input type="text" placeholder="Search WO, SKU, customer, notes..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} style={Object.assign({}, inp, { width:220 })} />
       {["all","ready","partial","blocked","nobom"].map(f => <button key={f} onClick={() => setFilterStatus(f)} style={pill(filterStatus===f)}>{f==="all"?"All":f==="ready"?"Ready":f==="partial"?"Partial":f==="blocked"?"Blocked":"No BOM"}</button>)}
-      {["all","shared","reduced"].map(function(f) { return <button key={f} onClick={function() { setFilterCommitment(f); }} style={pill(filterCommitment===f)}>{f==="all"?"All Cap":f==="shared"?"Shared": "Net Gap"}</button>; })}
+      <button onClick={function() { setFilterShared(function(v) { return !v; }); }} style={pill(filterShared)}>Shared</button>
       <select value={filterWoStatus} onChange={e => setFilterWoStatus(e.target.value)} style={Object.assign({}, sel, { fontSize:13 })}>
         <option value="all">All WO Status</option>
         {woStatuses.map(s => <option key={s} value={s}>{s}</option>)}
