@@ -11,12 +11,13 @@ import WorkOrdersView from "./views/WorkOrdersView";
 import CriticalItemsView from "./views/CriticalItemsView";
 import FlagsView from "./views/FlagsView";
 import TimelineView from "./views/TimelineView";
+import RecommendationsView from "./views/RecommendationsView";
 
 export default function ProductionReadiness() {
   const { C, theme, setTheme, sans, mono, FONTS_CSS, A11Y_CSS } = useTheme();
   const { pill } = useStyles();
   const ds = useDataSources();
-  const { analysis, summary, criticalItems, woStatuses, woCustomers, timelineData, inboundCoverage } = useAnalysis({
+  const { analysis, summary, criticalItems, woStatuses, woCustomers, timelineData, inboundCoverage, recommendations } = useAnalysis({
     mappingConfirmed: ds.mappingConfirmed, allUploaded: ds.allUploaded,
     inventory: ds.inventory, itemMaster: ds.itemMaster, boms: ds.boms, workOrders: ds.workOrders,
     invMapping: ds.invMapping, bomMapping: ds.bomMapping, woMapping: ds.woMapping,
@@ -125,6 +126,7 @@ export default function ProductionReadiness() {
   var criticalItemsForUI = criticalItems || [];
   var woStatusesForUI = woStatuses || [];
   var woCustomersForUI = woCustomers || [];
+  var recommendationsForUI = recommendations || [];
   var syncProgress = (() => {
     var reportStates = nulogySyncState && nulogySyncState.reportStates ? nulogySyncState.reportStates : null;
     var steps = [
@@ -208,6 +210,14 @@ export default function ProductionReadiness() {
     setWorkOrdersPrefilterCustomer(customerName || "");
     setWorkOrdersPrefilterNonce(function(v) { return v + 1; });
     setActiveView("workorders");
+    setTimeout(function() {
+      var el = document.getElementById("dashboard-main");
+      if (el && el.scrollIntoView) el.scrollIntoView({ behavior:"smooth", block:"start" });
+    }, 0);
+  }, []);
+  var openRecommendation = useCallback(function(rec) {
+    if (!rec || !rec.targetView) return;
+    setActiveView(rec.targetView);
     setTimeout(function() {
       var el = document.getElementById("dashboard-main");
       if (el && el.scrollIntoView) el.scrollIntoView({ behavior:"smooth", block:"start" });
@@ -465,7 +475,7 @@ export default function ProductionReadiness() {
         )}
 
         <div style={{ display:"flex", gap:0, marginBottom:16, borderBottom:"1px solid "+C.border }}>
-          {[{key:"overview",label:"Overview",count:null,alert:false},{key:"workorders",label:"Work Orders",count:summaryForUI.total},{key:"criticalitems",label:"Critical Items",count:criticalItemsForUI.length}]
+          {[{key:"overview",label:"Overview",count:null,alert:false},{key:"workorders",label:"Work Orders",count:summaryForUI.total},{key:"criticalitems",label:"Critical Items",count:criticalItemsForUI.length},{key:"recommendations",label:"Recommendations",count:recommendationsForUI.length,alert:recommendationsForUI.some(function(r){return r.priority==="P1";})}]
             .concat([{key:"flags",label:"Data Flags",count:analysisForUI.flags.length,alert:analysisForUI.flags.length>0}])
             .concat([{key:"timeline",label:"Deliveries",count:timelineData ? timelineData.woTimelines.length : 0,alert:false}]).map(t =>
               <button key={t.key} onClick={() => setActiveView(t.key)} style={{ padding:"8px 16px", border:"none", fontFamily:sans, fontSize:14, fontWeight:500, cursor:"pointer", background:"transparent", color:activeView===t.key?C.bright:C.dim, borderBottom:activeView===t.key?"2px solid "+C.accent:"2px solid transparent", marginBottom:-1 }}>
@@ -477,6 +487,7 @@ export default function ProductionReadiness() {
         {activeView === "overview" && <OverviewView analysis={analysisForUI} woStatuses={woStatusesForUI} onSelectCustomer={openWorkOrdersForCustomer} />}
         {activeView === "workorders" && <WorkOrdersView analysis={analysisForUI} woStatuses={woStatusesForUI} woCustomers={woCustomersForUI} prefilterCustomer={workOrdersPrefilterCustomer} prefilterNonce={workOrdersPrefilterNonce} />}
         {activeView === "criticalitems" && <CriticalItemsView rawCriticalItems={criticalItemsForUI} inboundCoverage={inboundCoverage} />}
+        {activeView === "recommendations" && <RecommendationsView recommendations={recommendationsForUI} onOpenRecommendation={openRecommendation} />}
         {activeView === "flags" && <FlagsView flags={analysisForUI.flags} />}
         {activeView === "timeline" && <TimelineView timelineData={timelineData} />}
 

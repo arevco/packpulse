@@ -521,5 +521,157 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
     return { horizonDays: horizonDays, summary: summary, rows: rows };
   }, [analysis, criticalItems, edrData, dockData]);
 
-  return { analysis, summary, criticalItems, woStatuses, woCustomers, poCheck, timelineData, inboundCoverage };
+  /* ====== RECOMMENDATIONS (V1 RULES ENGINE) ====== */
+  var recommendations = useMemo(() => {
+    if (!analysis) return [];
+    var recs = [];
+    var nextId = 1;
+    var now = new Date();
+    var today = new Date(now); today.setHours(0, 0, 0, 0);
+    var tomorrow = new Date(today.getTime() + 86400000);
+    var weekEnd = new Date(today.getTime() + 7 * 86400000);
+    var bucketByDate = function(dateStr) {
+      if (!dateStr) return "week";
+      var d = new Date(dateStr);
+      if (isNaN(d)) return "week";
+      if (d < tomorrow) return "now";
+      if (d <= new Date(today.getTime() + 3 * 86400000)) return "today";
+      return "week";
+    };
+    var dueUrgency = function(dateStr) {
+      if (!dateStr) return 10;
+      var d = new Date(dateStr);
+      if (isNaN(d)) return 10;
+      var days = Math.floor((d.getTime() - today.getTime()) / 86400000);
+      if (days <= 0) return 80;
+      if (days <= 2) return 50;
+      if (days <= 7) return 25;
+      return 10;
+    };
+    var dataScore = 100;
+    if (!boms || !boms.length) dataScore -= 20;
+    if (!edrData || !edrData.length) dataScore -= 15;
+    if (!dockData || !dockData.length) dataScore -= 10;
+    if ((analysis.flags || []).length > 100) dataScore -= 10;
+    var confidenceLabel = dataScore >= 80 ? "High" : dataScore >= 60 ? "Medium" : "Low";
+
+    if (inboundCoverage && inboundCoverage.rows && inboundCoverage.rows.length) {
+      inboundCoverage.rows.forEach(function(row) {
+        var uncovered = Math.max(0, safeNum(row.uncoveredQty || row.shortQty || 0));
+        if (uncovered <= 0) return;
+        var urgency = dueUrgency(row.earliestDueDate);
+        var base = uncovered + urgency;
+        if (row.status === "missing") {
+          recs.push({
+            id: "R" + (nextId++),
+            priorityScore: base + 60,
+            owner: "Supply Chain",
+            action: "Create / Expedite PO",
+            why: row.sku + " has no scheduled inbound covering current shortfall.",
+            impactUnits: uncovered,
+            window: bucketByDate(row.earliestDueDate),
+            confidence: confidenceLabel,
+            source: "Critical Items",
+            targetView: "criticalitems"
+          });
+        } else if (row.status === "unscheduled") {
+          recs.push({
+            id: "R" + (nextId++),
+            priorityScore: base + 40,
+            owner: "Supply Chain",
+            action: "Schedule OpenDock",
+            why: row.sku + " has inbound but no dock schedule; risk remains uncovered.",
+            impactUnits: uncovered,
+            window: bucketByDate(row.earliestDueDate),
+            confidence: confidenceLabel,
+            source: "Inbound Coverage",
+            targetView: "criticalitems"
+          });
+        } else if (row.status === "partial") {
+          recs.push({
+            id: "R" + (nextId++),
+            priorityScore: base + 25,
+            owner: "Supply Chain",
+            action: "Expedite Balance",
+            why: row.sku + " has partial scheduled coverage; remaining shortfall still blocks output.",
+            impactUnits: uncovered,
+            window: bucketByDate(row.earliestDueDate),
+            confidence: confidenceLabel,
+            source: "Inbound Coverage",
+            targetView: "criticalitems"
+          });
+        }
+      });
+    }
+
+    (analysis.results || []).forEach(function(wo) {
+      var due = wo.dueDate ? new Date(wo.dueDate) : null;
+      var dueSoon = due && !isNaN(due) && due <= new Date(today.getTime() + 3 * 86400000);
+      if (wo.runStatus === "nobom" && wo.unitsRemaining > 0 && dueSoon) {
+        recs.push({
+          id: "R" + (nextId++),
+          priorityScore: 95 + dueUrgency(wo.dueDate),
+          owner: "Planner",
+          action: "Create / Validate BOM",
+          why: "WO " + wo.woNum + " is due soon with no BOM.",
+          impactUnits: safeNum(wo.unitsRemaining || wo.qtyToProduce || 0),
+          window: bucketByDate(wo.dueDate),
+          confidence: confidenceLabel,
+          source: "Work Orders",
+          targetView: "workorders"
+        });
+      }
+      if (due && !isNaN(due) && due < today && wo.unitsRemaining > 0 && wo.maxRunnable > 0 && wo.readiness >= 50) {
+        recs.push({
+          id: "R" + (nextId++),
+          priorityScore: 70 + dueUrgency(wo.dueDate),
+          owner: "Planner / Supervisor",
+          action: "Resequence WO",
+          why: "Past-due WO " + wo.woNum + " has recoverable material coverage.",
+          impactUnits: safeNum(wo.unitsRemaining || 0),
+          window: "now",
+          confidence: confidenceLabel,
+          source: "Work Orders",
+          targetView: "workorders"
+        });
+      }
+    });
+
+    if (!edrData || !edrData.length) {
+      recs.push({
+        id: "R" + (nextId++),
+        priorityScore: 55,
+        owner: "Ops Analyst",
+        action: "Upload EDR",
+        why: "Inbound coverage confidence is reduced without EDR.",
+        impactUnits: 0,
+        window: "today",
+        confidence: "Low",
+        source: "Data Quality",
+        targetView: "criticalitems"
+      });
+    }
+    if (!dockData || !dockData.length) {
+      recs.push({
+        id: "R" + (nextId++),
+        priorityScore: 50,
+        owner: "Ops Analyst",
+        action: "Sync OpenDock",
+        why: "Dock scheduling confidence is reduced without OpenDock data.",
+        impactUnits: 0,
+        window: "today",
+        confidence: "Low",
+        source: "Data Quality",
+        targetView: "criticalitems"
+      });
+    }
+
+    recs.sort(function(a, b) { return b.priorityScore - a.priorityScore; });
+    return recs.slice(0, 30).map(function(r) {
+      var p = r.priorityScore >= 120 ? "P1" : r.priorityScore >= 85 ? "P2" : "P3";
+      return Object.assign({}, r, { priority:p });
+    });
+  }, [analysis, inboundCoverage, boms, edrData, dockData]);
+
+  return { analysis, summary, criticalItems, woStatuses, woCustomers, poCheck, timelineData, inboundCoverage, recommendations };
 }
