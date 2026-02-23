@@ -310,7 +310,9 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
                 {["Component","Description","Qty/Unit","Needed","On Hand","Short","Fill %"].map(h => <th key={h} style={thDS}>{h}</th>)}
               </tr></thead>
               <tbody>
-                {wo.components.map((comp, ci) => {
+                {wo.components.slice().sort(function(a, b) {
+                  return String(a.sku || "").localeCompare(String(b.sku || ""), undefined, { numeric:true, sensitivity:"base" });
+                }).map((comp, ci) => {
                   var rows = [];
                   rows.push(
                     <tr key={"c"+ci} style={{ borderBottom:comp.hasSubs?"none":"1px solid "+C.border }}>
