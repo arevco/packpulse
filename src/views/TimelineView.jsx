@@ -248,7 +248,9 @@ export default function TimelineView({ timelineData }) {
           })}
           {filteredWoTimelines.length === 0 && (
             <div style={{ padding:"16px 12px", color:C.dim, fontSize:13 }}>
-              No work orders match the current Deliveries filters.
+              {windowSummary.inbound > 0
+                ? "No at-risk work orders are linked to inbound deliveries in this window. Inbound appointments are still listed below."
+                : "No deliveries are available in the selected window."}
             </div>
           )}
         </div>
