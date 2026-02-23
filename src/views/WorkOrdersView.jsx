@@ -32,6 +32,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterWoStatus, setFilterWoStatus] = useState("Booked");
   const [filterCustomer, setFilterCustomer] = useState("all");
+  const [filterCommitment, setFilterCommitment] = useState("all");
   const [sortField, setSortField] = useState("readiness");
   const [sortDir, setSortDir] = useState("desc");
   const [expandedWO, setExpandedWO] = useState(null);
@@ -60,16 +61,133 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
     setFilterCustomer(prefilterCustomer);
     setFilterStatus("all");
     setFilterWoStatus("all");
+    setFilterCommitment("all");
     setSearchTerm("");
   }, [prefilterCustomer, prefilterNonce]);
 
   var handleSort = f => { if (sortField === f) setSortDir(d => d==="asc"?"desc":"asc"); else { setSortField(f); setSortDir("desc"); } };
+  var woCommitKey = function(wo) { return [wo.woNum || "", wo.productSkuRaw || "", wo.dueDate || ""].join("|"); };
+
+  var statusLooksClosed = function(status) {
+    var s = normalizeStr(status || "");
+    if (!s) return false;
+    return s.includes("close") || s.includes("complete") || s.includes("cancel") || s.includes("archive") || s.includes("done");
+  };
+  var parseDueDateTs = function(v) {
+    var d = parseDateValue(v);
+    return d ? d.getTime() : Number.POSITIVE_INFINITY;
+  };
+
+  var commitmentMap = useMemo(() => {
+    if (!analysis) return {};
+    var results = analysis.results || [];
+    var activeWOs = results.filter(function(wo) {
+      if (wo.runStatus === "nobom") return false;
+      if (statusLooksClosed(wo.status)) return false;
+      return true;
+    }).slice().sort(function(a, b) {
+      var dt = parseDueDateTs(a.dueDate) - parseDueDateTs(b.dueDate);
+      if (dt !== 0) return dt;
+      return (a.woNum || "").localeCompare(b.woNum || "");
+    });
+
+    var remainingBySku = {};
+    activeWOs.forEach(function(wo) {
+      (wo.components || []).forEach(function(comp) {
+        var seen = {};
+        var optList = comp.optionDetails && comp.optionDetails.length ? comp.optionDetails : [{ sku:comp.sku, onHand:comp.onHand || 0, isSub:false }];
+        optList.forEach(function(opt) {
+          var k = normalizeStr(opt.sku || "");
+          if (!k || seen[k]) return;
+          seen[k] = true;
+          var onHand = Number(opt.onHand || 0);
+          if (!Object.prototype.hasOwnProperty.call(remainingBySku, k) || onHand > remainingBySku[k]) remainingBySku[k] = onHand;
+        });
+      });
+    });
+
+    var map = {};
+    activeWOs.forEach(function(wo) {
+      var committed = Number.POSITIVE_INFINITY;
+      var sharedDetails = [];
+      var compList = wo.components || [];
+      if (!compList.length) committed = 0;
+      compList.forEach(function(comp) {
+        var qtyPer = Number(comp.qtyPer || 0);
+        if (!(qtyPer > 0)) return;
+        var optionRows = comp.optionDetails && comp.optionDetails.length ? comp.optionDetails : [{ sku:comp.sku, onHand:comp.onHand || 0, isSub:false }];
+        var options = optionRows.map(function(opt) {
+          var key = normalizeStr(opt.sku || "");
+          return { key:key, sku:opt.sku || "", isSub:!!opt.isSub };
+        }).filter(function(opt) { return !!opt.key; });
+        var optionCountWithStock = options.filter(function(opt) { return (remainingBySku[opt.key] || 0) > 0; }).length;
+        var available = options.reduce(function(sum, opt) { return sum + (remainingBySku[opt.key] || 0); }, 0);
+        var makeUnits = Math.floor(available / qtyPer);
+        committed = Math.min(committed, makeUnits);
+        if (optionCountWithStock > 1) sharedDetails.push(comp.sku);
+      });
+      if (!isFinite(committed)) committed = 0;
+      committed = Math.max(0, Math.min(committed, Number(wo.qtyToProduce || 0)));
+
+      // Reserve inventory for this WO using same priority order.
+      compList.forEach(function(comp) {
+        var qtyPer = Number(comp.qtyPer || 0);
+        if (!(qtyPer > 0)) return;
+        var need = committed * qtyPer;
+        if (need <= 0) return;
+        var optionRows = comp.optionDetails && comp.optionDetails.length ? comp.optionDetails.slice() : [{ sku:comp.sku, onHand:comp.onHand || 0, isSub:false }];
+        optionRows.sort(function(a, b) {
+          if (!!a.isSub !== !!b.isSub) return a.isSub ? 1 : -1;
+          return Number(b.onHand || 0) - Number(a.onHand || 0);
+        });
+        var remainingNeed = need;
+        optionRows.forEach(function(opt) {
+          if (remainingNeed <= 0) return;
+          var key = normalizeStr(opt.sku || "");
+          if (!key) return;
+          var avail = remainingBySku[key] || 0;
+          if (avail <= 0) return;
+          var take = Math.min(avail, remainingNeed);
+          remainingBySku[key] = avail - take;
+          remainingNeed -= take;
+        });
+      });
+
+      var localCanMake = Number(wo.maxRunnable || 0);
+      var gap = Math.max(0, localCanMake - committed);
+      map[woCommitKey(wo)] = {
+        committedCanMake: committed,
+        commitmentGap: gap,
+        sharedConstraint: gap > 0,
+        sharedComponents: Array.from(new Set(sharedDetails)).slice(0, 3)
+      };
+    });
+    return map;
+  }, [analysis]);
+
+  var commitmentSummary = useMemo(function() {
+    if (!analysis) return null;
+    var rows = analysis.results || [];
+    var atRisk = 0;
+    var reducedUnits = 0;
+    rows.forEach(function(wo) {
+      var c = commitmentMap[woCommitKey(wo)];
+      if (!c) return;
+      if (c.commitmentGap > 0) {
+        atRisk += 1;
+        reducedUnits += c.commitmentGap;
+      }
+    });
+    return { atRisk:atRisk, reducedUnits:reducedUnits };
+  }, [analysis, commitmentMap]);
 
   var filteredResults = useMemo(() => {
     if (!analysis) return []; var r = analysis.results.slice();
     if (filterStatus !== "all") r = r.filter(w => w.runStatus === filterStatus);
     if (filterWoStatus !== "all") r = r.filter(w => w.status === filterWoStatus);
     if (filterCustomer !== "all") r = r.filter(w => w.customer === filterCustomer);
+    if (filterCommitment === "reduced") r = r.filter(function(w) { var c = commitmentMap[woCommitKey(w)]; return !!(c && c.commitmentGap > 0); });
+    else if (filterCommitment === "shared") r = r.filter(function(w) { var c = commitmentMap[woCommitKey(w)]; return !!(c && c.sharedConstraint); });
     if (searchTerm) { var q = searchTerm.toLowerCase(); r = r.filter(w => w.woNum.toLowerCase().includes(q) || w.productSkuRaw.toLowerCase().includes(q) || (w.productDesc||"").toLowerCase().includes(q) || (w.customer||"").toLowerCase().includes(q) || (w.reference1||"").toLowerCase().includes(q)); }
     r.sort((a,b) => {
       var c = 0;
@@ -82,6 +200,16 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
       else if (sortField==="remaining") c=a.unitsRemaining-b.unitsRemaining;
       else if (sortField==="complete") c=a.prodPct-b.prodPct;
       else if (sortField==="maxRunnable") c=a.maxRunnable-b.maxRunnable;
+      else if (sortField==="committedCanMake") {
+        var ac = commitmentMap[woCommitKey(a)] ? commitmentMap[woCommitKey(a)].committedCanMake : 0;
+        var bc = commitmentMap[woCommitKey(b)] ? commitmentMap[woCommitKey(b)].committedCanMake : 0;
+        c = ac - bc;
+      }
+      else if (sortField==="commitmentGap") {
+        var ag = commitmentMap[woCommitKey(a)] ? commitmentMap[woCommitKey(a)].commitmentGap : 0;
+        var bg = commitmentMap[woCommitKey(b)] ? commitmentMap[woCommitKey(b)].commitmentGap : 0;
+        c = ag - bg;
+      }
       else if (sortField==="readiness") c=a.readiness-b.readiness;
       else if (sortField==="estHours") c=a.estHours-b.estHours;
       else if (sortField==="dueDate" || sortField==="plannedStart" || sortField==="plannedEnd") {
@@ -112,7 +240,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
       return sortDir==="desc"?-c:c;
     });
     return r;
-  }, [analysis, filterStatus, filterWoStatus, filterCustomer, searchTerm, sortField, sortDir]);
+  }, [analysis, filterStatus, filterWoStatus, filterCustomer, filterCommitment, searchTerm, sortField, sortDir, commitmentMap]);
 
   var exportCSV = () => { if (!analysis) return; var h = ["Work Order","Product SKU","Description","Customer","WO Status","Due Date","Planned Start","Planned End","Order Qty","Produced","Remaining","Complete %","Ready %","Can Make","Est Hours","Run Status","Reference"]; var rows = analysis.results.map(w => [w.woNum, w.productSkuRaw, '"'+(w.productDesc||"").replace(/"/g,'""')+'"', '"'+(w.customer||"")+'"', w.status||"", w.dueDate||"", w.plannedStart||"", w.plannedEnd||"", w.qtyToProduce, w.unitsProduced, w.unitsRemaining, w.prodPct, w.readiness<0?"N/A":Math.round(w.readiness), w.maxRunnable, w.estHours||"", w.runStatus, '"'+(w.reference1||"").replace(/"/g,'""')+'"']); triggerDownload([h.join(",")].concat(rows.map(r => r.join(","))).join("\n"), "packpulse_" + new Date().toISOString().slice(0,10) + ".csv", "text/csv"); };
   var exportPDF = () => { if (!analysis) return; var th = ["WO#","Product","Customer","Qty","Produced","Remaining","Complete","Ready","Est Hrs","Status","Due"].map(h => "<th>"+h+"</th>").join(""); var tb = analysis.results.map(w => "<tr><td>"+w.woNum+"</td><td>"+w.productSkuRaw+"</td><td>"+(w.customer||"--")+"</td><td>"+w.qtyToProduce.toLocaleString()+"</td><td>"+w.unitsProduced.toLocaleString()+"</td><td>"+w.unitsRemaining.toLocaleString()+"</td><td>"+w.prodPct+"%</td><td>"+(w.readiness<0?"N/A":Math.round(w.readiness)+"%")+'</td><td>'+(w.estHours||"--")+'</td><td class="'+w.runStatus+'">'+w.runStatus+"</td><td>"+fmtDate(w.dueDate)+"</td></tr>").join(""); triggerDownload(buildExportHTML("PackPulse Report", th, tb), "packpulse_" + new Date().toISOString().slice(0,10) + ".html", "text/html"); };
@@ -120,10 +248,11 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
   var SortTh = function(props) { return <th onClick={() => handleSort(props.field)} style={Object.assign({}, thC(sortField===props.field), props.style||{})}>{props.children}{sortField===props.field ? (sortDir==="asc" ? " \u2191" : " \u2193") : ""}</th>; };
 
   var renderWORows = () => {
-    if (filteredResults.length === 0) return <tr><td colSpan={15} style={{ padding:36, textAlign:"center", color:C.dim, fontSize:14 }}>No work orders match filters.</td></tr>;
+    if (filteredResults.length === 0) return <tr><td colSpan={17} style={{ padding:36, textAlign:"center", color:C.dim, fontSize:14 }}>No work orders match filters.</td></tr>;
     var out = [];
     filteredResults.forEach((wo, idx) => {
       var isX = expandedWO === wo.woNum + idx;
+      var commitment = commitmentMap[woCommitKey(wo)] || { committedCanMake:0, commitmentGap:0, sharedConstraint:false };
       var rs = runStatusMeta(wo.runStatus);
       out.push(
         <tr key={"r"+idx} onClick={() => setExpandedWO(isX ? null : wo.woNum + idx)} style={{ cursor:"pointer", borderBottom:"1px solid "+C.border, background:isX?C.raised:"transparent" }}
@@ -144,6 +273,18 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
           <td style={Object.assign({}, tdM, { fontWeight:600, color:wo.prodPct>=100?C.ok:wo.prodPct>=50?C.warn:wo.prodPct>0?C.accent:C.dim })}>{wo.prodPct > 0 ? wo.prodPct+"%" : "--"}</td>
           <td style={Object.assign({}, tdM, { fontWeight:600, color:wo.readiness>=100?C.ok:wo.readiness>=70?C.warn:C.bad })}>{wo.readiness < 0 ? <span style={{color:C.dim}}>--</span> : Math.round(wo.readiness)+"%"}</td>
           <td style={Object.assign({}, tdM, { fontWeight:600, color:wo.runStatus==="ready"?C.ok:wo.runStatus==="nobom"?C.dim:wo.maxRunnable>0?C.warn:C.bad })}>{wo.runStatus==="nobom" ? "--" : wo.maxRunnable.toLocaleString()}</td>
+          <td style={Object.assign({}, tdM, { fontWeight:600, color:commitment.committedCanMake>0?C.accent:C.dim })}>
+            {wo.runStatus==="nobom" ? "--" : commitment.committedCanMake.toLocaleString()}
+          </td>
+          <td style={Object.assign({}, tdN, { whiteSpace:"nowrap" })}>
+            {(commitment.commitmentGap > 0) ? (
+              <span title={"Shared material demand across active work orders. Allocation order: earliest due date, then WO #. Local: " + wo.maxRunnable.toLocaleString() + " | After commitments: " + commitment.committedCanMake.toLocaleString() + " | Gap: " + commitment.commitmentGap.toLocaleString()} style={{ display:"inline-block", padding:"2px 7px", borderRadius:999, fontSize:11, fontWeight:700, color:C.bad, background:C.badSoft }}>
+                Shared Material
+              </span>
+            ) : (
+              <span style={{ color:C.dim }}>--</span>
+            )}
+          </td>
           <td style={Object.assign({}, tdM, { color:wo.estHours>0?C.bright:C.dim })}>{wo.estHours > 0 ? wo.estHours+"h" : "--"}</td>
         </tr>
       );
@@ -200,7 +341,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
           </div>
         );
         out.push(
-          <tr key={"d"+idx}><td colSpan={15} style={{ padding:"0 12px 14px 36px", background:C.raised }}>
+          <tr key={"d"+idx}><td colSpan={17} style={{ padding:"0 12px 14px 36px", background:C.raised }}>
             {details}
           </td></tr>
         );
@@ -213,6 +354,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
     <div style={{ display:"flex", gap:6, marginBottom:12, flexWrap:"wrap", alignItems:"center" }}>
       <input type="text" placeholder="Search WO, SKU, customer, notes..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} style={Object.assign({}, inp, { width:220 })} />
       {["all","ready","partial","blocked","nobom"].map(f => <button key={f} onClick={() => setFilterStatus(f)} style={pill(filterStatus===f)}>{f==="all"?"All":f==="ready"?"Ready":f==="partial"?"Partial":f==="blocked"?"Blocked":"No BOM"}</button>)}
+      {["all","shared","reduced"].map(function(f) { return <button key={f} onClick={function() { setFilterCommitment(f); }} style={pill(filterCommitment===f)}>{f==="all"?"All Commitments":f==="shared"?"Shared Material": "Net Reduced"}</button>; })}
       <select value={filterWoStatus} onChange={e => setFilterWoStatus(e.target.value)} style={Object.assign({}, sel, { fontSize:13 })}>
         <option value="all">All WO Status</option>
         {woStatuses.map(s => <option key={s} value={s}>{s}</option>)}
@@ -225,6 +367,11 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
       <button onClick={exportCSV} style={Object.assign({}, pill(false), { fontSize:13 })}>CSV</button>
       <button onClick={exportPDF} style={Object.assign({}, pill(false), { fontSize:13 })}>PDF</button>
     </div>
+    {commitmentSummary && (
+      <div style={{ marginBottom:10, fontSize:13, color:C.dim }}>
+        Commitment Risk: <span style={{ color:C.bad, fontWeight:600 }}>{commitmentSummary.atRisk}</span> work orders | Net Reduction: <span style={{ color:C.bad, fontWeight:600 }}>{commitmentSummary.reducedUnits.toLocaleString()}</span> units
+      </div>
+    )}
     <div style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, overflow:"hidden" }}>
       <div style={{ overflowX:"auto" }}>
         <table style={{ width:"100%", borderCollapse:"collapse" }}>
@@ -241,7 +388,9 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
             <SortTh field="remaining">Remaining</SortTh>
             <SortTh field="complete">Complete</SortTh>
             <SortTh field="readiness">Ready</SortTh>
-            <SortTh field="maxRunnable">Can Make</SortTh>
+            <SortTh field="maxRunnable">Can Make (This WO)</SortTh>
+            <SortTh field="committedCanMake">Can Make (After Commitments)</SortTh>
+            <SortTh field="commitmentGap">Commitment</SortTh>
             <SortTh field="estHours">Est Hrs</SortTh>
           </tr></thead>
           <tbody>{renderWORows()}</tbody>
