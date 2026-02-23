@@ -107,6 +107,27 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
     leadingZeroMatched: (deliveriesV2 && deliveriesV2.reconciliation && deliveriesV2.reconciliation.leadingZeroMatched) || 0,
     unmatchedSkuRows: (deliveriesV2 && deliveriesV2.reconciliation && deliveriesV2.reconciliation.unmatchedSkuRows) || 0
   };
+  var freshness = deliveriesV2 && deliveriesV2.freshness ? deliveriesV2.freshness : {
+    edr:{ level:"missing", ageDays:null, lastDate:"" },
+    openDock:{ level:"missing", ageDays:null, lastDate:"" },
+    confidence:{ score:0, label:"Low" }
+  };
+  var summary = deliveriesV2 && deliveriesV2.summary ? deliveriesV2.summary : {
+    openDockScheduled: windowBoard.openDockInboundAppts || 0,
+    materialResolved: windowBoard.matched || 0,
+    materialUnknown: windowBoard.unmatched || 0,
+    atRiskWOsWaiting: 0,
+    unitsPotentiallyUnlocked: windowBoard.unitsUnlocked || 0
+  };
+  var toneByLevel = function(level) {
+    if (level === "fresh") return { fg:C.ok, bg:C.okSoft, bd:C.okLine, label:"Fresh" };
+    if (level === "aging") return { fg:C.warn, bg:C.warnSoft, bd:C.warnLine, label:"Aging" };
+    if (level === "stale") return { fg:C.bad, bg:C.badSoft, bd:C.badLine, label:"Stale" };
+    return { fg:C.dim, bg:C.raised, bd:C.border, label:"Missing" };
+  };
+  var edrTone = toneByLevel(freshness.edr.level);
+  var dockTone = toneByLevel(freshness.openDock.level);
+  var isEdrStale = freshness.edr.level === "stale" || freshness.edr.level === "missing";
   var fmtDateShort = function(v) {
     if (!v) return "--";
     var d = new Date(String(v) + "T12:00:00");
@@ -129,8 +150,7 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
         return (
           (r.materialSku || "").toLowerCase().includes(q) ||
           (r.materialDesc || "").toLowerCase().includes(q) ||
-          (r.po || "").toLowerCase().includes(q) ||
-          (r.recommendedAction || "").toLowerCase().includes(q)
+          (r.po || "").toLowerCase().includes(q)
         );
       });
     }
@@ -141,6 +161,8 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
     });
     return rows;
   }, [deliveriesV2, todayStr, windowEndStr, pqAtRiskOnly, pqSearch]);
+  var executionQueueRows = priorityQueueRows;
+  var coverageQueueRows = priorityQueueRows.filter(function(r) { return !!r.isMatched; });
 
   var timelineRows = useMemo(function() {
     var grouped = {};
@@ -207,26 +229,29 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
         return <button key={opt.key} onClick={function() { setWindowDays(opt.key); }} style={pill(windowDays===opt.key)}>{opt.label}</button>;
       })}
     </div>
+    <div style={{ display:"flex", gap:6, marginBottom:12, flexWrap:"wrap", alignItems:"center" }}>
+      <span style={{ display:"inline-flex", alignItems:"center", gap:6, fontSize:12, fontWeight:600, color:dockTone.fg, background:dockTone.bg, border:"1px solid "+dockTone.bd, borderRadius:999, padding:"4px 10px" }}>
+        OpenDock {dockTone.label}
+        <span style={{ fontFamily:mono }}>{freshness.openDock.ageDays == null ? "--" : (freshness.openDock.ageDays + "d")}</span>
+      </span>
+      <span style={{ display:"inline-flex", alignItems:"center", gap:6, fontSize:12, fontWeight:600, color:edrTone.fg, background:edrTone.bg, border:"1px solid "+edrTone.bd, borderRadius:999, padding:"4px 10px" }}>
+        EDR {edrTone.label}
+        <span style={{ fontFamily:mono }}>{freshness.edr.ageDays == null ? "--" : (freshness.edr.ageDays + "d")}</span>
+      </span>
+      <span style={{ display:"inline-flex", alignItems:"center", gap:6, fontSize:12, fontWeight:600, color:C.accent, background:C.accentSoft, border:"1px solid "+C.accentLine, borderRadius:999, padding:"4px 10px" }}>
+        Coverage Confidence
+        <span style={{ fontFamily:mono }}>{freshness.confidence.label} ({freshness.confidence.score})</span>
+      </span>
+    </div>
+    {isEdrStale && <div style={{ marginBottom:12, fontSize:12, color:C.warn, background:C.warnSoft, border:"1px solid "+C.warnLine, borderRadius:8, padding:"8px 10px" }}>
+      EDR is stale. Prioritizing OpenDock execution queue; material matching may be incomplete until a fresh EDR is uploaded.
+    </div>}
     <div style={{ display:"flex", gap:20, marginBottom:8, flexWrap:"wrap" }}>
-      {[{l:"OpenDock Inbound",v:windowBoard.openDockInboundAppts,c:C.accent},{l:"EDR Inbounds",v:windowBoard.edrLoads,c:C.bright},{l:"OD + EDR Match",v:windowBoard.matched,c:C.ok},{l:"At Risk WO",v:windowBoard.atRisk,c:C.warn},{l:"Units Unlocked",v:windowBoard.unitsUnlocked.toLocaleString(),c:C.accent}].map((s,i) =>
+      {[{l:"Scheduled Inbounds",v:summary.openDockScheduled,c:C.accent},{l:"Material Resolved",v:summary.materialResolved,c:C.ok},{l:"Material Unknown",v:summary.materialUnknown,c:C.warn},{l:"At-Risk WOs Waiting",v:summary.atRiskWOsWaiting,c:C.bad},{l:"Potential Units Unlocked",v:(summary.unitsPotentiallyUnlocked||0).toLocaleString(),c:C.bright}].map((s,i) =>
         <div key={i}><div style={{ fontSize:24, fontWeight:700, fontFamily:mono, color:s.c, lineHeight:1 }}>{s.v}</div><div style={{ fontSize:13, color:C.dim, marginTop:3, letterSpacing:0.1 }}>{s.l}</div></div>
       )}
     </div>
-    <div style={{ display:"flex", gap:6, marginBottom:12, flexWrap:"wrap", alignItems:"center" }}>
-      {[
-        { label:"Due Before Inbound", value:riskSummary.dueBeforeInbound, tone:riskSummary.dueBeforeInbound>0?"bad":"dim" },
-        { label:"Unscheduled PO", value:riskSummary.unscheduled, tone:riskSummary.unscheduled>0?"warn":"dim" },
-        { label:"No Inbound", value:riskSummary.noInbound, tone:riskSummary.noInbound>0?"bad":"dim" },
-        { label:"Dock Conflict", value:riskSummary.dockConflict, tone:riskSummary.dockConflict>0?"warn":"dim" }
-      ].map(function(r) {
-        var color = r.tone==="bad" ? C.bad : r.tone==="warn" ? C.warn : C.dim;
-        var bg = r.tone==="bad" ? C.badSoft : r.tone==="warn" ? C.warnSoft : C.raised;
-        return <span key={r.label} style={{ display:"inline-flex", alignItems:"center", gap:5, fontSize:12, fontWeight:600, color:color, background:bg, border:"1px solid "+C.border, borderRadius:999, padding:"3px 9px" }}>
-          <span style={{ fontFamily:mono }}>{r.value}</span>{r.label}
-        </span>;
-      })}
-    </div>
-    <div style={{ fontSize:12, color:C.dim, marginBottom:16 }}>
+    <div style={{ fontSize:12, color:C.dim, marginBottom:8 }}>
       Reconciliation ({windowDays === 1 ? "today" : (windowDays + "d")}): EDR {reconciliation.edrTotal} = matched {reconciliation.matched} + unmatched {reconciliation.unmatched}.
     </div>
     <div style={{ display:"flex", gap:6, marginBottom:14, flexWrap:"wrap", alignItems:"center" }}>
@@ -246,7 +271,7 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
     </div>
     <div style={{ marginBottom:16, background:C.surface, border:"1px solid "+C.border, borderRadius:8, padding:"10px 12px" }}>
       <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
-        {[{l:"EDR w/o OpenDock",v:exceptions.edrWithoutOpenDock},{l:"OpenDock w/o EDR",v:exceptions.openDockWithoutEdr},{l:"Late vs WO Due",v:exceptions.lateForDueWos},{l:"Cancelled At-Risk",v:exceptions.cancelledAtRisk}].map(function(x) {
+        {[{l:"EDR w/o OpenDock",v:isEdrStale ? 0 : exceptions.edrWithoutOpenDock},{l:"OpenDock w/o EDR",v:isEdrStale ? 0 : exceptions.openDockWithoutEdr},{l:"Late vs WO Due",v:exceptions.lateForDueWos},{l:"Cancelled At-Risk",v:exceptions.cancelledAtRisk}].map(function(x) {
           var hot = x.v > 0;
           return <span key={x.l} style={{ display:"inline-flex", alignItems:"center", gap:5, border:"1px solid "+C.border, borderRadius:999, padding:"3px 9px", fontSize:12, fontWeight:600, color:hot?C.bad:C.dim, background:hot?C.badSoft:C.raised }}>
             <span style={{ fontFamily:mono }}>{x.v}</span>{x.l}
@@ -259,15 +284,21 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
         <div style={{ fontSize:14, fontWeight:700, color:C.bright, marginRight:8 }}>Inbound Priority Queue</div>
         <input value={pqSearch} onChange={function(e) { setPqSearch(e.target.value); }} placeholder="Search PO, material..." style={Object.assign({}, inp, { width:190, fontSize:13 })} />
         <button onClick={function() { setPqAtRiskOnly(function(v) { return !v; }); }} style={pill(pqAtRiskOnly)}>{pqAtRiskOnly ? "At-Risk Only" : "All Loads"}</button>
-        <span style={{ fontSize:12, color:C.dim }}>{priorityQueueRows.length} loads</span>
+        <span style={{ fontSize:12, color:C.dim }}>{executionQueueRows.length} loads</span>
       </div>
-      <div style={{ overflowX:"auto" }}>
+      <div style={{ padding:"8px 12px", borderBottom:"1px solid "+C.border, background:C.raised, fontSize:12, color:C.dim, fontWeight:600 }}>
+        Execution Queue (OpenDock truth)
+      </div>
+      <div style={{ overflowX:"auto", borderBottom:"1px solid "+C.border }}>
         <table style={{ width:"100%", borderCollapse:"collapse" }}>
           <thead><tr style={{ background:C.raised }}>
-            {["Scheduled Date","Expected Date","PO","Material","Qty","OD + EDR Match","At Risk WO","Linked WOs","Units Unlocked"].map(function(h) { return <th key={h} style={thC(false)}>{h}</th>; })}
+            {["Scheduled Date","Expected Date","PO","Material","Qty","Match State","At Risk WO","Linked WOs","Units Unlocked"].map(function(h) { return <th key={h} style={thC(false)}>{h}</th>; })}
           </tr></thead>
           <tbody>
-            {priorityQueueRows.slice(0, 25).map(function(r, i) {
+            {executionQueueRows.slice(0, 25).map(function(r, i) {
+              var matchColor = r.matchState === "opendock-only" ? C.warn : (r.matchState === "matched-stale" ? C.warn : C.ok);
+              var matchBg = r.matchState === "opendock-only" ? C.warnSoft : (r.matchState === "matched-stale" ? C.warnSoft : C.okSoft);
+              var matchLabel = r.matchState === "opendock-only" ? "OpenDock only" : (r.matchState === "matched-stale" ? "Matched (stale EDR)" : (r.matchState === "matched-aging" ? "Matched (aging EDR)" : "Matched (fresh EDR)"));
               return <tr key={i} style={{ borderBottom:"1px solid "+C.border }}>
                 <td style={tdM}>{fmtDateShort(r.scheduledDate)}</td>
                 <td style={tdM}>{fmtDateShort(r.etaDate)}</td>
@@ -275,9 +306,7 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
                 <td style={Object.assign({}, tdN, { maxWidth:260, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" })}>{r.materialSku} {r.materialDesc ? ("| " + formatDescriptionForDisplay(r.materialDesc)) : ""}</td>
                 <td style={Object.assign({}, tdM, { color:C.bright })}>{Math.round(r.qty || 0).toLocaleString()}</td>
                 <td style={Object.assign({}, tdM, { fontWeight:600 })}>
-                  <span style={{ display:"inline-block", padding:"2px 7px", borderRadius:999, fontSize:11, color:r.isMatched ? C.ok : C.bad, background:r.isMatched ? C.okSoft : C.badSoft }}>
-                    {r.isMatched ? "Matched" : "No Match"}
-                  </span>
+                  <span style={{ display:"inline-block", padding:"2px 7px", borderRadius:999, fontSize:11, color:matchColor, background:matchBg }}>{matchLabel}</span>
                 </td>
                 <td style={Object.assign({}, tdM, { fontWeight:600 })}>
                   <span style={{ display:"inline-block", padding:"2px 7px", borderRadius:999, fontSize:11, color:r.isAtRisk ? C.warn : C.dim, background:r.isAtRisk ? C.warnSoft : C.raised }}>
@@ -288,7 +317,42 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
                 <td style={Object.assign({}, tdM, { color:(r.unitsUnlocked || 0) > 0 ? C.accent : C.dim, fontWeight:600 })}>{Math.round(r.unitsUnlocked || 0).toLocaleString()}</td>
               </tr>;
             })}
-            {priorityQueueRows.length === 0 && <tr><td colSpan={9} style={{ padding:18, color:C.dim, textAlign:"center" }}>No loads match current queue filters.</td></tr>}
+            {executionQueueRows.length === 0 && <tr><td colSpan={9} style={{ padding:18, color:C.dim, textAlign:"center" }}>No OpenDock loads match current queue filters.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <div style={{ padding:"8px 12px", borderBottom:"1px solid "+C.border, background:C.raised, fontSize:12, color:C.dim, fontWeight:600 }}>
+        Coverage Insights (OD + EDR){isEdrStale ? " - low confidence" : ""}
+      </div>
+      <div style={{ overflowX:"auto" }}>
+        <table style={{ width:"100%", borderCollapse:"collapse" }}>
+          <thead><tr style={{ background:C.raised }}>
+            {["Scheduled Date","Expected Date","PO","Material","Qty","Match State","At Risk WO","Linked WOs","Units Unlocked"].map(function(h) { return <th key={h} style={thC(false)}>{h}</th>; })}
+          </tr></thead>
+          <tbody>
+            {coverageQueueRows.slice(0, 25).map(function(r, i) {
+              var cLabel = r.matchState === "matched-stale" ? "Matched (stale EDR)" : (r.matchState === "matched-aging" ? "Matched (aging EDR)" : "Matched (fresh EDR)");
+              var cColor = r.matchState === "matched-fresh" ? C.ok : C.warn;
+              var cBg = r.matchState === "matched-fresh" ? C.okSoft : C.warnSoft;
+              return <tr key={i} style={{ borderBottom:"1px solid "+C.border }}>
+                <td style={tdM}>{fmtDateShort(r.scheduledDate)}</td>
+                <td style={tdM}>{fmtDateShort(r.etaDate)}</td>
+                <td style={Object.assign({}, tdN, { maxWidth:120, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" })}>{r.po || "--"}</td>
+                <td style={Object.assign({}, tdN, { maxWidth:260, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" })}>{r.materialSku} {r.materialDesc ? ("| " + formatDescriptionForDisplay(r.materialDesc)) : ""}</td>
+                <td style={Object.assign({}, tdM, { color:C.bright })}>{Math.round(r.qty || 0).toLocaleString()}</td>
+                <td style={Object.assign({}, tdM, { fontWeight:600 })}>
+                  <span style={{ display:"inline-block", padding:"2px 7px", borderRadius:999, fontSize:11, color:cColor, background:cBg }}>{cLabel}</span>
+                </td>
+                <td style={Object.assign({}, tdM, { fontWeight:600 })}>
+                  <span style={{ display:"inline-block", padding:"2px 7px", borderRadius:999, fontSize:11, color:r.isAtRisk ? C.warn : C.dim, background:r.isAtRisk ? C.warnSoft : C.raised }}>
+                    {r.isAtRisk ? "Yes" : "No"}
+                  </span>
+                </td>
+                <td style={tdM}>{r.linkedWOCount || 0}</td>
+                <td style={Object.assign({}, tdM, { color:(r.unitsUnlocked || 0) > 0 ? C.accent : C.dim, fontWeight:600 })}>{Math.round(r.unitsUnlocked || 0).toLocaleString()}</td>
+              </tr>;
+            })}
+            {coverageQueueRows.length === 0 && <tr><td colSpan={9} style={{ padding:18, color:C.dim, textAlign:"center" }}>No material-resolved loads in selected window.</td></tr>}
           </tbody>
         </table>
       </div>

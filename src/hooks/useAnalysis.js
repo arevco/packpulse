@@ -412,8 +412,27 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
   var deliveriesV2 = useMemo(() => {
     if (!timelineData) return null;
     var today = timelineData.today;
+    var todayDate = new Date(today + "T00:00:00");
     var todayLoads = (timelineData.deliveries || []).filter(function(d) { return d.date === today; });
+    var toDayAge = function(lastDateStr) {
+      if (!lastDateStr) return null;
+      var dt = new Date(lastDateStr + "T00:00:00");
+      if (isNaN(dt)) return null;
+      return Math.max(0, Math.floor((todayDate.getTime() - dt.getTime()) / 86400000));
+    };
+    var freshnessLevel = function(daysOld) {
+      if (daysOld == null) return "missing";
+      if (daysOld <= 2) return "fresh";
+      if (daysOld <= 7) return "aging";
+      return "stale";
+    };
+    var edrLatestDate = (timelineData.deliveries || []).reduce(function(maxDate, d) {
+      return (!maxDate || (d.date && d.date > maxDate)) ? (d.date || maxDate) : maxDate;
+    }, "");
+    var edrAgeDays = toDayAge(edrLatestDate);
+    var edrLevel = freshnessLevel(edrAgeDays);
     var openDockAppointmentsToday = 0;
+    var dockLatestDate = "";
     if (dockData && dockData.length) {
       var dCols = Object.keys(dockData[0] || {});
       var dDate = dCols.find(function(c) { return normalizeStr(c).includes("apptdate"); }) || dCols.find(function(c) { return normalizeStr(c).includes("date"); });
@@ -431,6 +450,15 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
         return true;
       };
       if (dDate) {
+        dockData.forEach(function(row) {
+          if (!isInboundDockRow(row)) return;
+          var raw = row[dDate];
+          if (!raw) return;
+          var d = new Date(raw);
+          if (isNaN(d)) return;
+          var ds = d.toISOString().slice(0,10);
+          if (!dockLatestDate || ds > dockLatestDate) dockLatestDate = ds;
+        });
         openDockAppointmentsToday = dockData.filter(function(row) {
           if (!isInboundDockRow(row)) return false;
           var raw = row[dDate];
@@ -475,7 +503,8 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
         linkedWOCount:atRiskLinks.length,
         unitsUnlocked:unitsUnlocked,
         status:d.dockStatus || "",
-        recommendedAction:recommendedAction
+        recommendedAction:recommendedAction,
+        matchState: !d.isMatched ? "opendock-only" : (edrLevel === "fresh" ? "matched-fresh" : (edrLevel === "aging" ? "matched-aging" : "matched-stale"))
       };
     });
     var exceptions = {
@@ -492,6 +521,18 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       cancelledAtRisk: todayLoads.filter(function(d) { return d.isAtRisk && normalizeStr(d.dockStatus || "").includes("cancel"); }).length
     };
 
+    var dockAgeDays = toDayAge(dockLatestDate);
+    var dockLevel = freshnessLevel(dockAgeDays);
+    var confidenceScore = 100;
+    if (edrLevel === "aging") confidenceScore -= 25;
+    if (edrLevel === "stale") confidenceScore -= 50;
+    if (edrLevel === "missing") confidenceScore -= 70;
+    if (dockLevel !== "fresh") confidenceScore -= 10;
+    var confidenceLabel = confidenceScore >= 80 ? "High" : confidenceScore >= 60 ? "Medium" : "Low";
+    var atRiskWOsWaiting = (timelineData.woTimelines || []).filter(function(w) { return w.runStatus !== "ready" && (!w.deliveries || !w.deliveries.length); }).length;
+    var materialResolvedLoads = priorityQueue.filter(function(r) { return !!r.isMatched; }).length;
+    var unknownMaterialLoads = Math.max(0, priorityQueue.length - materialResolvedLoads);
+
     return {
       todayBoard: {
         openDockAppointmentsToday: openDockAppointmentsToday,
@@ -500,6 +541,18 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
         unmatchedLoadsToday: unmatchedLoadsToday,
         atRiskLoadsToday: atRiskLoadsToday,
         unitsPotentiallyUnlockedToday: Math.round(unitsPotentiallyUnlockedToday)
+      },
+      summary: {
+        openDockScheduled: priorityQueue.length,
+        materialResolved: materialResolvedLoads,
+        materialUnknown: unknownMaterialLoads,
+        atRiskWOsWaiting: atRiskWOsWaiting,
+        unitsPotentiallyUnlocked: Math.round(priorityQueue.reduce(function(s, r) { return s + Math.max(0, safeNum(r.unitsUnlocked || 0)); }, 0))
+      },
+      freshness: {
+        edr: { lastDate: edrLatestDate, ageDays: edrAgeDays, level: edrLevel },
+        openDock: { lastDate: dockLatestDate, ageDays: dockAgeDays, level: dockLevel },
+        confidence: { score: confidenceScore, label: confidenceLabel }
       },
       priorityQueue: priorityQueue,
       exceptions: exceptions,
