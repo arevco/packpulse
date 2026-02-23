@@ -182,7 +182,9 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
 
   return (<div>
     <div style={{ display:"flex", gap:8, marginBottom:16, flexWrap:"wrap", alignItems:"center" }}>
-      {["all"].concat(woStatuses).map(f => <button key={f} onClick={() => setOvWoStatus(f)} style={pill(ovWoStatus===f)}>{f==="all"?"All WO Status":f}</button>)}
+      {["all"].concat(woStatuses).map(function(f) {
+        return <button key={f} onClick={function() { setOvWoStatus(function(curr) { return curr === f && f !== "all" ? "all" : f; }); }} style={pill(ovWoStatus===f)}>{f==="all"?"All WO Status":f}</button>;
+      })}
       <select value={ovCustomer} onChange={function(e) { setOvCustomer(e.target.value); }} style={Object.assign({}, inp, { width:220 })}>
         <option value="all">All Customers</option>
         {customerOptions.map(function(c) { return <option key={c} value={c}>{c}</option>; })}

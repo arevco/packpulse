@@ -264,7 +264,7 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
         {customerOptions.map(function(c) { return <option key={c} value={c}>{c}</option>; })}
       </select>
       {[{ key:"all", label:"All" }, { key:"missing", label:"Missing" }, { key:"unscheduled", label:"Unscheduled" }, { key:"partial", label:"Partial" }].map(function(f) {
-        return <button key={f.key} onClick={function() { setStatusFilter(f.key); }} style={pill(statusFilter === f.key)}>{f.label}</button>;
+        return <button key={f.key} onClick={function() { setStatusFilter(function(curr) { return curr === f.key && f.key !== "all" ? "all" : f.key; }); }} style={pill(statusFilter === f.key)}>{f.label}</button>;
       })}
       <span style={{ fontSize:13, color:C.dim }}><span style={{ color:C.bad, fontWeight:600 }}>{summary.atRisk}</span> at risk | <span style={{ color:C.bad, fontWeight:600 }}>{Math.round(summary.uncovered).toLocaleString()}</span> uncovered units</span>
       <div style={{ flex:1 }} />

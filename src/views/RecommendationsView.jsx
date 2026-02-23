@@ -56,7 +56,7 @@ export default function RecommendationsView({ recommendations, onOpenRecommendat
     <div>
       <div style={{ display:"flex", gap:6, marginBottom:12, flexWrap:"wrap", alignItems:"center" }}>
         {["all", "now", "today", "week"].map(function(w) {
-          return <button key={w} onClick={function() { setWindowFilter(w); }} style={pill(windowFilter === w)}>{w === "all" ? "All" : windowLabel(w)}</button>;
+          return <button key={w} onClick={function() { setWindowFilter(function(curr) { return curr === w && w !== "all" ? "all" : w; }); }} style={pill(windowFilter === w)}>{w === "all" ? "All" : windowLabel(w)}</button>;
         })}
         <select value={ownerFilter} onChange={function(e) { setOwnerFilter(e.target.value); }} style={Object.assign({}, inp, { fontSize:13 })}>
           <option value="all">All Owners</option>
