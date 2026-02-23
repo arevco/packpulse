@@ -27,7 +27,6 @@ export default function ProductionReadiness() {
   const [showSettings, setShowSettings] = useState(false);
   const [showDataSetup, setShowDataSetup] = useState(false);
   const [showDataControlsPanel, setShowDataControlsPanel] = useState(false);
-  const [showDataStatusPanel, setShowDataStatusPanel] = useState(false);
   const [workOrdersPrefilterCustomer, setWorkOrdersPrefilterCustomer] = useState("");
   const [workOrdersPrefilterNonce, setWorkOrdersPrefilterNonce] = useState(0);
   const [autoBootstrapEnabled, setAutoBootstrapEnabled] = useState(true);
@@ -43,6 +42,19 @@ export default function ProductionReadiness() {
 
   var fmtTs = ts => { if (!ts) return "--"; var d = Date.now() - ts; return d < 60000 ? "now" : d < 3600000 ? Math.floor(d/60000) + "m" : d < 86400000 ? Math.floor(d/3600000) + "h" : Math.floor(d/86400000) + "d"; };
   var staleLevel = (ts, cad) => { if (!ts) return "stale"; var h = (Date.now()-ts)/3600000; if (cad==="daily") return h<8?"fresh":h<24?"stale":"old"; if (cad==="rare") return h<720?"fresh":"stale"; return h<168?"fresh":"stale"; };
+  var dataSourceStatus = [
+    { k:"inv", l:"Inventory", ts:ds.invTimestamp, cad:"daily", ref:() => window.__invR && window.__invR.click() },
+    { k:"wo", l:"Work Orders", ts:ds.woTimestamp, cad:"monthly", ref:() => window.__woR && window.__woR.click() },
+    { k:"bom", l:"BOMs", ts:ds.bomTimestamp, cad:"rare", ref:() => window.__bomR && window.__bomR.click() },
+    { k:"edr", l:"EDR", ts:ds.edrTimestamp, cad:"monthly", ref:() => window.__edrR && window.__edrR.click() },
+    { k:"dock", l:"OpenDock", ts:ds.dockTimestamp, cad:"daily", ref:() => window.__dockR && window.__dockR.click() },
+  ];
+  var freshCount = dataSourceStatus.filter(function(s) { return staleLevel(s.ts, s.cad) === "fresh"; }).length;
+  var newestTs = dataSourceStatus.reduce(function(max, s) {
+    var ts = s.ts ? new Date(s.ts).getTime() : 0;
+    return ts > max ? ts : max;
+  }, 0);
+  var summaryStamp = newestTs ? fmtTs(new Date(newestTs)) : "--";
 
   var fetchOpenDockApi = useCallback(async () => {
     setDockApiLoading(true);
@@ -406,31 +418,28 @@ export default function ProductionReadiness() {
             {showDataControlsPanel ? "Hide Data Controls" : "Data Controls"}
           </button>
           <button onClick={() => setShowSettings(!showSettings)} style={{ padding:"4px 10px", borderRadius:6, border:"1px solid "+(showSettings?C.accentLine:C.border), background:showSettings?C.accentSoft:"transparent", cursor:"pointer", color:showSettings?C.accent:C.dim, fontFamily:sans, fontSize:13 }}>Data Mapping</button>
+          <span style={{ fontSize:12, color:C.dim }}>
+            Data freshness: <span style={{ color:freshCount===dataSourceStatus.length?C.ok:freshCount>=3?C.warn:C.bad, fontWeight:600 }}>{freshCount}/{dataSourceStatus.length}</span> fresh · Updated {summaryStamp}
+          </span>
         </div>
         {showDataControlsPanel && (
-          <div style={{ marginBottom:10, border:"1px solid "+C.border, borderRadius:8, background:C.surface, padding:"10px 12px", display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
-            <button onClick={() => setShowDataStatusPanel(v => !v)} style={{ padding:"4px 10px", borderRadius:6, border:"1px solid "+(showDataStatusPanel?C.accentLine:C.border), background:showDataStatusPanel?C.accentSoft:"transparent", cursor:"pointer", color:showDataStatusPanel?C.accent:C.dim, fontFamily:sans, fontSize:13 }}>
-              {showDataStatusPanel ? "Hide Data Status" : "Data Status"}
-            </button>
+          <div style={{ marginBottom:10, border:"1px solid "+C.border, borderRadius:8, background:C.surface, padding:"10px 12px" }}>
+            <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center", marginBottom:8 }}>
             <button onClick={fetchOpenDockApi} disabled={dockApiLoading} style={{ padding:"4px 10px", borderRadius:6, border:"1px solid "+(dockApiLoading?C.border:C.accentLine), background:dockApiLoading?C.raised:C.accentSoft, cursor:dockApiLoading?"not-allowed":"pointer", color:dockApiLoading?C.dim:C.accent, fontFamily:sans, fontSize:13 }}>
               {dockApiLoading ? "Syncing OpenDock..." : "Sync OpenDock API"}
             </button>
-          </div>
-        )}
-        {showDataStatusPanel && (
-          <div style={{ marginBottom:14, border:"1px solid "+C.border, borderRadius:8, background:C.surface, padding:"10px 12px", display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
-            {[
-              {k:"inv",l:"Inventory",ts:ds.invTimestamp,cad:"daily",ref:() => window.__invR && window.__invR.click()},
-              {k:"wo",l:"Work Orders",ts:ds.woTimestamp,cad:"monthly",ref:() => window.__woR && window.__woR.click()},
-              {k:"bom",l:"BOMs",ts:ds.bomTimestamp,cad:"rare",ref:() => window.__bomR && window.__bomR.click()},
-              {k:"edr",l:"EDR",ts:ds.edrTimestamp,cad:"monthly",ref:() => window.__edrR && window.__edrR.click()},
-              {k:"dock",l:"OpenDock",ts:ds.dockTimestamp,cad:"daily",ref:() => window.__dockR && window.__dockR.click()},
-            ].map(s => {
-              var sl = staleLevel(s.ts, s.cad); var dc = sl==="fresh"?C.ok:sl==="stale"?C.warn:C.bad;
-              return <button key={s.k} onClick={s.ref} style={{ display:"inline-flex", alignItems:"center", gap:5, padding:"4px 10px", borderRadius:6, border:"1px solid "+C.border, background:C.surface, cursor:"pointer", color:C.dim, fontFamily:sans, fontSize:13, fontWeight:500 }}>
-                <span style={{ width:6, height:6, borderRadius:"50%", background:dc }} />{s.l} <span style={{ opacity:0.6 }}>{fmtTs(s.ts)}</span>
-              </button>;
-            })}
+              <button onClick={() => setShowDataSetup(v => !v)} style={{ padding:"4px 10px", borderRadius:6, border:"1px solid "+C.border, background:"transparent", cursor:"pointer", color:C.dim, fontFamily:sans, fontSize:13 }}>
+                {showDataSetup ? "Close Data Setup" : "Open Data Setup"}
+              </button>
+            </div>
+            <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
+              {dataSourceStatus.map(function(s) {
+                var sl = staleLevel(s.ts, s.cad); var dc = sl==="fresh"?C.ok:sl==="stale"?C.warn:C.bad;
+                return <button key={s.k} onClick={s.ref} style={{ display:"inline-flex", alignItems:"center", gap:5, padding:"4px 10px", borderRadius:6, border:"1px solid "+C.border, background:C.surface, cursor:"pointer", color:C.dim, fontFamily:sans, fontSize:13, fontWeight:500 }}>
+                  <span style={{ width:6, height:6, borderRadius:"50%", background:dc }} />{s.l} <span style={{ opacity:0.6 }}>{fmtTs(s.ts)}</span>
+                </button>;
+              })}
+            </div>
           </div>
         )}
         {dockApiError && <div style={{ fontSize:12, color:C.bad, marginTop:-8, marginBottom:10 }}>OpenDock API error: {dockApiError}</div>}
