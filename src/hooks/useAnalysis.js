@@ -295,8 +295,29 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
     var colQtyOrd = findCol(["orderquantity","orderqty"]);
     var colTab = "__edrTab";
     if (hasEdr && (!colMat || !colDate)) return null;
-    var dockByPO = {};
-    var dockByPONorm = {};
+    var dockByToken = {};
+    var dockApptAll = [];
+    var collectReferenceTokens = function(row, explicitPairs) {
+      var out = [];
+      var seen = {};
+      var pushToken = function(value, kind) {
+        var t = normalizePoKey(value);
+        if (!t || seen[t]) return;
+        seen[t] = true;
+        out.push({ token:t, kind:kind || "reference" });
+      };
+      (explicitPairs || []).forEach(function(p) {
+        if (!p) return;
+        pushToken(p.value, p.kind || "reference");
+      });
+      var keys = Object.keys(row || {});
+      keys.forEach(function(k) {
+        var nk = normalizeStr(k);
+        if (!(nk.includes("po") || nk.includes("purchase") || nk.includes("reference") || nk.includes("ref") || nk.includes("bol") || nk.includes("document") || nk.includes("order"))) return;
+        pushToken(row[k], nk.includes("po") ? "po" : "reference");
+      });
+      return out;
+    };
     if (dockData && dockData.length) {
       var dC = Object.keys(dockData[0]); var dPO = dC.find(c=>normalizeStr(c)==="po") || dC.find(c=>normalizeStr(c).includes("po")); var dSt = dC.find(c=>normalizeStr(c)==="status"); var dDt = dC.find(c=>normalizeStr(c).includes("apptdate")); var dTm = dC.find(c=>normalizeStr(c).includes("appttime"));
       var isInboundDockRow = function(row) {
@@ -312,18 +333,18 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
         if (vals.includes("inbound") || vals.includes("receiv")) return true;
         return true;
       };
-      if (dPO) dockData.forEach(row => {
+      dockData.forEach(function(row, idx) {
         if (!isInboundDockRow(row)) return;
-        var po = (row[dPO]||"").toString().trim();
-        if (!po) return;
+        var po = dPO ? (row[dPO]||"").toString().trim() : "";
         var poNorm = normalizePoKey(po);
-        var appt = { status:(row[dSt]||"").toString().trim(), apptDate:toIsoDate((row[dDt]||"").toString().trim()) || (row[dDt]||"").toString().trim() };
-        if (!dockByPO[po]) dockByPO[po] = [];
-        dockByPO[po].push(appt);
-        if (poNorm) {
-          if (!dockByPONorm[poNorm]) dockByPONorm[poNorm] = [];
-          dockByPONorm[poNorm].push(appt);
-        }
+        var apptDate = toIsoDate((row[dDt]||"").toString().trim()) || (row[dDt]||"").toString().trim();
+        var appt = { id:"dock-" + idx, status:(row[dSt]||"").toString().trim(), apptDate:apptDate, po:po, poNorm:poNorm };
+        appt.tokens = collectReferenceTokens(row, [{ value:po, kind:"po" }]);
+        dockApptAll.push(appt);
+        appt.tokens.forEach(function(tp) {
+          if (!dockByToken[tp.token]) dockByToken[tp.token] = [];
+          dockByToken[tp.token].push({ appt:appt, kind:tp.kind });
+        });
       });
     }
     var deliveries = [];
@@ -331,7 +352,10 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       materialColumn: colMat || "",
       exactSkuMatched: 0,
       leadingZeroMatched: 0,
-      unmatched: 0
+      unmatched: 0,
+      matchedByPo: 0,
+      matchedByReference: 0,
+      dateProximityOnly: 0
     };
     if (hasEdr) {
       edrData.forEach(row => {
@@ -343,11 +367,52 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
         if (!mat || !rawDate) return; var qty = qtyOpen > 0 ? qtyOpen : qtyOrd; if (qty <= 0) return;
         var dateObj; if (rawDate instanceof Date) dateObj = rawDate; else { dateObj = new Date(rawDate); if (isNaN(dateObj)) return; }
         var dateStr = dateObj.toISOString().slice(0,10);
-        var dockAppts = (poNorm && dockByPONorm[poNorm]) ? dockByPONorm[poNorm] : (dockByPO[po] || []);
-        var bestDock = dockAppts.length > 0 ? dockAppts.sort((a,b) => { var o = {Completed:0,Arrived:1,Scheduled:2,Cancelled:3}; return (o[a.status]||9)-(o[b.status]||9); })[0] : null;
+        var edrTokens = collectReferenceTokens(row, [{ value:po, kind:"po" }]);
+        var candidateById = {};
+        edrTokens.forEach(function(tp) {
+          var arr = dockByToken[tp.token] || [];
+          arr.forEach(function(hit) {
+            var key = hit.appt.id;
+            if (!candidateById[key] || (candidateById[key].score || 0) < (tp.kind === "po" ? 100 : 80)) {
+              candidateById[key] = { appt:hit.appt, kind:tp.kind, score:(tp.kind === "po" ? 100 : 80) };
+            }
+          });
+        });
+        var candidates = Object.values(candidateById);
+        var best = null;
+        candidates.forEach(function(c) {
+          var score = c.score || 0;
+          if (c.appt && c.appt.apptDate) {
+            var d1 = new Date(dateStr + "T00:00:00");
+            var d2 = new Date(c.appt.apptDate + "T00:00:00");
+            if (!isNaN(d1) && !isNaN(d2)) {
+              var dayDiff = Math.abs(Math.round((d1.getTime() - d2.getTime()) / 86400000));
+              if (dayDiff === 0) score += 20;
+              else if (dayDiff === 1) score += 10;
+            }
+          }
+          if (!best || score > best.score) best = { appt:c.appt, kind:c.kind, score:score };
+        });
+        if (!best && dockApptAll.length) {
+          dockApptAll.forEach(function(appt) {
+            if (!appt || !appt.apptDate) return;
+            var d1 = new Date(dateStr + "T00:00:00");
+            var d2 = new Date(appt.apptDate + "T00:00:00");
+            if (isNaN(d1) || isNaN(d2)) return;
+            var dayDiff = Math.abs(Math.round((d1.getTime() - d2.getTime()) / 86400000));
+            if (dayDiff > 1) return;
+            var score = dayDiff === 0 ? 35 : 25;
+            if (!best || score > best.score) best = { appt:appt, kind:"date", score:score };
+          });
+        }
+        var bestDock = best ? best.appt : null;
+        var strongMatch = !!(best && best.score >= 85);
+        if (strongMatch && best.kind === "po") matchDiagnostics.matchedByPo += 1;
+        else if (strongMatch && best.kind === "reference") matchDiagnostics.matchedByReference += 1;
+        else if (best && best.kind === "date") matchDiagnostics.dateProximityOnly += 1;
         var skuKeys = buildSkuMatchKeys(mat);
         if (!skuKeys.length) return;
-        deliveries.push({ sku:mat, skuNorm:skuKeys[0], skuKeys:skuKeys, desc:desc, date:dateStr, dateObj:dateObj, qty:qty, po:po, poNorm:poNorm, tab:tab, dockStatus:bestDock?bestDock.status:"", dockApptDate:bestDock?bestDock.apptDate:"", isMatched:dockAppts.length > 0, qtyOrd:qtyOrd });
+        deliveries.push({ sku:mat, skuNorm:skuKeys[0], skuKeys:skuKeys, desc:desc, date:dateStr, dateObj:dateObj, qty:qty, po:po, poNorm:poNorm, tab:tab, dockStatus:bestDock?bestDock.status:"", dockApptDate:bestDock?bestDock.apptDate:"", isMatched:strongMatch, qtyOrd:qtyOrd, dockMatchKind:best ? best.kind : "none", dockMatchScore:best ? best.score : 0 });
       });
     } else if (hasDock) {
       var dC2 = Object.keys(dockData[0] || {});
@@ -599,7 +664,10 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
         materialColumn: (timelineData.matchDiagnostics && timelineData.matchDiagnostics.materialColumn) || "",
         exactSkuMatched: (timelineData.matchDiagnostics && timelineData.matchDiagnostics.exactSkuMatched) || 0,
         leadingZeroMatched: (timelineData.matchDiagnostics && timelineData.matchDiagnostics.leadingZeroMatched) || 0,
-        unmatchedSkuRows: (timelineData.matchDiagnostics && timelineData.matchDiagnostics.unmatched) || 0
+        unmatchedSkuRows: (timelineData.matchDiagnostics && timelineData.matchDiagnostics.unmatched) || 0,
+        matchedByPo: (timelineData.matchDiagnostics && timelineData.matchDiagnostics.matchedByPo) || 0,
+        matchedByReference: (timelineData.matchDiagnostics && timelineData.matchDiagnostics.matchedByReference) || 0,
+        dateProximityOnly: (timelineData.matchDiagnostics && timelineData.matchDiagnostics.dateProximityOnly) || 0
       }
     };
     } catch (err) {

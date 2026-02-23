@@ -105,7 +105,10 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
     materialColumn: (deliveriesV2 && deliveriesV2.reconciliation && deliveriesV2.reconciliation.materialColumn) || "",
     exactSkuMatched: (deliveriesV2 && deliveriesV2.reconciliation && deliveriesV2.reconciliation.exactSkuMatched) || 0,
     leadingZeroMatched: (deliveriesV2 && deliveriesV2.reconciliation && deliveriesV2.reconciliation.leadingZeroMatched) || 0,
-    unmatchedSkuRows: (deliveriesV2 && deliveriesV2.reconciliation && deliveriesV2.reconciliation.unmatchedSkuRows) || 0
+    unmatchedSkuRows: (deliveriesV2 && deliveriesV2.reconciliation && deliveriesV2.reconciliation.unmatchedSkuRows) || 0,
+    matchedByPo: (deliveriesV2 && deliveriesV2.reconciliation && deliveriesV2.reconciliation.matchedByPo) || 0,
+    matchedByReference: (deliveriesV2 && deliveriesV2.reconciliation && deliveriesV2.reconciliation.matchedByReference) || 0,
+    dateProximityOnly: (deliveriesV2 && deliveriesV2.reconciliation && deliveriesV2.reconciliation.dateProximityOnly) || 0
   };
   var freshness = deliveriesV2 && deliveriesV2.freshness ? deliveriesV2.freshness : {
     edr:{ level:"missing", ageDays:null, lastDate:"" },
@@ -267,6 +270,15 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
       </span>
       <span style={{ display:"inline-flex", alignItems:"center", gap:4, fontSize:12, color:C.bad, background:C.badSoft, border:"1px solid "+C.badLine, borderRadius:999, padding:"3px 8px" }}>
         Unmatched: <span style={{ fontFamily:mono }}>{reconciliation.unmatchedSkuRows}</span>
+      </span>
+      <span style={{ display:"inline-flex", alignItems:"center", gap:4, fontSize:12, color:C.ok, background:C.okSoft, border:"1px solid "+C.okLine, borderRadius:999, padding:"3px 8px" }}>
+        PO: <span style={{ fontFamily:mono }}>{reconciliation.matchedByPo}</span>
+      </span>
+      <span style={{ display:"inline-flex", alignItems:"center", gap:4, fontSize:12, color:C.accent, background:C.accentSoft, border:"1px solid "+C.accentLine, borderRadius:999, padding:"3px 8px" }}>
+        Ref: <span style={{ fontFamily:mono }}>{reconciliation.matchedByReference}</span>
+      </span>
+      <span style={{ display:"inline-flex", alignItems:"center", gap:4, fontSize:12, color:C.warn, background:C.warnSoft, border:"1px solid "+C.warnLine, borderRadius:999, padding:"3px 8px" }}>
+        Date-only: <span style={{ fontFamily:mono }}>{reconciliation.dateProximityOnly}</span>
       </span>
     </div>
     <div style={{ marginBottom:16, background:C.surface, border:"1px solid "+C.border, borderRadius:8, padding:"10px 12px" }}>
