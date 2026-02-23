@@ -250,20 +250,33 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
     var colTab = "__edrTab";
     if (!colMat || !colDate) return null;
     var dockByPO = {};
+    var dockByPONorm = {};
     if (dockData && dockData.length) {
       var dC = Object.keys(dockData[0]); var dPO = dC.find(c=>normalizeStr(c)==="po") || dC.find(c=>normalizeStr(c).includes("po")); var dSt = dC.find(c=>normalizeStr(c)==="status"); var dDt = dC.find(c=>normalizeStr(c).includes("apptdate")); var dTm = dC.find(c=>normalizeStr(c).includes("appttime"));
-      if (dPO) dockData.forEach(row => { var po = (row[dPO]||"").toString().trim(); if (!po) return; if (!dockByPO[po]) dockByPO[po] = []; dockByPO[po].push({ status:(row[dSt]||"").toString().trim(), apptDate:(row[dDt]||"").toString().trim() }); });
+      if (dPO) dockData.forEach(row => {
+        var po = (row[dPO]||"").toString().trim();
+        if (!po) return;
+        var poNorm = normalizePoKey(po);
+        var appt = { status:(row[dSt]||"").toString().trim(), apptDate:(row[dDt]||"").toString().trim() };
+        if (!dockByPO[po]) dockByPO[po] = [];
+        dockByPO[po].push(appt);
+        if (poNorm) {
+          if (!dockByPONorm[poNorm]) dockByPONorm[poNorm] = [];
+          dockByPONorm[poNorm].push(appt);
+        }
+      });
     }
     var deliveries = [];
     edrData.forEach(row => {
       var mat = (row[colMat]||"").toString().trim(); var desc = colDesc ? (row[colDesc]||"").toString().trim() : "";
       var rawDate = row[colDate]; var po = colPO ? (row[colPO]||"").toString().trim() : "";
+      var poNorm = normalizePoKey(po);
       var qtyOpen = colQtyOpen ? safeNum(row[colQtyOpen]) : 0; var qtyOrd = colQtyOrd ? safeNum(row[colQtyOrd]) : 0;
       var tab = row[colTab] || "";
       if (!mat || !rawDate) return; var qty = qtyOpen > 0 ? qtyOpen : qtyOrd; if (qty <= 0) return;
       var dateObj; if (rawDate instanceof Date) dateObj = rawDate; else { dateObj = new Date(rawDate); if (isNaN(dateObj)) return; }
       var dateStr = dateObj.toISOString().slice(0,10);
-      var dockAppts = dockByPO[po] || [];
+      var dockAppts = (poNorm && dockByPONorm[poNorm]) ? dockByPONorm[poNorm] : (dockByPO[po] || []);
       var bestDock = dockAppts.length > 0 ? dockAppts.sort((a,b) => { var o = {Completed:0,Arrived:1,Scheduled:2,Cancelled:3}; return (o[a.status]||9)-(o[b.status]||9); })[0] : null;
       deliveries.push({ sku:mat, skuNorm:normalizeStr(mat), desc:desc, date:dateStr, dateObj:dateObj, qty:qty, po:po, tab:tab, dockStatus:bestDock?bestDock.status:"", qtyOrd:qtyOrd });
     });
