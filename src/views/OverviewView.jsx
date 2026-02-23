@@ -110,7 +110,7 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
       totalEstHours += wo.estHours || 0;
       if (wo.dueDate) {
         var dd = new Date(wo.dueDate);
-        if (!isNaN(dd) && dd < today && wo.unitsRemaining > 0) {
+        if (!isNaN(dd) && dd < today && wo.unitsRemaining > 0 && !statusLooksClosed(wo.status)) {
           var daysLate = Math.floor((today - dd) / 86400000);
           lateWOs.push(Object.assign({}, wo, { daysLate:daysLate, netCanMake:netMakeByWo[woKey(wo)] || 0 }));
         }
