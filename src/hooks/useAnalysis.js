@@ -281,8 +281,11 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
 
   /* ====== TIMELINE ====== */
   var timelineData = useMemo(() => {
-    if (!edrData || !edrData.length || !analysis) return null;
-    var edrCols = Object.keys(edrData[0]);
+    if (!analysis) return null;
+    var hasEdr = !!(edrData && edrData.length);
+    var hasDock = !!(dockData && dockData.length);
+    if (!hasEdr && !hasDock) return null;
+    var edrCols = hasEdr ? Object.keys(edrData[0]) : [];
     var findCol = cands => edrCols.find(c => cands.some(p => normalizeStr(c).includes(p)));
     var colMat = pickEdrMaterialColumn(edrCols) || findCol(["material"]) || findCol(["sku","itemcode"]);
     var colDesc = findCol(["shorttext","matdesc","desc"]);
@@ -291,7 +294,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
     var colQtyOpen = findCol(["stilltobedelivered","openqty","stillto"]);
     var colQtyOrd = findCol(["orderquantity","orderqty"]);
     var colTab = "__edrTab";
-    if (!colMat || !colDate) return null;
+    if (hasEdr && (!colMat || !colDate)) return null;
     var dockByPO = {};
     var dockByPONorm = {};
     if (dockData && dockData.length) {
@@ -330,21 +333,53 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       leadingZeroMatched: 0,
       unmatched: 0
     };
-    edrData.forEach(row => {
-      var mat = (row[colMat]||"").toString().trim(); var desc = colDesc ? (row[colDesc]||"").toString().trim() : "";
-      var rawDate = row[colDate]; var po = colPO ? (row[colPO]||"").toString().trim() : "";
-      var poNorm = normalizePoKey(po);
-      var qtyOpen = colQtyOpen ? safeNum(row[colQtyOpen]) : 0; var qtyOrd = colQtyOrd ? safeNum(row[colQtyOrd]) : 0;
-      var tab = row[colTab] || "";
-      if (!mat || !rawDate) return; var qty = qtyOpen > 0 ? qtyOpen : qtyOrd; if (qty <= 0) return;
-      var dateObj; if (rawDate instanceof Date) dateObj = rawDate; else { dateObj = new Date(rawDate); if (isNaN(dateObj)) return; }
-      var dateStr = dateObj.toISOString().slice(0,10);
-      var dockAppts = (poNorm && dockByPONorm[poNorm]) ? dockByPONorm[poNorm] : (dockByPO[po] || []);
-      var bestDock = dockAppts.length > 0 ? dockAppts.sort((a,b) => { var o = {Completed:0,Arrived:1,Scheduled:2,Cancelled:3}; return (o[a.status]||9)-(o[b.status]||9); })[0] : null;
-      var skuKeys = buildSkuMatchKeys(mat);
-      if (!skuKeys.length) return;
-      deliveries.push({ sku:mat, skuNorm:skuKeys[0], skuKeys:skuKeys, desc:desc, date:dateStr, dateObj:dateObj, qty:qty, po:po, poNorm:poNorm, tab:tab, dockStatus:bestDock?bestDock.status:"", dockApptDate:bestDock?bestDock.apptDate:"", isMatched:dockAppts.length > 0, qtyOrd:qtyOrd });
-    });
+    if (hasEdr) {
+      edrData.forEach(row => {
+        var mat = (row[colMat]||"").toString().trim(); var desc = colDesc ? (row[colDesc]||"").toString().trim() : "";
+        var rawDate = row[colDate]; var po = colPO ? (row[colPO]||"").toString().trim() : "";
+        var poNorm = normalizePoKey(po);
+        var qtyOpen = colQtyOpen ? safeNum(row[colQtyOpen]) : 0; var qtyOrd = colQtyOrd ? safeNum(row[colQtyOrd]) : 0;
+        var tab = row[colTab] || "";
+        if (!mat || !rawDate) return; var qty = qtyOpen > 0 ? qtyOpen : qtyOrd; if (qty <= 0) return;
+        var dateObj; if (rawDate instanceof Date) dateObj = rawDate; else { dateObj = new Date(rawDate); if (isNaN(dateObj)) return; }
+        var dateStr = dateObj.toISOString().slice(0,10);
+        var dockAppts = (poNorm && dockByPONorm[poNorm]) ? dockByPONorm[poNorm] : (dockByPO[po] || []);
+        var bestDock = dockAppts.length > 0 ? dockAppts.sort((a,b) => { var o = {Completed:0,Arrived:1,Scheduled:2,Cancelled:3}; return (o[a.status]||9)-(o[b.status]||9); })[0] : null;
+        var skuKeys = buildSkuMatchKeys(mat);
+        if (!skuKeys.length) return;
+        deliveries.push({ sku:mat, skuNorm:skuKeys[0], skuKeys:skuKeys, desc:desc, date:dateStr, dateObj:dateObj, qty:qty, po:po, poNorm:poNorm, tab:tab, dockStatus:bestDock?bestDock.status:"", dockApptDate:bestDock?bestDock.apptDate:"", isMatched:dockAppts.length > 0, qtyOrd:qtyOrd });
+      });
+    } else if (hasDock) {
+      var dC2 = Object.keys(dockData[0] || {});
+      var dPO2 = dC2.find(c=>normalizeStr(c)==="po") || dC2.find(c=>normalizeStr(c).includes("po"));
+      var dSt2 = dC2.find(c=>normalizeStr(c)==="status");
+      var dDt2 = dC2.find(c=>normalizeStr(c).includes("apptdate")) || dC2.find(c=>normalizeStr(c).includes("date"));
+      dockData.forEach(function(row, idx) {
+        var rawDate = dDt2 ? row[dDt2] : "";
+        var dateObj = new Date(rawDate || "");
+        if (isNaN(dateObj)) return;
+        var dateStr = dateObj.toISOString().slice(0,10);
+        var po = dPO2 ? (row[dPO2]||"").toString().trim() : "";
+        var poNorm = normalizePoKey(po);
+        var refKey = "od" + idx + (poNorm || dateStr);
+        deliveries.push({
+          sku: po || ("OD-" + idx),
+          skuNorm: normalizeStr(refKey),
+          skuKeys: [normalizeStr(refKey)],
+          desc: "OpenDock scheduled inbound",
+          date: dateStr,
+          dateObj: dateObj,
+          qty: 0,
+          po: po,
+          poNorm: poNorm,
+          tab: "",
+          dockStatus: dSt2 ? (row[dSt2]||"").toString().trim() : "",
+          dockApptDate: dateStr,
+          isMatched: false,
+          qtyOrd: 0
+        });
+      });
+    }
     if (!deliveries.length) return null;
     var compToFG = {};
     var woIsClosed = function(status, unitsRemaining) {
@@ -410,6 +445,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
   }, [edrData, dockData, analysis]);
 
   var deliveriesV2 = useMemo(() => {
+    try {
     if (!timelineData) return null;
     var today = timelineData.today;
     var todayDate = new Date(today + "T00:00:00");
@@ -566,6 +602,10 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
         unmatchedSkuRows: (timelineData.matchDiagnostics && timelineData.matchDiagnostics.unmatched) || 0
       }
     };
+    } catch (err) {
+      console.error("deliveriesV2 computation failed", err);
+      return null;
+    }
   }, [timelineData, dockData]);
 
   /* ====== INBOUND COVERAGE (CRITICAL ITEMS) ====== */
