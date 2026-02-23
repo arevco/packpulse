@@ -9,6 +9,11 @@ export default function ColumnMapper({ title, headers, mapping, onMappingChange,
         {fields.map(f => (
           <div key={f.key}>
             <label style={{ fontSize:13, color:C.dim, fontFamily:sans, display:"block", marginBottom:3 }}>{f.label}{f.required && <span style={{ color:C.bad }}> *</span>}</label>
+            {f.help && (
+              <div style={{ fontSize:11, color:C.dim, marginBottom:4, lineHeight:1.35 }}>
+                {f.help}
+              </div>
+            )}
             <select value={mapping[f.key] || ""} onChange={e => onMappingChange({ ...mapping, [f.key]: e.target.value })}
               style={{ width:"100%", padding:"7px 10px", borderRadius:6, border:"1px solid " + (mapping[f.key] ? C.accentLine : C.border), background:C.surface, color:C.bright, fontFamily:mono, fontSize:13 }}>
               <option value="">--</option>
