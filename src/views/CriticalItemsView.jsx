@@ -10,7 +10,6 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
   const [search, setSearch] = useState("");
   const [customerFilter, setCustomerFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [riskFilter, setRiskFilter] = useState("all");
   const [sortField, setSortField] = useState("uncoveredQty");
   const [sortDir, setSortDir] = useState("desc");
   const [expanded, setExpanded] = useState(null);
@@ -129,9 +128,8 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
         return String(r.customerLabel || "").split(",").map(function(v) { return v.trim(); }).includes(customerFilter);
       });
     }
-    if (statusFilter === "at-risk") rows = rows.filter(function(r) { return r.riskLevel !== "low"; });
+    if (statusFilter === "action-needed") rows = rows.filter(function(r) { return r.status !== "covered"; });
     else if (statusFilter !== "all") rows = rows.filter(function(r) { return r.status === statusFilter; });
-    if (riskFilter !== "all") rows = rows.filter(function(r) { return r.riskLevel === riskFilter; });
 
     rows.sort(function(a, b) {
       var c = 0;
@@ -149,14 +147,14 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
       return sortDir === "desc" ? -c : c;
     });
     return rows;
-  }, [rawCriticalItems, inboundCoverage, search, customerFilter, statusFilter, riskFilter, sortField, sortDir]);
+  }, [rawCriticalItems, inboundCoverage, search, customerFilter, statusFilter, sortField, sortDir]);
 
   var handleSort = function(field) {
     if (sortField === field) setSortDir(function(d) { return d === "asc" ? "desc" : "asc"; });
     else { setSortField(field); setSortDir("desc"); }
   };
 
-  var hasActiveFilters = !!search || customerFilter !== "all" || statusFilter !== "all" || riskFilter !== "all";
+  var hasActiveFilters = !!search || customerFilter !== "all" || statusFilter !== "all";
 
   var exportCSV = function() {
     var h = ["Item Code", "Description", "Customer", "On Hand", "Short Qty", "Scheduled Qty", "Uncovered Qty", "Inbound Qty", "Coverage %", "Risk", "Action", "Earliest Due", "POs"];
@@ -266,16 +264,13 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
         <option value="all">All Customers</option>
         {customerOptions.map(function(c) { return <option key={c} value={c}>{c}</option>; })}
       </select>
-      {[{ key:"all", label:"All" }, { key:"at-risk", label:"At Risk" }, { key:"missing", label:"Missing" }, { key:"unscheduled", label:"Unscheduled" }, { key:"partial", label:"Partial" }, { key:"covered", label:"Covered" }].map(function(f) {
+      {[{ key:"all", label:"All" }, { key:"action-needed", label:"Action Needed" }, { key:"missing", label:"Missing" }, { key:"unscheduled", label:"Unscheduled" }, { key:"partial", label:"Partial" }, { key:"covered", label:"Covered" }].map(function(f) {
         return <button key={f.key} onClick={function() { setStatusFilter(f.key); }} style={pill(statusFilter === f.key)}>{f.label}</button>;
-      })}
-      {[{ key:"all", label:"All Risk" }, { key:"high", label:"High" }, { key:"medium", label:"Medium" }, { key:"low", label:"Low" }].map(function(f) {
-        return <button key={f.key} onClick={function() { setRiskFilter(f.key); }} style={pill(riskFilter === f.key)}>{f.label}</button>;
       })}
       <span style={{ fontSize:13, color:C.dim }}><span style={{ color:C.bad, fontWeight:600 }}>{summary.atRisk}</span> at risk | <span style={{ color:C.bad, fontWeight:600 }}>{Math.round(summary.uncovered).toLocaleString()}</span> uncovered units</span>
       <div style={{ flex:1 }} />
       {hasActiveFilters && (
-        <button onClick={function() { setSearch(""); setCustomerFilter("all"); setStatusFilter("all"); setRiskFilter("all"); }} style={Object.assign({}, pill(false), { fontSize:13, color:C.bad, borderColor:C.badLine })}>Clear Filters</button>
+        <button onClick={function() { setSearch(""); setCustomerFilter("all"); setStatusFilter("all"); }} style={Object.assign({}, pill(false), { fontSize:13, color:C.bad, borderColor:C.badLine })}>Clear Filters</button>
       )}
       <button onClick={exportCSV} style={Object.assign({}, pill(false), { fontSize:13 })}>CSV</button>
       <button onClick={exportPDF} style={Object.assign({}, pill(false), { fontSize:13 })}>PDF</button>
