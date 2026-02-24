@@ -281,6 +281,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
 
   /* ====== TIMELINE ====== */
   var timelineData = useMemo(() => {
+    try {
     if (!analysis) return null;
     var hasEdr = !!(edrData && edrData.length);
     var hasDock = !!(dockData && dockData.length);
@@ -294,7 +295,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
     var colQtyOpen = findCol(["stilltobedelivered","openqty","stillto"]);
     var colQtyOrd = findCol(["orderquantity","orderqty"]);
     var colTab = "__edrTab";
-    if (hasEdr && (!colMat || !colDate)) return null;
+    var hasUsableEdr = hasEdr && !!colMat && !!colDate;
     var dockByToken = {};
     var dockApptAll = [];
     var collectReferenceTokens = function(row, explicitPairs) {
@@ -358,7 +359,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       dateProximityOnly: 0
     };
     var matchedDockApptIds = {};
-    if (hasEdr) {
+    if (hasUsableEdr) {
       edrData.forEach(row => {
         var mat = (row[colMat]||"").toString().trim(); var desc = colDesc ? (row[colDesc]||"").toString().trim() : "";
         var rawDate = row[colDate]; var po = colPO ? (row[colPO]||"").toString().trim() : "";
@@ -540,6 +541,10 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       return { woNum:wo.woNum, productSku:wo.productSkuRaw, productDesc:wo.productDesc, customer:wo.customer || "", qtyToProduce:wo.qtyToProduce, readiness:wo.readiness, runStatus:wo.runStatus, maxRunnable:wo.maxRunnable, dueDate:dueDateStr, hasDeliveries:cd.length>0, deliveries:cd, delByDate:delByDate, totalIncoming:cd.reduce((s,d)=>s+d.qty,0) };
     }).filter(w => w.hasDeliveries).sort((a,b) => (a.dueDate||"zzz").localeCompare(b.dueDate||"zzz"));
     return { days:days, today:today, woTimelines:woTimelines, deliveries:visibleDeliveries, byMaterial:byMaterial, totalDeliveries:visibleDeliveries.length, matchedToBOM:visibleDeliveries.filter(function(d){ return (getCompLinks(d.skuNorm).links || []).length>0; }).length, withDockAppt:visibleDeliveries.filter(function(d){return d.dockStatus;}).length, matchDiagnostics:matchDiagnostics };
+    } catch (err) {
+      console.error("timelineData computation failed", err);
+      return null;
+    }
   }, [edrData, dockData, analysis]);
 
   var deliveriesV2 = useMemo(() => {
