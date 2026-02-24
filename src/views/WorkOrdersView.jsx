@@ -201,10 +201,10 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
   var filteredResults = useMemo(() => {
     if (!analysis) return []; var r = analysis.results.slice();
     if (filterStatus !== "all") r = r.filter(w => w.runStatus === filterStatus);
-    if (filterWoStatus !== "all") r = r.filter(w => w.status === filterWoStatus);
     if (filterCustomer !== "all") r = r.filter(w => w.customer === filterCustomer);
     if (filterShared) r = r.filter(function(w) { var c = commitmentMap[woCommitKey(w)]; return !!(c && c.sharedConstraint); });
     if (searchTerm) { var q = searchTerm.toLowerCase(); r = r.filter(w => w.woNum.toLowerCase().includes(q) || w.productSkuRaw.toLowerCase().includes(q) || (w.productDesc||"").toLowerCase().includes(q) || (w.customer||"").toLowerCase().includes(q) || (w.reference1||"").toLowerCase().includes(q)); }
+    if (filterWoStatus !== "all") r = r.filter(w => w.status === filterWoStatus);
     r.sort((a,b) => {
       var c = 0;
       if (sortField==="woNum") c=a.woNum.localeCompare(b.woNum);
@@ -257,6 +257,32 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
     });
     return r;
   }, [analysis, filterStatus, filterWoStatus, filterCustomer, filterShared, searchTerm, sortField, sortDir, commitmentMap]);
+
+  var woStatusBreakdown = useMemo(function() {
+    if (!analysis) return [];
+    var r = analysis.results.slice();
+    if (filterStatus !== "all") r = r.filter(function(w) { return w.runStatus === filterStatus; });
+    if (filterCustomer !== "all") r = r.filter(function(w) { return w.customer === filterCustomer; });
+    if (filterShared) r = r.filter(function(w) { var c = commitmentMap[woCommitKey(w)]; return !!(c && c.sharedConstraint); });
+    if (searchTerm) {
+      var q = searchTerm.toLowerCase();
+      r = r.filter(function(w) {
+        return w.woNum.toLowerCase().includes(q) ||
+          w.productSkuRaw.toLowerCase().includes(q) ||
+          (w.productDesc || "").toLowerCase().includes(q) ||
+          (w.customer || "").toLowerCase().includes(q) ||
+          (w.reference1 || "").toLowerCase().includes(q);
+      });
+    }
+    var map = {};
+    r.forEach(function(w) {
+      var key = String(w.status || "--").trim() || "--";
+      if (!map[key]) map[key] = { status:key, woCount:0, qtyUnits:0 };
+      map[key].woCount += 1;
+      map[key].qtyUnits += Number(w.qtyToProduce || 0);
+    });
+    return Object.values(map).sort(function(a, b) { return b.qtyUnits - a.qtyUnits; });
+  }, [analysis, filterStatus, filterCustomer, filterShared, searchTerm, commitmentMap]);
 
   var exportCSV = () => { if (!analysis) return; var h = ["Work Order","Product SKU","Description","Customer","WO Status","Due Date","Planned Start","Planned End","Order Qty","Produced","Remaining","Complete %","Ready %","Can Make","Est Hours","Run Status","Reference"]; var rows = analysis.results.map(w => [w.woNum, w.productSkuRaw, '"'+(w.productDesc||"").replace(/"/g,'""')+'"', '"'+(w.customer||"")+'"', w.status||"", w.dueDate||"", w.plannedStart||"", w.plannedEnd||"", w.qtyToProduce, w.unitsProduced, w.unitsRemaining, w.prodPct, w.readiness<0?"N/A":Math.round(w.readiness), w.maxRunnable, w.estHours||"", w.runStatus, '"'+(w.reference1||"").replace(/"/g,'""')+'"']); triggerDownload([h.join(",")].concat(rows.map(r => r.join(","))).join("\n"), "packpulse_" + new Date().toISOString().slice(0,10) + ".csv", "text/csv"); };
   var exportPDF = () => { if (!analysis) return; var th = ["WO#","Product","Customer","Qty","Produced","Remaining","Complete","Ready","Est Hrs","Status","Due"].map(h => "<th>"+h+"</th>").join(""); var tb = analysis.results.map(w => "<tr><td>"+w.woNum+"</td><td>"+w.productSkuRaw+"</td><td>"+(w.customer||"--")+"</td><td>"+w.qtyToProduce.toLocaleString()+"</td><td>"+w.unitsProduced.toLocaleString()+"</td><td>"+w.unitsRemaining.toLocaleString()+"</td><td>"+w.prodPct+"%</td><td>"+(w.readiness<0?"N/A":Math.round(w.readiness)+"%")+'</td><td>'+(w.estHours||"--")+'</td><td class="'+w.runStatus+'">'+w.runStatus+"</td><td>"+fmtDate(w.dueDate)+"</td></tr>").join(""); triggerDownload(buildExportHTML("PackPulse Report", th, tb), "packpulse_" + new Date().toISOString().slice(0,10) + ".html", "text/html"); };
@@ -401,6 +427,22 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
     {commitmentSummary && (
       <div style={{ marginBottom:10, fontSize:13, color:C.dim }}>
         Gap: <span style={{ color:C.bad, fontWeight:600 }}>{commitmentSummary.atRisk}</span> WOs | <span style={{ color:C.bad, fontWeight:600 }}>{commitmentSummary.reducedUnits.toLocaleString()}</span> units
+        {woStatusBreakdown.length > 0 && (
+          <span>
+            {" "} | WO Status Qty:{" "}
+            {woStatusBreakdown.map(function(row) {
+              var active = filterWoStatus !== "all" && filterWoStatus === row.status;
+              return (
+                <span key={row.status} style={{ marginRight:10, color:active ? C.accent : C.dim }}>
+                  <span style={{ fontWeight:active ? 700 : 600 }}>{row.status}</span>{" "}
+                  <span style={{ color:active ? C.accent : C.text }}>{row.woCount}</span>{" "}
+                  <span style={{ opacity:0.8 }}>/</span>{" "}
+                  <span style={{ color:active ? C.accent : C.text }}>{row.qtyUnits.toLocaleString()}</span>
+                </span>
+              );
+            })}
+          </span>
+        )}
       </div>
     )}
     <div style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, overflow:"hidden" }}>
