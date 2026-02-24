@@ -1,6 +1,3 @@
-import * as Papa from "papaparse";
-
-export function parseCSV(text) { return Papa.parse(text, { header:true, skipEmptyLines:true, dynamicTyping:false }).data; }
 export function safeNum(v) { if (v == null || v === "") return 0; const n = typeof v === "number" ? v : parseFloat(String(v).replace(/[^0-9.\-]/g, "")); return isNaN(n) ? 0 : n; }
 export function normalizeStr(s) { return String(s || "").replace(/[^a-z0-9]/gi, "").toLowerCase(); }
 export function fmtDate(v) { if (!v) return "--"; var d = v instanceof Date ? v : new Date(v); if (isNaN(d)) return String(v); return (d.getMonth()+1) + "/" + d.getDate() + "/" + String(d.getFullYear()).slice(-2); }

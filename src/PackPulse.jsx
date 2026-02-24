@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, lazy, Suspense } from "react";
 import NulogySync from "./NulogySync";
 import { useTheme } from "./theme";
 import { useStyles } from "./hooks/useStyles";
@@ -6,12 +6,12 @@ import { useDataSources } from "./hooks/useDataSources";
 import { useAnalysis } from "./hooks/useAnalysis";
 import ColumnMapper from "./components/ColumnMapper";
 import FileUploader from "./components/FileUploader";
-import OverviewView from "./views/OverviewView";
-import WorkOrdersView from "./views/WorkOrdersView";
-import CriticalItemsView from "./views/CriticalItemsView";
-import FlagsView from "./views/FlagsView";
-import TimelineView from "./views/TimelineView";
-import RecommendationsView from "./views/RecommendationsView";
+const OverviewView = lazy(() => import("./views/OverviewView"));
+const WorkOrdersView = lazy(() => import("./views/WorkOrdersView"));
+const CriticalItemsView = lazy(() => import("./views/CriticalItemsView"));
+const FlagsView = lazy(() => import("./views/FlagsView"));
+const TimelineView = lazy(() => import("./views/TimelineView"));
+const RecommendationsView = lazy(() => import("./views/RecommendationsView"));
 
 export default function ProductionReadiness() {
   const { C, theme, setTheme, sans, mono, FONTS_CSS, A11Y_CSS } = useTheme();
@@ -482,12 +482,14 @@ export default function ProductionReadiness() {
           )}
         </div>
 
-        {activeView === "overview" && <OverviewView analysis={analysisForUI} woStatuses={woStatusesForUI} onSelectCustomer={openWorkOrdersForCustomer} />}
-        {activeView === "workorders" && <WorkOrdersView analysis={analysisForUI} woStatuses={woStatusesForUI} woCustomers={woCustomersForUI} prefilterCustomer={workOrdersPrefilterCustomer} prefilterNonce={workOrdersPrefilterNonce} />}
-        {activeView === "criticalitems" && <CriticalItemsView rawCriticalItems={criticalItemsForUI} inboundCoverage={inboundCoverage} />}
-        {activeView === "recommendations" && <RecommendationsView recommendations={recommendationsForUI} onOpenRecommendation={openRecommendation} />}
-        {activeView === "flags" && <FlagsView flags={analysisForUI.flags} />}
-        {activeView === "timeline" && <TimelineView timelineData={timelineData} deliveriesV2={deliveriesV2} />}
+        <Suspense fallback={<div style={{ fontSize:13, color:C.dim, padding:"8px 0 4px" }}>Loading view...</div>}>
+          {activeView === "overview" && <OverviewView analysis={analysisForUI} woStatuses={woStatusesForUI} onSelectCustomer={openWorkOrdersForCustomer} />}
+          {activeView === "workorders" && <WorkOrdersView analysis={analysisForUI} woStatuses={woStatusesForUI} woCustomers={woCustomersForUI} prefilterCustomer={workOrdersPrefilterCustomer} prefilterNonce={workOrdersPrefilterNonce} />}
+          {activeView === "criticalitems" && <CriticalItemsView rawCriticalItems={criticalItemsForUI} inboundCoverage={inboundCoverage} />}
+          {activeView === "recommendations" && <RecommendationsView recommendations={recommendationsForUI} onOpenRecommendation={openRecommendation} />}
+          {activeView === "flags" && <FlagsView flags={analysisForUI.flags} />}
+          {activeView === "timeline" && <TimelineView timelineData={timelineData} deliveriesV2={deliveriesV2} />}
+        </Suspense>
 
       </div>
       </main>

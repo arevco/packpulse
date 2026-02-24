@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
-import * as XLSX from "xlsx";
-import { parseCSV, safeNum, normalizeStr, autoMapColumns, INV_PAT, BOM_PAT, WO_PAT, PO_PAT } from "../utils";
+import { safeNum, normalizeStr, autoMapColumns, INV_PAT, BOM_PAT, WO_PAT, PO_PAT } from "../utils";
+import { parseCsvText, readFileAsText, readWorkbook } from "../utils/fileParsers";
 
 function areMappingsEqual(a, b) {
   var ka = Object.keys(a || {});
@@ -76,26 +76,62 @@ export function useDataSources() {
     })();
   }, [boms, bomFileName, bomTimestamp]);
 
-  const parseXlsxFile = useCallback((file, cb) => { var r = new FileReader(); r.onload = e => { try { cb(XLSX.read(new Uint8Array(e.target.result), { type:"array", cellDates:true })); } catch(err) { console.error(err); } }; r.readAsArrayBuffer(file); }, []);
-
-  const parseEdrWorkbook = useCallback(wb => {
-    var rows = []; var ds = wb.SheetNames.filter(s => { var l = s.toLowerCase(); return l==="fg"||l==="rm"||l==="inbound"||l==="inbounds"; });
-    (ds.length > 0 ? ds : [wb.SheetNames[0]]).forEach(sn => { var ws = wb.Sheets[sn]; if (!ws) return; var d = XLSX.utils.sheet_to_json(ws, {defval:""}); d.forEach(r => { r.__edrTab = sn; }); rows.push(...d); });
-    return rows;
+  const parseXlsxFile = useCallback(async (file, cb) => {
+    try {
+      cb(await readWorkbook(file));
+    } catch (err) {
+      console.error(err);
+    }
   }, []);
 
-  const handleRefreshFile = useCallback((type, file) => {
-    if (!file) return; var ext = file.name.split(".").pop().toLowerCase(); var ts = new Date();
+  const parseEdrWorkbook = useCallback(wb => {
+    var rows = [];
+    var ds = wb.SheetNames.filter(s => { var l = s.toLowerCase(); return l==="fg"||l==="rm"||l==="inbound"||l==="inbounds"; });
+    var sheets = ds.length > 0 ? ds : [wb.SheetNames[0]];
+    var xlsxModulePromise = import("xlsx");
+    return xlsxModulePromise.then(function(xlsxModule) {
+      var XLSX = xlsxModule.default || xlsxModule;
+      sheets.forEach(function(sn) {
+        var ws = wb.Sheets[sn];
+        if (!ws) return;
+        var d = XLSX.utils.sheet_to_json(ws, { defval:"" });
+        d.forEach(function(r) { r.__edrTab = sn; });
+        rows.push.apply(rows, d);
+      });
+      return rows;
+    });
+  }, []);
+
+  const handleRefreshFile = useCallback(async (type, file) => {
+    if (!file) return;
+    var ext = file.name.split(".").pop().toLowerCase();
+    var ts = new Date();
     if (ext === "xlsx" || ext === "xls") {
-      parseXlsxFile(file, wb => {
-        if (type==="edr") { setEdrData(parseEdrWorkbook(wb)); setEdrFileName(file.name); setEdrTimestamp(ts); }
-        else if (type==="dock") { setDockData(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {defval:""})); setDockFileName(file.name); setDockTimestamp(ts); }
-        else { var d = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {defval:""}); if (type==="inv") {setInventory(d);setInvFileName(file.name);setInvTimestamp(ts);} else if (type==="bom") {setBoms(d);setBomFileName(file.name);setBomTimestamp(ts);} else if (type==="wo") {setWorkOrders(d);setWoFileName(file.name);setWoTimestamp(ts);} }
+      parseXlsxFile(file, async function(wb) {
+        const xlsxModule = await import("xlsx");
+        const XLSX = xlsxModule.default || xlsxModule;
+        if (type === "edr") {
+          setEdrData(await parseEdrWorkbook(wb));
+          setEdrFileName(file.name);
+          setEdrTimestamp(ts);
+        } else if (type === "dock") {
+          setDockData(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval:"" }));
+          setDockFileName(file.name);
+          setDockTimestamp(ts);
+        } else {
+          var d = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval:"" });
+          if (type==="inv") {setInventory(d);setInvFileName(file.name);setInvTimestamp(ts);}
+          else if (type==="bom") {setBoms(d);setBomFileName(file.name);setBomTimestamp(ts);}
+          else if (type==="wo") {setWorkOrders(d);setWoFileName(file.name);setWoTimestamp(ts);}
+        }
       });
     } else {
-      var r = new FileReader();
-      r.onload = e => { var d = parseCSV(e.target.result); if (type==="inv") {setInventory(d);setInvFileName(file.name);setInvTimestamp(ts);} else if (type==="bom") {setBoms(d);setBomFileName(file.name);setBomTimestamp(ts);} else if (type==="wo") {setWorkOrders(d);setWoFileName(file.name);setWoTimestamp(ts);} else if (type==="edr") {setEdrData(d);setEdrFileName(file.name);setEdrTimestamp(ts);} };
-      r.readAsText(file);
+      var text = await readFileAsText(file);
+      var d = await parseCsvText(text);
+      if (type==="inv") {setInventory(d);setInvFileName(file.name);setInvTimestamp(ts);}
+      else if (type==="bom") {setBoms(d);setBomFileName(file.name);setBomTimestamp(ts);}
+      else if (type==="wo") {setWorkOrders(d);setWoFileName(file.name);setWoTimestamp(ts);}
+      else if (type==="edr") {setEdrData(d);setEdrFileName(file.name);setEdrTimestamp(ts);}
     }
   }, [parseXlsxFile, parseEdrWorkbook]);
 

@@ -1,23 +1,32 @@
 import { useCallback } from "react";
-import * as XLSX from "xlsx";
 import { useTheme } from "../theme";
-import { parseCSV } from "../utils";
+import { parseCsvText, readFileAsText, readWorkbook, workbookFirstSheetToJson } from "../utils/fileParsers";
 
 export default function FileUploader({ label, onData, uploaded, fileName, subtitle, acceptTypes, parseWorkbook }) {
   const { C, sans } = useTheme();
   const accept = acceptTypes || ".csv";
-  const handleFile = useCallback(file => {
+  const handleFile = useCallback(async file => {
     if (!file) return;
     const ext = file.name.split(".").pop().toLowerCase();
     if (ext === "pdf") {
       window.alert("PDF selected. Automatic PO parsing currently supports CSV/XLSX only. Please export the PDF to CSV/XLSX and upload that file.");
       return;
     }
-    if (ext === "xlsx" || ext === "xls") {
-      const r = new FileReader();
-      r.onload = e => { try { const wb = XLSX.read(new Uint8Array(e.target.result), { type:"array", cellDates:true }); parseWorkbook ? onData(parseWorkbook(wb), file.name) : onData(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval:"" }), file.name); } catch(err) { console.error(err); } };
-      r.readAsArrayBuffer(file);
-    } else { const r = new FileReader(); r.onload = e => onData(parseCSV(e.target.result), file.name); r.readAsText(file); }
+    try {
+      if (ext === "xlsx" || ext === "xls") {
+        if (parseWorkbook) {
+          const wb = await readWorkbook(file);
+          onData(await parseWorkbook(wb), file.name);
+        } else {
+          onData(await workbookFirstSheetToJson(file), file.name);
+        }
+      } else {
+        const text = await readFileAsText(file);
+        onData(await parseCsvText(text), file.name);
+      }
+    } catch (err) {
+      console.error(err);
+    }
   }, [onData, parseWorkbook]);
   return (
     <label onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); handleFile(e.dataTransfer.files[0]); }}
