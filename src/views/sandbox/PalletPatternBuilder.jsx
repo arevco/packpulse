@@ -73,6 +73,13 @@ export default function PalletPatternBuilder() {
   const totalCases = cpl * layers;
   const grid = bestGrid(cpl);
   const rowCounts = distributeByRows(cpl, grid.rows);
+  const layerPattern = Array.from({ length:layers }).map(function(_, layerIdx) {
+    return {
+      idx: layerIdx + 1,
+      dir: rotateEveryRow ? (layerIdx % 2 === 0 ? "L" : "W") : "L",
+      offset: interlocked && layerIdx % 2 === 1 ? 10 : 0
+    };
+  });
 
   return (
     <div style={{ border:"1px solid " + C.border, borderRadius:10, background:C.surface, padding:14, marginBottom:14 }}>
@@ -123,46 +130,81 @@ export default function PalletPatternBuilder() {
         </div>
 
         <div style={{ border:"1px solid " + C.border, borderRadius:8, background:C.raised, padding:12 }}>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
-            <div style={{ fontSize:12, color:C.dim, fontWeight:600, letterSpacing:0.2 }}>Layer Preview (Top View)</div>
-            <div style={{ fontSize:12, color:C.dim }}>
-              <span style={{ display:"inline-flex", alignItems:"center", gap:5, marginRight:10 }}>
-                <span style={{ width:10, height:10, borderRadius:2, background:C.accentSoft, border:"1px solid " + C.accentLine }} /> L
-              </span>
-              <span style={{ display:"inline-flex", alignItems:"center", gap:5 }}>
-                <span style={{ width:10, height:10, borderRadius:2, background:C.okSoft, border:"1px solid " + C.okLine }} /> W
-              </span>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(220px, 1fr))", gap:12 }}>
+            <div>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                <div style={{ fontSize:12, color:C.dim, fontWeight:600, letterSpacing:0.2 }}>Top View</div>
+                <div style={{ fontSize:12, color:C.dim }}>
+                  <span style={{ display:"inline-flex", alignItems:"center", gap:5, marginRight:10 }}>
+                    <span style={{ width:10, height:10, borderRadius:2, background:C.accentSoft, border:"1px solid " + C.accentLine }} /> L
+                  </span>
+                  <span style={{ display:"inline-flex", alignItems:"center", gap:5 }}>
+                    <span style={{ width:10, height:10, borderRadius:2, background:C.okSoft, border:"1px solid " + C.okLine }} /> W
+                  </span>
+                </div>
+              </div>
+              <div style={{ display:"grid", gap:6 }}>
+                {rowCounts.map(function(count, rowIdx) {
+                  var rowDir = rotateEveryRow ? (rowIdx % 2 === 0 ? "L" : "W") : "L";
+                  var offset = interlocked && rowIdx % 2 === 1 ? 16 : 0;
+                  return (
+                    <div key={rowIdx} style={{ display:"flex", alignItems:"center", gap:6, marginLeft:offset }}>
+                      <span style={{ width:26, fontFamily:mono, fontSize:11, color:C.dim }}>R{rowIdx + 1}</span>
+                      <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
+                        {Array.from({ length:count }).map(function(_, i) {
+                          var longDir = rowDir === "L";
+                          return (
+                            <span
+                              key={i}
+                              title={"Row " + (rowIdx + 1) + " case " + (i + 1)}
+                              style={{
+                                width:longDir ? 18 : 12,
+                                height:longDir ? 12 : 18,
+                                borderRadius:2,
+                                background:longDir ? C.accentSoft : C.okSoft,
+                                border:"1px solid " + (longDir ? C.accentLine : C.okLine),
+                                display:"inline-block"
+                              }}
+                            />
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-          </div>
-          <div style={{ display:"grid", gap:6 }}>
-            {rowCounts.map(function(count, rowIdx) {
-              var rowDir = rotateEveryRow ? (rowIdx % 2 === 0 ? "L" : "W") : "L";
-              var offset = interlocked && rowIdx % 2 === 1 ? 16 : 0;
-              return (
-                <div key={rowIdx} style={{ display:"flex", alignItems:"center", gap:6, marginLeft:offset }}>
-                  <span style={{ width:26, fontFamily:mono, fontSize:11, color:C.dim }}>R{rowIdx + 1}</span>
-                  <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
-                    {Array.from({ length:count }).map(function(_, i) {
-                      var longDir = rowDir === "L";
-                      return (
+
+            <div>
+              <div style={{ fontSize:12, color:C.dim, fontWeight:600, letterSpacing:0.2, marginBottom:8 }}>Side View</div>
+              <div style={{ border:"1px dashed " + C.border, borderRadius:6, padding:8, background:C.surface }}>
+                <div style={{ display:"grid", gap:4 }}>
+                  {layerPattern.slice().reverse().map(function(layer) {
+                    var isLong = layer.dir === "L";
+                    return (
+                      <div key={layer.idx} style={{ display:"flex", alignItems:"center", gap:6 }}>
+                        <span style={{ width:24, fontFamily:mono, fontSize:11, color:C.dim, textAlign:"right" }}>L{layer.idx}</span>
                         <span
-                          key={i}
-                          title={"Row " + (rowIdx + 1) + " case " + (i + 1)}
+                          title={"Layer " + layer.idx + " (" + cpl + " cases)"}
                           style={{
-                            width:longDir ? 18 : 12,
-                            height:longDir ? 12 : 18,
-                            borderRadius:2,
-                            background:longDir ? C.accentSoft : C.okSoft,
-                            border:"1px solid " + (longDir ? C.accentLine : C.okLine),
+                            width:(isLong ? 132 : 112) + layer.offset,
+                            height:10,
+                            borderRadius:4,
+                            background:isLong ? C.accentSoft : C.okSoft,
+                            border:"1px solid " + (isLong ? C.accentLine : C.okLine),
                             display:"inline-block"
                           }}
                         />
-                      );
-                    })}
+                        <span style={{ fontSize:11, color:C.dim, fontFamily:mono }}>{cpl}</span>
+                      </div>
+                    );
+                  })}
+                  <div style={{ marginTop:4, fontSize:11, color:C.dim }}>
+                    Stack shows {layers} layers tall. Alternating width indicates rotation; offset indicates interlock.
                   </div>
                 </div>
-              );
-            })}
+              </div>
+            </div>
           </div>
         </div>
       </div>
