@@ -12,6 +12,7 @@ const CriticalItemsView = lazy(() => import("./views/CriticalItemsView"));
 const FlagsView = lazy(() => import("./views/FlagsView"));
 const TimelineView = lazy(() => import("./views/TimelineView"));
 const RecommendationsView = lazy(() => import("./views/RecommendationsView"));
+const SandboxView = lazy(() => import("./views/SandboxView"));
 
 export default function ProductionReadiness() {
   const { C, theme, setTheme, sans, mono, FONTS_CSS, A11Y_CSS } = useTheme();
@@ -474,7 +475,7 @@ export default function ProductionReadiness() {
         )}
 
         <div style={{ display:"flex", gap:0, marginBottom:16, borderBottom:"1px solid "+C.border }}>
-          {[{key:"overview",label:"Overview",count:null,alert:false},{key:"workorders",label:"Work Orders",count:summaryForUI.total},{key:"criticalitems",label:"Critical Items",count:criticalItemsForUI.length},{key:"recommendations",label:"Recommendations",count:recommendationsForUI.length,alert:recommendationsForUI.some(function(r){return r.priority==="P1";})}]
+          {[{key:"overview",label:"Overview",count:null,alert:false},{key:"workorders",label:"Work Orders",count:summaryForUI.total},{key:"criticalitems",label:"Critical Items",count:criticalItemsForUI.length},{key:"recommendations",label:"Recommendations",count:recommendationsForUI.length,alert:recommendationsForUI.some(function(r){return r.priority==="P1";})},{key:"sandbox",label:"Sandbox",count:null,alert:false}]
             .concat([{key:"timeline",label:"Deliveries",count:timelineData ? timelineData.totalDeliveries : 0,alert:false}]).map(t =>
               <button key={t.key} onClick={() => setActiveView(t.key)} style={{ padding:"8px 16px", border:"none", fontFamily:sans, fontSize:14, fontWeight:500, cursor:"pointer", background:"transparent", color:activeView===t.key?C.bright:C.dim, borderBottom:activeView===t.key?"2px solid "+C.accent:"2px solid transparent", marginBottom:-1 }}>
                 {t.label} {t.count != null && <span style={{ opacity:t.alert?1:0.45, fontSize:13, color:t.alert?C.bad:undefined }}>{t.alert?"\u26A0 ":""}{t.count}</span>}
@@ -487,6 +488,7 @@ export default function ProductionReadiness() {
           {activeView === "workorders" && <WorkOrdersView analysis={analysisForUI} woStatuses={woStatusesForUI} woCustomers={woCustomersForUI} prefilterCustomer={workOrdersPrefilterCustomer} prefilterNonce={workOrdersPrefilterNonce} />}
           {activeView === "criticalitems" && <CriticalItemsView rawCriticalItems={criticalItemsForUI} inboundCoverage={inboundCoverage} />}
           {activeView === "recommendations" && <RecommendationsView recommendations={recommendationsForUI} onOpenRecommendation={openRecommendation} />}
+          {activeView === "sandbox" && <SandboxView />}
           {activeView === "flags" && <FlagsView flags={analysisForUI.flags} />}
           {activeView === "timeline" && <TimelineView timelineData={timelineData} deliveriesV2={deliveriesV2} />}
         </Suspense>
