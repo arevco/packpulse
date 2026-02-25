@@ -1,6 +1,7 @@
 import { useTheme } from "../theme";
 import { useStyles } from "../hooks/useStyles";
 import PalletPatternBuilder from "./sandbox/PalletPatternBuilder";
+import LineCardGenerator from "./sandbox/LineCardGenerator";
 
 export default function SandboxView() {
   const { C, sans } = useTheme();
@@ -27,6 +28,7 @@ export default function SandboxView() {
       </div>
 
       <PalletPatternBuilder />
+      <LineCardGenerator />
 
       <div style={{ fontSize:12, color:C.dim, fontWeight:700, letterSpacing:0.2, marginBottom:8 }}>Tool Pipeline</div>
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(260px, 1fr))", gap:12 }}>
