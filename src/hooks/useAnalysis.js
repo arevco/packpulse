@@ -1142,6 +1142,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       recs.push({
         id: "R" + (nextId++),
         priorityScore: Math.round(dispatchScore * 1.3),
+        woNum: wo.woNum,
         owner: "Planner / Supervisor",
         action: action,
         why: "WO " + wo.woNum + " \u2022 " + whyBits.join(" \u2022 "),
