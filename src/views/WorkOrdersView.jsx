@@ -43,6 +43,45 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
     if (s === "nobom") return { label:"BOM", color:C.accent, bg:C.accentSoft };
     return { label:"BLK", color:C.bad, bg:C.badSoft };
   };
+  var normalizeSearchValue = function(v) {
+    return normalizeStr(String(v || "")).replace(/[^a-z0-9]/g, "");
+  };
+  var normalizeSkuSearchValue = function(v) {
+    var s = normalizeSearchValue(v);
+    return s.replace(/^0+(?=\d)/, "");
+  };
+  var matchesWorkOrderSearch = function(wo, qRaw, qNorm, qSku) {
+    var textFields = [
+      wo.woNum,
+      wo.productSkuRaw,
+      wo.productSku,
+      wo.productDesc,
+      wo.customer,
+      wo.reference1,
+      wo.status
+    ];
+    var textMatch = textFields.some(function(v) {
+      var raw = String(v || "").toLowerCase();
+      if (raw.includes(qRaw)) return true;
+      var norm = normalizeSearchValue(v);
+      return !!qNorm && norm.includes(qNorm);
+    });
+    if (textMatch) return true;
+    var woSkuRaw = normalizeSkuSearchValue(wo.productSkuRaw);
+    if (qSku && woSkuRaw && woSkuRaw.includes(qSku)) return true;
+    return (wo.components || []).some(function(comp) {
+      var compSku = normalizeSkuSearchValue(comp.sku);
+      if (qSku && compSku && compSku.includes(qSku)) return true;
+      if (String(comp.sku || "").toLowerCase().includes(qRaw)) return true;
+      if (normalizeSearchValue(comp.desc).includes(qNorm)) return true;
+      return (comp.optionDetails || []).some(function(opt) {
+        var optSku = normalizeSkuSearchValue(opt.sku);
+        if (qSku && optSku && optSku.includes(qSku)) return true;
+        if (String(opt.sku || "").toLowerCase().includes(qRaw)) return true;
+        return normalizeSearchValue(opt.desc).includes(qNorm);
+      });
+    });
+  };
   var shortWoStatus = function(status) {
     var raw = String(status || "").trim();
     if (!raw) return "--";
@@ -210,7 +249,12 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
     if (filterStatus !== "all") r = r.filter(w => w.runStatus === filterStatus);
     if (filterCustomer !== "all") r = r.filter(w => w.customer === filterCustomer);
     if (filterShared) r = r.filter(function(w) { return hasSharedComponent(w); });
-    if (searchTerm) { var q = searchTerm.toLowerCase(); r = r.filter(w => w.woNum.toLowerCase().includes(q) || w.productSkuRaw.toLowerCase().includes(q) || (w.productDesc||"").toLowerCase().includes(q) || (w.customer||"").toLowerCase().includes(q) || (w.reference1||"").toLowerCase().includes(q)); }
+    if (searchTerm) {
+      var qRaw = String(searchTerm || "").toLowerCase().trim();
+      var qNorm = normalizeSearchValue(qRaw);
+      var qSku = normalizeSkuSearchValue(qRaw);
+      r = r.filter(function(w) { return matchesWorkOrderSearch(w, qRaw, qNorm, qSku); });
+    }
     if (filterWoStatus !== "all") r = r.filter(w => w.status === filterWoStatus);
     r.sort((a,b) => {
       var c = 0;
@@ -272,14 +316,10 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
     if (filterCustomer !== "all") r = r.filter(function(w) { return w.customer === filterCustomer; });
     if (filterShared) r = r.filter(function(w) { return hasSharedComponent(w); });
     if (searchTerm) {
-      var q = searchTerm.toLowerCase();
-      r = r.filter(function(w) {
-        return w.woNum.toLowerCase().includes(q) ||
-          w.productSkuRaw.toLowerCase().includes(q) ||
-          (w.productDesc || "").toLowerCase().includes(q) ||
-          (w.customer || "").toLowerCase().includes(q) ||
-          (w.reference1 || "").toLowerCase().includes(q);
-      });
+      var qRaw = String(searchTerm || "").toLowerCase().trim();
+      var qNorm = normalizeSearchValue(qRaw);
+      var qSku = normalizeSkuSearchValue(qRaw);
+      r = r.filter(function(w) { return matchesWorkOrderSearch(w, qRaw, qNorm, qSku); });
     }
     var map = {};
     r.forEach(function(w) {
