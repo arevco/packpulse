@@ -32,6 +32,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterWoStatus, setFilterWoStatus] = useState("Booked");
   const [filterCustomer, setFilterCustomer] = useState("all");
+  const [filterDueMonth, setFilterDueMonth] = useState("all");
   const [filterShared, setFilterShared] = useState(false);
   const [sortField, setSortField] = useState("readiness");
   const [sortDir, setSortDir] = useState("desc");
@@ -115,6 +116,22 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
   var parseDueDateTs = function(v) {
     var d = parseDateValue(v);
     return d ? d.getTime() : Number.POSITIVE_INFINITY;
+  };
+  var dueMonthKey = function(v) {
+    var d = parseDateValue(v);
+    if (!d) return "";
+    var y = d.getFullYear();
+    var m = String(d.getMonth() + 1).padStart(2, "0");
+    return y + "-" + m;
+  };
+  var dueMonthLabel = function(key) {
+    var parts = String(key || "").split("-");
+    if (parts.length !== 2) return key || "--";
+    var y = Number(parts[0]);
+    var m = Number(parts[1]) - 1;
+    var d = new Date(y, m, 1);
+    if (isNaN(d)) return key || "--";
+    return d.toLocaleDateString(undefined, { month:"short", year:"numeric" });
   };
 
   var commitmentMap = useMemo(() => {
@@ -237,6 +254,16 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
     return usage;
   }, [analysis]);
 
+  var dueMonthOptions = useMemo(function() {
+    if (!analysis) return [];
+    var set = {};
+    (analysis.results || []).forEach(function(wo) {
+      var k = dueMonthKey(wo.dueDate);
+      if (k) set[k] = true;
+    });
+    return Object.keys(set).sort();
+  }, [analysis]);
+
   var hasSharedComponent = function(wo) {
     return (wo.components || []).some(function(comp) {
       var key = normalizeStr(comp.sku || "");
@@ -248,6 +275,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
     if (!analysis) return []; var r = analysis.results.slice();
     if (filterStatus !== "all") r = r.filter(w => w.runStatus === filterStatus);
     if (filterCustomer !== "all") r = r.filter(w => w.customer === filterCustomer);
+    if (filterDueMonth !== "all") r = r.filter(function(w) { return dueMonthKey(w.dueDate) === filterDueMonth; });
     if (filterShared) r = r.filter(function(w) { return hasSharedComponent(w); });
     if (searchTerm) {
       var qRaw = String(searchTerm || "").toLowerCase().trim();
@@ -307,13 +335,14 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
       return sortDir==="desc"?-c:c;
     });
     return r;
-  }, [analysis, filterStatus, filterWoStatus, filterCustomer, filterShared, searchTerm, sortField, sortDir, commitmentMap, sharedComponentUsage]);
+  }, [analysis, filterStatus, filterWoStatus, filterCustomer, filterDueMonth, filterShared, searchTerm, sortField, sortDir, commitmentMap, sharedComponentUsage]);
 
   var woStatusBreakdown = useMemo(function() {
     if (!analysis) return [];
     var r = analysis.results.slice();
     if (filterStatus !== "all") r = r.filter(function(w) { return w.runStatus === filterStatus; });
     if (filterCustomer !== "all") r = r.filter(function(w) { return w.customer === filterCustomer; });
+    if (filterDueMonth !== "all") r = r.filter(function(w) { return dueMonthKey(w.dueDate) === filterDueMonth; });
     if (filterShared) r = r.filter(function(w) { return hasSharedComponent(w); });
     if (searchTerm) {
       var qRaw = String(searchTerm || "").toLowerCase().trim();
@@ -329,7 +358,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
       map[key].qtyUnits += Number(w.qtyToProduce || 0);
     });
     return Object.values(map).sort(function(a, b) { return b.qtyUnits - a.qtyUnits; });
-  }, [analysis, filterStatus, filterCustomer, filterShared, searchTerm, commitmentMap, sharedComponentUsage]);
+  }, [analysis, filterStatus, filterCustomer, filterDueMonth, filterShared, searchTerm, commitmentMap, sharedComponentUsage]);
 
   var exportCSV = () => { if (!analysis) return; var h = ["Work Order","Product SKU","Description","Customer","WO Status","Due Date","Planned Start","Planned End","Order Qty","Produced","Remaining","Complete %","Ready %","Can Make","Est Hours","Run Status","Reference"]; var rows = analysis.results.map(w => [w.woNum, w.productSkuRaw, '"'+(w.productDesc||"").replace(/"/g,'""')+'"', '"'+(w.customer||"")+'"', w.status||"", w.dueDate||"", w.plannedStart||"", w.plannedEnd||"", w.qtyToProduce, w.unitsProduced, w.unitsRemaining, w.prodPct, w.readiness<0?"N/A":Math.round(w.readiness), w.maxRunnable, w.estHours||"", w.runStatus, '"'+(w.reference1||"").replace(/"/g,'""')+'"']); triggerDownload([h.join(",")].concat(rows.map(r => r.join(","))).join("\n"), "packpulse_" + new Date().toISOString().slice(0,10) + ".csv", "text/csv"); };
   var exportPDF = () => { if (!analysis) return; var th = ["WO#","Product","Customer","Qty","Produced","Remaining","Complete","Ready","Est Hrs","Status","Due"].map(h => "<th>"+h+"</th>").join(""); var tb = analysis.results.map(w => "<tr><td>"+w.woNum+"</td><td>"+w.productSkuRaw+"</td><td>"+(w.customer||"--")+"</td><td>"+w.qtyToProduce.toLocaleString()+"</td><td>"+w.unitsProduced.toLocaleString()+"</td><td>"+w.unitsRemaining.toLocaleString()+"</td><td>"+w.prodPct+"%</td><td>"+(w.readiness<0?"N/A":Math.round(w.readiness)+"%")+'</td><td>'+(w.estHours||"--")+'</td><td class="'+w.runStatus+'">'+w.runStatus+"</td><td>"+fmtDate(w.dueDate)+"</td></tr>").join(""); triggerDownload(buildExportHTML("PackPulse Report", th, tb), "packpulse_" + new Date().toISOString().slice(0,10) + ".html", "text/html"); };
@@ -459,13 +488,17 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
         <option value="all">All Customers</option>
         {woCustomers.map(s => <option key={s} value={s}>{s}</option>)}
       </select>
-      {["all","ready","partial","blocked","nobom"].map(function(f) {
-        return <button key={f} onClick={function() { setFilterStatus(function(curr) { return curr === f && f !== "all" ? "all" : f; }); }} style={pill(filterStatus===f)}>{f==="all"?"All":f==="ready"?"Ready":f==="partial"?"Partial":f==="blocked"?"Blocked":"No BOM"}</button>;
-      })}
+      <select value={filterDueMonth} onChange={e => setFilterDueMonth(e.target.value)} style={Object.assign({}, sel, { fontSize:13 })}>
+        <option value="all">All Months</option>
+        {dueMonthOptions.map(function(m) { return <option key={m} value={m}>{dueMonthLabel(m)}</option>; })}
+      </select>
       <select value={filterWoStatus} onChange={e => setFilterWoStatus(e.target.value)} style={Object.assign({}, sel, { fontSize:13 })}>
         <option value="all">All WO Status</option>
         {woStatuses.map(s => <option key={s} value={s}>{s}</option>)}
       </select>
+      {["all","ready","partial","blocked","nobom"].map(function(f) {
+        return <button key={f} onClick={function() { setFilterStatus(function(curr) { return curr === f && f !== "all" ? "all" : f; }); }} style={pill(filterStatus===f)}>{f==="all"?"All":f==="ready"?"Ready":f==="partial"?"Partial":f==="blocked"?"Blocked":"No BOM"}</button>;
+      })}
       <button onClick={function() { setFilterShared(function(v) { return !v; }); }} style={pill(filterShared)}>Shared</button>
       <div style={{ flex:1 }} />
       <button onClick={exportCSV} style={Object.assign({}, pill(false), { fontSize:13 })}>CSV</button>
