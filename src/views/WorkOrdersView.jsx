@@ -161,11 +161,23 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
         });
       });
     });
+    var initialBySku = Object.assign({}, remainingBySku);
+    var usageByPrimary = {};
+    activeWOs.forEach(function(wo) {
+      var seen = {};
+      (wo.components || []).forEach(function(comp) {
+        var pk = normalizeStr(comp.sku || "");
+        if (!pk || seen[pk]) return;
+        seen[pk] = true;
+        usageByPrimary[pk] = (usageByPrimary[pk] || 0) + 1;
+      });
+    });
 
     var map = {};
     activeWOs.forEach(function(wo) {
       var committed = Number.POSITIVE_INFINITY;
       var sharedDetails = [];
+      var componentPressure = {};
       var compList = wo.components || [];
       if (!compList.length) committed = 0;
       compList.forEach(function(comp) {
@@ -178,7 +190,23 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
         }).filter(function(opt) { return !!opt.key; });
         var optionCountWithStock = options.filter(function(opt) { return (remainingBySku[opt.key] || 0) > 0; }).length;
         var available = options.reduce(function(sum, opt) { return sum + (remainingBySku[opt.key] || 0); }, 0);
+        var isolatedAvailable = options.reduce(function(sum, opt) { return sum + (initialBySku[opt.key] || 0); }, 0);
+        var consumedBefore = Math.max(0, isolatedAvailable - available);
         var makeUnits = Math.floor(available / qtyPer);
+        var isolatedMakeUnits = Math.floor(isolatedAvailable / qtyPer);
+        var compKey = normalizeStr(comp.sku || "");
+        if (compKey) {
+          componentPressure[compKey] = {
+            usedByWOs: usageByPrimary[compKey] || 1,
+            qtyPer: qtyPer,
+            availableAtTurn: available,
+            isolatedAvailable: isolatedAvailable,
+            consumedBefore: consumedBefore,
+            turnMakeUnits: makeUnits,
+            isolatedMakeUnits: isolatedMakeUnits,
+            reducedUnits: Math.max(0, isolatedMakeUnits - makeUnits)
+          };
+        }
         committed = Math.min(committed, makeUnits);
         if (optionCountWithStock > 1) sharedDetails.push(comp.sku);
       });
@@ -215,7 +243,8 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
         committedCanMake: committed,
         commitmentGap: gap,
         sharedConstraint: gap > 0,
-        sharedComponents: Array.from(new Set(sharedDetails)).slice(0, 3)
+        sharedComponents: Array.from(new Set(sharedDetails)).slice(0, 3),
+        componentPressure: componentPressure
       };
     });
     return map;
@@ -440,6 +469,8 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
                   return String(a.sku || "").localeCompare(String(b.sku || ""), undefined, { numeric:true, sensitivity:"base" });
                 }).map((comp, ci) => {
                   var rows = [];
+                  var compPressure = commitment.componentPressure ? commitment.componentPressure[normalizeStr(comp.sku || "")] : null;
+                  var hasCompPressure = !!(compPressure && compPressure.usedByWOs > 1);
                   rows.push(
                     <tr key={"c"+ci} style={{ borderBottom:comp.hasSubs?"none":"1px solid "+C.border }}>
                       <td style={Object.assign({}, tdDM, { color:C.bright })}>
@@ -452,6 +483,11 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
                           >
                             Shared
                           </span>
+                        )}
+                        {hasCompPressure && (
+                          <div style={{ marginTop:4, fontSize:11, color:C.dim, fontFamily:mono }}>
+                            shared:{compPressure.usedByWOs} | prior:{compPressure.consumedBefore.toLocaleString()} | avail:{compPressure.availableAtTurn.toLocaleString()} | make:{compPressure.turnMakeUnits.toLocaleString()}
+                          </div>
                         )}
                       </td>
                       <td style={Object.assign({}, tdDN, { color:C.dim }, truncate(150))}>{formatDescriptionForDisplay(comp.desc) || "--"}</td>
