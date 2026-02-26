@@ -1019,7 +1019,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
     return { horizonDays: horizonDays, summary: summary, rows: rows };
   }, [analysis, criticalItems, edrData, dockData]);
 
-  /* ====== RECOMMENDATIONS (V1 RULES ENGINE) ====== */
+  /* ====== RECOMMENDATIONS (DISPATCH SCORING ENGINE) ====== */
   var recommendations = useMemo(() => {
     if (!analysis) return [];
     var recs = [];
@@ -1046,12 +1046,112 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       if (days <= 7) return 25;
       return 10;
     };
+    var clamp = function(n, min, max) { return Math.max(min, Math.min(max, n)); };
+    var safePct = function(num, den) {
+      if (!(den > 0)) return 0;
+      return clamp((safeNum(num) / safeNum(den)) * 100, 0, 100);
+    };
+    var dueDays = function(dateStr) {
+      if (!dateStr) return 999;
+      var d = new Date(dateStr);
+      if (isNaN(d)) return 999;
+      return Math.floor((d.getTime() - today.getTime()) / 86400000);
+    };
+    var dueRiskScore = function(dateStr) {
+      var days = dueDays(dateStr);
+      if (days <= 0) return 100;
+      if (days <= 1) return 90;
+      if (days <= 3) return 75;
+      if (days <= 7) return 55;
+      if (days <= 14) return 35;
+      return 20;
+    };
+    var statusLooksClosed = function(status) {
+      var s = normalizeStr(status || "");
+      return s.includes("close") || s.includes("complete") || s.includes("cancel") || s.includes("archive") || s.includes("done");
+    };
+
     var dataScore = 100;
     if (!boms || !boms.length) dataScore -= 20;
     if (!edrData || !edrData.length) dataScore -= 15;
     if (!dockData || !dockData.length) dataScore -= 10;
     if ((analysis.flags || []).length > 100) dataScore -= 10;
     var confidenceLabel = dataScore >= 80 ? "High" : dataScore >= 60 ? "Medium" : "Low";
+
+    var activeWOs = (analysis.results || []).filter(function(wo) {
+      if (statusLooksClosed(wo.status)) return false;
+      if (safeNum(wo.unitsRemaining || 0) <= 0) return false;
+      return true;
+    });
+    var maxRemaining = activeWOs.reduce(function(m, wo) { return Math.max(m, safeNum(wo.unitsRemaining || 0)); }, 0) || 1;
+    var maxUph = activeWOs.reduce(function(m, wo) { return Math.max(m, safeNum(wo.unitsPerHour || 0)); }, 0) || 1;
+    var componentUsage = {};
+    activeWOs.forEach(function(wo) {
+      var seen = {};
+      (wo.components || []).forEach(function(c) {
+        var key = normalizeStr(c.sku || "");
+        if (!key || seen[key]) return;
+        seen[key] = true;
+        componentUsage[key] = (componentUsage[key] || 0) + 1;
+      });
+    });
+
+    activeWOs.forEach(function(wo) {
+      if (wo.runStatus === "nobom") return;
+      var unitsRemaining = Math.max(0, safeNum(wo.unitsRemaining || wo.qtyToProduce || 0));
+      if (unitsRemaining <= 0) return;
+      var netUnits = Math.max(0, safeNum(wo.maxRunnable || 0));
+      var coveragePct = safePct(netUnits, unitsRemaining);
+      var readiness = clamp(safeNum(wo.readiness || 0), 0, 100);
+      var days = dueDays(wo.dueDate);
+      var dueScore = dueRiskScore(wo.dueDate);
+      var volumeScore = clamp((unitsRemaining / maxRemaining) * 100, 0, 100);
+      var sharedCount = (wo.components || []).reduce(function(sum, c) {
+        var key = normalizeStr(c.sku || "");
+        return sum + ((key && (componentUsage[key] || 0) > 1) ? 1 : 0);
+      }, 0);
+      var sharedPenalty = Math.min(35, sharedCount * 8);
+
+      // Low coverage is a soft penalty, not exclusion. Allows "patch" runs when useful.
+      var lowCoveragePenalty = coveragePct < 60 ? (60 - coveragePct) * 0.6 : 0;
+      var shortRunCandidate = coveragePct < 60 && netUnits >= Math.min(1000, Math.max(250, unitsRemaining * 0.15));
+      var shortRunBoost = shortRunCandidate ? 10 : 0;
+
+      var service = clamp((0.7 * dueScore) + (0.3 * volumeScore), 0, 100);
+      var feasibility = clamp((0.65 * coveragePct) + (0.35 * readiness) - sharedPenalty - lowCoveragePenalty + shortRunBoost, 0, 100);
+      var uphScore = clamp((safeNum(wo.unitsPerHour || 0) / maxUph) * 100, 0, 100);
+      var runLengthScore = unitsRemaining >= 5000 ? 95 : unitsRemaining >= 2500 ? 75 : unitsRemaining >= 1000 ? 55 : 35;
+      var flow = clamp((0.6 * uphScore) + (0.4 * runLengthScore), 0, 100);
+      var stability = clamp(dataScore - Math.min(20, sharedCount * 5) - (coveragePct < 60 ? 10 : 0), 0, 100);
+      var dispatchScore = (0.40 * service) + (0.30 * feasibility) + (0.20 * flow) + (0.10 * stability);
+
+      var action = "Run Next";
+      if (coveragePct < 60 && shortRunCandidate) action = "Short-Run + Replenish";
+      else if (days < 0 && coveragePct >= 50) action = "Recover Past Due";
+      else if (coveragePct < 60) action = "Hold / Replenish";
+      else if (days <= 1) action = "Run Now";
+
+      var whyBits = [];
+      if (days < 0) whyBits.push("Past due");
+      else if (days <= 1) whyBits.push("Due " + (days === 0 ? "today" : "tomorrow"));
+      else if (days <= 3) whyBits.push("Due in " + days + "d");
+      whyBits.push("Net " + Math.round(coveragePct) + "%");
+      if (sharedCount > 0) whyBits.push(sharedCount + " shared comps");
+      if (shortRunCandidate) whyBits.push("partial run viable");
+
+      recs.push({
+        id: "R" + (nextId++),
+        priorityScore: Math.round(dispatchScore * 1.3),
+        owner: "Planner / Supervisor",
+        action: action,
+        why: "WO " + wo.woNum + " \u2022 " + whyBits.join(" \u2022 "),
+        impactUnits: shortRunCandidate ? netUnits : unitsRemaining,
+        window: bucketByDate(wo.dueDate),
+        confidence: confidenceLabel,
+        source: "Dispatch Engine",
+        targetView: "workorders"
+      });
+    });
 
     if (inboundCoverage && inboundCoverage.rows && inboundCoverage.rows.length) {
       inboundCoverage.rows.forEach(function(row) {
@@ -1114,20 +1214,6 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
           why: "WO " + wo.woNum + " is due soon with no BOM.",
           impactUnits: safeNum(wo.unitsRemaining || wo.qtyToProduce || 0),
           window: bucketByDate(wo.dueDate),
-          confidence: confidenceLabel,
-          source: "Work Orders",
-          targetView: "workorders"
-        });
-      }
-      if (due && !isNaN(due) && due < today && wo.unitsRemaining > 0 && wo.maxRunnable > 0 && wo.readiness >= 50) {
-        recs.push({
-          id: "R" + (nextId++),
-          priorityScore: 70 + dueUrgency(wo.dueDate),
-          owner: "Planner / Supervisor",
-          action: "Resequence WO",
-          why: "Past-due WO " + wo.woNum + " has recoverable material coverage.",
-          impactUnits: safeNum(wo.unitsRemaining || 0),
-          window: "now",
           confidence: confidenceLabel,
           source: "Work Orders",
           targetView: "workorders"
