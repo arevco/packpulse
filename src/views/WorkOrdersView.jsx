@@ -47,6 +47,11 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
   var normalizeSearchValue = function(v) {
     return normalizeStr(String(v || "")).replace(/[^a-z0-9]/g, "");
   };
+  var fmtQty = function(v) {
+    var n = Number(v || 0);
+    if (!isFinite(n)) return "--";
+    return Math.round(n).toLocaleString();
+  };
   var normalizeSkuSearchValue = function(v) {
     var s = normalizeSearchValue(v);
     return s.replace(/^0+(?=\d)/, "");
@@ -471,6 +476,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
                   var rows = [];
                   var compPressure = commitment.componentPressure ? commitment.componentPressure[normalizeStr(comp.sku || "")] : null;
                   var hasCompPressure = !!(compPressure && compPressure.usedByWOs > 1);
+                  var isNetLimiter = !!(hasCompPressure && compPressure.turnMakeUnits === commitment.committedCanMake && commitment.commitmentGap > 0);
                   rows.push(
                     <tr key={"c"+ci} style={{ borderBottom:comp.hasSubs?"none":"1px solid "+C.border }}>
                       <td style={Object.assign({}, tdDM, { color:C.bright })}>
@@ -485,8 +491,16 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
                           </span>
                         )}
                         {hasCompPressure && (
-                          <div style={{ marginTop:4, fontSize:11, color:C.dim, fontFamily:mono }}>
-                            shared:{compPressure.usedByWOs} | prior:{compPressure.consumedBefore.toLocaleString()} | avail:{compPressure.availableAtTurn.toLocaleString()} | make:{compPressure.turnMakeUnits.toLocaleString()}
+                          <div style={{ marginTop:4, fontSize:11, color:C.dim }}>
+                            Shared by <span style={{ color:C.bright, fontWeight:700 }}>{compPressure.usedByWOs}</span> WOs
+                            {" \u2022 "}Allocated before this WO: <span style={{ color:C.bright, fontFamily:mono }}>{fmtQty(compPressure.consumedBefore)}</span>
+                            {" \u2022 "}Available now: <span style={{ color:C.bright, fontFamily:mono }}>{fmtQty(compPressure.availableAtTurn)}</span>
+                            {" \u2022 "}Supports up to <span style={{ color:C.bright, fontFamily:mono }}>{fmtQty(compPressure.turnMakeUnits)}</span> WO units
+                            {isNetLimiter && (
+                              <span style={{ display:"inline-block", marginLeft:6, padding:"1px 6px", borderRadius:999, fontSize:10, fontWeight:700, color:C.bad, background:C.badSoft }}>
+                                Net limiter
+                              </span>
+                            )}
                           </div>
                         )}
                       </td>
