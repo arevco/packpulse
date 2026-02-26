@@ -457,7 +457,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
   var SortTh = function(props) { return <th onClick={() => handleSort(props.field)} style={Object.assign({}, thC(sortField===props.field), props.style||{})}>{props.children}{sortField===props.field ? (sortDir==="asc" ? " \u2191" : " \u2193") : ""}</th>; };
 
   var renderWORows = () => {
-    if (filteredResults.length === 0) return <tr><td colSpan={18} style={{ padding:36, textAlign:"center", color:C.dim, fontSize:14 }}>No work orders match filters.</td></tr>;
+    if (filteredResults.length === 0) return <tr><td colSpan={19} style={{ padding:36, textAlign:"center", color:C.dim, fontSize:14 }}>No work orders match filters.</td></tr>;
     var out = [];
     filteredResults.forEach((wo, idx) => {
       var rowKey = wo.woNum + "|" + idx;
@@ -506,11 +506,11 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
           <td style={Object.assign({}, tdM, { color:wo.estHours>0?C.bright:C.dim })}>{wo.estHours > 0 ? wo.estHours+"h" : "--"}</td>
           <td style={Object.assign({}, tdN, { color:runMeta ? C.bright : C.dim, whiteSpace:"nowrap" })}>
             {runMeta ? (
-              <span title={(runMeta.action || "Run Next") + (runMeta.why ? " • " + runMeta.why : "")}>
-                <span style={{ color:C.accent, fontWeight:700, marginRight:6 }}>#{runMeta.rank}</span>
-                <span style={{ fontFamily:mono, fontWeight:700 }}>{runMeta.score}</span>
-              </span>
+              <span title={(runMeta.action || "Run Next") + (runMeta.why ? " • " + runMeta.why : "")} style={{ color:C.accent, fontWeight:700 }}>#{runMeta.rank}</span>
             ) : "--"}
+          </td>
+          <td style={Object.assign({}, tdM, { color:runMeta ? C.bright : C.dim, fontFamily:mono, fontWeight:runMeta ? 700 : 500 })}>
+            {runMeta ? runMeta.score : "--"}
           </td>
         </tr>
       );
@@ -604,7 +604,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
           </div>
         );
         out.push(
-          <tr key={"d"+idx}><td colSpan={18} style={{ padding:"0 12px 14px 36px", background:C.raised }}>
+          <tr key={"d"+idx}><td colSpan={19} style={{ padding:"0 12px 14px 36px", background:C.raised }}>
             {details}
           </td></tr>
         );
@@ -698,7 +698,8 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
             <SortTh field="committedCanMake"><span title="Capacity after shared-material commitments across active work orders">Net</span></SortTh>
             <SortTh field="commitmentGap"><span title="Difference between isolated make and commitment-aware net capacity">Gap</span></SortTh>
             <SortTh field="estHours">Est Hrs</SortTh>
-            <SortTh field="dispatchScore"><span title="Run Next weighted score (higher = stronger candidate). Prefix is dispatch rank.">Run Next</span></SortTh>
+            <SortTh field="dispatchRank"><span title="Run Next rank from dispatch scoring">Run Next</span></SortTh>
+            <SortTh field="dispatchScore"><span title="Run Next weighted score (higher = stronger candidate)">Score</span></SortTh>
           </tr></thead>
           <tbody>{renderWORows()}</tbody>
         </table>
