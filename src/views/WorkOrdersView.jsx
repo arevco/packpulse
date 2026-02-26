@@ -649,9 +649,6 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
           <option value="20">Top 20</option>
         </select>
       )}
-      {filterRunNext && (
-        <button onClick={function() { setSortField("dispatchScore"); setSortDir("desc"); }} style={Object.assign({}, pill(false), { fontSize:13 })}>Reset Rank</button>
-      )}
       <button onClick={function() { setFilterShared(function(v) { return !v; }); }} style={pill(filterShared)}>Shared</button>
       <div style={{ flex:1 }} />
       <button onClick={exportCSV} style={Object.assign({}, pill(false), { fontSize:13 })}>CSV</button>
