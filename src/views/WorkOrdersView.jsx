@@ -36,7 +36,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
   const [filterShared, setFilterShared] = useState(false);
   const [sortField, setSortField] = useState("readiness");
   const [sortDir, setSortDir] = useState("desc");
-  const [expandedWO, setExpandedWO] = useState(null);
+  const [expandedWOs, setExpandedWOs] = useState({});
 
   var runStatusMeta = function(s) {
     if (s === "ready") return { label:"RDY", color:C.ok, bg:C.okSoft || C.accentSoft };
@@ -369,11 +369,19 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, pref
     if (filteredResults.length === 0) return <tr><td colSpan={17} style={{ padding:36, textAlign:"center", color:C.dim, fontSize:14 }}>No work orders match filters.</td></tr>;
     var out = [];
     filteredResults.forEach((wo, idx) => {
-      var isX = expandedWO === wo.woNum + idx;
+      var rowKey = wo.woNum + "|" + idx;
+      var isX = !!expandedWOs[rowKey];
       var commitment = commitmentMap[woCommitKey(wo)] || { committedCanMake:0, commitmentGap:0, sharedConstraint:false };
       var rs = runStatusMeta(wo.runStatus);
       out.push(
-        <tr key={"r"+idx} onClick={() => setExpandedWO(isX ? null : wo.woNum + idx)} style={{ cursor:"pointer", borderBottom:"1px solid "+C.border, background:isX?C.raised:"transparent" }}
+        <tr key={"r"+idx} onClick={function() {
+          setExpandedWOs(function(prev) {
+            var next = Object.assign({}, prev);
+            if (next[rowKey]) delete next[rowKey];
+            else next[rowKey] = true;
+            return next;
+          });
+        }} style={{ cursor:"pointer", borderBottom:"1px solid "+C.border, background:isX?C.raised:"transparent" }}
           onMouseEnter={e => { if (!isX) e.currentTarget.style.background = C.hover; }} onMouseLeave={e => { if (!isX) e.currentTarget.style.background = isX ? C.raised : "transparent"; }}>
           <td style={tdToggle}>{isX ? "\u25BE" : "\u25B8"}</td>
           <td style={Object.assign({}, tdM, { fontWeight:600, color:C.bright })}>{wo.woNum}</td>
