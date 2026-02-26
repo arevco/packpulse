@@ -35,6 +35,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
   const [filterDueMonth, setFilterDueMonth] = useState("all");
   const [filterShared, setFilterShared] = useState(false);
   const [filterRunNext, setFilterRunNext] = useState(false);
+  const [runNextLimit, setRunNextLimit] = useState("12");
   const [sortField, setSortField] = useState("readiness");
   const [sortDir, setSortDir] = useState("desc");
   const [expandedWOs, setExpandedWOs] = useState({});
@@ -301,15 +302,35 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
   }, [analysis]);
 
   var runNextWoSet = useMemo(function() {
-    var set = {};
-    (recommendations || []).forEach(function(r) {
-      if (!r || r.targetView !== "workorders" || r.source !== "Dispatch Engine") return;
-      if (!r.woNum) return;
-      if (r.action === "Hold / Replenish") return;
-      set[String(r.woNum)] = true;
+    var dispatchRows = (recommendations || []).filter(function(r) {
+      return !!r && r.targetView === "workorders" && r.source === "Dispatch Engine" && !!r.woNum;
+    }).slice().sort(function(a, b) {
+      return Number(b.priorityScore || 0) - Number(a.priorityScore || 0);
     });
+    var target = parseInt(runNextLimit, 10) || 12;
+    var isRunnable = function(r) { return r.action !== "Hold / Replenish"; };
+    var selected = [];
+    var seen = {};
+    dispatchRows.forEach(function(r) {
+      if (selected.length >= target) return;
+      var k = String(r.woNum || "");
+      if (!k || seen[k] || !isRunnable(r)) return;
+      seen[k] = true;
+      selected.push(r);
+    });
+    if (selected.length < target) {
+      dispatchRows.forEach(function(r) {
+        if (selected.length >= target) return;
+        var k = String(r.woNum || "");
+        if (!k || seen[k]) return;
+        seen[k] = true;
+        selected.push(r);
+      });
+    }
+    var set = {};
+    selected.forEach(function(r) { set[String(r.woNum)] = true; });
     return set;
-  }, [recommendations]);
+  }, [recommendations, runNextLimit]);
 
   var hasSharedComponent = function(wo) {
     return (wo.components || []).some(function(comp) {
@@ -572,7 +593,20 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       {["all","ready","partial","blocked","nobom"].map(function(f) {
         return <button key={f} onClick={function() { setFilterStatus(function(curr) { return curr === f && f !== "all" ? "all" : f; }); }} style={pill(filterStatus===f)}>{f==="all"?"All":f==="ready"?"Ready":f==="partial"?"Partial":f==="blocked"?"Blocked":"No BOM"}</button>;
       })}
-      <button onClick={function() { setFilterRunNext(function(v) { return !v; }); }} style={pill(filterRunNext)}>Run Next</button>
+      <button onClick={function() {
+        setFilterRunNext(function(v) {
+          var next = !v;
+          if (next) setFilterWoStatus("all");
+          return next;
+        });
+      }} style={pill(filterRunNext)}>Run Next</button>
+      {filterRunNext && (
+        <select value={runNextLimit} onChange={function(e) { setRunNextLimit(e.target.value); }} style={Object.assign({}, sel, { fontSize:13 })}>
+          <option value="8">Top 8</option>
+          <option value="12">Top 12</option>
+          <option value="20">Top 20</option>
+        </select>
+      )}
       <button onClick={function() { setFilterShared(function(v) { return !v; }); }} style={pill(filterShared)}>Shared</button>
       <div style={{ flex:1 }} />
       <button onClick={exportCSV} style={Object.assign({}, pill(false), { fontSize:13 })}>CSV</button>
