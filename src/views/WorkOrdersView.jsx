@@ -301,7 +301,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     return Object.keys(set).sort();
   }, [analysis]);
 
-  var runNextWoSet = useMemo(function() {
+  var runNextSelection = useMemo(function() {
     var dispatchRows = (dispatchQueue || []).filter(function(r) {
       return !!r && !!r.woNum;
     }).slice().sort(function(a, b) {
@@ -328,9 +328,21 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       });
     }
     var set = {};
-    selected.forEach(function(r) { set[String(r.woNum)] = true; });
-    return set;
+    var map = {};
+    selected.forEach(function(r, idx) {
+      var k = String(r.woNum);
+      set[k] = true;
+      map[k] = {
+        rank: idx + 1,
+        score: Number(r.priorityScore || 0),
+        action: r.action || "",
+        why: r.why || ""
+      };
+    });
+    return { set:set, map:map };
   }, [dispatchQueue, runNextLimit]);
+  var runNextWoSet = runNextSelection.set;
+  var runNextMetaMap = runNextSelection.map;
 
   var hasSharedComponent = function(wo) {
     return (wo.components || []).some(function(comp) {
@@ -376,6 +388,15 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       }
       else if (sortField==="readiness") c=a.readiness-b.readiness;
       else if (sortField==="estHours") c=a.estHours-b.estHours;
+      else if (sortField==="dispatchRank") {
+        var ar = runNextMetaMap[String(a.woNum || "")] ? runNextMetaMap[String(a.woNum || "")].rank : Number.POSITIVE_INFINITY;
+        var br = runNextMetaMap[String(b.woNum || "")] ? runNextMetaMap[String(b.woNum || "")].rank : Number.POSITIVE_INFINITY;
+        c = ar - br;
+      } else if (sortField==="dispatchScore") {
+        var as = runNextMetaMap[String(a.woNum || "")] ? runNextMetaMap[String(a.woNum || "")].score : 0;
+        var bs = runNextMetaMap[String(b.woNum || "")] ? runNextMetaMap[String(b.woNum || "")].score : 0;
+        c = as - bs;
+      }
       else if (sortField==="dueDate" || sortField==="plannedStart" || sortField==="plannedEnd") {
         var aDate = parseDateValue(sortField==="dueDate" ? a.dueDate : sortField==="plannedStart" ? a.plannedStart : a.plannedEnd);
         var bDate = parseDateValue(sortField==="dueDate" ? b.dueDate : sortField==="plannedStart" ? b.plannedStart : b.plannedEnd);
@@ -404,7 +425,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       return sortDir==="desc"?-c:c;
     });
     return r;
-  }, [analysis, filterStatus, filterWoStatus, filterCustomer, filterDueMonth, filterShared, filterRunNext, searchTerm, sortField, sortDir, commitmentMap, sharedComponentUsage, runNextWoSet]);
+  }, [analysis, filterStatus, filterWoStatus, filterCustomer, filterDueMonth, filterShared, filterRunNext, searchTerm, sortField, sortDir, commitmentMap, sharedComponentUsage, runNextWoSet, runNextMetaMap]);
 
   var woStatusBreakdown = useMemo(function() {
     if (!analysis) return [];
@@ -436,12 +457,13 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
   var SortTh = function(props) { return <th onClick={() => handleSort(props.field)} style={Object.assign({}, thC(sortField===props.field), props.style||{})}>{props.children}{sortField===props.field ? (sortDir==="asc" ? " \u2191" : " \u2193") : ""}</th>; };
 
   var renderWORows = () => {
-    if (filteredResults.length === 0) return <tr><td colSpan={17} style={{ padding:36, textAlign:"center", color:C.dim, fontSize:14 }}>No work orders match filters.</td></tr>;
+    if (filteredResults.length === 0) return <tr><td colSpan={19} style={{ padding:36, textAlign:"center", color:C.dim, fontSize:14 }}>No work orders match filters.</td></tr>;
     var out = [];
     filteredResults.forEach((wo, idx) => {
       var rowKey = wo.woNum + "|" + idx;
       var isX = !!expandedWOs[rowKey];
       var commitment = commitmentMap[woCommitKey(wo)] || { committedCanMake:0, commitmentGap:0, sharedConstraint:false };
+      var runMeta = runNextMetaMap[String(wo.woNum || "")] || null;
       var rs = runStatusMeta(wo.runStatus);
       out.push(
         <tr key={"r"+idx} onClick={function() {
@@ -482,10 +504,20 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
             )}
           </td>
           <td style={Object.assign({}, tdM, { color:wo.estHours>0?C.bright:C.dim })}>{wo.estHours > 0 ? wo.estHours+"h" : "--"}</td>
+          <td style={Object.assign({}, tdM, { color:runMeta ? C.accent : C.dim, fontWeight:runMeta ? 700 : 500 })}>{runMeta ? "#" + runMeta.rank : "--"}</td>
+          <td style={Object.assign({}, tdM, { color:runMeta ? C.bright : C.dim })}>{runMeta ? runMeta.score : "--"}</td>
         </tr>
       );
       if (isX) {
         var details = [];
+        if (runMeta) details.push(
+          <div key="dispatch" style={{ fontSize:13, color:C.dim, marginBottom:8 }}>
+            <span style={{ fontWeight:700, color:C.accent }}>Run Next #{runMeta.rank}</span>{" \u2022 "}
+            <span style={{ fontFamily:mono, color:C.bright }}>Score {runMeta.score}</span>{" \u2022 "}
+            <span style={{ color:C.bright }}>{runMeta.action || "Run Next"}</span>
+            {runMeta.why ? <span>{" \u2022 " + runMeta.why.replace(/^WO\s+\S+\s+\u2022\s*/i, "")}</span> : null}
+          </div>
+        );
         if (wo.reference1) details.push(<div key="ref" style={{ fontSize:13, color:C.text, marginBottom:8 }}><span style={{ fontSize:12, fontWeight:600, color:C.dim, letterSpacing:0.1, marginRight:6 }}>Notes</span>{wo.reference1}</div>);
         if (wo.plannedStart || wo.plannedEnd) details.push(
           <div key="sched" style={{ fontSize:13, color:C.dim, marginBottom:8, display:"flex", gap:16, flexWrap:"wrap" }}>
@@ -566,7 +598,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
           </div>
         );
         out.push(
-          <tr key={"d"+idx}><td colSpan={17} style={{ padding:"0 12px 14px 36px", background:C.raised }}>
+          <tr key={"d"+idx}><td colSpan={19} style={{ padding:"0 12px 14px 36px", background:C.raised }}>
             {details}
           </td></tr>
         );
@@ -596,7 +628,11 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       <button onClick={function() {
         setFilterRunNext(function(v) {
           var next = !v;
-          if (next) setFilterWoStatus("all");
+          if (next) {
+            setFilterWoStatus("all");
+            setSortField("dispatchRank");
+            setSortDir("asc");
+          }
           return next;
         });
       }} style={pill(filterRunNext)}>Run Next</button>
@@ -606,6 +642,9 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
           <option value="12">Top 12</option>
           <option value="20">Top 20</option>
         </select>
+      )}
+      {filterRunNext && (
+        <button onClick={function() { setSortField("dispatchRank"); setSortDir("asc"); }} style={Object.assign({}, pill(false), { fontSize:13 })}>Reset Rank</button>
       )}
       <button onClick={function() { setFilterShared(function(v) { return !v; }); }} style={pill(filterShared)}>Shared</button>
       <div style={{ flex:1 }} />
@@ -653,6 +692,8 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
             <SortTh field="committedCanMake"><span title="Capacity after shared-material commitments across active work orders">Net</span></SortTh>
             <SortTh field="commitmentGap"><span title="Difference between isolated make and commitment-aware net capacity">Gap</span></SortTh>
             <SortTh field="estHours">Est Hrs</SortTh>
+            <SortTh field="dispatchRank"><span title="Run Next rank from dispatch scoring">Rank</span></SortTh>
+            <SortTh field="dispatchScore"><span title="Dispatch score (higher = stronger candidate)">Score</span></SortTh>
           </tr></thead>
           <tbody>{renderWORows()}</tbody>
         </table>
