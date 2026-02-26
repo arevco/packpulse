@@ -1060,11 +1060,12 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
     };
     var dueRiskScore = function(dateStr) {
       var days = dueDays(dateStr);
-      if (days <= 0) return 100;
-      if (days <= 1) return 90;
-      if (days <= 3) return 75;
-      if (days <= 7) return 55;
-      if (days <= 14) return 35;
+      // Due date is important, but not enough by itself to force poor changeover economics.
+      if (days <= 0) return 85;
+      if (days <= 1) return 75;
+      if (days <= 3) return 62;
+      if (days <= 7) return 48;
+      if (days <= 14) return 30;
       return 20;
     };
     var statusLooksClosed = function(status) {
@@ -1107,27 +1108,32 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       var days = dueDays(wo.dueDate);
       var dueScore = dueRiskScore(wo.dueDate);
       var volumeScore = clamp((unitsRemaining / maxRemaining) * 100, 0, 100);
+      var unitsPerHour = Math.max(0, safeNum(wo.unitsPerHour || 0));
+      var netHours = unitsPerHour > 0 ? (netUnits / unitsPerHour) : 0;
+      var shiftCount = netHours / 8;
       var sharedCount = (wo.components || []).reduce(function(sum, c) {
         var key = normalizeStr(c.sku || "");
         return sum + ((key && (componentUsage[key] || 0) > 1) ? 1 : 0);
       }, 0);
       var sharedPenalty = Math.min(35, sharedCount * 8);
+      var runWindowScore = shiftCount >= 4 ? 100 : shiftCount >= 3 ? 85 : shiftCount >= 2 ? 65 : shiftCount >= 1 ? 40 : 15;
+      var shortRunPenalty = shiftCount < 1 ? 45 : shiftCount < 2 ? 30 : shiftCount < 4 ? 15 : 0;
 
       // Low coverage is a soft penalty, not exclusion. Allows "patch" runs when useful.
       var lowCoveragePenalty = coveragePct < 60 ? (60 - coveragePct) * 0.6 : 0;
       var shortRunCandidate = coveragePct < 60 && netUnits >= Math.min(1000, Math.max(250, unitsRemaining * 0.15));
       var shortRunBoost = shortRunCandidate ? 10 : 0;
 
-      var service = clamp((0.7 * dueScore) + (0.3 * volumeScore), 0, 100);
-      var feasibility = clamp((0.65 * coveragePct) + (0.35 * readiness) - sharedPenalty - lowCoveragePenalty + shortRunBoost, 0, 100);
+      var service = clamp((0.65 * dueScore) + (0.35 * volumeScore), 0, 100);
+      var feasibility = clamp((0.55 * coveragePct) + (0.20 * readiness) + (0.25 * runWindowScore) - sharedPenalty - lowCoveragePenalty - shortRunPenalty + shortRunBoost, 0, 100);
       var uphScore = clamp((safeNum(wo.unitsPerHour || 0) / maxUph) * 100, 0, 100);
-      var runLengthScore = unitsRemaining >= 5000 ? 95 : unitsRemaining >= 2500 ? 75 : unitsRemaining >= 1000 ? 55 : 35;
-      var flow = clamp((0.6 * uphScore) + (0.4 * runLengthScore), 0, 100);
-      var stability = clamp(dataScore - Math.min(20, sharedCount * 5) - (coveragePct < 60 ? 10 : 0), 0, 100);
-      var dispatchScore = (0.40 * service) + (0.30 * feasibility) + (0.20 * flow) + (0.10 * stability);
+      var flow = clamp((0.5 * uphScore) + (0.5 * runWindowScore), 0, 100);
+      var stability = clamp(dataScore - Math.min(20, sharedCount * 5) - (coveragePct < 60 ? 10 : 0) - Math.min(15, shortRunPenalty * 0.35), 0, 100);
+      var dispatchScore = (0.32 * service) + (0.34 * feasibility) + (0.24 * flow) + (0.10 * stability);
 
       var action = "Run Next";
-      if (coveragePct < 60 && shortRunCandidate) action = "Short-Run + Replenish";
+      if (shiftCount < 1 && !(days <= 0 && coveragePct >= 80)) action = "Hold / Build Window";
+      else if (coveragePct < 60 && shortRunCandidate) action = "Short-Run + Replenish";
       else if (days < 0 && coveragePct >= 50) action = "Recover Past Due";
       else if (coveragePct < 60) action = "Hold / Replenish";
       else if (days <= 1) action = "Run Now";
@@ -1137,6 +1143,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       else if (days <= 1) whyBits.push("Due " + (days === 0 ? "today" : "tomorrow"));
       else if (days <= 3) whyBits.push("Due in " + days + "d");
       whyBits.push("Net " + Math.round(coveragePct) + "%");
+      if (unitsPerHour > 0) whyBits.push(Math.round(shiftCount * 10) / 10 + " shifts @ net");
       if (sharedCount > 0) whyBits.push(sharedCount + " shared comps");
       if (shortRunCandidate) whyBits.push("partial run viable");
 
