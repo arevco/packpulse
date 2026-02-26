@@ -18,7 +18,7 @@ export default function ProductionReadiness() {
   const { C, theme, setTheme, sans, mono, FONTS_CSS, A11Y_CSS } = useTheme();
   const { pill } = useStyles();
   const ds = useDataSources();
-  const { analysis, summary, criticalItems, woStatuses, woCustomers, timelineData, deliveriesV2, inboundCoverage, recommendations } = useAnalysis({
+  const { analysis, summary, criticalItems, woStatuses, woCustomers, timelineData, deliveriesV2, inboundCoverage, recommendations, dispatchQueue } = useAnalysis({
     mappingConfirmed: ds.mappingConfirmed, allUploaded: ds.allUploaded,
     inventory: ds.inventory, itemMaster: ds.itemMaster, boms: ds.boms, workOrders: ds.workOrders,
     invMapping: ds.invMapping, bomMapping: ds.bomMapping, woMapping: ds.woMapping,
@@ -485,7 +485,7 @@ export default function ProductionReadiness() {
 
         <Suspense fallback={<div style={{ fontSize:13, color:C.dim, padding:"8px 0 4px" }}>Loading view...</div>}>
           {activeView === "overview" && <OverviewView analysis={analysisForUI} woStatuses={woStatusesForUI} onSelectCustomer={openWorkOrdersForCustomer} />}
-          {activeView === "workorders" && <WorkOrdersView analysis={analysisForUI} woStatuses={woStatusesForUI} woCustomers={woCustomersForUI} recommendations={recommendationsForUI} prefilterCustomer={workOrdersPrefilterCustomer} prefilterNonce={workOrdersPrefilterNonce} />}
+          {activeView === "workorders" && <WorkOrdersView analysis={analysisForUI} woStatuses={woStatusesForUI} woCustomers={woCustomersForUI} recommendations={recommendationsForUI} dispatchQueue={dispatchQueue || []} prefilterCustomer={workOrdersPrefilterCustomer} prefilterNonce={workOrdersPrefilterNonce} />}
           {activeView === "criticalitems" && <CriticalItemsView rawCriticalItems={criticalItemsForUI} inboundCoverage={inboundCoverage} />}
           {activeView === "recommendations" && <RecommendationsView recommendations={recommendationsForUI} onOpenRecommendation={openRecommendation} />}
           {activeView === "sandbox" && <SandboxView />}

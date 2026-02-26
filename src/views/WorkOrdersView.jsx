@@ -24,7 +24,7 @@ function parseDateValue(value) {
   return isNaN(parsed) ? null : parsed;
 }
 
-export default function WorkOrdersView({ analysis, woStatuses, woCustomers, recommendations, prefilterCustomer, prefilterNonce }) {
+export default function WorkOrdersView({ analysis, woStatuses, woCustomers, recommendations, dispatchQueue, prefilterCustomer, prefilterNonce }) {
   const { C, sans, mono } = useTheme();
   const { thC, tdN, tdM, tdToggle, thDS, tdDN, tdDM, truncate, inp, sel, pill } = useStyles();
 
@@ -302,8 +302,8 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
   }, [analysis]);
 
   var runNextWoSet = useMemo(function() {
-    var dispatchRows = (recommendations || []).filter(function(r) {
-      return !!r && r.targetView === "workorders" && r.source === "Dispatch Engine" && !!r.woNum;
+    var dispatchRows = (dispatchQueue || []).filter(function(r) {
+      return !!r && !!r.woNum;
     }).slice().sort(function(a, b) {
       return Number(b.priorityScore || 0) - Number(a.priorityScore || 0);
     });
@@ -330,7 +330,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     var set = {};
     selected.forEach(function(r) { set[String(r.woNum)] = true; });
     return set;
-  }, [recommendations, runNextLimit]);
+  }, [dispatchQueue, runNextLimit]);
 
   var hasSharedComponent = function(wo) {
     return (wo.components || []).some(function(comp) {

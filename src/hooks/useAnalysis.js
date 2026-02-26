@@ -1020,9 +1020,10 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
   }, [analysis, criticalItems, edrData, dockData]);
 
   /* ====== RECOMMENDATIONS (DISPATCH SCORING ENGINE) ====== */
-  var recommendations = useMemo(() => {
-    if (!analysis) return [];
+  var recommendationBundle = useMemo(() => {
+    if (!analysis) return { recommendations: [], dispatchQueue: [] };
     var recs = [];
+    var dispatchQueue = [];
     var nextId = 1;
     var now = new Date();
     var today = new Date(now); today.setHours(0, 0, 0, 0);
@@ -1139,7 +1140,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       if (sharedCount > 0) whyBits.push(sharedCount + " shared comps");
       if (shortRunCandidate) whyBits.push("partial run viable");
 
-      recs.push({
+      var dispatchRec = {
         id: "R" + (nextId++),
         priorityScore: Math.round(dispatchScore * 1.3),
         woNum: wo.woNum,
@@ -1151,7 +1152,9 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
         confidence: confidenceLabel,
         source: "Dispatch Engine",
         targetView: "workorders"
-      });
+      };
+      recs.push(dispatchRec);
+      dispatchQueue.push(dispatchRec);
     });
 
     if (inboundCoverage && inboundCoverage.rows && inboundCoverage.rows.length) {
@@ -1252,11 +1255,17 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
     }
 
     recs.sort(function(a, b) { return b.priorityScore - a.priorityScore; });
-    return recs.slice(0, 30).map(function(r) {
+    var withPriority = function(r) {
       var p = r.priorityScore >= 120 ? "P1" : r.priorityScore >= 85 ? "P2" : "P3";
       return Object.assign({}, r, { priority:p });
-    });
+    };
+    var topRecommendations = recs.slice(0, 30).map(withPriority);
+    var rankedDispatchQueue = dispatchQueue.slice().sort(function(a, b) { return b.priorityScore - a.priorityScore; }).map(withPriority);
+    return { recommendations: topRecommendations, dispatchQueue: rankedDispatchQueue };
   }, [analysis, inboundCoverage, boms, edrData, dockData]);
 
-  return { analysis, summary, criticalItems, woStatuses, woCustomers, poCheck, timelineData, deliveriesV2, inboundCoverage, recommendations };
+  var recommendations = recommendationBundle && recommendationBundle.recommendations ? recommendationBundle.recommendations : [];
+  var dispatchQueue = recommendationBundle && recommendationBundle.dispatchQueue ? recommendationBundle.dispatchQueue : [];
+
+  return { analysis, summary, criticalItems, woStatuses, woCustomers, poCheck, timelineData, deliveriesV2, inboundCoverage, recommendations, dispatchQueue };
 }
