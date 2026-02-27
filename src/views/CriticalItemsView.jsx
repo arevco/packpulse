@@ -4,6 +4,7 @@ import { useStyles } from "../hooks/useStyles";
 import { fmtDate, triggerDownload, buildExportHTML, normalizeStr, formatDescriptionForDisplay } from "../utils";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
+import TableShell from "../components/ui/table-shell";
 
 export default function CriticalItemsView({ rawCriticalItems, inboundCoverage }) {
   const { C } = useTheme();
@@ -277,7 +278,7 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
       <Button onClick={exportPDF} variant="outline" size="default">PDF</Button>
     </div>
 
-    <div style={{ background:C.surface, border:"1px solid " + C.border, borderRadius:8, overflow:"hidden" }}>
+    <TableShell>
       <div style={{ overflowX:"auto" }}>
         <table style={{ width:"100%", borderCollapse:"collapse" }}>
           <thead><tr style={{ background:C.raised }}>
@@ -289,7 +290,7 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
           <tbody>{renderRows()}</tbody>
         </table>
       </div>
-    </div>
+    </TableShell>
 
     <div style={{ marginTop:8, fontSize:13, color:C.dim }}>
       {summary.total + " critical materials" + (inboundCoverage ? (" · horizon " + inboundCoverage.horizonDays + "d") : "")}

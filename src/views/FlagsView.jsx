@@ -5,6 +5,7 @@ import { triggerDownload, buildExportHTML } from "../utils";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Badge } from "../components/ui/badge";
+import TableShell from "../components/ui/table-shell";
 
 var FLAG_LABELS = { "missing-desc":"Missing Description", "not-in-inventory":"Not in Inventory", "no-bom":"No BOM", "fg-not-in-inventory":"FG Not in Inventory", "zero-stock":"Zero Stock" };
 
@@ -57,7 +58,7 @@ export default function FlagsView({ flags }) {
       <Button onClick={exportFlagsCSV} variant="outline" size="default">CSV</Button>
       <Button onClick={exportFlagsPDF} variant="outline" size="default">PDF</Button>
     </div>
-    <div style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, overflow:"hidden" }}>
+    <TableShell>
       <div style={{ overflowX:"auto" }}>
         <table style={{ width:"100%", borderCollapse:"collapse" }}>
           <thead><tr style={{ background:C.raised }}>
@@ -83,7 +84,7 @@ export default function FlagsView({ flags }) {
           </tbody>
         </table>
       </div>
-    </div>
+    </TableShell>
     <div style={{ marginTop:8, fontSize:13, color:C.dim }}>{filteredFlags.length} of {safeFlags.length} flags</div>
   </div>);
 }

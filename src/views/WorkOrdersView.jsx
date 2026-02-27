@@ -4,6 +4,7 @@ import { useStyles } from "../hooks/useStyles";
 import { fmtDate, triggerDownload, buildExportHTML, normalizeStr, formatDescriptionForDisplay, detectPackType, safeNum } from "../utils";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
+import TableShell from "../components/ui/table-shell";
 
 function parseDateValue(value) {
   if (!value) return null;
@@ -740,7 +741,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
         )}
       </div>
     )}
-    <div style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, overflow:"hidden" }}>
+    <TableShell>
       <div style={{ overflowX:"auto" }}>
         <table style={{ width:"100%", borderCollapse:"collapse" }}>
           <thead><tr style={{ background:C.raised }}>
@@ -766,7 +767,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
           <tbody>{renderWORows()}</tbody>
         </table>
       </div>
-    </div>
+    </TableShell>
     <div style={{ marginTop:8, fontSize:13, color:C.dim }}>{filteredResults.length} of {analysis.results.length} work orders</div>
   </div>);
 }

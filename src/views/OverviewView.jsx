@@ -4,6 +4,7 @@ import { useStyles } from "../hooks/useStyles";
 import { fmtDate, formatDescriptionForDisplay, normalizeStr } from "../utils";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
+import TableShell from "../components/ui/table-shell";
 
 export default function OverviewView({ analysis, woStatuses, onSelectCustomer }) {
   const { C, mono } = useTheme();
@@ -228,7 +229,7 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
 
     <div style={{ marginBottom:20 }}>
       <div style={{ fontSize:14, fontWeight:600, color:C.bright, marginBottom:10 }}>Work Orders by Customer</div>
-      <div style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, overflow:"hidden" }}>
+      <TableShell>
         <table style={{ width:"100%", borderCollapse:"collapse" }}>
           <thead><tr style={{ background:C.raised }}>
             {[{l:"Customer",f:"name"},{l:"WOs",f:"count"},{l:"Order Qty",f:"orderQty"},{l:"Produced",f:"produced"},{l:"Remaining",f:"remaining"},{l:"Net Make",f:"netMake"},{l:"Complete",f:"complete"},{l:"Late",f:"late"}].map(function(col) {
@@ -262,14 +263,14 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
             )}
           </tbody>
         </table>
-      </div>
+      </TableShell>
     </div>
 
     <div style={{ marginBottom:20 }}>
       <div style={{ fontSize:14, fontWeight:600, color:C.bad, marginBottom:10, display:"flex", alignItems:"center", gap:8 }}>
         <span style={{ fontSize:16 }}>{"\u26A0"}</span> Past Due Work Orders ({overview.lateWOs.length})
       </div>
-      <div style={{ background:C.surface, border:"1px solid "+C.badLine, borderRadius:8, overflow:"hidden" }}>
+      <TableShell className="border-[rgb(var(--danger))]/40">
         <table style={{ width:"100%", borderCollapse:"collapse" }}>
           <thead><tr style={{ background:C.raised }}>
             {[{l:"Days Late",f:"daysLate"},{l:"WO#",f:"woNum"},{l:"Product",f:"productSkuRaw"},{l:"Product Description",f:"productDesc"},{l:"Customer",f:"customer"},{l:"Order Qty",f:"qtyToProduce"},{l:"Remaining",f:"unitsRemaining"},{l:"Complete",f:"prodPct"},{l:"Ready",f:"readiness"},{l:"Net Make",f:"netCanMake"},{l:"Due Date",f:"dueDate"}].map(function(col) {
@@ -301,7 +302,7 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
             )}
           </tbody>
         </table>
-      </div>
+      </TableShell>
     </div>
   </div>);
 }

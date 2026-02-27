@@ -9,6 +9,7 @@ import { Button } from "./components/ui/button";
 import { Badge } from "./components/ui/badge";
 import { Progress } from "./components/ui/progress";
 import TabsNav from "./components/ui/tabs-nav";
+import { Card } from "./components/ui/card";
 const OverviewView = lazy(() => import("./views/OverviewView"));
 const WorkOrdersView = lazy(() => import("./views/WorkOrdersView"));
 const CriticalItemsView = lazy(() => import("./views/CriticalItemsView"));
@@ -225,15 +226,15 @@ export default function ProductionReadiness() {
 
   /* ====== MAIN RENDER ====== */
   return (
-    <div style={{ fontFamily:sans, background:C.bg, minHeight:"100vh", color:C.text }}>
+    <div className="min-h-screen bg-[rgb(var(--background))] text-[rgb(var(--foreground))]" style={{ fontFamily:sans }}>
       <style>{FONTS_CSS + A11Y_CSS}</style>
-      <header style={{ padding:"16px 28px", borderBottom:"1px solid "+C.border, display:"flex", alignItems:"center", justifyContent:"space-between", background:C.surface }}>
+      <header className="flex items-center justify-between border-b border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-7 py-4">
         <div>
-          <h1 style={{ fontSize:18, fontWeight:700, color:C.bright, margin:0, fontFamily:sans, letterSpacing:-0.2 }}>PackPulse</h1>
-          <span style={{ fontSize:13, color:C.dim }}>REV Copack</span>
+          <h1 className="m-0 text-lg font-bold tracking-[-0.2px] text-[rgb(var(--foreground))]" style={{ fontFamily:sans }}>PackPulse</h1>
+          <span className="text-sm text-[rgb(var(--muted))]">REV Copack</span>
         </div>
-        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-          {window.__ppUser && <span style={{ fontSize:13, color:C.dim }}>{window.__ppUser.email}</span>}
+        <div className="flex items-center gap-2.5">
+          {window.__ppUser && <span className="text-sm text-[rgb(var(--muted))]">{window.__ppUser.email}</span>}
           {window.__ppLogout && <Button onClick={window.__ppLogout} variant="outline" size="sm">Sign out</Button>}
           <Button onClick={() => setTheme(theme==="dark"?"light":"dark")} variant="outline" size="sm">
             {theme === "dark" ? "Light" : "Dark"}
@@ -256,7 +257,7 @@ export default function ProductionReadiness() {
       {(showDataSetup || (!ds.mappingConfirmed && !showAutoBootstrap)) && (<div>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2.5">
           <div className="text-xs text-[rgb(var(--muted))]">
-            Dashboard / <span style={{ color:C.bright, fontWeight:600 }}>Data Setup</span>
+            Dashboard / <span className="font-semibold text-[rgb(var(--foreground))]">Data Setup</span>
           </div>
           <Button onClick={goToDashboard} variant="outline" size="sm">
             Back to Dashboard
@@ -314,8 +315,8 @@ export default function ProductionReadiness() {
             {dockApiLoading ? "Loading OpenDock..." : "Fetch OpenDock from API"}
           </Button>
           <span className="text-xs text-[rgb(var(--muted))]">Uses secure Vercel server route (`/api/opendock/appointments`).</span>
-          {dockApiInfo && <span className="text-xs" style={{ color:C.ok }}>{dockApiInfo}</span>}
-          {dockApiError && <span className="text-xs" style={{ color:C.bad }}>OpenDock API error: {dockApiError}</span>}
+          {dockApiInfo && <span className="text-xs text-[rgb(var(--success))]">{dockApiInfo}</span>}
+          {dockApiError && <span className="text-xs text-[rgb(var(--danger))]">OpenDock API error: {dockApiError}</span>}
         </div>
         </>)}
         {ds.allUploaded && !ds.analyzing && (
@@ -324,70 +325,70 @@ export default function ProductionReadiness() {
           </Button>
         )}
         {ds.allUploaded && ds.analyzing && (
-          <div style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, padding:"32px 20px", marginBottom:20, textAlign:"center" }}>
-            <div style={{ display:"inline-block", width:28, height:28, border:"3px solid "+C.border, borderTopColor:C.accent, borderRadius:"50%", animation:"spin 0.8s linear infinite", marginBottom:12 }} />
-            <div style={{ fontSize:16, fontWeight:600, color:C.bright }}>Analyzing</div>
-            <div style={{ fontSize:14, color:C.dim, marginTop:4 }}>Mapping columns and processing data...</div>
+          <Card className="mb-5 px-5 py-8 text-center">
+            <div className="mb-3 inline-block h-7 w-7 animate-spin rounded-full border-2 border-[rgb(var(--border))] border-t-[rgb(var(--accent))]" />
+            <div className="text-base font-semibold text-[rgb(var(--foreground))]">Analyzing</div>
+            <div className="mt-1 text-sm text-[rgb(var(--muted))]">Mapping columns and processing data...</div>
             <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-          </div>
+          </Card>
         )}
 
         {(!showAutoBootstrap || showDataSetup) && <div className="mt-7 border-t border-[rgb(var(--border))] pt-6">
           <div className="mb-4 text-[15px] font-bold text-[rgb(var(--foreground))]">How PackPulse Works</div>
           <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4">
 
-            <div style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, padding:"16px 18px" }}>
-              <div style={{ fontSize:14, fontWeight:700, color:C.accent, marginBottom:6 }}>1. SKU Matching</div>
-              <div style={{ fontSize:13, color:C.dim, lineHeight:1.6 }}>
+            <Card className="px-[18px] py-4">
+              <div className="mb-1.5 text-sm font-bold text-[rgb(var(--accent))]">1. SKU Matching</div>
+              <div className="text-[13px] leading-[1.6] text-[rgb(var(--muted))]">
                 Each Work Order has a product SKU that PackPulse normalizes (lowercased, trimmed, special characters removed) and matches against your Inventory and BOM files. This means "114715", " 114715 ", and "114715.0" all match correctly.
               </div>
-            </div>
+            </Card>
 
-            <div style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, padding:"16px 18px" }}>
-              <div style={{ fontSize:14, fontWeight:700, color:C.accent, marginBottom:6 }}>2. Material Readiness</div>
-              <div style={{ fontSize:13, color:C.dim, lineHeight:1.6 }}>
-                When a BOM is loaded, PackPulse explodes each Work Order into its component materials. It compares <span style={{ color:C.bright }}>Qty Needed</span> (BOM qty per unit {"\u00D7"} order qty) against <span style={{ color:C.bright }}>On Hand</span> from Inventory. The lowest component fill rate becomes the WO's readiness %. <span style={{ color:C.bright }}>Can Make</span> shows the max units producible with current stock.
+            <Card className="px-[18px] py-4">
+              <div className="mb-1.5 text-sm font-bold text-[rgb(var(--accent))]">2. Material Readiness</div>
+              <div className="text-[13px] leading-[1.6] text-[rgb(var(--muted))]">
+                When a BOM is loaded, PackPulse explodes each Work Order into its component materials. It compares <span className="text-[rgb(var(--foreground))]">Qty Needed</span> (BOM qty per unit {"\u00D7"} order qty) against <span className="text-[rgb(var(--foreground))]">On Hand</span> from Inventory. The lowest component fill rate becomes the WO's readiness %. <span className="text-[rgb(var(--foreground))]">Can Make</span> shows the max units producible with current stock.
               </div>
-            </div>
+            </Card>
 
-            <div style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, padding:"16px 18px" }}>
-              <div style={{ fontSize:14, fontWeight:700, color:C.accent, marginBottom:6 }}>3. Substitutes & Alternates</div>
-              <div style={{ fontSize:13, color:C.dim, lineHeight:1.6 }}>
+            <Card className="px-[18px] py-4">
+              <div className="mb-1.5 text-sm font-bold text-[rgb(var(--accent))]">3. Substitutes & Alternates</div>
+              <div className="text-[13px] leading-[1.6] text-[rgb(var(--muted))]">
                 BOMs can include substitute components. PackPulse groups primary and alternate materials together and pools their inventory {"\u2014"} if the primary is short but an approved alternate has stock, the combined quantity is used for readiness calculations.
               </div>
-            </div>
+            </Card>
 
-            <div style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, padding:"16px 18px" }}>
-              <div style={{ fontSize:14, fontWeight:700, color:C.accent, marginBottom:6 }}>4. Production Progress</div>
-              <div style={{ fontSize:13, color:C.dim, lineHeight:1.6 }}>
-                Work Order fields like <span style={{ color:C.bright }}>Units Produced</span>, <span style={{ color:C.bright }}>Units Remaining</span>, and <span style={{ color:C.bright }}>Standard Units/Hour</span> power the completion % and estimated run hours. Past-due detection compares due dates against today's date for WOs with remaining units.
+            <Card className="px-[18px] py-4">
+              <div className="mb-1.5 text-sm font-bold text-[rgb(var(--accent))]">4. Production Progress</div>
+              <div className="text-[13px] leading-[1.6] text-[rgb(var(--muted))]">
+                Work Order fields like <span className="text-[rgb(var(--foreground))]">Units Produced</span>, <span className="text-[rgb(var(--foreground))]">Units Remaining</span>, and <span className="text-[rgb(var(--foreground))]">Standard Units/Hour</span> power the completion % and estimated run hours. Past-due detection compares due dates against today's date for WOs with remaining units.
               </div>
-            </div>
+            </Card>
 
-            <div style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, padding:"16px 18px" }}>
-              <div style={{ fontSize:14, fontWeight:700, color:C.accent, marginBottom:6 }}>5. Column Auto-Detection</div>
-              <div style={{ fontSize:13, color:C.dim, lineHeight:1.6 }}>
-                PackPulse scans your column headers against known patterns (e.g., "Item Code" {"\u2192"} SKU, "Qty On Hand" {"\u2192"} stock level). If a column doesn't map correctly, use the <span style={{ color:C.bright }}>Settings</span> panel after analysis to manually adjust any field mapping.
+            <Card className="px-[18px] py-4">
+              <div className="mb-1.5 text-sm font-bold text-[rgb(var(--accent))]">5. Column Auto-Detection</div>
+              <div className="text-[13px] leading-[1.6] text-[rgb(var(--muted))]">
+                PackPulse scans your column headers against known patterns (e.g., "Item Code" {"\u2192"} SKU, "Qty On Hand" {"\u2192"} stock level). If a column doesn't map correctly, use the <span className="text-[rgb(var(--foreground))]">Settings</span> panel after analysis to manually adjust any field mapping.
               </div>
-            </div>
+            </Card>
 
-            <div style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, padding:"16px 18px" }}>
-              <div style={{ fontSize:14, fontWeight:700, color:C.accent, marginBottom:6 }}>6. Optional Data Sources</div>
-              <div style={{ fontSize:13, color:C.dim, lineHeight:1.6 }}>
-                <span style={{ color:C.bright }}>BOM</span> {"\u2014"} enables component-level readiness (saved between sessions). <span style={{ color:C.bright }}>EDR</span> {"\u2014"} inbound delivery data for the Delivery Timeline. <span style={{ color:C.bright }}>OpenDock</span> {"\u2014"} dock appointment statuses.
+            <Card className="px-[18px] py-4">
+              <div className="mb-1.5 text-sm font-bold text-[rgb(var(--accent))]">6. Optional Data Sources</div>
+              <div className="text-[13px] leading-[1.6] text-[rgb(var(--muted))]">
+                <span className="text-[rgb(var(--foreground))]">BOM</span> {"\u2014"} enables component-level readiness (saved between sessions). <span className="text-[rgb(var(--foreground))]">EDR</span> {"\u2014"} inbound delivery data for the Delivery Timeline. <span className="text-[rgb(var(--foreground))]">OpenDock</span> {"\u2014"} dock appointment statuses.
               </div>
-            </div>
+            </Card>
 
           </div>
         </div>}
       </div>)}
 
       <div id="dashboard-main">
-        <input ref={ds.invRefreshRef} type="file" accept=".csv" style={{display:"none"}} onChange={e => {ds.handleRefreshFile("inv",e.target.files[0]);e.target.value="";}} />
-        <input ref={ds.bomRefreshRef} type="file" accept=".csv,.xlsx,.xls" style={{display:"none"}} onChange={e => {ds.handleRefreshFile("bom",e.target.files[0]);e.target.value="";}} />
-        <input ref={ds.woRefreshRef} type="file" accept=".csv" style={{display:"none"}} onChange={e => {ds.handleRefreshFile("wo",e.target.files[0]);e.target.value="";}} />
-        <input ref={ds.edrRefreshRef} type="file" accept=".xlsx,.xls,.csv" style={{display:"none"}} onChange={e => {ds.handleRefreshFile("edr",e.target.files[0]);e.target.value="";}} />
-        <input ref={ds.dockRefreshRef} type="file" accept=".xlsx,.xls,.csv" style={{display:"none"}} onChange={e => {ds.handleRefreshFile("dock",e.target.files[0]);e.target.value="";}} />
+        <input ref={ds.invRefreshRef} type="file" accept=".csv" className="hidden" onChange={e => {ds.handleRefreshFile("inv",e.target.files[0]);e.target.value="";}} />
+        <input ref={ds.bomRefreshRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={e => {ds.handleRefreshFile("bom",e.target.files[0]);e.target.value="";}} />
+        <input ref={ds.woRefreshRef} type="file" accept=".csv" className="hidden" onChange={e => {ds.handleRefreshFile("wo",e.target.files[0]);e.target.value="";}} />
+        <input ref={ds.edrRefreshRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e => {ds.handleRefreshFile("edr",e.target.files[0]);e.target.value="";}} />
+        <input ref={ds.dockRefreshRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e => {ds.handleRefreshFile("dock",e.target.files[0]);e.target.value="";}} />
 
         {showSyncBanner ? (
           <div className="mb-2.5 flex flex-wrap items-center gap-2 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2.5 py-2">
@@ -452,22 +453,22 @@ export default function ProductionReadiness() {
             </div>
           </div>
         )}
-        {dockApiError && <div style={{ fontSize:12, color:C.bad, marginTop:-8, marginBottom:10 }}>OpenDock API error: {dockApiError}</div>}
+        {dockApiError && <div className="-mt-2 mb-2.5 text-xs text-[rgb(var(--danger))]">OpenDock API error: {dockApiError}</div>}
 
         {showSettings && (
-          <div style={{ position:"fixed", top:0, left:0, right:0, bottom:0, background:"rgba(0,0,0,0.5)", zIndex:100, display:"flex", alignItems:"center", justifyContent:"center" }} onClick={e => { if (e.target === e.currentTarget) setShowSettings(false); }}>
-            <div style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:10, padding:24, width:"90%", maxWidth:720, maxHeight:"80vh", overflowY:"auto" }}>
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50" onClick={e => { if (e.target === e.currentTarget) setShowSettings(false); }}>
+            <div className="max-h-[80vh] w-[90%] max-w-[720px] overflow-y-auto rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-6">
+              <div className="mb-4 flex items-center justify-between">
                 <div>
-                  <div style={{ fontSize:16, fontWeight:600, color:C.bright }}>Column Mapping</div>
-                  <div style={{ fontSize:14, color:C.dim, marginTop:2 }}>Adjust how your file columns map to the analysis engine. <span style={{color:C.bad}}>*</span> = required</div>
+                  <div className="text-base font-semibold text-[rgb(var(--foreground))]">Column Mapping</div>
+                  <div className="mt-0.5 text-sm text-[rgb(var(--muted))]">Adjust how your file columns map to the analysis engine. <span className="text-[rgb(var(--danger))]">*</span> = required</div>
                 </div>
                 <Button onClick={() => setShowSettings(false)} variant="outline" size="sm">{"\u2715"}</Button>
               </div>
               <ColumnMapper title="Inventory" headers={ds.invHeaders} mapping={ds.invMapping} onMappingChange={ds.setInvMapping} fields={[{key:"sku",label:"Item / SKU",required:true},{key:"description",label:"Description"},{key:"qtyOnHand",label:"Qty On Hand",required:true},{key:"status",label:"Inventory Status",help:"If mapped, PackPulse uses only rows marked Good."}]} />
               {ds.boms && <ColumnMapper title="Bill of Materials" headers={ds.bomHeaders} mapping={ds.bomMapping} onMappingChange={ds.setBomMapping} fields={[{key:"bomId",label:"Finished Good",required:true},{key:"componentSku",label:"Component SKU",required:true},{key:"description",label:"Description (optional)",help:"Used for component naming in details. If blank, PackPulse falls back to Item Master / Inventory descriptions."},{key:"qtyPer",label:"Qty Per",required:true},{key:"substituteFor",label:"Substitute For"},{key:"priority",label:"Priority"}]} />}
               <ColumnMapper title="Work Orders" headers={ds.woHeaders} mapping={ds.woMapping} onMappingChange={ds.setWoMapping} fields={[{key:"woNumber",label:"WO Number",required:true},{key:"productSku",label:"Product SKU",required:true},{key:"qtyToProduce",label:"Qty to Produce",required:true},{key:"dueDate",label:"Due Date"},{key:"status",label:"Status"},{key:"customer",label:"Customer"},{key:"unitsProduced",label:"Units Produced"},{key:"unitsRemaining",label:"Units Remaining"},{key:"unitsPerHour",label:"Units/Hour"},{key:"standardPeople",label:"Crew Size"},{key:"plannedStart",label:"Planned Start"},{key:"plannedEnd",label:"Planned End"},{key:"reference1",label:"Reference / Notes"}]} />
-              <div style={{ display:"flex", justifyContent:"flex-end", marginTop:16 }}>
+              <div className="mt-4 flex justify-end">
                 <Button onClick={() => setShowSettings(false)} variant="default" size="default">Done</Button>
               </div>
             </div>
@@ -481,7 +482,7 @@ export default function ProductionReadiness() {
             .concat([{key:"timeline",label:"Deliveries",count:timelineData ? timelineData.totalDeliveries : 0,alert:false},{key:"sandbox",label:"Sandbox",count:null,alert:false}])}
         />
 
-        <Suspense fallback={<div style={{ fontSize:13, color:C.dim, padding:"8px 0 4px" }}>Loading view...</div>}>
+        <Suspense fallback={<div className="px-0 py-2 text-sm text-[rgb(var(--muted))]">Loading view...</div>}>
           {activeView === "overview" && <OverviewView analysis={analysisForUI} woStatuses={woStatusesForUI} onSelectCustomer={openWorkOrdersForCustomer} />}
           {activeView === "workorders" && <WorkOrdersView analysis={analysisForUI} woStatuses={woStatusesForUI} woCustomers={woCustomersForUI} recommendations={recommendationsForUI} dispatchQueue={dispatchQueue || []} prefilterCustomer={workOrdersPrefilterCustomer} prefilterNonce={workOrdersPrefilterNonce} />}
           {activeView === "criticalitems" && <CriticalItemsView rawCriticalItems={criticalItemsForUI} inboundCoverage={inboundCoverage} />}

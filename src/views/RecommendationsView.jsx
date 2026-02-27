@@ -4,6 +4,7 @@ import { useStyles } from "../hooks/useStyles";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Badge } from "../components/ui/badge";
+import TableShell from "../components/ui/table-shell";
 
 export default function RecommendationsView({ recommendations, onOpenRecommendation }) {
   const { C } = useTheme();
@@ -70,7 +71,7 @@ export default function RecommendationsView({ recommendations, onOpenRecommendat
         <Badge variant="secondary">{rows.length} recommendations</Badge>
       </div>
 
-      <div style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, overflow:"hidden" }}>
+      <TableShell>
         <div style={{ overflowX:"auto" }}>
           <table style={{ width:"100%", borderCollapse:"collapse" }}>
             <thead>
@@ -113,7 +114,7 @@ export default function RecommendationsView({ recommendations, onOpenRecommendat
             </tbody>
           </table>
         </div>
-      </div>
+      </TableShell>
     </div>
   );
 }

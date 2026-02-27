@@ -5,6 +5,8 @@ import { formatDescriptionForDisplay } from "../utils";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Badge } from "../components/ui/badge";
+import { Card } from "../components/ui/card";
+import TableShell from "../components/ui/table-shell";
 
 function fmtDateShort(v) {
   if (!v) return "--";
@@ -31,12 +33,12 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
 
   if (!timelineData || !deliveriesV2) {
     return (
-      <div style={{ background: C.surface, border: "1px solid " + C.border, borderRadius: 8, padding: "20px 18px" }}>
+      <Card className="px-[18px] py-5">
         <div style={{ fontSize: 16, fontWeight: 700, color: C.bright, marginBottom: 6 }}>Deliveries</div>
         <div style={{ fontSize: 13, color: C.dim, lineHeight: 1.5 }}>
           No delivery data loaded yet. Sync OpenDock to see scheduled inbounds.
         </div>
-      </div>
+      </Card>
     );
   }
 
@@ -129,7 +131,7 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
         })}
       </div>
 
-      <div style={{ background: C.surface, border: "1px solid " + C.border, borderRadius: 8, overflow: "hidden" }}>
+      <TableShell>
         <div className="flex flex-wrap items-center gap-1.5 border-b border-[rgb(var(--border))] px-3 py-2.5">
           <div style={{ fontSize: 14, fontWeight: 700, color: C.bright, marginRight: 8 }}>Loads (OpenDock-first)</div>
           <Input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search PO, confirmation, material..." className="h-10 w-72 text-sm" />
@@ -209,7 +211,7 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
             </tbody>
           </table>
         </div>
-      </div>
+      </TableShell>
     </div>
   );
 }
