@@ -3,8 +3,8 @@ import { createContext, useContext, useState } from "react";
 const FONTS_CSS = "";
 const A11Y_CSS = `
   :focus-visible {
-    outline: 2px solid #3b82f6 !important;
-    outline-offset: 2px;
+    outline: none !important;
+    box-shadow: 0 0 0 2px #3b82f6 !important;
   }
   @media (prefers-reduced-motion: reduce) {
     *,
