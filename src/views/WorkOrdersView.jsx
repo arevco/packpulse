@@ -45,6 +45,61 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
   const [sortField, setSortField] = useState("readiness");
   const [sortDir, setSortDir] = useState("desc");
   const [expandedWOs, setExpandedWOs] = useState({});
+  const styles = {
+    noRows: { padding: 36, textAlign: "center", color: C.dim, fontSize: 14 },
+    row: function(isExpanded) { return { cursor: "pointer", borderBottom: "1px solid " + C.border, background: isExpanded ? C.raised : "transparent" }; },
+    textDim: { color: C.dim },
+    rankTag: { color: C.accent, fontWeight: 700 },
+    dispatchLine: { fontSize: 13, color: C.dim, marginBottom: 8 },
+    dispatchRank: { fontWeight: 700, color: C.accent },
+    dispatchScore: { fontFamily: mono, color: C.bright },
+    dispatchAction: { color: C.bright },
+    notesRow: { fontSize: 13, color: C.text, marginBottom: 8 },
+    notesLabel: { fontSize: 12, fontWeight: 600, color: C.dim, letterSpacing: 0.1, marginRight: 6 },
+    schedRow: { fontSize: 13, color: C.dim, marginBottom: 8, display: "flex", gap: 16, flexWrap: "wrap" },
+    schedValue: { color: C.bright, fontFamily: mono },
+    opsRow: { fontSize: 13, color: C.dim, marginBottom: 8, display: "flex", gap: 16 },
+    opsValue: { fontWeight: 600, color: C.bright },
+    bomTitle: { fontSize: 12, fontWeight: 600, color: C.accent, marginBottom: 6, marginTop: 4, letterSpacing: 0.1 },
+    bomTable: { width: "100%", borderCollapse: "collapse" },
+    bomSubRow: function(hasSubs) { return { borderBottom: hasSubs ? "none" : "1px solid " + C.border }; },
+    altTag: { fontSize: 13, color: C.accent, marginLeft: 3 },
+    pressure: { marginTop: 4, fontSize: 11, color: C.dim },
+    pressureStrong: { color: C.bright, fontWeight: 700 },
+    pressureMono: { color: C.bright, fontFamily: mono },
+    subWrap: { padding: "0 8px 6px 20px", borderBottom: "1px solid " + C.border },
+    subList: { display: "flex", gap: 10, flexWrap: "wrap" },
+    subItem: { fontSize: 12, fontFamily: mono, color: C.dim },
+    detailCell: { padding: "0 12px 14px 36px", background: C.raised },
+    spacer: { flex: 1 },
+    summaryWrap: { marginBottom: 10, display: "flex", flexDirection: "column", gap: 8 },
+    summaryLine: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" },
+    gapChip: { display: "inline-flex", alignItems: "center", gap: 8, padding: "4px 10px", borderRadius: 999, border: "1px solid " + C.border, background: C.surface, fontSize: 13, color: C.dim },
+    gapLabel: { fontWeight: 700 },
+    gapValue: { color: C.bad, fontWeight: 700 },
+    woStatusLabel: { fontSize: 12, color: C.dim, fontWeight: 700, letterSpacing: 0.2 },
+    woStatusChip: function(active) {
+      return {
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "3px 9px",
+        borderRadius: 999,
+        border: "1px solid " + (active ? C.accentLine : C.border),
+        background: active ? C.accentSoft : C.surface,
+        fontSize: 12,
+        color: active ? C.accent : C.dim,
+      };
+    },
+    chipStrong: { fontWeight: 700 },
+    chipSep: { opacity: 0.65 },
+    packMixLine: { display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" },
+    tableWrap: { overflowX: "auto" },
+    table: { width: "100%", borderCollapse: "collapse" },
+    tableHead: { background: C.raised },
+    tableExpanderHead: { width: 24, padding: "0 8px", borderBottom: "1px solid " + C.border },
+    footer: { marginTop: 8, fontSize: 13, color: C.dim },
+  };
 
   var runStatusMeta = function(s) {
     if (s === "ready") return { label:"RDY", variant:"success" };
@@ -498,7 +553,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
   };
 
   var renderWORows = () => {
-    if (filteredResults.length === 0) return <tr><td colSpan={19} style={{ padding:36, textAlign:"center", color:C.dim, fontSize:14 }}>No work orders match filters.</td></tr>;
+    if (filteredResults.length === 0) return <tr><td colSpan={19} style={styles.noRows}>No work orders match filters.</td></tr>;
     var out = [];
     filteredResults.forEach((wo, idx) => {
       var rowKey = wo.woNum + "|" + idx;
@@ -514,7 +569,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
             else next[rowKey] = true;
             return next;
           });
-        }} style={{ cursor:"pointer", borderBottom:"1px solid "+C.border, background:isX?C.raised:"transparent" }}
+        }} style={styles.row(isX)}
           onMouseEnter={e => { if (!isX) e.currentTarget.style.background = C.hover; }} onMouseLeave={e => { if (!isX) e.currentTarget.style.background = isX ? C.raised : "transparent"; }}>
           <td style={tdToggle}>{isX ? "\u25BE" : "\u25B8"}</td>
           <td style={Object.assign({}, tdM, { fontWeight:600, color:C.bright })}>{wo.woNum}</td>
@@ -530,7 +585,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
           <td style={Object.assign({}, tdM, { color:wo.unitsProduced>0?C.ok:C.dim })}>{wo.unitsProduced>0?wo.unitsProduced.toLocaleString():"--"}</td>
           <td style={Object.assign({}, tdM, { color:C.bright })}>{wo.unitsRemaining.toLocaleString()}</td>
           <td style={Object.assign({}, tdM, { fontWeight:600, color:wo.prodPct>=100?C.ok:wo.prodPct>=50?C.warn:wo.prodPct>0?C.accent:C.dim })}>{wo.prodPct > 0 ? wo.prodPct+"%" : "--"}</td>
-          <td style={Object.assign({}, tdM, { fontWeight:600, color:wo.readiness>=100?C.ok:wo.readiness>=70?C.warn:C.bad })}>{wo.readiness < 0 ? <span style={{color:C.dim}}>--</span> : Math.round(wo.readiness)+"%"}</td>
+          <td style={Object.assign({}, tdM, { fontWeight:600, color:wo.readiness>=100?C.ok:wo.readiness>=70?C.warn:C.bad })}>{wo.readiness < 0 ? <span style={styles.textDim}>--</span> : Math.round(wo.readiness)+"%"}</td>
           <td style={Object.assign({}, tdM, { fontWeight:600, color:wo.runStatus==="ready"?C.ok:wo.runStatus==="nobom"?C.dim:wo.maxRunnable>0?C.warn:C.bad })}>{wo.runStatus==="nobom" ? "--" : wo.maxRunnable.toLocaleString()}</td>
           <td style={Object.assign({}, tdM, { fontWeight:600, color:commitment.committedCanMake>0?C.accent:C.dim })}>
             {wo.runStatus==="nobom" ? "--" : commitment.committedCanMake.toLocaleString()}
@@ -539,13 +594,13 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
             {(commitment.commitmentGap > 0) ? (
               <Badge title={"Shared material demand across active work orders. Order: earliest due date, then WO #. Make: " + wo.maxRunnable.toLocaleString() + " | Net: " + commitment.committedCanMake.toLocaleString() + " | Gap: " + commitment.commitmentGap.toLocaleString()} variant="danger">Shared</Badge>
             ) : (
-              <span style={{ color:C.dim }}>--</span>
+              <span style={styles.textDim}>--</span>
             )}
           </td>
           <td style={Object.assign({}, tdM, { color:wo.estHours>0?C.bright:C.dim })}>{wo.estHours > 0 ? wo.estHours+"h" : "--"}</td>
           <td style={Object.assign({}, tdN, { color:runMeta ? C.bright : C.dim, whiteSpace:"nowrap" })}>
             {runMeta ? (
-              <span title={(runMeta.action || "Run Next") + (runMeta.why ? " • " + runMeta.why : "")} style={{ color:C.accent, fontWeight:700 }}>#{runMeta.rank}</span>
+              <span title={(runMeta.action || "Run Next") + (runMeta.why ? " • " + runMeta.why : "")} style={styles.rankTag}>#{runMeta.rank}</span>
             ) : "--"}
           </td>
           <td style={Object.assign({}, tdM, { color:runMeta ? C.bright : C.dim, fontFamily:mono, fontWeight:runMeta ? 700 : 500 })}>
@@ -556,29 +611,29 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       if (isX) {
         var details = [];
         if (runMeta) details.push(
-          <div key="dispatch" style={{ fontSize:13, color:C.dim, marginBottom:8 }}>
-            <span style={{ fontWeight:700, color:C.accent }}>Run Next #{runMeta.rank}</span>{" \u2022 "}
-            <span style={{ fontFamily:mono, color:C.bright }}>Score {runMeta.score}</span>{" \u2022 "}
-            <span style={{ color:C.bright }}>{runMeta.action || "Run Next"}</span>
+          <div key="dispatch" style={styles.dispatchLine}>
+            <span style={styles.dispatchRank}>Run Next #{runMeta.rank}</span>{" \u2022 "}
+            <span style={styles.dispatchScore}>Score {runMeta.score}</span>{" \u2022 "}
+            <span style={styles.dispatchAction}>{runMeta.action || "Run Next"}</span>
             {runMeta.why ? <span>{" \u2022 " + runMeta.why.replace(/^WO\s+\S+\s+\u2022\s*/i, "")}</span> : null}
           </div>
         );
-        if (wo.reference1) details.push(<div key="ref" style={{ fontSize:13, color:C.text, marginBottom:8 }}><span style={{ fontSize:12, fontWeight:600, color:C.dim, letterSpacing:0.1, marginRight:6 }}>Notes</span>{wo.reference1}</div>);
+        if (wo.reference1) details.push(<div key="ref" style={styles.notesRow}><span style={styles.notesLabel}>Notes</span>{wo.reference1}</div>);
         if (wo.plannedStart || wo.plannedEnd) details.push(
-          <div key="sched" style={{ fontSize:13, color:C.dim, marginBottom:8, display:"flex", gap:16, flexWrap:"wrap" }}>
-            <span>Start: <span style={{ color:C.bright, fontFamily:mono }}>{fmtDate(wo.plannedStart)}</span></span>
-            <span>End: <span style={{ color:C.bright, fontFamily:mono }}>{fmtDate(wo.plannedEnd)}</span></span>
+          <div key="sched" style={styles.schedRow}>
+            <span>Start: <span style={styles.schedValue}>{fmtDate(wo.plannedStart)}</span></span>
+            <span>End: <span style={styles.schedValue}>{fmtDate(wo.plannedEnd)}</span></span>
           </div>
         );
-        if (wo.unitsPerHour > 0 || wo.standardPeople > 0) details.push(<div key="ops" style={{ fontSize:13, color:C.dim, marginBottom:8, display:"flex", gap:16 }}>
-          {wo.unitsPerHour > 0 && <span><span style={{ fontWeight:600, color:C.bright }}>{wo.unitsPerHour}</span> units/hr</span>}
-          {wo.standardPeople > 0 && <span><span style={{ fontWeight:600, color:C.bright }}>{wo.standardPeople}</span> crew</span>}
+        if (wo.unitsPerHour > 0 || wo.standardPeople > 0) details.push(<div key="ops" style={styles.opsRow}>
+          {wo.unitsPerHour > 0 && <span><span style={styles.opsValue}>{wo.unitsPerHour}</span> units/hr</span>}
+          {wo.standardPeople > 0 && <span><span style={styles.opsValue}>{wo.standardPeople}</span> crew</span>}
           {wo.prodPct > 0 && <span><span style={{ fontWeight:600, color:wo.prodPct>=100?C.ok:C.accent }}>{wo.prodPct}%</span> complete</span>}
         </div>);
         if (wo.components.length > 0) details.push(
           <div key="bom">
-            <div style={{ fontSize:12, fontWeight:600, color:C.accent, marginBottom:6, marginTop:4, letterSpacing:0.1 }}>BOM - {wo.components.length} components</div>
-            <table style={{ width:"100%", borderCollapse:"collapse" }}>
+            <div style={styles.bomTitle}>BOM - {wo.components.length} components</div>
+            <table style={styles.bomTable}>
               <thead><tr>
                 {["Component","Description","Qty/Unit","Needed","On Hand","Short","Fill %"].map(h => <th key={h} style={thDS}>{h}</th>)}
               </tr></thead>
@@ -591,21 +646,21 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
                   var hasCompPressure = !!(compPressure && compPressure.usedByWOs > 1);
                   var isNetLimiter = !!(hasCompPressure && compPressure.turnMakeUnits === commitment.committedCanMake && commitment.commitmentGap > 0);
                   rows.push(
-                    <tr key={"c"+ci} style={{ borderBottom:comp.hasSubs?"none":"1px solid "+C.border }}>
+                    <tr key={"c"+ci} style={styles.bomSubRow(comp.hasSubs)}>
                       <td style={Object.assign({}, tdDM, { color:C.bright })}>
                         {comp.sku}
-                        {comp.hasSubs && <span style={{ fontSize:13, color:C.accent, marginLeft:3 }}>+alt</span>}
+                        {comp.hasSubs && <span style={styles.altTag}>+alt</span>}
                         {(sharedComponentUsage[normalizeStr(comp.sku || "")] || 0) > 1 && (
                           <Badge title={"Shared component: used in " + sharedComponentUsage[normalizeStr(comp.sku || "")] + " active work orders"} variant="danger" className="ml-1.5 px-1.5 py-0 text-[10px]">
                             Shared
                           </Badge>
                         )}
                         {hasCompPressure && (
-                          <div style={{ marginTop:4, fontSize:11, color:C.dim }}>
-                            Shared by <span style={{ color:C.bright, fontWeight:700 }}>{compPressure.usedByWOs}</span> WOs
-                            {" \u2022 "}Allocated before this WO: <span style={{ color:C.bright, fontFamily:mono }}>{fmtQty(compPressure.consumedBefore)}</span>
-                            {" \u2022 "}Available now: <span style={{ color:C.bright, fontFamily:mono }}>{fmtQty(compPressure.availableAtTurn)}</span>
-                            {" \u2022 "}Supports up to <span style={{ color:C.bright, fontFamily:mono }}>{fmtQty(compPressure.turnMakeUnits)}</span> WO units
+                          <div style={styles.pressure}>
+                            Shared by <span style={styles.pressureStrong}>{compPressure.usedByWOs}</span> WOs
+                            {" \u2022 "}Allocated before this WO: <span style={styles.pressureMono}>{fmtQty(compPressure.consumedBefore)}</span>
+                            {" \u2022 "}Available now: <span style={styles.pressureMono}>{fmtQty(compPressure.availableAtTurn)}</span>
+                            {" \u2022 "}Supports up to <span style={styles.pressureMono}>{fmtQty(compPressure.turnMakeUnits)}</span> WO units
                             {isNetLimiter && (
                               <Badge variant="danger" className="ml-1.5 px-1.5 py-0 text-[10px]">Net limiter</Badge>
                             )}
@@ -622,9 +677,9 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
                   );
                   if (comp.hasSubs && comp.optionDetails) {
                     rows.push(
-                      <tr key={"s"+ci}><td colSpan={7} style={{ padding:"0 8px 6px 20px", borderBottom:"1px solid "+C.border }}>
-                        <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
-                          {comp.optionDetails.map((opt, oi) => <span key={oi} style={{ fontSize:12, fontFamily:mono, color:C.dim }}>
+                      <tr key={"s"+ci}><td colSpan={7} style={styles.subWrap}>
+                        <div style={styles.subList}>
+                          {comp.optionDetails.map((opt, oi) => <span key={oi} style={styles.subItem}>
                             <span style={{ color:opt.isSub?C.accent:C.ok, fontWeight:600, marginRight:2 }}>{opt.isSub ? "ALT" : "PRI"}</span>{opt.sku} = {opt.onHand.toLocaleString()}
                           </span>)}
                         </div>
@@ -638,7 +693,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
           </div>
         );
         out.push(
-          <tr key={"d"+idx}><td colSpan={19} style={{ padding:"0 12px 14px 36px", background:C.raised }}>
+          <tr key={"d"+idx}><td colSpan={19} style={styles.detailCell}>
             {details}
           </td></tr>
         );
@@ -684,28 +739,28 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
         </select>
       )}
       <Button onClick={function() { setFilterShared(function(v) { return !v; }); }} variant={filterShared ? "active" : "outline"} size="default">Shared</Button>
-      <div style={{ flex:1 }} />
+      <div style={styles.spacer} />
       <Button onClick={exportCSV} variant="outline" size="default">CSV</Button>
       <Button onClick={exportPDF} variant="outline" size="default">PDF</Button>
     </div>
     {commitmentSummary && (
-      <div style={{ marginBottom:10, display:"flex", flexDirection:"column", gap:8 }}>
-        <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
-          <span style={{ display:"inline-flex", alignItems:"center", gap:8, padding:"4px 10px", borderRadius:999, border:"1px solid "+C.border, background:C.surface, fontSize:13, color:C.dim }}>
-            <span style={{ fontWeight:700 }}>Gap</span>
-            <span style={{ color:C.bad, fontWeight:700 }}>{commitmentSummary.atRisk} WOs</span>
-            <span style={{ color:C.bad, fontWeight:700 }}>{fmtNum(commitmentSummary.reducedUnits)} units</span>
+      <div style={styles.summaryWrap}>
+        <div style={styles.summaryLine}>
+          <span style={styles.gapChip}>
+            <span style={styles.gapLabel}>Gap</span>
+            <span style={styles.gapValue}>{commitmentSummary.atRisk} WOs</span>
+            <span style={styles.gapValue}>{fmtNum(commitmentSummary.reducedUnits)} units</span>
           </span>
           {woStatusBreakdown.length > 0 && (
             <>
-              <span style={{ fontSize:12, color:C.dim, fontWeight:700, letterSpacing:0.2 }}>WO Status Qty</span>
+              <span style={styles.woStatusLabel}>WO Status Qty</span>
               {woStatusBreakdown.map(function(row) {
                 var active = filterWoStatus !== "all" && filterWoStatus === row.status;
                 return (
-                  <span key={row.status} style={{ display:"inline-flex", alignItems:"center", gap:6, padding:"3px 9px", borderRadius:999, border:"1px solid "+(active ? C.accentLine : C.border), background:active ? C.accentSoft : C.surface, fontSize:12, color:active ? C.accent : C.dim }}>
-                    <span style={{ fontWeight:700 }}>{row.status}</span>
+                  <span key={row.status} style={styles.woStatusChip(active)}>
+                    <span style={styles.chipStrong}>{row.status}</span>
                     <span style={{ color:active ? C.accent : C.text }}>{row.woCount}</span>
-                    <span style={{ opacity:0.65 }}>/</span>
+                    <span style={styles.chipSep}>/</span>
                     <span style={{ color:active ? C.accent : C.text }}>{fmtNum(row.qtyUnits)}</span>
                   </span>
                 );
@@ -715,8 +770,8 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
         </div>
 
         {packMixBreakdown.length > 0 && (
-          <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
-            <span style={{ fontSize:12, color:C.dim, fontWeight:700, letterSpacing:0.2 }}>Pack Mix (Remaining)</span>
+          <div style={styles.packMixLine}>
+            <span style={styles.woStatusLabel}>Pack Mix (Remaining)</span>
             <Button onClick={function() { setFilterPackType("all"); }} variant={filterPackType === "all" ? "active" : "outline"} size="sm" className="rounded-full">
               All Packs
             </Button>
@@ -724,7 +779,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
               var activePack = filterPackType === row.packType;
               return (
                 <Button key={row.packType} onClick={function() { setFilterPackType(function(curr) { return curr === row.packType ? "all" : row.packType; }); }} variant={activePack ? "active" : "outline"} size="sm" className="rounded-full">
-                  <span style={{ color:C.bright, fontWeight:700 }}>{row.packType}</span>
+                  <span style={styles.chipStrong}>{row.packType}</span>
                   <span style={{ color:C.text }}>{fmtNum(row.remainingUnits)}</span>
                 </Button>
               );
@@ -734,10 +789,10 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       </div>
     )}
     <TableShell>
-      <div style={{ overflowX:"auto" }}>
-        <table style={{ width:"100%", borderCollapse:"collapse" }}>
-          <thead><tr style={{ background:C.raised }}>
-            <th style={{ width:24, padding:"0 8px", borderBottom:"1px solid "+C.border }} />
+      <div style={styles.tableWrap}>
+        <table style={styles.table}>
+          <thead><tr style={styles.tableHead}>
+            <th style={styles.tableExpanderHead} />
             <SortTh field="woNum">WO#</SortTh>
             <SortTh field="product">Product</SortTh>
             <SortTh field="desc">Product Description</SortTh>
@@ -760,6 +815,6 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
         </table>
       </div>
     </TableShell>
-    <div style={{ marginTop:8, fontSize:13, color:C.dim }}>{filteredResults.length} of {analysis.results.length} work orders</div>
+    <div style={styles.footer}>{filteredResults.length} of {analysis.results.length} work orders</div>
   </div>);
 }

@@ -10,6 +10,27 @@ import SortHeaderButton from "../components/ui/sort-header-button";
 export default function CriticalItemsView({ rawCriticalItems, inboundCoverage }) {
   const { C } = useTheme();
   const { thC, tdN, tdM, tdToggle, thDS, tdDN, tdDM, truncate } = useStyles();
+  const styles = {
+    noRowsCell: { padding: 36, textAlign: "center", color: C.dim },
+    row: function(isOpen) { return { cursor: "pointer", borderBottom: "1px solid " + C.border, background: isOpen ? C.raised : "transparent" }; },
+    detailCell: { padding: "0 12px 14px 36px", background: C.raised },
+    detailMeta: { display: "flex", gap: 14, flexWrap: "wrap", marginTop: 10, marginBottom: 8, fontSize: 12 },
+    detailMetaLabel: { color: C.dim },
+    detailMetaValue: { color: C.bright, fontFamily: "monospace" },
+    detailSectionTitle: { fontSize: 12, fontWeight: 600, color: C.accent, marginBottom: 6, letterSpacing: 0.1 },
+    miniTable: { width: "100%", borderCollapse: "collapse" },
+    miniRow: { borderBottom: "1px solid " + C.border },
+    miniEmpty: { padding: "10px 8px", color: C.dim, fontSize: 12 },
+    summaryText: { fontSize: 13, color: C.dim },
+    fill: { flex: 1 },
+    tableWrap: { overflowX: "auto" },
+    table: { width: "100%", borderCollapse: "collapse" },
+    tableHead: { background: C.raised },
+    expanderHead: { width: 24, padding: "0 8px", borderBottom: "1px solid " + C.border },
+    footer: { marginTop: 8, fontSize: 13, color: C.dim },
+    statusLabel: { fontSize: 12, color: C.dim, fontWeight: 700, letterSpacing: 0.2 },
+    statusValue: function(color) { return { color: color, fontWeight: 600 }; },
+  };
 
   const [search, setSearch] = useState("");
   const [customerFilter, setCustomerFilter] = useState("all");
@@ -196,13 +217,13 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
   };
 
   var renderRows = function() {
-    if (!consolidatedItems.length) return <tr><td colSpan={12} style={{ padding:36, textAlign:"center", color:C.dim }}>No critical materials match current filters.</td></tr>;
+    if (!consolidatedItems.length) return <tr><td colSpan={12} style={styles.noRowsCell}>No critical materials match current filters.</td></tr>;
     var out = [];
     consolidatedItems.forEach(function(ci, idx) {
       var rowKey = "cm-" + idx;
       var isX = expanded === rowKey;
       out.push(
-        <tr key={rowKey} onClick={function() { setExpanded(isX ? null : rowKey); }} style={{ cursor:"pointer", borderBottom:"1px solid " + C.border, background:isX ? C.raised : "transparent" }}
+        <tr key={rowKey} onClick={function() { setExpanded(isX ? null : rowKey); }} style={styles.row(isX)}
           onMouseEnter={function(e) { if (!isX) e.currentTarget.style.background = C.hover; }} onMouseLeave={function(e) { if (!isX) e.currentTarget.style.background = isX ? C.raised : "transparent"; }}>
           <td style={tdToggle}>{isX ? "\u25BE" : "\u25B8"}</td>
           <td title={ci.sku} style={Object.assign({}, tdM, { fontWeight:600, color:C.bright }, truncate(140))}>{truncateItem(ci.sku)}</td>
@@ -220,19 +241,19 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
       );
       if (isX) {
         out.push(
-          <tr key={rowKey + "-detail"}><td colSpan={12} style={{ padding:"0 12px 14px 36px", background:C.raised }}>
-            <div style={{ display:"flex", gap:14, flexWrap:"wrap", marginTop:10, marginBottom:8, fontSize:12 }}>
-              <span style={{ color:C.dim }}>Earliest Inbound: <span style={{ color:C.bright, fontFamily:"monospace" }}>{fmtDate(ci.earliestInboundDate)}</span></span>
-              <span style={{ color:C.dim }}>Earliest Scheduled: <span style={{ color:C.bright, fontFamily:"monospace" }}>{fmtDate(ci.earliestScheduledDate)}</span></span>
-              <span style={{ color:C.dim }}>POs: <span style={{ color:C.bright }}>{(ci.openPOs || []).length ? ci.openPOs.join(", ") : "--"}</span></span>
-              <span style={{ color:C.dim }}>Unlocked Units: <span style={{ color:C.bright }}>{Math.round(ci.unlockedUnits || 0).toLocaleString()}</span></span>
+          <tr key={rowKey + "-detail"}><td colSpan={12} style={styles.detailCell}>
+            <div style={styles.detailMeta}>
+              <span style={styles.detailMetaLabel}>Earliest Inbound: <span style={styles.detailMetaValue}>{fmtDate(ci.earliestInboundDate)}</span></span>
+              <span style={styles.detailMetaLabel}>Earliest Scheduled: <span style={styles.detailMetaValue}>{fmtDate(ci.earliestScheduledDate)}</span></span>
+              <span style={styles.detailMetaLabel}>POs: <span style={styles.statusValue(C.bright)}>{(ci.openPOs || []).length ? ci.openPOs.join(", ") : "--"}</span></span>
+              <span style={styles.detailMetaLabel}>Unlocked Units: <span style={styles.statusValue(C.bright)}>{Math.round(ci.unlockedUnits || 0).toLocaleString()}</span></span>
             </div>
-            <div style={{ fontSize:12, fontWeight:600, color:C.accent, marginBottom:6, letterSpacing:0.1 }}>Affected Work Orders</div>
-            <table style={{ width:"100%", borderCollapse:"collapse" }}>
+            <div style={styles.detailSectionTitle}>Affected Work Orders</div>
+            <table style={styles.miniTable}>
               <thead><tr>{["WO#", "Product", "Customer", "WO Qty", "Needed", "Short", "Due"].map(function(h) { return <th key={h} style={thDS}>{h}</th>; })}</tr></thead>
               <tbody>
                 {(ci.affectedWOs || []).map(function(wo, wi) {
-                  return <tr key={wi} style={{ borderBottom:"1px solid " + C.border }}>
+                  return <tr key={wi} style={styles.miniRow}>
                     <td style={Object.assign({}, tdDM, { fontWeight:600, color:C.bright })}>{wo.woNum}</td>
                     <td style={tdDM}>{wo.productSku}</td>
                     <td style={Object.assign({}, tdDN, { color:C.dim })}>{wo.customer || "--"}</td>
@@ -243,7 +264,7 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
                   </tr>;
                 })}
                 {(!ci.affectedWOs || !ci.affectedWOs.length) && (
-                  <tr><td colSpan={7} style={{ padding:"10px 8px", color:C.dim, fontSize:12 }}>No linked work orders found.</td></tr>
+                  <tr><td colSpan={7} style={styles.miniEmpty}>No linked work orders found.</td></tr>
                 )}
               </tbody>
             </table>
@@ -270,8 +291,8 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
       {[{ key:"all", label:"All" }, { key:"missing", label:"Missing" }, { key:"unscheduled", label:"Unscheduled" }, { key:"partial", label:"Partial" }].map(function(f) {
         return <Button key={f.key} onClick={function() { setStatusFilter(function(curr) { return curr === f.key && f.key !== "all" ? "all" : f.key; }); }} variant={statusFilter === f.key ? "active" : "outline"} size="default">{f.label}</Button>;
       })}
-      <span style={{ fontSize:13, color:C.dim }}><span style={{ color:C.bad, fontWeight:600 }}>{summary.atRisk}</span> at risk | <span style={{ color:C.bad, fontWeight:600 }}>{Math.round(summary.uncovered).toLocaleString()}</span> uncovered units</span>
-      <div style={{ flex:1 }} />
+      <span style={styles.summaryText}><span style={styles.statusValue(C.bad)}>{summary.atRisk}</span> at risk | <span style={styles.statusValue(C.bad)}>{Math.round(summary.uncovered).toLocaleString()}</span> uncovered units</span>
+      <div style={styles.fill} />
       {hasActiveFilters && (
         <Button onClick={function() { setSearch(""); setCustomerFilter("all"); setStatusFilter("all"); }} variant="outline" size="default">Clear Filters</Button>
       )}
@@ -280,10 +301,10 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
     </div>
 
     <TableShell>
-      <div style={{ overflowX:"auto" }}>
-        <table style={{ width:"100%", borderCollapse:"collapse" }}>
-          <thead><tr style={{ background:C.raised }}>
-            <th style={{ width:24, padding:"0 8px", borderBottom:"1px solid " + C.border }} />
+      <div style={styles.tableWrap}>
+        <table style={styles.table}>
+          <thead><tr style={styles.tableHead}>
+            <th style={styles.expanderHead} />
             {[{ f:"sku", l:"Item" }, { f:"desc", l:"Description" }, { f:"customer", l:"Customer" }, { f:"onHand", l:"On Hand" }, { f:"shortQty", l:"Short" }, { f:"scheduledQty", l:"Scheduled" }, { f:"uncoveredQty", l:"Uncovered" }, { f:"coverage", l:"Coverage" }, { f:"risk", l:"Risk" }, { f:"action", l:"Action" }, { f:"dueDate", l:"Earliest Due" }].map(function(col) {
               return <th key={col.f} style={Object.assign({}, thC(sortField===col.f), { textAlign:col.f==="sku"||col.f==="desc"||col.f==="customer"||col.f==="risk"||col.f==="action"?"left":"right" })}><SortHeaderButton onClick={function() { handleSort(col.f); }} className={col.f==="sku"||col.f==="desc"||col.f==="customer"||col.f==="risk"||col.f==="action"?"text-left":"text-right"}>{col.l}{sortField===col.f ? (sortDir==="asc" ? " \u2191" : " \u2193") : ""}</SortHeaderButton></th>;
             })}
@@ -293,7 +314,7 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
       </div>
     </TableShell>
 
-    <div style={{ marginTop:8, fontSize:13, color:C.dim }}>
+    <div style={styles.footer}>
       {summary.total + " critical materials" + (inboundCoverage ? (" · horizon " + inboundCoverage.horizonDays + "d") : "")}
     </div>
   </div>);
