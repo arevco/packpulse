@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { useTheme } from "../theme";
 import { useStyles } from "../hooks/useStyles";
-import { fmtDate, triggerDownload, buildExportHTML, normalizeStr, formatDescriptionForDisplay } from "../utils";
+import { fmtDate, triggerDownload, buildExportHTML, normalizeStr, formatDescriptionForDisplay, detectPackType } from "../utils";
 
 function parseDateValue(value) {
   if (!value) return null;
@@ -451,6 +451,25 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     return Object.values(map).sort(function(a, b) { return b.qtyUnits - a.qtyUnits; });
   }, [analysis, filterStatus, filterCustomer, filterDueMonth, filterShared, filterRunNext, searchTerm, commitmentMap, sharedComponentUsage, runNextWoSet]);
 
+  var packMixBreakdown = useMemo(function() {
+    var byType = {};
+    filteredResults.forEach(function(w) {
+      var t = detectPackType(w.productDesc || w.productSkuRaw || "");
+      if (!byType[t]) byType[t] = { packType:t, woCount:0, remainingUnits:0, orderUnits:0 };
+      byType[t].woCount += 1;
+      byType[t].remainingUnits += Number(w.unitsRemaining || 0);
+      byType[t].orderUnits += Number(w.qtyToProduce || 0);
+    });
+    return Object.values(byType).sort(function(a, b) {
+      var an = parseInt(String(a.packType || "").replace(/\D/g, ""), 10);
+      var bn = parseInt(String(b.packType || "").replace(/\D/g, ""), 10);
+      var aNum = isNaN(an) ? Number.POSITIVE_INFINITY : an;
+      var bNum = isNaN(bn) ? Number.POSITIVE_INFINITY : bn;
+      if (aNum !== bNum) return aNum - bNum;
+      return b.remainingUnits - a.remainingUnits;
+    });
+  }, [filteredResults]);
+
   var exportCSV = () => { if (!analysis) return; var h = ["Work Order","Product SKU","Description","Customer","WO Status","Due Date","Planned Start","Planned End","Order Qty","Produced","Remaining","Complete %","Ready %","Can Make","Est Hours","Run Status","Reference"]; var rows = analysis.results.map(w => [w.woNum, w.productSkuRaw, '"'+(w.productDesc||"").replace(/"/g,'""')+'"', '"'+(w.customer||"")+'"', w.status||"", w.dueDate||"", w.plannedStart||"", w.plannedEnd||"", w.qtyToProduce, w.unitsProduced, w.unitsRemaining, w.prodPct, w.readiness<0?"N/A":Math.round(w.readiness), w.maxRunnable, w.estHours||"", w.runStatus, '"'+(w.reference1||"").replace(/"/g,'""')+'"']); triggerDownload([h.join(",")].concat(rows.map(r => r.join(","))).join("\n"), "packpulse_" + new Date().toISOString().slice(0,10) + ".csv", "text/csv"); };
   var exportPDF = () => { if (!analysis) return; var th = ["WO#","Product","Customer","Qty","Produced","Remaining","Complete","Ready","Est Hrs","Status","Due"].map(h => "<th>"+h+"</th>").join(""); var tb = analysis.results.map(w => "<tr><td>"+w.woNum+"</td><td>"+w.productSkuRaw+"</td><td>"+(w.customer||"--")+"</td><td>"+w.qtyToProduce.toLocaleString()+"</td><td>"+w.unitsProduced.toLocaleString()+"</td><td>"+w.unitsRemaining.toLocaleString()+"</td><td>"+w.prodPct+"%</td><td>"+(w.readiness<0?"N/A":Math.round(w.readiness)+"%")+'</td><td>'+(w.estHours||"--")+'</td><td class="'+w.runStatus+'">'+w.runStatus+"</td><td>"+fmtDate(w.dueDate)+"</td></tr>").join(""); triggerDownload(buildExportHTML("PackPulse Report", th, tb), "packpulse_" + new Date().toISOString().slice(0,10) + ".html", "text/html"); };
 
@@ -668,6 +687,19 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
                   <span style={{ color:active ? C.accent : C.text }}>{row.woCount}</span>{" "}
                   <span style={{ opacity:0.8 }}>/</span>{" "}
                   <span style={{ color:active ? C.accent : C.text }}>{row.qtyUnits.toLocaleString()}</span>
+                </span>
+              );
+            })}
+          </span>
+        )}
+        {packMixBreakdown.length > 0 && (
+          <span>
+            {" "} | Pack Mix (Remaining):{" "}
+            {packMixBreakdown.map(function(row) {
+              return (
+                <span key={row.packType} style={{ marginRight:10 }}>
+                  <span style={{ color:C.bright, fontWeight:700 }}>{row.packType}</span>{" "}
+                  <span style={{ color:C.text }}>{row.remainingUnits.toLocaleString()}</span>
                 </span>
               );
             })}

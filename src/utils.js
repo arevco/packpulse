@@ -29,6 +29,26 @@ export function formatDescriptionForDisplay(value) {
 
   return compact.split(" ").map(formatToken).join(" ");
 }
+export function detectPackType(value) {
+  var raw = String(value || "").toUpperCase();
+  if (!raw) return "Other";
+  var cleaned = raw.replace(/\s+/g, " ").trim();
+
+  // Explicit pack tokens: "12PK", "12 PK", "12 PACK"
+  var m = cleaned.match(/\b(\d{1,2})\s*(?:PK|PACK)\b/);
+  if (m) return m[1] + "PK";
+
+  // Case pack formats: "2/12 PACK" -> 12PK
+  m = cleaned.match(/\b\d{1,2}\s*\/\s*(\d{1,2})\s*(?:PK|PACK)\b/);
+  if (m) return m[1] + "PK";
+
+  // Size shorthand often used in beverage SKUs: "24/16OZ", "15/16 OZ", "18/12OZ"
+  // First number typically represents can count per case/pack.
+  m = cleaned.match(/\b(\d{1,2})\s*\/\s*\d{1,3}(?:\.\d+)?\s*(?:OZ|ML|L)\b/);
+  if (m) return m[1] + "PK";
+
+  return "Other";
+}
 export function autoMapColumns(headers, patterns) {
   const map = {}; const normed = headers.map(h => ({ orig:h, norm:normalizeStr(h) }));
   Object.entries(patterns).forEach(([field, cands]) => { for (const c of cands) { const m = normed.find(h => h.norm.includes(c.toLowerCase())); if (m) { map[field] = m.orig; break; } } });
