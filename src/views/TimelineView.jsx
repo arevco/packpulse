@@ -2,6 +2,9 @@ import { useMemo, useState } from "react";
 import { useTheme } from "../theme";
 import { useStyles } from "../hooks/useStyles";
 import { formatDescriptionForDisplay } from "../utils";
+import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
+import { Badge } from "../components/ui/badge";
 
 function fmtDateShort(v) {
   if (!v) return "--";
@@ -12,7 +15,7 @@ function fmtDateShort(v) {
 
 export default function TimelineView({ timelineData, deliveriesV2 }) {
   const { C, mono } = useTheme();
-  const { thC, tdN, tdM, inp, pill } = useStyles();
+  const { thC, tdN, tdM } = useStyles();
 
   const [windowDays, setWindowDays] = useState(14);
   const [search, setSearch] = useState("");
@@ -95,14 +98,14 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap", alignItems: "center" }}>
-        <span style={{ fontSize: 12, color: C.dim, marginRight: 4 }}>Window</span>
+      <div className="mb-2.5 flex flex-wrap items-center gap-1.5">
+        <span className="mr-1 text-xs text-[rgb(var(--muted))]">Window</span>
         {windowOptions.map(function(opt) {
-          return <button key={opt.key} onClick={function() { setWindowDays(opt.key); }} style={pill(windowDays === opt.key)}>{opt.label}</button>;
+          return <Button key={opt.key} onClick={function() { setWindowDays(opt.key); }} variant={windowDays === opt.key ? "active" : "outline"} size="default">{opt.label}</Button>;
         })}
       </div>
 
-      <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
+      <div className="mb-3 flex flex-wrap items-center gap-1.5">
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: dockTone.fg, background: dockTone.bg, border: "1px solid " + dockTone.bd, borderRadius: 999, padding: "4px 10px" }}>
           OpenDock {dockTone.label}
           <span style={{ fontFamily: mono }}>{freshness.openDock.ageDays == null ? "--" : (freshness.openDock.ageDays + "d")}</span>
@@ -127,11 +130,11 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
       </div>
 
       <div style={{ background: C.surface, border: "1px solid " + C.border, borderRadius: 8, overflow: "hidden" }}>
-        <div style={{ padding: "10px 12px", borderBottom: "1px solid " + C.border, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+        <div className="flex flex-wrap items-center gap-1.5 border-b border-[rgb(var(--border))] px-3 py-2.5">
           <div style={{ fontSize: 14, fontWeight: 700, color: C.bright, marginRight: 8 }}>Loads (OpenDock-first)</div>
-          <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search PO, confirmation, material..." style={Object.assign({}, inp, { width: 260, fontSize: 13 })} />
-          <button onClick={function() { setAtRiskOnly(function(v) { return !v; }); }} style={pill(atRiskOnly)}>{atRiskOnly ? "At-Risk Only" : "All Loads"}</button>
-          <span style={{ fontSize: 12, color: C.dim }}>{filteredLoads.length} loads</span>
+          <Input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search PO, confirmation, material..." className="h-10 w-72 text-sm" />
+          <Button onClick={function() { setAtRiskOnly(function(v) { return !v; }); }} variant={atRiskOnly ? "active" : "outline"} size="default">{atRiskOnly ? "At-Risk WO" : "All Loads"}</Button>
+          <Badge variant="secondary">{filteredLoads.length} loads</Badge>
         </div>
 
         <div style={{ overflowX: "auto" }}>

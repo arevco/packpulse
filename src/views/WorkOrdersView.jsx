@@ -2,6 +2,8 @@ import { useState, useMemo, useEffect } from "react";
 import { useTheme } from "../theme";
 import { useStyles } from "../hooks/useStyles";
 import { fmtDate, triggerDownload, buildExportHTML, normalizeStr, formatDescriptionForDisplay, detectPackType, safeNum } from "../utils";
+import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
 
 function parseDateValue(value) {
   if (!value) return null;
@@ -26,7 +28,7 @@ function parseDateValue(value) {
 
 export default function WorkOrdersView({ analysis, woStatuses, woCustomers, recommendations, dispatchQueue, prefilterCustomer, prefilterNonce }) {
   const { C, sans, mono } = useTheme();
-  const { thC, tdN, tdM, tdToggle, thDS, tdDN, tdDM, truncate, inp, sel, pill } = useStyles();
+  const { thC, tdN, tdM, tdToggle, thDS, tdDN, tdDM, truncate } = useStyles();
 
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
@@ -642,24 +644,24 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
   };
 
   return (<div>
-    <div style={{ display:"flex", gap:6, marginBottom:12, flexWrap:"wrap", alignItems:"center" }}>
-      <input type="text" placeholder="Search WO, SKU, customer, notes..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} style={Object.assign({}, inp, { width:220 })} />
-      <select value={filterCustomer} onChange={e => setFilterCustomer(e.target.value)} style={Object.assign({}, sel, { fontSize:13 })}>
+    <div className="mb-3 flex flex-wrap items-center gap-1.5">
+      <Input type="text" placeholder="Search WO, SKU, customer, notes..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="h-10 w-72 text-sm" />
+      <select value={filterCustomer} onChange={e => setFilterCustomer(e.target.value)} className="h-10 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]">
         <option value="all">All Customers</option>
         {woCustomers.map(s => <option key={s} value={s}>{s}</option>)}
       </select>
-      <select value={filterDueMonth} onChange={e => setFilterDueMonth(e.target.value)} style={Object.assign({}, sel, { fontSize:13 })}>
+      <select value={filterDueMonth} onChange={e => setFilterDueMonth(e.target.value)} className="h-10 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]">
         <option value="all">All Months</option>
         {dueMonthOptions.map(function(m) { return <option key={m} value={m}>{dueMonthLabel(m)}</option>; })}
       </select>
-      <select value={filterWoStatus} onChange={e => setFilterWoStatus(e.target.value)} style={Object.assign({}, sel, { fontSize:13 })}>
+      <select value={filterWoStatus} onChange={e => setFilterWoStatus(e.target.value)} className="h-10 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]">
         <option value="all">All WO Status</option>
         {woStatuses.map(s => <option key={s} value={s}>{s}</option>)}
       </select>
       {["all","ready","partial","blocked","nobom"].map(function(f) {
-        return <button key={f} onClick={function() { setFilterStatus(function(curr) { return curr === f && f !== "all" ? "all" : f; }); }} style={pill(filterStatus===f)}>{f==="all"?"All":f==="ready"?"Ready":f==="partial"?"Partial":f==="blocked"?"Blocked":"No BOM"}</button>;
+        return <Button key={f} onClick={function() { setFilterStatus(function(curr) { return curr === f && f !== "all" ? "all" : f; }); }} variant={filterStatus===f ? "active" : "outline"} size="default">{f==="all"?"All":f==="ready"?"Ready":f==="partial"?"Partial":f==="blocked"?"Blocked":"No BOM"}</Button>;
       })}
-      <button onClick={function() {
+      <Button onClick={function() {
         setFilterRunNext(function(v) {
           var next = !v;
           if (next) {
@@ -669,18 +671,18 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
           }
           return next;
         });
-      }} style={pill(filterRunNext)}>Run Next</button>
+      }} variant={filterRunNext ? "active" : "outline"} size="default">Run Next</Button>
       {filterRunNext && (
-        <select value={runNextLimit} onChange={function(e) { setRunNextLimit(e.target.value); }} style={Object.assign({}, sel, { fontSize:13 })}>
+        <select value={runNextLimit} onChange={function(e) { setRunNextLimit(e.target.value); }} className="h-10 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]">
           <option value="8">Top 8</option>
           <option value="12">Top 12</option>
           <option value="20">Top 20</option>
         </select>
       )}
-      <button onClick={function() { setFilterShared(function(v) { return !v; }); }} style={pill(filterShared)}>Shared</button>
+      <Button onClick={function() { setFilterShared(function(v) { return !v; }); }} variant={filterShared ? "active" : "outline"} size="default">Shared</Button>
       <div style={{ flex:1 }} />
-      <button onClick={exportCSV} style={Object.assign({}, pill(false), { fontSize:13 })}>CSV</button>
-      <button onClick={exportPDF} style={Object.assign({}, pill(false), { fontSize:13 })}>PDF</button>
+      <Button onClick={exportCSV} variant="outline" size="default">CSV</Button>
+      <Button onClick={exportPDF} variant="outline" size="default">PDF</Button>
     </div>
     {commitmentSummary && (
       <div style={{ marginBottom:10, display:"flex", flexDirection:"column", gap:8 }}>
