@@ -34,18 +34,29 @@ export function detectPackType(value) {
   if (!raw) return "Other";
   var cleaned = raw.replace(/\s+/g, " ").trim();
 
-  // Explicit pack tokens: "12PK", "12 PK", "12 PACK"
-  var m = cleaned.match(/\b(\d{1,2})\s*(?:PK|PACK)\b/);
-  if (m) return m[1] + "PK";
+  // Keep RSC separate from 15-pack to support planner-level segmentation.
+  if (/\bRSC\b/.test(cleaned)) return "RSC";
 
-  // Case pack formats: "2/12 PACK" -> 12PK
-  m = cleaned.match(/\b\d{1,2}\s*\/\s*(\d{1,2})\s*(?:PK|PACK)\b/);
-  if (m) return m[1] + "PK";
+  // 2/12 family
+  if (/\b2\s*\/\s*12\b/.test(cleaned)) return "2/12 PACK";
+
+  // Explicit pack labels
+  if (/\b24\s*(?:PK|PACK)\b/.test(cleaned)) return "24 PACK";
+  if (/\b18\s*(?:PK|PACK)\b/.test(cleaned)) return "18 PACK";
+  if (/\b15\s*(?:PK|PACK)\b/.test(cleaned)) return "15 PACK";
+  if (/\b12\s*(?:PK|PACK)\b/.test(cleaned)) return "12 PACK";
 
   // Size shorthand often used in beverage SKUs: "24/16OZ", "15/16 OZ", "18/12OZ"
   // First number typically represents can count per case/pack.
-  m = cleaned.match(/\b(\d{1,2})\s*\/\s*\d{1,3}(?:\.\d+)?\s*(?:OZ|ML|L)\b/);
-  if (m) return m[1] + "PK";
+  var m = cleaned.match(/\b(\d{1,2})\s*\/\s*\d{1,3}(?:\.\d+)?\s*(?:OZ|ML|L)\b/);
+  if (m) {
+    var n = Number(m[1]);
+    if (n === 24) return "24 PACK";
+    if (n === 18) return "18 PACK";
+    if (n === 15) return "15 PACK";
+    if (n === 12) return "12 PACK";
+    return n + " PACK";
+  }
 
   return "Other";
 }
