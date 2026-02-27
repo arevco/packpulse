@@ -33,6 +33,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
   const [filterWoStatus, setFilterWoStatus] = useState("Booked");
   const [filterCustomer, setFilterCustomer] = useState("all");
   const [filterDueMonth, setFilterDueMonth] = useState("all");
+  const [filterPackType, setFilterPackType] = useState("all");
   const [filterShared, setFilterShared] = useState(false);
   const [filterRunNext, setFilterRunNext] = useState(false);
   const [runNextLimit, setRunNextLimit] = useState("12");
@@ -113,6 +114,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     setFilterCustomer(prefilterCustomer);
     setFilterStatus("all");
     setFilterWoStatus("all");
+    setFilterPackType("all");
     setFilterShared(false);
     setFilterRunNext(false);
     setSearchTerm("");
@@ -370,6 +372,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       r = r.filter(function(w) { return matchesWorkOrderSearch(w, qRaw, qNorm, qSku); });
     }
     if (filterWoStatus !== "all") r = r.filter(w => w.status === filterWoStatus);
+    if (filterPackType !== "all") r = r.filter(function(w) { return detectPackType(w.productDesc || w.productSkuRaw || "") === filterPackType; });
     r.sort((a,b) => {
       var c = 0;
       if (sortField==="woNum") c=a.woNum.localeCompare(b.woNum);
@@ -430,7 +433,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       return sortDir==="desc"?-c:c;
     });
     return r;
-  }, [analysis, filterStatus, filterWoStatus, filterCustomer, filterDueMonth, filterShared, filterRunNext, searchTerm, sortField, sortDir, commitmentMap, sharedComponentUsage, runNextWoSet, runNextMetaMap]);
+  }, [analysis, filterStatus, filterWoStatus, filterCustomer, filterDueMonth, filterPackType, filterShared, filterRunNext, searchTerm, sortField, sortDir, commitmentMap, sharedComponentUsage, runNextWoSet, runNextMetaMap]);
 
   var woStatusBreakdown = useMemo(function() {
     if (!analysis) return [];
@@ -446,6 +449,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       var qSku = normalizeSkuSearchValue(qRaw);
       r = r.filter(function(w) { return matchesWorkOrderSearch(w, qRaw, qNorm, qSku); });
     }
+    if (filterPackType !== "all") r = r.filter(function(w) { return detectPackType(w.productDesc || w.productSkuRaw || "") === filterPackType; });
     var map = {};
     r.forEach(function(w) {
       var key = String(w.status || "--").trim() || "--";
@@ -454,7 +458,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       map[key].qtyUnits += Number(w.qtyToProduce || 0);
     });
     return Object.values(map).sort(function(a, b) { return b.qtyUnits - a.qtyUnits; });
-  }, [analysis, filterStatus, filterCustomer, filterDueMonth, filterShared, filterRunNext, searchTerm, commitmentMap, sharedComponentUsage, runNextWoSet]);
+  }, [analysis, filterStatus, filterCustomer, filterDueMonth, filterPackType, filterShared, filterRunNext, searchTerm, commitmentMap, sharedComponentUsage, runNextWoSet]);
 
   var packMixBreakdown = useMemo(function() {
     var byType = {};
@@ -708,12 +712,16 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
         {packMixBreakdown.length > 0 && (
           <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
             <span style={{ fontSize:12, color:C.dim, fontWeight:700, letterSpacing:0.2 }}>Pack Mix (Remaining)</span>
+            <button onClick={function() { setFilterPackType("all"); }} style={{ display:"inline-flex", alignItems:"center", gap:6, padding:"3px 9px", borderRadius:999, border:"1px solid "+(filterPackType === "all" ? C.accentLine : C.border), background:filterPackType === "all" ? C.accentSoft : C.surface, color:filterPackType === "all" ? C.accent : C.dim, fontSize:12, fontWeight:700, cursor:"pointer" }}>
+              All Packs
+            </button>
             {packMixBreakdown.map(function(row) {
+              var activePack = filterPackType === row.packType;
               return (
-                <span key={row.packType} style={{ display:"inline-flex", alignItems:"center", gap:6, padding:"3px 9px", borderRadius:999, border:"1px solid "+C.border, background:C.surface, fontSize:12 }}>
+                <button key={row.packType} onClick={function() { setFilterPackType(function(curr) { return curr === row.packType ? "all" : row.packType; }); }} style={{ display:"inline-flex", alignItems:"center", gap:6, padding:"3px 9px", borderRadius:999, border:"1px solid "+(activePack ? C.accentLine : C.border), background:activePack ? C.accentSoft : C.surface, color:activePack ? C.accent : C.dim, fontSize:12, cursor:"pointer" }}>
                   <span style={{ color:C.bright, fontWeight:700 }}>{row.packType}</span>
                   <span style={{ color:C.text }}>{fmtNum(row.remainingUnits)}</span>
-                </span>
+                </button>
               );
             })}
           </div>
