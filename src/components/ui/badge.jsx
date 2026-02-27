@@ -12,6 +12,7 @@ const badgeVariants = cva(
         success: "border-transparent bg-[color-mix(in_oklab,rgb(var(--success))_15%,white)] text-[rgb(var(--success))]",
         warning: "border-transparent bg-[color-mix(in_oklab,rgb(var(--warning))_18%,white)] text-[rgb(var(--warning))]",
         danger: "border-transparent bg-[color-mix(in_oklab,rgb(var(--danger))_12%,white)] text-[rgb(var(--danger))]",
+        info: "border-transparent bg-[color-mix(in_oklab,rgb(var(--accent))_12%,white)] text-[rgb(var(--accent))]",
       },
     },
     defaultVariants: {

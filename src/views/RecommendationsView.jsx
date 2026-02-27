@@ -5,6 +5,7 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Badge } from "../components/ui/badge";
 import TableShell from "../components/ui/table-shell";
+import SortHeaderButton from "../components/ui/sort-header-button";
 
 export default function RecommendationsView({ recommendations, onOpenRecommendation }) {
   const { C } = useTheme();
@@ -50,9 +51,9 @@ export default function RecommendationsView({ recommendations, onOpenRecommendat
   };
 
   var priorityStyle = function(p) {
-    if (p === "P1") return { color:C.bad, bg:C.badSoft };
-    if (p === "P2") return { color:C.warn, bg:C.warnSoft };
-    return { color:C.accent, bg:C.accentSoft };
+    if (p === "P1") return "danger";
+    if (p === "P2") return "warning";
+    return "info";
   };
   var windowLabel = function(w) { return w === "now" ? "Now" : w === "today" ? "Today" : "This Week"; };
 
@@ -76,12 +77,12 @@ export default function RecommendationsView({ recommendations, onOpenRecommendat
           <table style={{ width:"100%", borderCollapse:"collapse" }}>
             <thead>
               <tr style={{ background:C.raised }}>
-                <th style={thC(sortField==="priority")}><button onClick={function() { onSort("priority"); }} style={{ border:"none", background:"transparent", padding:0, margin:0, color:"inherit", font:"inherit", cursor:"pointer", textAlign:"inherit" }}>Priority{sortField==="priority" ? (sortDir==="asc" ? " ↑" : " ↓") : ""}</button></th>
-                <th style={thC(sortField==="action")}><button onClick={function() { onSort("action"); }} style={{ border:"none", background:"transparent", padding:0, margin:0, color:"inherit", font:"inherit", cursor:"pointer", textAlign:"inherit" }}>Action{sortField==="action" ? (sortDir==="asc" ? " ↑" : " ↓") : ""}</button></th>
-                <th style={thC(sortField==="owner")}><button onClick={function() { onSort("owner"); }} style={{ border:"none", background:"transparent", padding:0, margin:0, color:"inherit", font:"inherit", cursor:"pointer", textAlign:"inherit" }}>Owner{sortField==="owner" ? (sortDir==="asc" ? " ↑" : " ↓") : ""}</button></th>
-                <th style={thC(sortField==="window")}><button onClick={function() { onSort("window"); }} style={{ border:"none", background:"transparent", padding:0, margin:0, color:"inherit", font:"inherit", cursor:"pointer", textAlign:"inherit" }}>When{sortField==="window" ? (sortDir==="asc" ? " ↑" : " ↓") : ""}</button></th>
-                <th style={Object.assign({}, thC(sortField==="impact"), { textAlign:"right" })}><button onClick={function() { onSort("impact"); }} style={{ border:"none", background:"transparent", padding:0, margin:0, color:"inherit", font:"inherit", cursor:"pointer", textAlign:"inherit" }}>Impact{sortField==="impact" ? (sortDir==="asc" ? " ↑" : " ↓") : ""}</button></th>
-                <th style={thC(sortField==="confidence")}><button onClick={function() { onSort("confidence"); }} style={{ border:"none", background:"transparent", padding:0, margin:0, color:"inherit", font:"inherit", cursor:"pointer", textAlign:"inherit" }}>Confidence{sortField==="confidence" ? (sortDir==="asc" ? " ↑" : " ↓") : ""}</button></th>
+                <th style={thC(sortField==="priority")}><SortHeaderButton onClick={function() { onSort("priority"); }}>Priority{sortField==="priority" ? (sortDir==="asc" ? " ↑" : " ↓") : ""}</SortHeaderButton></th>
+                <th style={thC(sortField==="action")}><SortHeaderButton onClick={function() { onSort("action"); }}>Action{sortField==="action" ? (sortDir==="asc" ? " ↑" : " ↓") : ""}</SortHeaderButton></th>
+                <th style={thC(sortField==="owner")}><SortHeaderButton onClick={function() { onSort("owner"); }}>Owner{sortField==="owner" ? (sortDir==="asc" ? " ↑" : " ↓") : ""}</SortHeaderButton></th>
+                <th style={thC(sortField==="window")}><SortHeaderButton onClick={function() { onSort("window"); }}>When{sortField==="window" ? (sortDir==="asc" ? " ↑" : " ↓") : ""}</SortHeaderButton></th>
+                <th style={Object.assign({}, thC(sortField==="impact"), { textAlign:"right" })}><SortHeaderButton onClick={function() { onSort("impact"); }} className="text-right">Impact{sortField==="impact" ? (sortDir==="asc" ? " ↑" : " ↓") : ""}</SortHeaderButton></th>
+                <th style={thC(sortField==="confidence")}><SortHeaderButton onClick={function() { onSort("confidence"); }}>Confidence{sortField==="confidence" ? (sortDir==="asc" ? " ↑" : " ↓") : ""}</SortHeaderButton></th>
                 <th style={thC(false)}>Why</th>
                 <th style={thC(false)}>Source</th>
                 <th style={thC(false)} />
@@ -89,9 +90,8 @@ export default function RecommendationsView({ recommendations, onOpenRecommendat
             </thead>
             <tbody>
               {rows.map(function(r) {
-                var p = priorityStyle(r.priority);
                 return <tr key={r.id} style={{ borderBottom:"1px solid "+C.border }}>
-                  <td style={tdN}><span style={{ display:"inline-block", padding:"2px 7px", borderRadius:999, fontSize:11, fontWeight:700, color:p.color, background:p.bg }}>{r.priority}</span></td>
+                  <td style={tdN}><Badge variant={priorityStyle(r.priority)}>{r.priority}</Badge></td>
                   <td style={Object.assign({}, tdN, { color:C.bright, fontWeight:600 })}>{r.action}</td>
                   <td style={Object.assign({}, tdN, { color:C.dim })}>{r.owner}</td>
                   <td style={Object.assign({}, tdN, { color:C.dim })}>{windowLabel(r.window)}</td>

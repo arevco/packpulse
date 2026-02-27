@@ -5,6 +5,7 @@ import { fmtDate, triggerDownload, buildExportHTML, normalizeStr, formatDescript
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import TableShell from "../components/ui/table-shell";
+import SortHeaderButton from "../components/ui/sort-header-button";
 
 export default function CriticalItemsView({ rawCriticalItems, inboundCoverage }) {
   const { C } = useTheme();
@@ -284,7 +285,7 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
           <thead><tr style={{ background:C.raised }}>
             <th style={{ width:24, padding:"0 8px", borderBottom:"1px solid " + C.border }} />
             {[{ f:"sku", l:"Item" }, { f:"desc", l:"Description" }, { f:"customer", l:"Customer" }, { f:"onHand", l:"On Hand" }, { f:"shortQty", l:"Short" }, { f:"scheduledQty", l:"Scheduled" }, { f:"uncoveredQty", l:"Uncovered" }, { f:"coverage", l:"Coverage" }, { f:"risk", l:"Risk" }, { f:"action", l:"Action" }, { f:"dueDate", l:"Earliest Due" }].map(function(col) {
-              return <th key={col.f} style={Object.assign({}, thC(sortField===col.f), { textAlign:col.f==="sku"||col.f==="desc"||col.f==="customer"||col.f==="risk"||col.f==="action"?"left":"right" })}><button onClick={function() { handleSort(col.f); }} style={{ border:"none", background:"transparent", padding:0, margin:0, color:"inherit", font:"inherit", cursor:"pointer", textAlign:"inherit" }}>{col.l}{sortField===col.f ? (sortDir==="asc" ? " \u2191" : " \u2193") : ""}</button></th>;
+              return <th key={col.f} style={Object.assign({}, thC(sortField===col.f), { textAlign:col.f==="sku"||col.f==="desc"||col.f==="customer"||col.f==="risk"||col.f==="action"?"left":"right" })}><SortHeaderButton onClick={function() { handleSort(col.f); }} className={col.f==="sku"||col.f==="desc"||col.f==="customer"||col.f==="risk"||col.f==="action"?"text-left":"text-right"}>{col.l}{sortField===col.f ? (sortDir==="asc" ? " \u2191" : " \u2193") : ""}</SortHeaderButton></th>;
             })}
           </tr></thead>
           <tbody>{renderRows()}</tbody>

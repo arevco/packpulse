@@ -5,6 +5,7 @@ import { fmtDate, formatDescriptionForDisplay, normalizeStr } from "../utils";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import TableShell from "../components/ui/table-shell";
+import SortHeaderButton from "../components/ui/sort-header-button";
 
 export default function OverviewView({ analysis, woStatuses, onSelectCustomer }) {
   const { C, mono } = useTheme();
@@ -235,7 +236,7 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
             {[{l:"Customer",f:"name"},{l:"WOs",f:"count"},{l:"Order Qty",f:"orderQty"},{l:"Produced",f:"produced"},{l:"Remaining",f:"remaining"},{l:"Net Make",f:"netMake"},{l:"Complete",f:"complete"},{l:"Late",f:"late"}].map(function(col) {
               var active = custSortField === col.f;
               var arrow = active ? (custSortDir === "asc" ? " \u2191" : " \u2193") : "";
-              return <th key={col.f} style={Object.assign({}, thS, { color:active ? C.accent : thS.color })}><button onClick={function() { onCustSort(col.f); }} style={{ border:"none", background:"transparent", padding:0, margin:0, color:"inherit", font:"inherit", cursor:"pointer", textAlign:"inherit" }}>{col.l + arrow}</button></th>;
+              return <th key={col.f} style={Object.assign({}, thS, { color:active ? C.accent : thS.color })}><SortHeaderButton onClick={function() { onCustSort(col.f); }}>{col.l + arrow}</SortHeaderButton></th>;
             })}
           </tr></thead>
           <tbody>
@@ -276,7 +277,7 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
             {[{l:"Days Late",f:"daysLate"},{l:"WO#",f:"woNum"},{l:"Product",f:"productSkuRaw"},{l:"Product Description",f:"productDesc"},{l:"Customer",f:"customer"},{l:"Order Qty",f:"qtyToProduce"},{l:"Remaining",f:"unitsRemaining"},{l:"Complete",f:"prodPct"},{l:"Ready",f:"readiness"},{l:"Net Make",f:"netCanMake"},{l:"Due Date",f:"dueDate"}].map(function(col) {
               var active = lateSortField === col.f;
               var arrow = active ? (lateSortDir === "asc" ? " \u2191" : " \u2193") : "";
-              return <th key={col.f} style={Object.assign({}, thS, { color:active ? C.accent : thS.color })}><button onClick={function() { onLateSort(col.f); }} style={{ border:"none", background:"transparent", padding:0, margin:0, color:"inherit", font:"inherit", cursor:"pointer", textAlign:"inherit" }}>{col.l + arrow}</button></th>;
+              return <th key={col.f} style={Object.assign({}, thS, { color:active ? C.accent : thS.color })}><SortHeaderButton onClick={function() { onLateSort(col.f); }}>{col.l + arrow}</SortHeaderButton></th>;
             })}
           </tr></thead>
           <tbody>

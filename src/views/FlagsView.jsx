@@ -6,6 +6,7 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Badge } from "../components/ui/badge";
 import TableShell from "../components/ui/table-shell";
+import SortHeaderButton from "../components/ui/sort-header-button";
 
 var FLAG_LABELS = { "missing-desc":"Missing Description", "not-in-inventory":"Not in Inventory", "no-bom":"No BOM", "fg-not-in-inventory":"FG Not in Inventory", "zero-stock":"Zero Stock" };
 
@@ -64,9 +65,9 @@ export default function FlagsView({ flags }) {
           <thead><tr style={{ background:C.raised }}>
             {[{f:"sku",l:"SKU"},{f:"desc",l:"Description"},{f:"type",l:"Type"},{f:"severity",l:"Severity"},{f:"source",l:"Source"},{f:"detail",l:"Action Needed"},{f:"affectedWOs",l:"Affected WOs"}].map(col =>
               <th key={col.f} style={thC(flagSort===col.f)}>
-                <button onClick={() => handleFlagSort(col.f)} style={{ border:"none", background:"transparent", padding:0, margin:0, color:"inherit", font:"inherit", cursor:"pointer", textAlign:"inherit" }}>
+                <SortHeaderButton onClick={() => handleFlagSort(col.f)}>
                   {col.l}{flagSort===col.f ? (flagSortDir==="asc" ? " \u2191" : " \u2193") : ""}
-                </button>
+                </SortHeaderButton>
               </th>
             )}
           </tr></thead>
@@ -76,7 +77,7 @@ export default function FlagsView({ flags }) {
               <td style={Object.assign({}, tdM, { fontWeight:600, color:C.bright })}>{f.sku}</td>
               <td style={Object.assign({}, tdN, { color:C.dim, maxWidth:180, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" })}>{f.desc || "--"}</td>
               <td style={Object.assign({}, tdN, { fontSize:13, whiteSpace:"nowrap" })}>{FLAG_LABELS[f.type]||f.type}</td>
-              <td style={tdN}><span style={{ fontSize:12, fontWeight:600, padding:"2px 8px", borderRadius:10, color:f.severity==="bad"?"#fff":C.warn, background:f.severity==="bad"?C.bad:C.warnSoft }}>{f.severity==="bad"?"ERROR":"WARN"}</span></td>
+              <td style={tdN}><Badge variant={f.severity==="bad"?"danger":"warning"}>{f.severity==="bad"?"ERROR":"WARN"}</Badge></td>
               <td style={Object.assign({}, tdN, { fontSize:13 })}>{f.source}</td>
               <td style={Object.assign({}, tdN, { fontSize:13, color:C.text })}>{f.detail}</td>
               <td style={Object.assign({}, tdN, { fontSize:13, color:f.affectedWOs.length?C.accent:C.dim })}>{f.affectedWOs.length ? f.affectedWOs.slice(0,3).join(", ")+(f.affectedWOs.length>3?" +"+String(f.affectedWOs.length-3)+" more":"") : "--"}</td>

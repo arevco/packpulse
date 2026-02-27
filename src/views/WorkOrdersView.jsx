@@ -4,7 +4,9 @@ import { useStyles } from "../hooks/useStyles";
 import { fmtDate, triggerDownload, buildExportHTML, normalizeStr, formatDescriptionForDisplay, detectPackType, safeNum } from "../utils";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
+import { Badge } from "../components/ui/badge";
 import TableShell from "../components/ui/table-shell";
+import SortHeaderButton from "../components/ui/sort-header-button";
 
 function parseDateValue(value) {
   if (!value) return null;
@@ -45,10 +47,10 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
   const [expandedWOs, setExpandedWOs] = useState({});
 
   var runStatusMeta = function(s) {
-    if (s === "ready") return { label:"RDY", color:C.ok, bg:C.okSoft || C.accentSoft };
-    if (s === "partial") return { label:"PRT", color:C.warn, bg:C.warnSoft };
-    if (s === "nobom") return { label:"BOM", color:C.accent, bg:C.accentSoft };
-    return { label:"BLK", color:C.bad, bg:C.badSoft };
+    if (s === "ready") return { label:"RDY", variant:"success" };
+    if (s === "partial") return { label:"PRT", variant:"warning" };
+    if (s === "nobom") return { label:"BOM", variant:"info" };
+    return { label:"BLK", variant:"danger" };
   };
   var normalizeSearchValue = function(v) {
     return normalizeStr(String(v || "")).replace(/[^a-z0-9]/g, "");
@@ -488,12 +490,9 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
   var SortTh = function(props) {
     return (
       <th style={Object.assign({}, thC(sortField===props.field), props.style||{})}>
-        <button
-          onClick={() => handleSort(props.field)}
-          style={{ border:"none", background:"transparent", padding:0, margin:0, color:"inherit", font:"inherit", cursor:"pointer", textAlign:"inherit" }}
-        >
+        <SortHeaderButton onClick={() => handleSort(props.field)} className={props.alignRight ? "text-right" : "text-left"}>
           {props.children}{sortField===props.field ? (sortDir==="asc" ? " \u2191" : " \u2193") : ""}
-        </button>
+        </SortHeaderButton>
       </th>
     );
   };
@@ -523,8 +522,8 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
           <td style={Object.assign({}, tdN, { color:C.dim }, truncate(220))}>{formatDescriptionForDisplay(wo.productDesc) || "--"}</td>
           <td style={Object.assign({}, tdN, { color:C.dim }, truncate(140))}>{wo.customer || "--"}</td>
           <td style={Object.assign({}, tdN, { whiteSpace:"nowrap" })}>
-            <span title={wo.runStatus || ""} style={{ display:"inline-block", minWidth:34, textAlign:"center", padding:"2px 6px", borderRadius:999, fontSize:11, fontWeight:700, color:rs.color, background:rs.bg, marginRight:4 }}>{rs.label}</span>
-            <span title={wo.status || ""} style={{ display:"inline-block", minWidth:34, textAlign:"center", padding:"2px 6px", borderRadius:999, fontSize:11, fontWeight:700, color:C.dim, background:C.raised }}>{shortWoStatus(wo.status)}</span>
+            <Badge title={wo.runStatus || ""} variant={rs.variant} className="mr-1 min-w-[34px] justify-center px-1.5 py-0.5 text-[11px] font-bold">{rs.label}</Badge>
+            <Badge title={wo.status || ""} variant="secondary" className="min-w-[34px] justify-center px-1.5 py-0.5 text-[11px] font-bold">{shortWoStatus(wo.status)}</Badge>
           </td>
           <td style={Object.assign({}, tdM, { color:C.text })}>{fmtDate(wo.dueDate)}</td>
           <td style={Object.assign({}, tdM, { color:C.bright })}>{wo.qtyToProduce.toLocaleString()}</td>
@@ -538,9 +537,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
           </td>
           <td style={Object.assign({}, tdN, { whiteSpace:"nowrap" })}>
             {(commitment.commitmentGap > 0) ? (
-              <span title={"Shared material demand across active work orders. Order: earliest due date, then WO #. Make: " + wo.maxRunnable.toLocaleString() + " | Net: " + commitment.committedCanMake.toLocaleString() + " | Gap: " + commitment.commitmentGap.toLocaleString()} style={{ display:"inline-block", padding:"2px 7px", borderRadius:999, fontSize:11, fontWeight:700, color:C.bad, background:C.badSoft }}>
-                Shared
-              </span>
+              <Badge title={"Shared material demand across active work orders. Order: earliest due date, then WO #. Make: " + wo.maxRunnable.toLocaleString() + " | Net: " + commitment.committedCanMake.toLocaleString() + " | Gap: " + commitment.commitmentGap.toLocaleString()} variant="danger">Shared</Badge>
             ) : (
               <span style={{ color:C.dim }}>--</span>
             )}
@@ -599,12 +596,9 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
                         {comp.sku}
                         {comp.hasSubs && <span style={{ fontSize:13, color:C.accent, marginLeft:3 }}>+alt</span>}
                         {(sharedComponentUsage[normalizeStr(comp.sku || "")] || 0) > 1 && (
-                          <span
-                            title={"Shared component: used in " + sharedComponentUsage[normalizeStr(comp.sku || "")] + " active work orders"}
-                            style={{ display:"inline-block", marginLeft:6, padding:"1px 6px", borderRadius:999, fontSize:10, fontWeight:700, color:C.bad, background:C.badSoft }}
-                          >
+                          <Badge title={"Shared component: used in " + sharedComponentUsage[normalizeStr(comp.sku || "")] + " active work orders"} variant="danger" className="ml-1.5 px-1.5 py-0 text-[10px]">
                             Shared
-                          </span>
+                          </Badge>
                         )}
                         {hasCompPressure && (
                           <div style={{ marginTop:4, fontSize:11, color:C.dim }}>
@@ -613,9 +607,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
                             {" \u2022 "}Available now: <span style={{ color:C.bright, fontFamily:mono }}>{fmtQty(compPressure.availableAtTurn)}</span>
                             {" \u2022 "}Supports up to <span style={{ color:C.bright, fontFamily:mono }}>{fmtQty(compPressure.turnMakeUnits)}</span> WO units
                             {isNetLimiter && (
-                              <span style={{ display:"inline-block", marginLeft:6, padding:"1px 6px", borderRadius:999, fontSize:10, fontWeight:700, color:C.bad, background:C.badSoft }}>
-                                Net limiter
-                              </span>
+                              <Badge variant="danger" className="ml-1.5 px-1.5 py-0 text-[10px]">Net limiter</Badge>
                             )}
                           </div>
                         )}
