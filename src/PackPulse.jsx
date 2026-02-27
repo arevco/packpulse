@@ -1,7 +1,6 @@
 import { useState, useCallback, useEffect, lazy, Suspense } from "react";
 import NulogySync from "./NulogySync";
 import { useTheme } from "./theme";
-import { useStyles } from "./hooks/useStyles";
 import { useDataSources } from "./hooks/useDataSources";
 import { useAnalysis } from "./hooks/useAnalysis";
 import ColumnMapper from "./components/ColumnMapper";
@@ -20,7 +19,6 @@ const SandboxView = lazy(() => import("./views/SandboxView"));
 
 export default function ProductionReadiness() {
   const { C, theme, setTheme, sans, mono, FONTS_CSS, A11Y_CSS } = useTheme();
-  const { pill } = useStyles();
   const ds = useDataSources();
   const { analysis, summary, criticalItems, woStatuses, woCustomers, timelineData, deliveriesV2, inboundCoverage, recommendations, dispatchQueue } = useAnalysis({
     mappingConfirmed: ds.mappingConfirmed, allUploaded: ds.allUploaded,
@@ -236,10 +234,10 @@ export default function ProductionReadiness() {
         </div>
         <div style={{ display:"flex", alignItems:"center", gap:10 }}>
           {window.__ppUser && <span style={{ fontSize:13, color:C.dim }}>{window.__ppUser.email}</span>}
-          {window.__ppLogout && <button onClick={window.__ppLogout} style={{ padding:"5px 12px", borderRadius:6, border:"1px solid "+C.border, background:"transparent", color:C.dim, fontFamily:sans, fontSize:13, cursor:"pointer" }}>Sign out</button>}
-          <button onClick={() => setTheme(theme==="dark"?"light":"dark")} style={{ padding:"5px 12px", borderRadius:6, border:"1px solid "+C.border, background:"transparent", color:C.dim, fontFamily:sans, fontSize:13, cursor:"pointer" }}>
+          {window.__ppLogout && <Button onClick={window.__ppLogout} variant="outline" size="sm">Sign out</Button>}
+          <Button onClick={() => setTheme(theme==="dark"?"light":"dark")} variant="outline" size="sm">
             {theme === "dark" ? "Light" : "Dark"}
-          </button>
+          </Button>
         </div>
       </header>
       <main style={{ padding:"20px 28px", maxWidth:1440, margin:"0 auto" }}>
@@ -260,9 +258,9 @@ export default function ProductionReadiness() {
           <div style={{ fontSize:12, color:C.dim }}>
             Dashboard / <span style={{ color:C.bright, fontWeight:600 }}>Data Setup</span>
           </div>
-          <button onClick={goToDashboard} style={{ padding:"6px 12px", borderRadius:6, border:"1px solid "+C.border, background:"transparent", color:C.dim, fontFamily:sans, fontSize:13, cursor:"pointer" }}>
+          <Button onClick={goToDashboard} variant="outline" size="sm">
             Back to Dashboard
-          </button>
+          </Button>
         </div>
         {showAutoBootstrap && !showDataSetup && (
           <div style={{ marginBottom:16, border:"1px solid "+C.border, borderRadius:10, background:C.surface, padding:"12px 14px", display:"flex", flexWrap:"wrap", alignItems:"center", gap:10 }}>
@@ -276,22 +274,22 @@ export default function ProductionReadiness() {
                   : "Preparing live feeds. You can open manual setup at any time."}
               </div>
             </div>
-            {dockApiLoading && <span style={pill("info")}>Loading OpenDock…</span>}
-            {nulogySyncState && nulogySyncState.syncing && <span style={pill("info")}>Loading Nulogy…</span>}
-            {dockApiInfo && <span style={pill("ok")}>{dockApiInfo}</span>}
-            {dockApiError && <span style={pill("bad")}>OpenDock: {dockApiError}</span>}
-            {nulogySyncState && nulogySyncState.errorCount > 0 && <span style={pill("bad")}>Nulogy sync has errors</span>}
+            {dockApiLoading && <Badge variant="secondary">Loading OpenDock…</Badge>}
+            {nulogySyncState && nulogySyncState.syncing && <Badge variant="secondary">Loading Nulogy…</Badge>}
+            {dockApiInfo && <Badge variant="success">{dockApiInfo}</Badge>}
+            {dockApiError && <Badge variant="danger">OpenDock: {dockApiError}</Badge>}
+            {nulogySyncState && nulogySyncState.errorCount > 0 && <Badge variant="danger">Nulogy sync has errors</Badge>}
             {!dockApiLoading && (!nulogySyncState || !nulogySyncState.syncing) && (
-              <button onClick={() => { setDockApiInfo(""); setDockApiError(""); setAutoDockAttempted(false); setSyncNonce(n => n + 1); }} style={{ padding:"6px 12px", borderRadius:6, border:"1px solid "+C.border, background:"transparent", color:C.dim, fontFamily:sans, fontSize:13, cursor:"pointer" }}>
+              <Button onClick={() => { setDockApiInfo(""); setDockApiError(""); setAutoDockAttempted(false); setSyncNonce(n => n + 1); }} variant="outline" size="sm">
                 Retry Sync
-              </button>
+              </Button>
             )}
-            <button onClick={() => setShowDataSetup(true)} style={{ padding:"6px 12px", borderRadius:6, border:"1px solid "+C.border, background:"transparent", color:C.dim, fontFamily:sans, fontSize:13, cursor:"pointer" }}>
+            <Button onClick={() => setShowDataSetup(true)} variant="outline" size="sm">
               Open Data Setup
-            </button>
-            <button onClick={() => { setAutoBootstrapEnabled(false); setShowDataSetup(true); }} style={{ padding:"6px 12px", borderRadius:6, border:"1px solid "+C.border, background:"transparent", color:C.dim, fontFamily:sans, fontSize:13, cursor:"pointer" }}>
+            </Button>
+            <Button onClick={() => { setAutoBootstrapEnabled(false); setShowDataSetup(true); }} variant="outline" size="sm">
               Switch to Manual Upload
-            </button>
+            </Button>
           </div>
         )}
         {(!showAutoBootstrap || showDataSetup) && <div style={{ fontSize:13, fontWeight:600, color:C.dim, letterSpacing:0.2, marginBottom:8 }}>Data Setup</div>}
@@ -312,18 +310,18 @@ export default function ProductionReadiness() {
           <FileUploader label="OpenDock" uploaded={!!ds.dockData} fileName={ds.dockFileName} onData={(d,n) => {ds.setDockData(d);ds.setDockFileName(n);ds.setDockTimestamp(new Date());}} subtitle="Dock appointments (.xlsx)" acceptTypes=".xlsx,.xls,.csv" />
         </div>
         <div style={{ marginTop:-10, marginBottom:16, display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
-          <button onClick={fetchOpenDockApi} disabled={dockApiLoading} style={{ padding:"8px 14px", borderRadius:6, border:"1px solid "+(dockApiLoading?C.border:C.accentLine), background:dockApiLoading?C.raised:C.accentSoft, color:dockApiLoading?C.dim:C.accent, fontFamily:sans, fontSize:14, fontWeight:600, cursor:dockApiLoading?"not-allowed":"pointer" }}>
+          <Button onClick={fetchOpenDockApi} disabled={dockApiLoading} variant={dockApiLoading ? "soft" : "active"} size="default">
             {dockApiLoading ? "Loading OpenDock..." : "Fetch OpenDock from API"}
-          </button>
+          </Button>
           <span style={{ fontSize:12, color:C.dim }}>Uses secure Vercel server route (`/api/opendock/appointments`).</span>
           {dockApiInfo && <span style={{ fontSize:12, color:C.ok }}>{dockApiInfo}</span>}
           {dockApiError && <span style={{ fontSize:12, color:C.bad }}>OpenDock API error: {dockApiError}</span>}
         </div>
         </>)}
         {ds.allUploaded && !ds.analyzing && (
-          <button onClick={() => { ds.setAnalyzing(true); setTimeout(() => { ds.setMappingConfirmed(true); ds.setAnalyzing(false); setShowDataSetup(false); setTimeout(() => { var el = document.getElementById("dashboard-main"); if (el && el.scrollIntoView) el.scrollIntoView({ behavior:"smooth", block:"start" }); }, 0); }, 1500); }} disabled={!ds.requiredMappingsMet} style={{ padding:"8px 24px", borderRadius:6, border:"none", background:ds.requiredMappingsMet?C.accent:C.raised, color:ds.requiredMappingsMet?"#fff":C.dim, fontFamily:sans, fontSize:15, fontWeight:600, cursor:ds.requiredMappingsMet?"pointer":"not-allowed" }}>
+          <Button onClick={() => { ds.setAnalyzing(true); setTimeout(() => { ds.setMappingConfirmed(true); ds.setAnalyzing(false); setShowDataSetup(false); setTimeout(() => { var el = document.getElementById("dashboard-main"); if (el && el.scrollIntoView) el.scrollIntoView({ behavior:"smooth", block:"start" }); }, 0); }, 1500); }} disabled={!ds.requiredMappingsMet} variant={ds.requiredMappingsMet ? "default" : "soft"} size="default">
             Analyze
-          </button>
+          </Button>
         )}
         {ds.allUploaded && ds.analyzing && (
           <div style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, padding:"32px 20px", marginBottom:20, textAlign:"center" }}>
@@ -464,13 +462,13 @@ export default function ProductionReadiness() {
                   <div style={{ fontSize:16, fontWeight:600, color:C.bright }}>Column Mapping</div>
                   <div style={{ fontSize:14, color:C.dim, marginTop:2 }}>Adjust how your file columns map to the analysis engine. <span style={{color:C.bad}}>*</span> = required</div>
                 </div>
-                <button onClick={() => setShowSettings(false)} style={{ padding:"4px 10px", borderRadius:6, border:"1px solid "+C.border, background:"transparent", cursor:"pointer", color:C.dim, fontFamily:sans, fontSize:14 }}>{"\u2715"}</button>
+                <Button onClick={() => setShowSettings(false)} variant="outline" size="sm">{"\u2715"}</Button>
               </div>
               <ColumnMapper title="Inventory" headers={ds.invHeaders} mapping={ds.invMapping} onMappingChange={ds.setInvMapping} fields={[{key:"sku",label:"Item / SKU",required:true},{key:"description",label:"Description"},{key:"qtyOnHand",label:"Qty On Hand",required:true},{key:"status",label:"Inventory Status",help:"If mapped, PackPulse uses only rows marked Good."}]} />
               {ds.boms && <ColumnMapper title="Bill of Materials" headers={ds.bomHeaders} mapping={ds.bomMapping} onMappingChange={ds.setBomMapping} fields={[{key:"bomId",label:"Finished Good",required:true},{key:"componentSku",label:"Component SKU",required:true},{key:"description",label:"Description (optional)",help:"Used for component naming in details. If blank, PackPulse falls back to Item Master / Inventory descriptions."},{key:"qtyPer",label:"Qty Per",required:true},{key:"substituteFor",label:"Substitute For"},{key:"priority",label:"Priority"}]} />}
               <ColumnMapper title="Work Orders" headers={ds.woHeaders} mapping={ds.woMapping} onMappingChange={ds.setWoMapping} fields={[{key:"woNumber",label:"WO Number",required:true},{key:"productSku",label:"Product SKU",required:true},{key:"qtyToProduce",label:"Qty to Produce",required:true},{key:"dueDate",label:"Due Date"},{key:"status",label:"Status"},{key:"customer",label:"Customer"},{key:"unitsProduced",label:"Units Produced"},{key:"unitsRemaining",label:"Units Remaining"},{key:"unitsPerHour",label:"Units/Hour"},{key:"standardPeople",label:"Crew Size"},{key:"plannedStart",label:"Planned Start"},{key:"plannedEnd",label:"Planned End"},{key:"reference1",label:"Reference / Notes"}]} />
               <div style={{ display:"flex", justifyContent:"flex-end", marginTop:16 }}>
-                <button onClick={() => setShowSettings(false)} style={{ padding:"8px 20px", borderRadius:6, border:"none", background:C.accent, color:"#fff", fontFamily:sans, fontSize:15, fontWeight:600, cursor:"pointer" }}>Done</button>
+                <Button onClick={() => setShowSettings(false)} variant="default" size="default">Done</Button>
               </div>
             </div>
           </div>

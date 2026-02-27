@@ -2,10 +2,12 @@ import { useState, useMemo } from "react";
 import { useTheme } from "../theme";
 import { useStyles } from "../hooks/useStyles";
 import { fmtDate, triggerDownload, buildExportHTML, normalizeStr, formatDescriptionForDisplay } from "../utils";
+import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
 
 export default function CriticalItemsView({ rawCriticalItems, inboundCoverage }) {
   const { C } = useTheme();
-  const { thC, tdN, tdM, tdToggle, thDS, tdDN, tdDM, truncate, inp, sel, pill } = useStyles();
+  const { thC, tdN, tdM, tdToggle, thDS, tdDN, tdDM, truncate } = useStyles();
 
   const [search, setSearch] = useState("");
   const [customerFilter, setCustomerFilter] = useState("all");
@@ -257,22 +259,22 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
   }, [consolidatedItems]);
 
   return (<div>
-    <div style={{ display:"flex", gap:6, marginBottom:12, flexWrap:"wrap", alignItems:"center" }}>
-      <input type="text" placeholder="Search SKU, customer, PO, action..." value={search} onChange={function(e) { setSearch(e.target.value); }} style={Object.assign({}, inp, { width:250 })} />
-      <select value={customerFilter} onChange={function(e) { setCustomerFilter(e.target.value); }} style={Object.assign({}, sel, { fontSize:13 })}>
+    <div className="mb-3 flex flex-wrap items-center gap-1.5">
+      <Input type="text" placeholder="Search SKU, customer, PO, action..." value={search} onChange={function(e) { setSearch(e.target.value); }} className="h-10 w-72 text-sm" />
+      <select value={customerFilter} onChange={function(e) { setCustomerFilter(e.target.value); }} className="h-10 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]">
         <option value="all">All Customers</option>
         {customerOptions.map(function(c) { return <option key={c} value={c}>{c}</option>; })}
       </select>
       {[{ key:"all", label:"All" }, { key:"missing", label:"Missing" }, { key:"unscheduled", label:"Unscheduled" }, { key:"partial", label:"Partial" }].map(function(f) {
-        return <button key={f.key} onClick={function() { setStatusFilter(function(curr) { return curr === f.key && f.key !== "all" ? "all" : f.key; }); }} style={pill(statusFilter === f.key)}>{f.label}</button>;
+        return <Button key={f.key} onClick={function() { setStatusFilter(function(curr) { return curr === f.key && f.key !== "all" ? "all" : f.key; }); }} variant={statusFilter === f.key ? "active" : "outline"} size="default">{f.label}</Button>;
       })}
       <span style={{ fontSize:13, color:C.dim }}><span style={{ color:C.bad, fontWeight:600 }}>{summary.atRisk}</span> at risk | <span style={{ color:C.bad, fontWeight:600 }}>{Math.round(summary.uncovered).toLocaleString()}</span> uncovered units</span>
       <div style={{ flex:1 }} />
       {hasActiveFilters && (
-        <button onClick={function() { setSearch(""); setCustomerFilter("all"); setStatusFilter("all"); }} style={Object.assign({}, pill(false), { fontSize:13, color:C.bad, borderColor:C.badLine })}>Clear Filters</button>
+        <Button onClick={function() { setSearch(""); setCustomerFilter("all"); setStatusFilter("all"); }} variant="outline" size="default">Clear Filters</Button>
       )}
-      <button onClick={exportCSV} style={Object.assign({}, pill(false), { fontSize:13 })}>CSV</button>
-      <button onClick={exportPDF} style={Object.assign({}, pill(false), { fontSize:13 })}>PDF</button>
+      <Button onClick={exportCSV} variant="outline" size="default">CSV</Button>
+      <Button onClick={exportPDF} variant="outline" size="default">PDF</Button>
     </div>
 
     <div style={{ background:C.surface, border:"1px solid " + C.border, borderRadius:8, overflow:"hidden" }}>
@@ -281,7 +283,7 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
           <thead><tr style={{ background:C.raised }}>
             <th style={{ width:24, padding:"0 8px", borderBottom:"1px solid " + C.border }} />
             {[{ f:"sku", l:"Item" }, { f:"desc", l:"Description" }, { f:"customer", l:"Customer" }, { f:"onHand", l:"On Hand" }, { f:"shortQty", l:"Short" }, { f:"scheduledQty", l:"Scheduled" }, { f:"uncoveredQty", l:"Uncovered" }, { f:"coverage", l:"Coverage" }, { f:"risk", l:"Risk" }, { f:"action", l:"Action" }, { f:"dueDate", l:"Earliest Due" }].map(function(col) {
-              return <th key={col.f} onClick={function() { handleSort(col.f); }} style={Object.assign({}, thC(sortField===col.f), { textAlign:col.f==="sku"||col.f==="desc"||col.f==="customer"||col.f==="risk"||col.f==="action"?"left":"right" })}>{col.l}{sortField===col.f ? (sortDir==="asc" ? " \u2191" : " \u2193") : ""}</th>;
+              return <th key={col.f} style={Object.assign({}, thC(sortField===col.f), { textAlign:col.f==="sku"||col.f==="desc"||col.f==="customer"||col.f==="risk"||col.f==="action"?"left":"right" })}><button onClick={function() { handleSort(col.f); }} style={{ border:"none", background:"transparent", padding:0, margin:0, color:"inherit", font:"inherit", cursor:"pointer", textAlign:"inherit" }}>{col.l}{sortField===col.f ? (sortDir==="asc" ? " \u2191" : " \u2193") : ""}</button></th>;
             })}
           </tr></thead>
           <tbody>{renderRows()}</tbody>

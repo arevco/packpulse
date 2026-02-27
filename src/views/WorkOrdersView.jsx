@@ -484,7 +484,18 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
   var exportCSV = () => { if (!analysis) return; var h = ["Work Order","Product SKU","Description","Customer","WO Status","Due Date","Planned Start","Planned End","Order Qty","Produced","Remaining","Complete %","Ready %","Can Make","Est Hours","Run Status","Reference"]; var rows = analysis.results.map(w => [w.woNum, w.productSkuRaw, '"'+(w.productDesc||"").replace(/"/g,'""')+'"', '"'+(w.customer||"")+'"', w.status||"", w.dueDate||"", w.plannedStart||"", w.plannedEnd||"", w.qtyToProduce, w.unitsProduced, w.unitsRemaining, w.prodPct, w.readiness<0?"N/A":Math.round(w.readiness), w.maxRunnable, w.estHours||"", w.runStatus, '"'+(w.reference1||"").replace(/"/g,'""')+'"']); triggerDownload([h.join(",")].concat(rows.map(r => r.join(","))).join("\n"), "packpulse_" + new Date().toISOString().slice(0,10) + ".csv", "text/csv"); };
   var exportPDF = () => { if (!analysis) return; var th = ["WO#","Product","Customer","Qty","Produced","Remaining","Complete","Ready","Est Hrs","Status","Due"].map(h => "<th>"+h+"</th>").join(""); var tb = analysis.results.map(w => "<tr><td>"+w.woNum+"</td><td>"+w.productSkuRaw+"</td><td>"+(w.customer||"--")+"</td><td>"+w.qtyToProduce.toLocaleString()+"</td><td>"+w.unitsProduced.toLocaleString()+"</td><td>"+w.unitsRemaining.toLocaleString()+"</td><td>"+w.prodPct+"%</td><td>"+(w.readiness<0?"N/A":Math.round(w.readiness)+"%")+'</td><td>'+(w.estHours||"--")+'</td><td class="'+w.runStatus+'">'+w.runStatus+"</td><td>"+fmtDate(w.dueDate)+"</td></tr>").join(""); triggerDownload(buildExportHTML("PackPulse Report", th, tb), "packpulse_" + new Date().toISOString().slice(0,10) + ".html", "text/html"); };
 
-  var SortTh = function(props) { return <th onClick={() => handleSort(props.field)} style={Object.assign({}, thC(sortField===props.field), props.style||{})}>{props.children}{sortField===props.field ? (sortDir==="asc" ? " \u2191" : " \u2193") : ""}</th>; };
+  var SortTh = function(props) {
+    return (
+      <th style={Object.assign({}, thC(sortField===props.field), props.style||{})}>
+        <button
+          onClick={() => handleSort(props.field)}
+          style={{ border:"none", background:"transparent", padding:0, margin:0, color:"inherit", font:"inherit", cursor:"pointer", textAlign:"inherit" }}
+        >
+          {props.children}{sortField===props.field ? (sortDir==="asc" ? " \u2191" : " \u2193") : ""}
+        </button>
+      </th>
+    );
+  };
 
   var renderWORows = () => {
     if (filteredResults.length === 0) return <tr><td colSpan={19} style={{ padding:36, textAlign:"center", color:C.dim, fontSize:14 }}>No work orders match filters.</td></tr>;
@@ -713,16 +724,16 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
         {packMixBreakdown.length > 0 && (
           <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
             <span style={{ fontSize:12, color:C.dim, fontWeight:700, letterSpacing:0.2 }}>Pack Mix (Remaining)</span>
-            <button onClick={function() { setFilterPackType("all"); }} style={{ display:"inline-flex", alignItems:"center", gap:6, padding:"3px 9px", borderRadius:999, border:"1px solid "+(filterPackType === "all" ? C.accentLine : C.border), background:filterPackType === "all" ? C.accentSoft : C.surface, color:filterPackType === "all" ? C.accent : C.dim, fontSize:12, fontWeight:700, cursor:"pointer" }}>
+            <Button onClick={function() { setFilterPackType("all"); }} variant={filterPackType === "all" ? "active" : "outline"} size="sm" className="rounded-full">
               All Packs
-            </button>
+            </Button>
             {packMixBreakdown.map(function(row) {
               var activePack = filterPackType === row.packType;
               return (
-                <button key={row.packType} onClick={function() { setFilterPackType(function(curr) { return curr === row.packType ? "all" : row.packType; }); }} style={{ display:"inline-flex", alignItems:"center", gap:6, padding:"3px 9px", borderRadius:999, border:"1px solid "+(activePack ? C.accentLine : C.border), background:activePack ? C.accentSoft : C.surface, color:activePack ? C.accent : C.dim, fontSize:12, cursor:"pointer" }}>
+                <Button key={row.packType} onClick={function() { setFilterPackType(function(curr) { return curr === row.packType ? "all" : row.packType; }); }} variant={activePack ? "active" : "outline"} size="sm" className="rounded-full">
                   <span style={{ color:C.bright, fontWeight:700 }}>{row.packType}</span>
                   <span style={{ color:C.text }}>{fmtNum(row.remainingUnits)}</span>
-                </button>
+                </Button>
               );
             })}
           </div>
