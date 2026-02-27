@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.2.0",
+    "@fontsource/inter": "^5.2.8",
     "@radix-ui/react-slot": "^1.2.4",
     "@sentry/node": "^10.39.0",
     "@sentry/react": "^10.39.0",

@@ -32,7 +32,7 @@
 
   body {
     margin: 0;
-    font-family: "Google Sans", "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+    font-family: "Inter Variable", "Inter", "Google Sans", "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
     color: rgb(var(--foreground));
     background: rgb(var(--background));
     -webkit-font-smoothing: antialiased;

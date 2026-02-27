@@ -1,4 +1,5 @@
 import "./storage-shim.js";
+import "@fontsource/inter/index.css";
 import "./index.css";
 import React from "react";
 import ReactDOM from "react-dom/client";
