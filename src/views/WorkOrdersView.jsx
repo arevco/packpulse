@@ -674,36 +674,44 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       <button onClick={exportPDF} style={Object.assign({}, pill(false), { fontSize:13 })}>PDF</button>
     </div>
     {commitmentSummary && (
-      <div style={{ marginBottom:10, fontSize:13, color:C.dim }}>
-        Gap: <span style={{ color:C.bad, fontWeight:600 }}>{commitmentSummary.atRisk}</span> WOs | <span style={{ color:C.bad, fontWeight:600 }}>{commitmentSummary.reducedUnits.toLocaleString()}</span> units
+      <div style={{ marginBottom:10, display:"flex", flexDirection:"column", gap:8 }}>
+        <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
+          <span style={{ display:"inline-flex", alignItems:"center", gap:8, padding:"4px 10px", borderRadius:999, border:"1px solid "+C.border, background:C.surface, fontSize:13, color:C.dim }}>
+            <span style={{ fontWeight:700 }}>Gap</span>
+            <span style={{ color:C.bad, fontWeight:700 }}>{commitmentSummary.atRisk} WOs</span>
+            <span style={{ color:C.bad, fontWeight:700 }}>{commitmentSummary.reducedUnits.toLocaleString()} units</span>
+          </span>
+        </div>
+
         {woStatusBreakdown.length > 0 && (
-          <span>
-            {" "} | WO Status Qty:{" "}
+          <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
+            <span style={{ fontSize:12, color:C.dim, fontWeight:700, letterSpacing:0.2 }}>WO Status Qty</span>
             {woStatusBreakdown.map(function(row) {
               var active = filterWoStatus !== "all" && filterWoStatus === row.status;
               return (
-                <span key={row.status} style={{ marginRight:10, color:active ? C.accent : C.dim }}>
-                  <span style={{ fontWeight:active ? 700 : 600 }}>{row.status}</span>{" "}
-                  <span style={{ color:active ? C.accent : C.text }}>{row.woCount}</span>{" "}
-                  <span style={{ opacity:0.8 }}>/</span>{" "}
+                <span key={row.status} style={{ display:"inline-flex", alignItems:"center", gap:6, padding:"3px 9px", borderRadius:999, border:"1px solid "+(active ? C.accentLine : C.border), background:active ? C.accentSoft : C.surface, fontSize:12, color:active ? C.accent : C.dim }}>
+                  <span style={{ fontWeight:700 }}>{row.status}</span>
+                  <span style={{ color:active ? C.accent : C.text }}>{row.woCount}</span>
+                  <span style={{ opacity:0.65 }}>/</span>
                   <span style={{ color:active ? C.accent : C.text }}>{row.qtyUnits.toLocaleString()}</span>
                 </span>
               );
             })}
-          </span>
+          </div>
         )}
+
         {packMixBreakdown.length > 0 && (
-          <span>
-            {" "} | Pack Mix (Remaining):{" "}
+          <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
+            <span style={{ fontSize:12, color:C.dim, fontWeight:700, letterSpacing:0.2 }}>Pack Mix (Remaining)</span>
             {packMixBreakdown.map(function(row) {
               return (
-                <span key={row.packType} style={{ marginRight:10 }}>
-                  <span style={{ color:C.bright, fontWeight:700 }}>{row.packType}</span>{" "}
+                <span key={row.packType} style={{ display:"inline-flex", alignItems:"center", gap:6, padding:"3px 9px", borderRadius:999, border:"1px solid "+C.border, background:C.surface, fontSize:12 }}>
+                  <span style={{ color:C.bright, fontWeight:700 }}>{row.packType}</span>
                   <span style={{ color:C.text }}>{row.remainingUnits.toLocaleString()}</span>
                 </span>
               );
             })}
-          </span>
+          </div>
         )}
       </div>
     )}
