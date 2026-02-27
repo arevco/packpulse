@@ -6,6 +6,10 @@ import { useDataSources } from "./hooks/useDataSources";
 import { useAnalysis } from "./hooks/useAnalysis";
 import ColumnMapper from "./components/ColumnMapper";
 import FileUploader from "./components/FileUploader";
+import { Button } from "./components/ui/button";
+import { Badge } from "./components/ui/badge";
+import { Progress } from "./components/ui/progress";
+import TabsNav from "./components/ui/tabs-nav";
 const OverviewView = lazy(() => import("./views/OverviewView"));
 const WorkOrdersView = lazy(() => import("./views/WorkOrdersView"));
 const CriticalItemsView = lazy(() => import("./views/CriticalItemsView"));
@@ -388,64 +392,62 @@ export default function ProductionReadiness() {
         <input ref={ds.dockRefreshRef} type="file" accept=".xlsx,.xls,.csv" style={{display:"none"}} onChange={e => {ds.handleRefreshFile("dock",e.target.files[0]);e.target.value="";}} />
 
         {showSyncBanner ? (
-          <div style={{ marginBottom:10, border:"1px solid "+C.border, borderRadius:8, background:C.surface, padding:"8px 10px", display:"flex", flexWrap:"wrap", alignItems:"center", gap:8 }}>
-            <span style={{ fontSize:13, fontWeight:600, color:C.bright }}>Live Sync</span>
-            <span style={{ fontSize:12, color:C.dim }}>
+          <div className="mb-2.5 flex flex-wrap items-center gap-2 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2.5 py-2">
+            <span className="text-sm font-semibold text-[rgb(var(--foreground))]">Live Sync</span>
+            <span className="text-xs text-[rgb(var(--muted))]">
               {isActivelySyncing ? "Syncing data..." : "Up to date"}
             </span>
-            <span style={{ fontSize:12, color:syncPctColor, minWidth:44, textAlign:"right", fontVariantNumeric:"tabular-nums" }}>
+            <span className="min-w-11 text-right text-xs font-semibold [font-variant-numeric:tabular-nums]" style={{ color:syncPctColor }}>
               {Math.round(syncVisualPct)}%
             </span>
-            <div style={{ width:180, height:6, borderRadius:999, background:C.raised, overflow:"hidden", border:"1px solid "+C.border }}>
-              <div style={{ width:syncVisualPct+"%", height:"100%", background:syncBarColor, transition:"width 280ms ease" }} />
-            </div>
+            <Progress value={syncVisualPct} className="w-44" />
             {syncVisualPct < 100 && (
-              <span style={{ fontSize:12, color:C.dim }}>
+              <span className="text-xs text-[rgb(var(--muted))]">
                 {syncProgress.activeText}
               </span>
             )}
-            {nulogySyncState && nulogySyncState.syncing && <span style={pill("info")}>Nulogy</span>}
-            {dockApiLoading && <span style={pill("info")}>OpenDock</span>}
-            {dockApiInfo && syncVisualPct < 100 && <span style={pill("ok")}>{dockApiInfo}</span>}
-            {dockApiError && <span style={pill("bad")}>OpenDock: {dockApiError}</span>}
-            {nulogySyncState && nulogySyncState.errorCount > 0 && <span style={pill("bad")}>Nulogy sync has errors</span>}
+            {nulogySyncState && nulogySyncState.syncing && <Badge variant="secondary">Nulogy</Badge>}
+            {dockApiLoading && <Badge variant="secondary">OpenDock</Badge>}
+            {dockApiInfo && syncVisualPct < 100 && <Badge variant="success">{dockApiInfo}</Badge>}
+            {dockApiError && <Badge variant="danger">OpenDock: {dockApiError}</Badge>}
+            {nulogySyncState && nulogySyncState.errorCount > 0 && <Badge variant="danger">Nulogy sync has errors</Badge>}
             {!dockApiLoading && (!nulogySyncState || !nulogySyncState.syncing) && !ds.mappingConfirmed && (
-              <button onClick={() => { setDockApiInfo(""); setDockApiError(""); setAutoDockAttempted(false); setSyncNonce(n => n + 1); }} style={{ padding:"6px 10px", borderRadius:6, border:"1px solid "+C.border, background:"transparent", color:C.dim, fontFamily:sans, fontSize:12, cursor:"pointer" }}>
+              <Button variant="outline" size="sm" onClick={() => { setDockApiInfo(""); setDockApiError(""); setAutoDockAttempted(false); setSyncNonce(n => n + 1); }}>
                 Retry
-              </button>
+              </Button>
             )}
-            <button onClick={() => setShowDataSetup(v => !v)} style={{ padding:"6px 10px", borderRadius:6, border:"1px solid "+C.border, background:"transparent", color:C.dim, fontFamily:sans, fontSize:12, cursor:"pointer" }}>
+            <Button variant="outline" size="sm" onClick={() => setShowDataSetup(v => !v)}>
               {showDataSetup ? "Close Setup" : "Open Data Setup"}
-            </button>
+            </Button>
           </div>
         ) : null}
 
-        <div style={{ display:"flex", gap:6, marginBottom:10, flexWrap:"wrap", alignItems:"center" }}>
-          <button onClick={() => setShowDataControlsPanel(v => !v)} style={{ padding:"4px 10px", borderRadius:6, border:"1px solid "+(showDataControlsPanel?C.accentLine:C.border), background:showDataControlsPanel?C.accentSoft:"transparent", cursor:"pointer", color:showDataControlsPanel?C.accent:C.dim, fontFamily:sans, fontSize:13 }}>
+        <div className="mb-2.5 flex flex-wrap items-center gap-1.5">
+          <Button onClick={() => setShowDataControlsPanel(v => !v)} variant={showDataControlsPanel ? "active" : "outline"} size="sm">
             {showDataControlsPanel ? "Hide Data Controls" : "Data Controls"}
-          </button>
-          <button onClick={() => setShowSettings(!showSettings)} style={{ padding:"4px 10px", borderRadius:6, border:"1px solid "+(showSettings?C.accentLine:C.border), background:showSettings?C.accentSoft:"transparent", cursor:"pointer", color:showSettings?C.accent:C.dim, fontFamily:sans, fontSize:13 }}>Data Mapping</button>
-          <span style={{ fontSize:12, color:C.dim }}>
+          </Button>
+          <Button onClick={() => setShowSettings(!showSettings)} variant={showSettings ? "active" : "outline"} size="sm">Data Mapping</Button>
+          <span className="text-xs text-[rgb(var(--muted))]">
             Data freshness: <span style={{ color:freshCount===dataSourceStatus.length?C.ok:freshCount>=3?C.warn:C.bad, fontWeight:600 }}>{freshCount}/{dataSourceStatus.length}</span> fresh · Updated {summaryStamp}
           </span>
         </div>
         {showDataControlsPanel && (
-          <div style={{ marginBottom:10, border:"1px solid "+C.border, borderRadius:8, background:C.surface, padding:"10px 12px" }}>
-            <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center", marginBottom:8 }}>
-            <button onClick={fetchOpenDockApi} disabled={dockApiLoading} style={{ padding:"4px 10px", borderRadius:6, border:"1px solid "+(dockApiLoading?C.border:C.accentLine), background:dockApiLoading?C.raised:C.accentSoft, cursor:dockApiLoading?"not-allowed":"pointer", color:dockApiLoading?C.dim:C.accent, fontFamily:sans, fontSize:13 }}>
+          <div className="mb-2.5 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-2.5">
+            <div className="mb-2 flex flex-wrap items-center gap-1.5">
+            <Button onClick={fetchOpenDockApi} disabled={dockApiLoading} variant={dockApiLoading ? "soft" : "active"} size="sm">
               {dockApiLoading ? "Syncing OpenDock..." : "Sync OpenDock API"}
-            </button>
-              <button onClick={() => setShowDataSetup(v => !v)} style={{ padding:"4px 10px", borderRadius:6, border:"1px solid "+C.border, background:"transparent", cursor:"pointer", color:C.dim, fontFamily:sans, fontSize:13 }}>
+            </Button>
+              <Button onClick={() => setShowDataSetup(v => !v)} variant="outline" size="sm">
                 {showDataSetup ? "Close Data Setup" : "Open Data Setup"}
-              </button>
-              <button onClick={() => setActiveView("flags")} style={{ padding:"4px 10px", borderRadius:6, border:"1px solid "+(activeView==="flags"?C.accentLine:C.border), background:activeView==="flags"?C.accentSoft:"transparent", cursor:"pointer", color:activeView==="flags"?C.accent:C.dim, fontFamily:sans, fontSize:13 }}>
+              </Button>
+              <Button onClick={() => setActiveView("flags")} variant={activeView==="flags" ? "active" : "outline"} size="sm">
                 Data Flags {analysisForUI.flags.length > 0 ? "(" + analysisForUI.flags.length + ")" : ""}
-              </button>
+              </Button>
             </div>
-            <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
+            <div className="flex flex-wrap items-center gap-1.5">
               {dataSourceStatus.map(function(s) {
                 var sl = staleLevel(s.ts, s.cad); var dc = sl==="fresh"?C.ok:sl==="stale"?C.warn:C.bad;
-                return <button key={s.k} onClick={s.ref} style={{ display:"inline-flex", alignItems:"center", gap:5, padding:"4px 10px", borderRadius:6, border:"1px solid "+C.border, background:C.surface, cursor:"pointer", color:C.dim, fontFamily:sans, fontSize:13, fontWeight:500 }}>
+                return <button key={s.k} onClick={s.ref} className="inline-flex items-center gap-1.5 rounded-md border border-[rgb(var(--border))] bg-white px-2.5 py-1 text-xs font-medium text-[rgb(var(--muted))]">
                   <span style={{ width:6, height:6, borderRadius:"50%", background:dc }} />{s.l} <span style={{ opacity:0.6 }}>{fmtTs(s.ts)}</span>
                 </button>;
               })}
@@ -474,14 +476,12 @@ export default function ProductionReadiness() {
           </div>
         )}
 
-        <div style={{ display:"flex", gap:0, marginBottom:16, borderBottom:"1px solid "+C.border }}>
-          {[{key:"overview",label:"Overview",count:null,alert:false},{key:"workorders",label:"Work Orders",count:summaryForUI.total},{key:"criticalitems",label:"Critical Items",count:criticalItemsForUI.length},{key:"recommendations",label:"Recommendations",count:recommendationsForUI.length,alert:recommendationsForUI.some(function(r){return r.priority==="P1";})}]
-            .concat([{key:"timeline",label:"Deliveries",count:timelineData ? timelineData.totalDeliveries : 0,alert:false},{key:"sandbox",label:"Sandbox",count:null,alert:false}]).map(t =>
-              <button key={t.key} onClick={() => setActiveView(t.key)} style={{ padding:"8px 16px", border:"none", fontFamily:sans, fontSize:14, fontWeight:500, cursor:"pointer", background:"transparent", color:activeView===t.key?C.bright:C.dim, borderBottom:activeView===t.key?"2px solid "+C.accent:"2px solid transparent", marginBottom:-1 }}>
-                {t.label} {t.count != null && <span style={{ opacity:t.alert?1:0.45, fontSize:13, color:t.alert?C.bad:undefined }}>{t.alert?"\u26A0 ":""}{t.count}</span>}
-              </button>
-          )}
-        </div>
+        <TabsNav
+          activeKey={activeView}
+          onChange={setActiveView}
+          items={[{key:"overview",label:"Overview",count:null,alert:false},{key:"workorders",label:"Work Orders",count:summaryForUI.total},{key:"criticalitems",label:"Critical Items",count:criticalItemsForUI.length},{key:"recommendations",label:"Recommendations",count:recommendationsForUI.length,alert:recommendationsForUI.some(function(r){return r.priority==="P1";})}]
+            .concat([{key:"timeline",label:"Deliveries",count:timelineData ? timelineData.totalDeliveries : 0,alert:false},{key:"sandbox",label:"Sandbox",count:null,alert:false}])}
+        />
 
         <Suspense fallback={<div style={{ fontSize:13, color:C.dim, padding:"8px 0 4px" }}>Loading view...</div>}>
           {activeView === "overview" && <OverviewView analysis={analysisForUI} woStatuses={woStatusesForUI} onSelectCustomer={openWorkOrdersForCustomer} />}
