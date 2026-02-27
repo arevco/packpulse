@@ -2,9 +2,15 @@ import { createContext, useContext, useState } from "react";
 
 const FONTS_CSS = "";
 const A11Y_CSS = `
-  :focus-visible {
+  :focus-visible:not(select) {
     outline: none !important;
     box-shadow: 0 0 0 2px #3b82f6 !important;
+  }
+  select:focus,
+  select:focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
+    border-color: rgb(59, 130, 246) !important;
   }
   @media (prefers-reduced-motion: reduce) {
     *,
