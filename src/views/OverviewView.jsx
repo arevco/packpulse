@@ -2,10 +2,12 @@ import { useState, useMemo } from "react";
 import { useTheme } from "../theme";
 import { useStyles } from "../hooks/useStyles";
 import { fmtDate, formatDescriptionForDisplay, normalizeStr } from "../utils";
+import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
 
 export default function OverviewView({ analysis, woStatuses, onSelectCustomer }) {
-  const { C, sans, mono } = useTheme();
-  const { thS, tdN, tdM, inp, pill } = useStyles();
+  const { C, mono } = useTheme();
+  const { thS, tdN, tdM } = useStyles();
 
   const [ovSearch, setOvSearch] = useState("");
   const [ovWoStatus, setOvWoStatus] = useState("all");
@@ -193,20 +195,20 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
   });
 
   return (<div>
-    <div style={{ display:"flex", gap:8, marginBottom:16, flexWrap:"wrap", alignItems:"center" }}>
-      <input type="text" placeholder="Search WO, SKU, customer..." value={ovSearch} onChange={function(e) { setOvSearch(e.target.value); }} style={Object.assign({}, inp, { width:220 })} />
-      <select value={ovCustomer} onChange={function(e) { setOvCustomer(e.target.value); }} style={Object.assign({}, inp, { width:220 })}>
+    <div className="mb-4 flex flex-wrap items-center gap-2">
+      <Input type="text" placeholder="Search WO, SKU, customer..." value={ovSearch} onChange={function(e) { setOvSearch(e.target.value); }} className="h-10 w-72 text-sm" />
+      <select value={ovCustomer} onChange={function(e) { setOvCustomer(e.target.value); }} className="h-10 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]">
         <option value="all">All Customers</option>
         {customerOptions.map(function(c) { return <option key={c} value={c}>{c}</option>; })}
       </select>
       {["all"].concat(woStatuses).map(function(f) {
-        return <button key={f} onClick={function() { setOvWoStatus(function(curr) { return curr === f && f !== "all" ? "all" : f; }); }} style={pill(ovWoStatus===f)}>{f==="all"?"All WO Status":f}</button>;
+        return <Button key={f} onClick={function() { setOvWoStatus(function(curr) { return curr === f && f !== "all" ? "all" : f; }); }} variant={ovWoStatus===f ? "active" : "outline"} size="default">{f==="all"?"All WO Status":f}</Button>;
       })}
       <span style={{ fontSize:13, color:C.dim, marginLeft:4 }}>Due from</span>
-      <input type="date" value={ovDateFrom} onChange={e => setOvDateFrom(e.target.value)} style={Object.assign({}, inp, { width:140 })} />
+      <Input type="date" value={ovDateFrom} onChange={e => setOvDateFrom(e.target.value)} className="h-10 w-36 text-sm" />
       <span style={{ fontSize:13, color:C.dim }}>to</span>
-      <input type="date" value={ovDateTo} onChange={e => setOvDateTo(e.target.value)} style={Object.assign({}, inp, { width:140 })} />
-      {(ovSearch || ovWoStatus!=="all" || ovCustomer!=="all" || ovDateFrom || ovDateTo) && <button onClick={() => {setOvSearch("");setOvWoStatus("all");setOvCustomer("all");setOvDateFrom("");setOvDateTo("");}} style={Object.assign({}, pill(false), { fontSize:12, color:C.bad, borderColor:C.badLine })}>Clear</button>}
+      <Input type="date" value={ovDateTo} onChange={e => setOvDateTo(e.target.value)} className="h-10 w-36 text-sm" />
+      {(ovSearch || ovWoStatus!=="all" || ovCustomer!=="all" || ovDateFrom || ovDateTo) && <Button onClick={() => {setOvSearch("");setOvWoStatus("all");setOvCustomer("all");setOvDateFrom("");setOvDateTo("");}} variant="outline" size="default">Clear</Button>}
       <span style={{ fontSize:13, color:C.dim, marginLeft:4 }}>{overview.woCount} of {analysis.results.length} WOs{overview.noDueDate > 0 && ovDateFrom ? " ("+overview.noDueDate+" excluded \u2014 no due date)" : ""}</span>
     </div>
     <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(150px, 1fr))", gap:10, marginBottom:20 }}>
@@ -232,7 +234,7 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
             {[{l:"Customer",f:"name"},{l:"WOs",f:"count"},{l:"Order Qty",f:"orderQty"},{l:"Produced",f:"produced"},{l:"Remaining",f:"remaining"},{l:"Net Make",f:"netMake"},{l:"Complete",f:"complete"},{l:"Late",f:"late"}].map(function(col) {
               var active = custSortField === col.f;
               var arrow = active ? (custSortDir === "asc" ? " \u2191" : " \u2193") : "";
-              return <th key={col.f} onClick={function() { onCustSort(col.f); }} style={Object.assign({}, thS, { cursor:"pointer", color:active ? C.accent : thS.color })}>{col.l + arrow}</th>;
+              return <th key={col.f} style={Object.assign({}, thS, { color:active ? C.accent : thS.color })}><button onClick={function() { onCustSort(col.f); }} style={{ border:"none", background:"transparent", padding:0, margin:0, color:"inherit", font:"inherit", cursor:"pointer", textAlign:"inherit" }}>{col.l + arrow}</button></th>;
             })}
           </tr></thead>
           <tbody>
@@ -273,7 +275,7 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
             {[{l:"Days Late",f:"daysLate"},{l:"WO#",f:"woNum"},{l:"Product",f:"productSkuRaw"},{l:"Product Description",f:"productDesc"},{l:"Customer",f:"customer"},{l:"Order Qty",f:"qtyToProduce"},{l:"Remaining",f:"unitsRemaining"},{l:"Complete",f:"prodPct"},{l:"Ready",f:"readiness"},{l:"Net Make",f:"netCanMake"},{l:"Due Date",f:"dueDate"}].map(function(col) {
               var active = lateSortField === col.f;
               var arrow = active ? (lateSortDir === "asc" ? " \u2191" : " \u2193") : "";
-              return <th key={col.f} onClick={function() { onLateSort(col.f); }} style={Object.assign({}, thS, { cursor:"pointer", color:active ? C.accent : thS.color })}>{col.l + arrow}</th>;
+              return <th key={col.f} style={Object.assign({}, thS, { color:active ? C.accent : thS.color })}><button onClick={function() { onLateSort(col.f); }} style={{ border:"none", background:"transparent", padding:0, margin:0, color:"inherit", font:"inherit", cursor:"pointer", textAlign:"inherit" }}>{col.l + arrow}</button></th>;
             })}
           </tr></thead>
           <tbody>

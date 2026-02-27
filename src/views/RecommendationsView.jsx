@@ -1,10 +1,13 @@
 import { useMemo, useState } from "react";
 import { useTheme } from "../theme";
 import { useStyles } from "../hooks/useStyles";
+import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
+import { Badge } from "../components/ui/badge";
 
 export default function RecommendationsView({ recommendations, onOpenRecommendation }) {
   const { C } = useTheme();
-  const { thC, tdN, tdM, inp, pill } = useStyles();
+  const { thC, tdN, tdM } = useStyles();
   const [windowFilter, setWindowFilter] = useState("all");
   const [ownerFilter, setOwnerFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -54,17 +57,17 @@ export default function RecommendationsView({ recommendations, onOpenRecommendat
 
   return (
     <div>
-      <div style={{ display:"flex", gap:6, marginBottom:12, flexWrap:"wrap", alignItems:"center" }}>
-        <input type="text" placeholder="Search action, reason, source..." value={search} onChange={function(e) { setSearch(e.target.value); }} style={Object.assign({}, inp, { width:240 })} />
-        <select value={ownerFilter} onChange={function(e) { setOwnerFilter(e.target.value); }} style={Object.assign({}, inp, { fontSize:13 })}>
+      <div className="mb-3 flex flex-wrap items-center gap-1.5">
+        <Input type="text" placeholder="Search action, reason, source..." value={search} onChange={function(e) { setSearch(e.target.value); }} className="h-10 w-72 text-sm" />
+        <select value={ownerFilter} onChange={function(e) { setOwnerFilter(e.target.value); }} className="h-10 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]">
           <option value="all">All Owners</option>
           {owners.map(function(o) { return <option key={o} value={o}>{o}</option>; })}
         </select>
         {["all", "now", "today", "week"].map(function(w) {
-          return <button key={w} onClick={function() { setWindowFilter(function(curr) { return curr === w && w !== "all" ? "all" : w; }); }} style={pill(windowFilter === w)}>{w === "all" ? "All" : windowLabel(w)}</button>;
+          return <Button key={w} onClick={function() { setWindowFilter(function(curr) { return curr === w && w !== "all" ? "all" : w; }); }} variant={windowFilter === w ? "active" : "outline"} size="default">{w === "all" ? "All" : windowLabel(w)}</Button>;
         })}
         <div style={{ flex:1 }} />
-        <span style={{ fontSize:13, color:C.dim }}>{rows.length} recommendations</span>
+        <Badge variant="secondary">{rows.length} recommendations</Badge>
       </div>
 
       <div style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, overflow:"hidden" }}>
@@ -72,12 +75,12 @@ export default function RecommendationsView({ recommendations, onOpenRecommendat
           <table style={{ width:"100%", borderCollapse:"collapse" }}>
             <thead>
               <tr style={{ background:C.raised }}>
-                <th onClick={function() { onSort("priority"); }} style={thC(sortField==="priority")}>Priority{sortField==="priority" ? (sortDir==="asc" ? " ↑" : " ↓") : ""}</th>
-                <th onClick={function() { onSort("action"); }} style={thC(sortField==="action")}>Action{sortField==="action" ? (sortDir==="asc" ? " ↑" : " ↓") : ""}</th>
-                <th onClick={function() { onSort("owner"); }} style={thC(sortField==="owner")}>Owner{sortField==="owner" ? (sortDir==="asc" ? " ↑" : " ↓") : ""}</th>
-                <th onClick={function() { onSort("window"); }} style={thC(sortField==="window")}>When{sortField==="window" ? (sortDir==="asc" ? " ↑" : " ↓") : ""}</th>
-                <th onClick={function() { onSort("impact"); }} style={Object.assign({}, thC(sortField==="impact"), { textAlign:"right" })}>Impact{sortField==="impact" ? (sortDir==="asc" ? " ↑" : " ↓") : ""}</th>
-                <th onClick={function() { onSort("confidence"); }} style={thC(sortField==="confidence")}>Confidence{sortField==="confidence" ? (sortDir==="asc" ? " ↑" : " ↓") : ""}</th>
+                <th style={thC(sortField==="priority")}><button onClick={function() { onSort("priority"); }} style={{ border:"none", background:"transparent", padding:0, margin:0, color:"inherit", font:"inherit", cursor:"pointer", textAlign:"inherit" }}>Priority{sortField==="priority" ? (sortDir==="asc" ? " ↑" : " ↓") : ""}</button></th>
+                <th style={thC(sortField==="action")}><button onClick={function() { onSort("action"); }} style={{ border:"none", background:"transparent", padding:0, margin:0, color:"inherit", font:"inherit", cursor:"pointer", textAlign:"inherit" }}>Action{sortField==="action" ? (sortDir==="asc" ? " ↑" : " ↓") : ""}</button></th>
+                <th style={thC(sortField==="owner")}><button onClick={function() { onSort("owner"); }} style={{ border:"none", background:"transparent", padding:0, margin:0, color:"inherit", font:"inherit", cursor:"pointer", textAlign:"inherit" }}>Owner{sortField==="owner" ? (sortDir==="asc" ? " ↑" : " ↓") : ""}</button></th>
+                <th style={thC(sortField==="window")}><button onClick={function() { onSort("window"); }} style={{ border:"none", background:"transparent", padding:0, margin:0, color:"inherit", font:"inherit", cursor:"pointer", textAlign:"inherit" }}>When{sortField==="window" ? (sortDir==="asc" ? " ↑" : " ↓") : ""}</button></th>
+                <th style={Object.assign({}, thC(sortField==="impact"), { textAlign:"right" })}><button onClick={function() { onSort("impact"); }} style={{ border:"none", background:"transparent", padding:0, margin:0, color:"inherit", font:"inherit", cursor:"pointer", textAlign:"inherit" }}>Impact{sortField==="impact" ? (sortDir==="asc" ? " ↑" : " ↓") : ""}</button></th>
+                <th style={thC(sortField==="confidence")}><button onClick={function() { onSort("confidence"); }} style={{ border:"none", background:"transparent", padding:0, margin:0, color:"inherit", font:"inherit", cursor:"pointer", textAlign:"inherit" }}>Confidence{sortField==="confidence" ? (sortDir==="asc" ? " ↑" : " ↓") : ""}</button></th>
                 <th style={thC(false)}>Why</th>
                 <th style={thC(false)}>Source</th>
                 <th style={thC(false)} />
@@ -96,9 +99,9 @@ export default function RecommendationsView({ recommendations, onOpenRecommendat
                   <td style={Object.assign({}, tdN, { color:C.dim, maxWidth:340, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" })}>{r.why}</td>
                   <td style={Object.assign({}, tdN, { color:C.dim })}>{r.source}</td>
                   <td style={tdN}>
-                    <button onClick={function() { if (onOpenRecommendation) onOpenRecommendation(r); }} style={{ padding:"4px 9px", borderRadius:6, border:"1px solid "+C.border, background:"transparent", cursor:"pointer", color:C.dim, fontSize:12 }}>
+                    <Button onClick={function() { if (onOpenRecommendation) onOpenRecommendation(r); }} variant="outline" size="sm">
                       Open
-                    </button>
+                    </Button>
                   </td>
                 </tr>;
               })}
