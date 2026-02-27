@@ -8,7 +8,7 @@ import TableShell from "../components/ui/table-shell";
 import SortHeaderButton from "../components/ui/sort-header-button";
 
 export default function CriticalItemsView({ rawCriticalItems, inboundCoverage }) {
-  const { C } = useTheme();
+  const { C, mono } = useTheme();
   const { thC, tdN, tdM, tdToggle, thDS, tdDN, tdDM, truncate } = useStyles();
 
   const [search, setSearch] = useState("");
@@ -222,8 +222,8 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
         out.push(
           <tr key={rowKey + "-detail"}><td colSpan={12} style={{ padding:"0 12px 14px 36px", background:C.raised }}>
             <div style={{ display:"flex", gap:14, flexWrap:"wrap", marginTop:10, marginBottom:8, fontSize:12 }}>
-              <span style={{ color:C.dim }}>Earliest Inbound: <span style={{ color:C.bright, fontFamily:"monospace" }}>{fmtDate(ci.earliestInboundDate)}</span></span>
-              <span style={{ color:C.dim }}>Earliest Scheduled: <span style={{ color:C.bright, fontFamily:"monospace" }}>{fmtDate(ci.earliestScheduledDate)}</span></span>
+              <span style={{ color:C.dim }}>Earliest Inbound: <span style={{ color:C.bright, fontFamily:mono }}>{fmtDate(ci.earliestInboundDate)}</span></span>
+              <span style={{ color:C.dim }}>Earliest Scheduled: <span style={{ color:C.bright, fontFamily:mono }}>{fmtDate(ci.earliestScheduledDate)}</span></span>
               <span style={{ color:C.dim }}>POs: <span style={{ color:C.bright }}>{(ci.openPOs || []).length ? ci.openPOs.join(", ") : "--"}</span></span>
               <span style={{ color:C.dim }}>Unlocked Units: <span style={{ color:C.bright }}>{Math.round(ci.unlockedUnits || 0).toLocaleString()}</span></span>
             </div>

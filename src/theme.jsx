@@ -1,6 +1,6 @@
 import { createContext, useContext, useState } from "react";
 
-const FONTS_CSS = "@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');";
+const FONTS_CSS = "";
 const A11Y_CSS = `
   :focus-visible {
     outline: 2px solid #3b82f6 !important;
@@ -16,8 +16,8 @@ const A11Y_CSS = `
     }
   }
 `;
-const sans = "'IBM Plex Sans', -apple-system, sans-serif";
-const mono = "'IBM Plex Mono', monospace";
+const sans = "'Inter Variable', 'Inter', 'Google Sans', 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif";
+const mono = sans;
 
 const THEMES = {
   dark: {

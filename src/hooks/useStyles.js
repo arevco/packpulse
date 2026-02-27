@@ -15,12 +15,12 @@ export function useStyles() {
   const thC = active => Object.assign({}, thBase, { color:active?C.accent:C.dim, cursor:"pointer", userSelect:"none" });
   const thS = Object.assign({}, thBase, { color:C.dim });
   const tdN = Object.assign({}, tdBase, { fontFamily:sans, color:C.text });
-  const tdM = Object.assign({}, tdBase, { fontFamily:mono, color:C.text });
+  const tdM = Object.assign({}, tdBase, { fontFamily:sans, fontVariantNumeric:"tabular-nums", color:C.text });
   const tdToggle = { padding:"0 " + hPadDetail, width:26, textAlign:"center", fontSize:fBody, color:C.dim, whiteSpace:"nowrap" };
 
   const thDS = { padding:vPadDetail + " " + hPadDetail, textAlign:"left", fontSize:fBody, fontWeight:600, fontFamily:sans, letterSpacing:0.2, color:C.dim, borderBottom:"1px solid "+C.border };
   const tdDN = { padding:vPadDetail + " " + hPadDetail, fontSize:fBody, fontFamily:sans, color:C.text, lineHeight:1.25 };
-  const tdDM = { padding:vPadDetail + " " + hPadDetail, fontSize:fBody, fontFamily:mono, color:C.text, lineHeight:1.25 };
+  const tdDM = { padding:vPadDetail + " " + hPadDetail, fontSize:fBody, fontFamily:sans, fontVariantNumeric:"tabular-nums", color:C.text, lineHeight:1.25 };
 
   const truncate = maxWidth => ({ maxWidth:maxWidth, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" });
   const inp = { padding:"6px 10px", background:C.surface, border:"1px solid "+C.border, borderRadius:6, color:C.bright, fontFamily:sans, fontSize:13 };
