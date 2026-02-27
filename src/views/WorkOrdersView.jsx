@@ -648,22 +648,22 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
   };
 
   return (<div>
-    <div className="mb-3 flex flex-wrap items-center gap-1.5">
-      <Input type="text" placeholder="Search WO, SKU, customer, notes..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="h-10 w-72 text-sm" />
-      <select value={filterCustomer} onChange={e => setFilterCustomer(e.target.value)} className="h-10 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]">
+    <div className="mb-3 flex items-center gap-1.5 overflow-x-auto whitespace-nowrap pb-1">
+      <Input type="text" placeholder="Search WO, SKU, customer, notes..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="h-10 w-72 shrink-0 text-sm" />
+      <select value={filterCustomer} onChange={e => setFilterCustomer(e.target.value)} className="h-10 shrink-0 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]">
         <option value="all">All Customers</option>
         {woCustomers.map(s => <option key={s} value={s}>{s}</option>)}
       </select>
-      <select value={filterDueMonth} onChange={e => setFilterDueMonth(e.target.value)} className="h-10 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]">
+      <select value={filterDueMonth} onChange={e => setFilterDueMonth(e.target.value)} className="h-10 shrink-0 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]">
         <option value="all">All Months</option>
         {dueMonthOptions.map(function(m) { return <option key={m} value={m}>{dueMonthLabel(m)}</option>; })}
       </select>
-      <select value={filterWoStatus} onChange={e => setFilterWoStatus(e.target.value)} className="h-10 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]">
+      <select value={filterWoStatus} onChange={e => setFilterWoStatus(e.target.value)} className="h-10 shrink-0 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]">
         <option value="all">All WO Status</option>
         {woStatuses.map(s => <option key={s} value={s}>{s}</option>)}
       </select>
       {["all","ready","partial","blocked","nobom"].map(function(f) {
-        return <Button key={f} onClick={function() { setFilterStatus(function(curr) { return curr === f && f !== "all" ? "all" : f; }); }} variant={filterStatus===f ? "active" : "outline"} size="default">{f==="all"?"All":f==="ready"?"Ready":f==="partial"?"Partial":f==="blocked"?"Blocked":"No BOM"}</Button>;
+        return <Button key={f} onClick={function() { setFilterStatus(function(curr) { return curr === f && f !== "all" ? "all" : f; }); }} variant={filterStatus===f ? "active" : "outline"} size="default" className="shrink-0">{f==="all"?"All":f==="ready"?"Ready":f==="partial"?"Partial":f==="blocked"?"Blocked":"No BOM"}</Button>;
       })}
       <Button onClick={function() {
         setFilterRunNext(function(v) {
@@ -675,18 +675,17 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
           }
           return next;
         });
-      }} variant={filterRunNext ? "active" : "outline"} size="default">Run Next</Button>
+      }} variant={filterRunNext ? "active" : "outline"} size="default" className="shrink-0">Run Next</Button>
       {filterRunNext && (
-        <select value={runNextLimit} onChange={function(e) { setRunNextLimit(e.target.value); }} className="h-10 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]">
+        <select value={runNextLimit} onChange={function(e) { setRunNextLimit(e.target.value); }} className="h-10 shrink-0 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]">
           <option value="8">Top 8</option>
           <option value="12">Top 12</option>
           <option value="20">Top 20</option>
         </select>
       )}
-      <Button onClick={function() { setFilterShared(function(v) { return !v; }); }} variant={filterShared ? "active" : "outline"} size="default">Shared</Button>
-      <div style={{ flex:1 }} />
-      <Button onClick={exportCSV} variant="outline" size="default">CSV</Button>
-      <Button onClick={exportPDF} variant="outline" size="default">PDF</Button>
+      <Button onClick={function() { setFilterShared(function(v) { return !v; }); }} variant={filterShared ? "active" : "outline"} size="default" className="shrink-0">Shared</Button>
+      <Button onClick={exportCSV} variant="outline" size="default" className="shrink-0">CSV</Button>
+      <Button onClick={exportPDF} variant="outline" size="default" className="shrink-0">PDF</Button>
     </div>
     {commitmentSummary && (
       <div style={{ marginBottom:10, display:"flex", flexDirection:"column", gap:8 }}>
