@@ -240,7 +240,7 @@ export default function ProductionReadiness() {
           </Button>
         </div>
       </header>
-      <main style={{ padding:"20px 28px", maxWidth:1440, margin:"0 auto" }}>
+      <main className="mx-auto max-w-[1440px] px-7 py-5">
       {showAutoBootstrap && (
         <NulogySync
           key={"auto-sync-" + syncNonce}
@@ -254,8 +254,8 @@ export default function ProductionReadiness() {
       )}
 
       {(showDataSetup || (!ds.mappingConfirmed && !showAutoBootstrap)) && (<div>
-        <div style={{ marginBottom:12, display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, flexWrap:"wrap" }}>
-          <div style={{ fontSize:12, color:C.dim }}>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2.5">
+          <div className="text-xs text-[rgb(var(--muted))]">
             Dashboard / <span style={{ color:C.bright, fontWeight:600 }}>Data Setup</span>
           </div>
           <Button onClick={goToDashboard} variant="outline" size="sm">
@@ -263,12 +263,12 @@ export default function ProductionReadiness() {
           </Button>
         </div>
         {showAutoBootstrap && !showDataSetup && (
-          <div style={{ marginBottom:16, border:"1px solid "+C.border, borderRadius:10, background:C.surface, padding:"12px 14px", display:"flex", flexWrap:"wrap", alignItems:"center", gap:10 }}>
-            <div style={{ display:"flex", flexDirection:"column", gap:2, minWidth:260 }}>
-              <div style={{ fontSize:14, fontWeight:600, color:C.bright }}>
+          <div className="mb-4 flex flex-wrap items-center gap-2.5 rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3.5 py-3">
+            <div className="flex min-w-[260px] flex-col gap-0.5">
+              <div className="text-sm font-semibold text-[rgb(var(--foreground))]">
                 Syncing live data in background
               </div>
-              <div style={{ fontSize:12, color:C.dim }}>
+              <div className="text-xs text-[rgb(var(--muted))]">
                 {nulogySyncState && nulogySyncState.syncing
                   ? "Pulling Nulogy + OpenDock now. You will enter the dashboard automatically."
                   : "Preparing live feeds. You can open manual setup at any time."}
@@ -292,30 +292,30 @@ export default function ProductionReadiness() {
             </Button>
           </div>
         )}
-        {(!showAutoBootstrap || showDataSetup) && <div style={{ fontSize:13, fontWeight:600, color:C.dim, letterSpacing:0.2, marginBottom:8 }}>Data Setup</div>}
+        {(!showAutoBootstrap || showDataSetup) && <div className="mb-2 text-sm font-semibold tracking-[0.2px] text-[rgb(var(--muted))]">Data Setup</div>}
         {(!showAutoBootstrap || showDataSetup) && (
           <NulogySync onDataLoaded={handleNulogyData} theme={C} autoStart={false} hideToggle={false} />
         )}
         {(!showAutoBootstrap || showDataSetup) && (<>
-        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(230px, 1fr))", gap:8, marginBottom:20 }}>
+        <div className="mb-5 grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-2">
           <FileUploader label="Inventory" uploaded={!!ds.inventory} fileName={ds.invFileName} onData={(d,n) => {ds.setInventory(d);ds.setInvFileName(n);ds.setInvTimestamp(new Date());}} subtitle="Daily stock levels (.csv)" />
           <FileUploader label="Work Orders" uploaded={!!ds.workOrders} fileName={ds.woFileName} onData={(d,n) => {ds.setWorkOrders(d);ds.setWoFileName(n);ds.setWoTimestamp(new Date());}} subtitle="Open work orders (.csv)" />
         </div>
-        <div style={{ marginBottom:8 }}>
-          <div style={{ fontSize:13, fontWeight:600, color:C.dim, letterSpacing:0.2, marginBottom:8 }}>Optional</div>
+        <div className="mb-2">
+          <div className="mb-2 text-sm font-semibold tracking-[0.2px] text-[rgb(var(--muted))]">Optional</div>
         </div>
-        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(230px, 1fr))", gap:8, marginBottom:20 }}>
+        <div className="mb-5 grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-2">
           <FileUploader label="Bill of Materials" uploaded={!!ds.boms} fileName={ds.bomFileName} onData={(d,n) => {ds.setBoms(d);ds.setBomFileName(n);ds.setBomTimestamp(new Date());}} subtitle={ds.boms ? ("Saved \u00b7 Re-upload to update") : "BOM structure (.csv, .xlsx)"} acceptTypes=".csv,.xlsx,.xls" />
           <FileUploader label="EDR" uploaded={!!ds.edrData} fileName={ds.edrFileName} onData={(d,n) => {ds.setEdrData(d);ds.setEdrFileName(n);ds.setEdrTimestamp(new Date());}} subtitle="Inbound deliveries (.xlsx)" acceptTypes=".xlsx,.xls,.csv" parseWorkbook={ds.parseEdrWorkbook} />
           <FileUploader label="OpenDock" uploaded={!!ds.dockData} fileName={ds.dockFileName} onData={(d,n) => {ds.setDockData(d);ds.setDockFileName(n);ds.setDockTimestamp(new Date());}} subtitle="Dock appointments (.xlsx)" acceptTypes=".xlsx,.xls,.csv" />
         </div>
-        <div style={{ marginTop:-10, marginBottom:16, display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+        <div className="-mt-2.5 mb-4 flex flex-wrap items-center gap-2.5">
           <Button onClick={fetchOpenDockApi} disabled={dockApiLoading} variant={dockApiLoading ? "soft" : "active"} size="default">
             {dockApiLoading ? "Loading OpenDock..." : "Fetch OpenDock from API"}
           </Button>
-          <span style={{ fontSize:12, color:C.dim }}>Uses secure Vercel server route (`/api/opendock/appointments`).</span>
-          {dockApiInfo && <span style={{ fontSize:12, color:C.ok }}>{dockApiInfo}</span>}
-          {dockApiError && <span style={{ fontSize:12, color:C.bad }}>OpenDock API error: {dockApiError}</span>}
+          <span className="text-xs text-[rgb(var(--muted))]">Uses secure Vercel server route (`/api/opendock/appointments`).</span>
+          {dockApiInfo && <span className="text-xs" style={{ color:C.ok }}>{dockApiInfo}</span>}
+          {dockApiError && <span className="text-xs" style={{ color:C.bad }}>OpenDock API error: {dockApiError}</span>}
         </div>
         </>)}
         {ds.allUploaded && !ds.analyzing && (
@@ -332,9 +332,9 @@ export default function ProductionReadiness() {
           </div>
         )}
 
-        {(!showAutoBootstrap || showDataSetup) && <div style={{ marginTop:28, borderTop:"1px solid "+C.border, paddingTop:24 }}>
-          <div style={{ fontSize:15, fontWeight:700, color:C.bright, marginBottom:16 }}>How PackPulse Works</div>
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(280px, 1fr))", gap:16 }}>
+        {(!showAutoBootstrap || showDataSetup) && <div className="mt-7 border-t border-[rgb(var(--border))] pt-6">
+          <div className="mb-4 text-[15px] font-bold text-[rgb(var(--foreground))]">How PackPulse Works</div>
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4">
 
             <div style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, padding:"16px 18px" }}>
               <div style={{ fontSize:14, fontWeight:700, color:C.accent, marginBottom:6 }}>1. SKU Matching</div>
