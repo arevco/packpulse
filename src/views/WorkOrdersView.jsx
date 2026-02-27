@@ -690,24 +690,23 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
             <span style={{ color:C.bad, fontWeight:700 }}>{commitmentSummary.atRisk} WOs</span>
             <span style={{ color:C.bad, fontWeight:700 }}>{fmtNum(commitmentSummary.reducedUnits)} units</span>
           </span>
+          {woStatusBreakdown.length > 0 && (
+            <>
+              <span style={{ fontSize:12, color:C.dim, fontWeight:700, letterSpacing:0.2 }}>WO Status Qty</span>
+              {woStatusBreakdown.map(function(row) {
+                var active = filterWoStatus !== "all" && filterWoStatus === row.status;
+                return (
+                  <span key={row.status} style={{ display:"inline-flex", alignItems:"center", gap:6, padding:"3px 9px", borderRadius:999, border:"1px solid "+(active ? C.accentLine : C.border), background:active ? C.accentSoft : C.surface, fontSize:12, color:active ? C.accent : C.dim }}>
+                    <span style={{ fontWeight:700 }}>{row.status}</span>
+                    <span style={{ color:active ? C.accent : C.text }}>{row.woCount}</span>
+                    <span style={{ opacity:0.65 }}>/</span>
+                    <span style={{ color:active ? C.accent : C.text }}>{fmtNum(row.qtyUnits)}</span>
+                  </span>
+                );
+              })}
+            </>
+          )}
         </div>
-
-        {woStatusBreakdown.length > 0 && (
-          <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
-            <span style={{ fontSize:12, color:C.dim, fontWeight:700, letterSpacing:0.2 }}>WO Status Qty</span>
-            {woStatusBreakdown.map(function(row) {
-              var active = filterWoStatus !== "all" && filterWoStatus === row.status;
-              return (
-                <span key={row.status} style={{ display:"inline-flex", alignItems:"center", gap:6, padding:"3px 9px", borderRadius:999, border:"1px solid "+(active ? C.accentLine : C.border), background:active ? C.accentSoft : C.surface, fontSize:12, color:active ? C.accent : C.dim }}>
-                  <span style={{ fontWeight:700 }}>{row.status}</span>
-                  <span style={{ color:active ? C.accent : C.text }}>{row.woCount}</span>
-                  <span style={{ opacity:0.65 }}>/</span>
-                  <span style={{ color:active ? C.accent : C.text }}>{fmtNum(row.qtyUnits)}</span>
-                </span>
-              );
-            })}
-          </div>
-        )}
 
         {packMixBreakdown.length > 0 && (
           <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
