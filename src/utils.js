@@ -29,10 +29,18 @@ export function formatDescriptionForDisplay(value) {
 
   return compact.split(" ").map(formatToken).join(" ");
 }
-export function detectPackType(value) {
+export function detectPackType(value, skuValue) {
   var raw = String(value || "").toUpperCase();
   if (!raw) return "Other";
   var cleaned = raw.replace(/\s+/g, " ").trim();
+  var skuRaw = String(skuValue || "").toUpperCase();
+  var skuNorm = skuRaw.replace(/[^A-Z0-9]/g, "");
+
+  // Explicit SKU overrides for known RSC line items.
+  var RSC_SKUS = {
+    "114634": true, "114635": true, "114715": true, "114716": true, "116495": true
+  };
+  if (RSC_SKUS[skuNorm]) return "RSC";
 
   // Keep RSC separate from 15-pack to support planner-level segmentation.
   if (/\bRSC\b/.test(cleaned)) return "RSC";

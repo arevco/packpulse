@@ -372,7 +372,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       r = r.filter(function(w) { return matchesWorkOrderSearch(w, qRaw, qNorm, qSku); });
     }
     if (filterWoStatus !== "all") r = r.filter(w => w.status === filterWoStatus);
-    if (filterPackType !== "all") r = r.filter(function(w) { return detectPackType(w.productDesc || w.productSkuRaw || "") === filterPackType; });
+    if (filterPackType !== "all") r = r.filter(function(w) { return detectPackType(w.productDesc || w.productSkuRaw || "", w.productSkuRaw || w.productSku || "") === filterPackType; });
     r.sort((a,b) => {
       var c = 0;
       if (sortField==="woNum") c=a.woNum.localeCompare(b.woNum);
@@ -449,7 +449,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       var qSku = normalizeSkuSearchValue(qRaw);
       r = r.filter(function(w) { return matchesWorkOrderSearch(w, qRaw, qNorm, qSku); });
     }
-    if (filterPackType !== "all") r = r.filter(function(w) { return detectPackType(w.productDesc || w.productSkuRaw || "") === filterPackType; });
+    if (filterPackType !== "all") r = r.filter(function(w) { return detectPackType(w.productDesc || w.productSkuRaw || "", w.productSkuRaw || w.productSku || "") === filterPackType; });
     var map = {};
     r.forEach(function(w) {
       var key = String(w.status || "--").trim() || "--";
@@ -463,7 +463,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
   var packMixBreakdown = useMemo(function() {
     var byType = {};
     filteredResults.forEach(function(w) {
-      var t = detectPackType(w.productDesc || w.productSkuRaw || "");
+      var t = detectPackType(w.productDesc || w.productSkuRaw || "", w.productSkuRaw || w.productSku || "");
       if (!byType[t]) byType[t] = { packType:t, woCount:0, remainingUnits:0, orderUnits:0 };
       byType[t].woCount += 1;
       byType[t].remainingUnits += Number(w.unitsRemaining || 0);
