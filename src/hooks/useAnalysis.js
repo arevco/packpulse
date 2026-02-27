@@ -114,10 +114,34 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       itemMasterBySku[sku].desc = pickBetterDescription(itemMasterBySku[sku].desc || "", masterDescRaw, skuRaw);
       if (!itemMasterBySku[sku].skuRaw && skuRaw) itemMasterBySku[sku].skuRaw = skuRaw;
     });
+    var inferredInvStatusCol = "";
+    if (!invMapping.status && inventory && inventory.length) {
+      var invCols = Object.keys(inventory[0] || {});
+      inferredInvStatusCol = invCols.find(function(c) {
+        var n = normalizeStr(c || "");
+        return n === "status" || n.includes("inventorystatus") || n.includes("qualitystatus") || n.includes("lotstatus") || n.includes("itemstatus");
+      }) || "";
+    }
+    var invStatusCol = invMapping.status || inferredInvStatusCol || "";
+    var invRowsIncluded = 0;
+    var invRowsExcludedByStatus = 0;
+    var isGoodInventoryStatus = function(statusRaw) {
+      var n = normalizeStr(statusRaw || "");
+      if (!n) return true; // blank status is treated as usable
+      return n.includes("good");
+    };
     inventory.forEach(row => {
       var skuRaw = (row[invMapping.sku] || "").toString().trim();
       var sku = normalizeStr(skuRaw);
       if (!sku) return;
+      if (invStatusCol) {
+        var statusRaw = (row[invStatusCol] || "").toString().trim();
+        if (!isGoodInventoryStatus(statusRaw)) {
+          invRowsExcludedByStatus += 1;
+          return;
+        }
+      }
+      invRowsIncluded += 1;
       var invDescRaw = invMapping.description ? (row[invMapping.description] || "").toString().trim() : "";
       invMap[sku] = (invMap[sku] || 0) + safeNum(row[invMapping.qtyOnHand]);
       if (!itemMasterBySku[sku]) itemMasterBySku[sku] = { sku:sku, skuRaw:skuRaw, desc:"" };
@@ -194,7 +218,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       if (maxRun === Infinity) maxRun = demandUnits; if (couldMk === Infinity) couldMk = demandUnits;
       return Object.assign({ woNum:woNum, productSkuRaw:productSkuRaw, productDesc:resolveItemDescription(productSku, productSkuRaw, ""), qtyToProduce:qtyToProduce, dueDate:dueDate, status:status, readiness:readiness, runStatus:runStatus, components:components, maxRunnable:Math.min(maxRun, demandUnits), couldMake:Math.min(couldMk, demandUnits), zeroStockCount:zeroCount, normalizedSku:productSku }, extra);
     });
-    var diag = { invCount:inventory.length, invUniqueSkus:Object.keys(invMap).length, itemMasterRows:(itemMaster||[]).length, itemMasterSkus:Object.keys(itemMasterBySku).length, invSampleQtys:Object.entries(invMap).slice(0,6).map(function(e){return{key:e[0],qty:e[1]}}), bomParentCount:Object.keys(bomMap).length, bomSampleParents:Object.keys(bomMap).slice(0,8), bomTotalLines:boms?boms.length:0, woCount:workOrders.length, woUniqueSkus:[...new Set(results.map(r=>r.normalizedSku))], woUnmatched:[...new Set(results.filter(r=>r.runStatus==="nobom").map(r=>({raw:r.productSkuRaw,norm:r.normalizedSku})))].slice(0,10), woMatchedCount:results.filter(r=>r.runStatus!=="nobom").length };
+    var diag = { invCount:inventory.length, invStatusColumn:invStatusCol || "", invRowsIncluded:invRowsIncluded, invRowsExcludedByStatus:invRowsExcludedByStatus, invUniqueSkus:Object.keys(invMap).length, itemMasterRows:(itemMaster||[]).length, itemMasterSkus:Object.keys(itemMasterBySku).length, invSampleQtys:Object.entries(invMap).slice(0,6).map(function(e){return{key:e[0],qty:e[1]}}), bomParentCount:Object.keys(bomMap).length, bomSampleParents:Object.keys(bomMap).slice(0,8), bomTotalLines:boms?boms.length:0, woCount:workOrders.length, woUniqueSkus:[...new Set(results.map(r=>r.normalizedSku))], woUnmatched:[...new Set(results.filter(r=>r.runStatus==="nobom").map(r=>({raw:r.productSkuRaw,norm:r.normalizedSku})))].slice(0,10), woMatchedCount:results.filter(r=>r.runStatus!=="nobom").length };
 
     /* ====== DATA FLAGS ====== */
     var flags = [];
