@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { useTheme } from "../theme";
 import { useStyles } from "../hooks/useStyles";
-import { fmtDate, triggerDownload, buildExportHTML, normalizeStr, formatDescriptionForDisplay, detectPackType } from "../utils";
+import { fmtDate, triggerDownload, buildExportHTML, normalizeStr, formatDescriptionForDisplay, detectPackType, safeNum } from "../utils";
 
 function parseDateValue(value) {
   if (!value) return null;
@@ -48,6 +48,11 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
   };
   var normalizeSearchValue = function(v) {
     return normalizeStr(String(v || "")).replace(/[^a-z0-9]/g, "");
+  };
+  var fmtNum = function(v) {
+    var n = safeNum(v);
+    if (!isFinite(n)) return "--";
+    return n.toLocaleString();
   };
   var fmtQty = function(v) {
     var n = Number(v || 0);
@@ -679,7 +684,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
           <span style={{ display:"inline-flex", alignItems:"center", gap:8, padding:"4px 10px", borderRadius:999, border:"1px solid "+C.border, background:C.surface, fontSize:13, color:C.dim }}>
             <span style={{ fontWeight:700 }}>Gap</span>
             <span style={{ color:C.bad, fontWeight:700 }}>{commitmentSummary.atRisk} WOs</span>
-            <span style={{ color:C.bad, fontWeight:700 }}>{commitmentSummary.reducedUnits.toLocaleString()} units</span>
+            <span style={{ color:C.bad, fontWeight:700 }}>{fmtNum(commitmentSummary.reducedUnits)} units</span>
           </span>
         </div>
 
@@ -693,7 +698,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
                   <span style={{ fontWeight:700 }}>{row.status}</span>
                   <span style={{ color:active ? C.accent : C.text }}>{row.woCount}</span>
                   <span style={{ opacity:0.65 }}>/</span>
-                  <span style={{ color:active ? C.accent : C.text }}>{row.qtyUnits.toLocaleString()}</span>
+                  <span style={{ color:active ? C.accent : C.text }}>{fmtNum(row.qtyUnits)}</span>
                 </span>
               );
             })}
@@ -707,7 +712,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
               return (
                 <span key={row.packType} style={{ display:"inline-flex", alignItems:"center", gap:6, padding:"3px 9px", borderRadius:999, border:"1px solid "+C.border, background:C.surface, fontSize:12 }}>
                   <span style={{ color:C.bright, fontWeight:700 }}>{row.packType}</span>
-                  <span style={{ color:C.text }}>{row.remainingUnits.toLocaleString()}</span>
+                  <span style={{ color:C.text }}>{fmtNum(row.remainingUnits)}</span>
                 </span>
               );
             })}
