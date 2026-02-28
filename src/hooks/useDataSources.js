@@ -2,6 +2,16 @@ import { useState, useMemo, useCallback, useEffect } from "react";
 import { safeNum, normalizeStr, autoMapColumns, INV_PAT, BOM_PAT, WO_PAT, PO_PAT } from "../utils";
 import { parseCsvText, readFileAsText, readWorkbook } from "../utils/fileParsers";
 
+const STORAGE_KEYS = {
+  inventory: "inv-data",
+  workOrders: "wo-data",
+  itemMaster: "itemmaster-data",
+  boms: "bom-data",
+  edr: "edr-data",
+  dock: "dock-data",
+  mappingConfirmed: "mapping-confirmed",
+};
+
 function areMappingsEqual(a, b) {
   var ka = Object.keys(a || {});
   var kb = Object.keys(b || {});
@@ -49,32 +59,109 @@ export function useDataSources() {
   const edrRefreshRef = useCallback(n => { if (n) window.__edrR = n; }, []);
   const dockRefreshRef = useCallback(n => { if (n) window.__dockR = n; }, []);
 
-  // Load BOM from persistent storage on mount
-  useEffect(() => {
-    (async () => {
-      try {
-        var result = await window.storage.get("bom-data");
-        if (result && result.value) {
-          var stored = JSON.parse(result.value);
-          if (stored.data && stored.data.length) {
-            setBoms(stored.data);
-            setBomFileName(stored.fileName || "Saved BOM");
-            setBomTimestamp(stored.timestamp ? new Date(stored.timestamp) : new Date());
-          }
-        }
-      } catch (e) { /* no stored BOM, that's fine */ }
-    })();
+  const hydrateDataSet = useCallback(function(storedValue, setData, setFileName, setTimestamp, fallbackName) {
+    if (!storedValue) return false;
+    var parsed = null;
+    try {
+      parsed = JSON.parse(storedValue);
+    } catch (e) {
+      return false;
+    }
+    if (!parsed || !parsed.data || !parsed.data.length) return false;
+    setData(parsed.data);
+    setFileName(parsed.fileName || fallbackName || "Saved Data");
+    setTimestamp(parsed.timestamp ? new Date(parsed.timestamp) : new Date());
+    return true;
   }, []);
 
-  // Save BOM to persistent storage whenever it changes
+  const persistDataSet = useCallback(async function(key, data, fileName, timestamp) {
+    if (!data || !data.length) return;
+    try {
+      var res = await window.storage.set(key, JSON.stringify({
+        data: data,
+        fileName: fileName || "Saved Data",
+        timestamp: timestamp ? timestamp.toISOString() : new Date().toISOString()
+      }));
+      if (!res) {
+        console.warn("[PackPulse] Cache write skipped (storage unavailable or quota exceeded):", key);
+      }
+    } catch (e) {
+      console.warn("[PackPulse] Cache write failed:", key, e && e.message ? e.message : e);
+    }
+  }, []);
+
+  // Load persisted data on mount
   useEffect(() => {
-    if (!boms || !boms.length) return;
     (async () => {
       try {
-        await window.storage.set("bom-data", JSON.stringify({ data:boms, fileName:bomFileName, timestamp:bomTimestamp?bomTimestamp.toISOString():new Date().toISOString() }));
-      } catch (e) { console.error("Failed to save BOM:", e); }
+        var keys = [
+          STORAGE_KEYS.inventory,
+          STORAGE_KEYS.workOrders,
+          STORAGE_KEYS.itemMaster,
+          STORAGE_KEYS.boms,
+          STORAGE_KEYS.edr,
+          STORAGE_KEYS.dock,
+          STORAGE_KEYS.mappingConfirmed
+        ];
+        var results = await Promise.all(keys.map(function(k) { return window.storage.get(k); }));
+        var map = {};
+        keys.forEach(function(k, i) { map[k] = results[i] && results[i].value ? results[i].value : null; });
+
+        hydrateDataSet(map[STORAGE_KEYS.inventory], setInventory, setInvFileName, setInvTimestamp, "Nulogy Sync (cached)");
+        hydrateDataSet(map[STORAGE_KEYS.workOrders], setWorkOrders, setWoFileName, setWoTimestamp, "Nulogy Sync (cached)");
+        hydrateDataSet(map[STORAGE_KEYS.itemMaster], setItemMaster, setItemMasterFileName, setItemMasterTimestamp, "Nulogy Sync (cached)");
+        hydrateDataSet(map[STORAGE_KEYS.boms], setBoms, setBomFileName, setBomTimestamp, "Nulogy Sync (cached)");
+        hydrateDataSet(map[STORAGE_KEYS.edr], setEdrData, setEdrFileName, setEdrTimestamp, "EDR (cached)");
+        hydrateDataSet(map[STORAGE_KEYS.dock], setDockData, setDockFileName, setDockTimestamp, "OpenDock API (cached)");
+
+        if (map[STORAGE_KEYS.mappingConfirmed] === "1") {
+          setMappingConfirmed(true);
+        }
+      } catch (e) {
+        // If cache is unavailable, app still works with live/manual data load.
+      }
     })();
-  }, [boms, bomFileName, bomTimestamp]);
+  }, [hydrateDataSet]);
+
+  // Save datasets to persistent storage whenever they change
+  useEffect(() => {
+    persistDataSet(STORAGE_KEYS.inventory, inventory, invFileName, invTimestamp);
+  }, [inventory, invFileName, invTimestamp, persistDataSet]);
+
+  useEffect(() => {
+    persistDataSet(STORAGE_KEYS.workOrders, workOrders, woFileName, woTimestamp);
+  }, [workOrders, woFileName, woTimestamp, persistDataSet]);
+
+  useEffect(() => {
+    persistDataSet(STORAGE_KEYS.itemMaster, itemMaster, itemMasterFileName, itemMasterTimestamp);
+  }, [itemMaster, itemMasterFileName, itemMasterTimestamp, persistDataSet]);
+
+  useEffect(() => {
+    persistDataSet(STORAGE_KEYS.boms, boms, bomFileName, bomTimestamp);
+  }, [boms, bomFileName, bomTimestamp, persistDataSet]);
+
+  useEffect(() => {
+    persistDataSet(STORAGE_KEYS.edr, edrData, edrFileName, edrTimestamp);
+  }, [edrData, edrFileName, edrTimestamp, persistDataSet]);
+
+  useEffect(() => {
+    persistDataSet(STORAGE_KEYS.dock, dockData, dockFileName, dockTimestamp);
+  }, [dockData, dockFileName, dockTimestamp, persistDataSet]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        await window.storage.set(STORAGE_KEYS.mappingConfirmed, mappingConfirmed ? "1" : "0");
+      } catch (e) { /* noop */ }
+    })();
+  }, [mappingConfirmed]);
+
+  useEffect(() => {
+    if (mappingConfirmed) return;
+    if (inventory && workOrders) {
+      setMappingConfirmed(true);
+    }
+  }, [mappingConfirmed, inventory, workOrders]);
 
   const parseXlsxFile = useCallback(async (file, cb) => {
     try {
