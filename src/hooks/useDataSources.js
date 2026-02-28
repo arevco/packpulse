@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { safeNum, normalizeStr, autoMapColumns, INV_PAT, BOM_PAT, WO_PAT, PO_PAT } from "../utils";
 import { parseCsvText, readFileAsText, readWorkbook } from "../utils/fileParsers";
 
@@ -52,6 +52,7 @@ export function useDataSources() {
   const [woMapping, setWoMapping] = useState({});
   const [mappingConfirmed, setMappingConfirmed] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
+  const hydrateDoneRef = useRef(false);
 
   const invRefreshRef = useCallback(n => { if (n) window.__invR = n; }, []);
   const bomRefreshRef = useCallback(n => { if (n) window.__bomR = n; }, []);
@@ -90,10 +91,50 @@ export function useDataSources() {
     }
   }, []);
 
-  // Load persisted data on mount
+  const hydrateFromPayloadObject = useCallback(function(payload, labelSuffix) {
+    if (!payload || typeof payload !== "object") return false;
+    var meta = payload.meta && typeof payload.meta === "object" ? payload.meta : {};
+    var hasAny = false;
+
+    function applyData(dataKey, setData, setName, setTs, defaultLabel) {
+      var rows = payload[dataKey];
+      if (!Array.isArray(rows) || !rows.length) return;
+      hasAny = true;
+      setData(rows);
+      setName(meta[dataKey + "FileName"] || defaultLabel + (labelSuffix ? " (" + labelSuffix + ")" : ""));
+      setTs(meta[dataKey + "Timestamp"] ? new Date(meta[dataKey + "Timestamp"]) : new Date());
+    }
+
+    applyData("inventory", setInventory, setInvFileName, setInvTimestamp, "Nulogy Sync");
+    applyData("workOrders", setWorkOrders, setWoFileName, setWoTimestamp, "Nulogy Sync");
+    applyData("itemMaster", setItemMaster, setItemMasterFileName, setItemMasterTimestamp, "Nulogy Sync");
+    applyData("boms", setBoms, setBomFileName, setBomTimestamp, "Nulogy Sync");
+    applyData("edrData", setEdrData, setEdrFileName, setEdrTimestamp, "EDR");
+    applyData("dockData", setDockData, setDockFileName, setDockTimestamp, "OpenDock API");
+
+    if (typeof meta.mappingConfirmed === "boolean") {
+      setMappingConfirmed(meta.mappingConfirmed);
+    }
+    return hasAny;
+  }, []);
+
+  // Load shared snapshot first, then local fallback.
   useEffect(() => {
     (async () => {
       try {
+        var sharedLoaded = false;
+        try {
+          var sharedRes = await fetch("/api/cache/snapshot", { credentials: "include" });
+          if (sharedRes.ok) {
+            var sharedBody = await sharedRes.json();
+            if (sharedBody && sharedBody.snapshot && sharedBody.snapshot.payload) {
+              sharedLoaded = hydrateFromPayloadObject(sharedBody.snapshot.payload, "shared");
+            }
+          }
+        } catch (eShared) {
+          // Ignore shared fetch issues and fallback to local cache.
+        }
+
         var keys = [
           STORAGE_KEYS.inventory,
           STORAGE_KEYS.workOrders,
@@ -107,21 +148,25 @@ export function useDataSources() {
         var map = {};
         keys.forEach(function(k, i) { map[k] = results[i] && results[i].value ? results[i].value : null; });
 
-        hydrateDataSet(map[STORAGE_KEYS.inventory], setInventory, setInvFileName, setInvTimestamp, "Nulogy Sync (cached)");
-        hydrateDataSet(map[STORAGE_KEYS.workOrders], setWorkOrders, setWoFileName, setWoTimestamp, "Nulogy Sync (cached)");
-        hydrateDataSet(map[STORAGE_KEYS.itemMaster], setItemMaster, setItemMasterFileName, setItemMasterTimestamp, "Nulogy Sync (cached)");
-        hydrateDataSet(map[STORAGE_KEYS.boms], setBoms, setBomFileName, setBomTimestamp, "Nulogy Sync (cached)");
-        hydrateDataSet(map[STORAGE_KEYS.edr], setEdrData, setEdrFileName, setEdrTimestamp, "EDR (cached)");
-        hydrateDataSet(map[STORAGE_KEYS.dock], setDockData, setDockFileName, setDockTimestamp, "OpenDock API (cached)");
+        if (!sharedLoaded) {
+          hydrateDataSet(map[STORAGE_KEYS.inventory], setInventory, setInvFileName, setInvTimestamp, "Nulogy Sync (cached)");
+          hydrateDataSet(map[STORAGE_KEYS.workOrders], setWorkOrders, setWoFileName, setWoTimestamp, "Nulogy Sync (cached)");
+          hydrateDataSet(map[STORAGE_KEYS.itemMaster], setItemMaster, setItemMasterFileName, setItemMasterTimestamp, "Nulogy Sync (cached)");
+          hydrateDataSet(map[STORAGE_KEYS.boms], setBoms, setBomFileName, setBomTimestamp, "Nulogy Sync (cached)");
+          hydrateDataSet(map[STORAGE_KEYS.edr], setEdrData, setEdrFileName, setEdrTimestamp, "EDR (cached)");
+          hydrateDataSet(map[STORAGE_KEYS.dock], setDockData, setDockFileName, setDockTimestamp, "OpenDock API (cached)");
+        }
 
         if (map[STORAGE_KEYS.mappingConfirmed] === "1") {
           setMappingConfirmed(true);
         }
       } catch (e) {
         // If cache is unavailable, app still works with live/manual data load.
+      } finally {
+        hydrateDoneRef.current = true;
       }
     })();
-  }, [hydrateDataSet]);
+  }, [hydrateDataSet, hydrateFromPayloadObject]);
 
   // Save datasets to persistent storage whenever they change
   useEffect(() => {
@@ -162,6 +207,50 @@ export function useDataSources() {
       setMappingConfirmed(true);
     }
   }, [mappingConfirmed, inventory, workOrders]);
+
+  useEffect(() => {
+    if (!hydrateDoneRef.current) return;
+    if (!inventory || !workOrders) return;
+    var payload = {
+      inventory: inventory || [],
+      workOrders: workOrders || [],
+      itemMaster: itemMaster || [],
+      boms: boms || [],
+      edrData: edrData || [],
+      dockData: dockData || [],
+      meta: {
+        inventoryFileName: invFileName || "",
+        workOrdersFileName: woFileName || "",
+        itemMasterFileName: itemMasterFileName || "",
+        bomsFileName: bomFileName || "",
+        edrDataFileName: edrFileName || "",
+        dockDataFileName: dockFileName || "",
+        inventoryTimestamp: invTimestamp ? invTimestamp.toISOString() : null,
+        workOrdersTimestamp: woTimestamp ? woTimestamp.toISOString() : null,
+        itemMasterTimestamp: itemMasterTimestamp ? itemMasterTimestamp.toISOString() : null,
+        bomsTimestamp: bomTimestamp ? bomTimestamp.toISOString() : null,
+        edrDataTimestamp: edrTimestamp ? edrTimestamp.toISOString() : null,
+        dockDataTimestamp: dockTimestamp ? dockTimestamp.toISOString() : null,
+        mappingConfirmed: !!mappingConfirmed,
+      }
+    };
+    var timer = setTimeout(function() {
+      fetch("/api/cache/snapshot", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ payload: payload })
+      }).catch(function() {
+        // Local cache still works; shared cache sync is best effort.
+      });
+    }, 1400);
+    return function() { clearTimeout(timer); };
+  }, [
+    inventory, workOrders, itemMaster, boms, edrData, dockData,
+    invFileName, woFileName, itemMasterFileName, bomFileName, edrFileName, dockFileName,
+    invTimestamp, woTimestamp, itemMasterTimestamp, bomTimestamp, edrTimestamp, dockTimestamp,
+    mappingConfirmed
+  ]);
 
   const parseXlsxFile = useCallback(async (file, cb) => {
     try {
