@@ -19,7 +19,7 @@ const RecommendationsView = lazy(() => import("./views/RecommendationsView"));
 const SandboxView = lazy(() => import("./views/SandboxView"));
 
 export default function ProductionReadiness() {
-  const { C, theme, setTheme, sans, mono, FONTS_CSS, A11Y_CSS } = useTheme();
+  const { C, theme, setTheme, sans, mono } = useTheme();
   const ds = useDataSources();
   const { analysis, summary, criticalItems, woStatuses, woCustomers, timelineData, deliveriesV2, inboundCoverage, recommendations, dispatchQueue } = useAnalysis({
     mappingConfirmed: ds.mappingConfirmed, allUploaded: ds.allUploaded,
@@ -227,7 +227,6 @@ export default function ProductionReadiness() {
   /* ====== MAIN RENDER ====== */
   return (
     <div className="min-h-screen bg-[rgb(var(--background))] text-[rgb(var(--foreground))]" style={{ fontFamily:sans }}>
-      <style>{FONTS_CSS + A11Y_CSS}</style>
       <header className="flex items-center justify-between border-b border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-7 py-4">
         <div>
           <h1 className="m-0 text-lg font-bold tracking-[-0.2px] text-[rgb(var(--foreground))]" style={{ fontFamily:sans }}>PackPulse</h1>

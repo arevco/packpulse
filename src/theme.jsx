@@ -1,27 +1,5 @@
 import { createContext, useContext, useState } from "react";
 
-const FONTS_CSS = "";
-const A11Y_CSS = `
-  :focus-visible:not(select) {
-    outline: none !important;
-    box-shadow: 0 0 0 2px #3b82f6 !important;
-  }
-  select:focus,
-  select:focus-visible {
-    outline: none !important;
-    box-shadow: none !important;
-    border-color: rgb(59, 130, 246) !important;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    *,
-    *::before,
-    *::after {
-      animation: none !important;
-      transition: none !important;
-      scroll-behavior: auto !important;
-    }
-  }
-`;
 const sans = "'Inter Variable', 'Inter', 'Google Sans', 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif";
 const mono = sans;
 
@@ -52,7 +30,7 @@ export function ThemeProvider({ children }) {
   const [theme, setTheme] = useState("light");
   const C = THEMES[theme];
   return (
-    <ThemeContext.Provider value={{ C, theme, setTheme, sans, mono, FONTS_CSS, A11Y_CSS }}>
+    <ThemeContext.Provider value={{ C, theme, setTheme, sans, mono }}>
       {children}
     </ThemeContext.Provider>
   );

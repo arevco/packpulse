@@ -38,4 +38,26 @@
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
+
+  :focus-visible:not(select) {
+    outline: none;
+    box-shadow: 0 0 0 2px rgb(var(--accent));
+  }
+
+  select:focus,
+  select:focus-visible {
+    outline: none;
+    box-shadow: none;
+    border-color: rgb(var(--accent));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
 }
