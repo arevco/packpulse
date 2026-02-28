@@ -6,6 +6,7 @@ import ReactDOM from "react-dom/client";
 import * as Sentry from "@sentry/react";
 import AuthGate from "./AuthGate.jsx";
 import App from "./App.jsx";
+import { initSupabaseClient } from "./lib/supabaseClient.js";
 
 if (import.meta.env.VITE_SENTRY_DSN) {
   Sentry.init({
@@ -16,6 +17,8 @@ if (import.meta.env.VITE_SENTRY_DSN) {
     tracesSampleRate: 0.2,
   });
 }
+
+initSupabaseClient();
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
