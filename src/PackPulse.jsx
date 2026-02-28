@@ -227,20 +227,20 @@ export default function ProductionReadiness() {
   /* ====== MAIN RENDER ====== */
   return (
     <div className="min-h-screen bg-[rgb(var(--background))] text-[rgb(var(--foreground))]" style={{ fontFamily:sans }}>
-      <header className="flex items-center justify-between border-b border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-7 py-4">
+      <header className="flex flex-wrap items-start justify-between gap-2 border-b border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-3 sm:items-center sm:gap-3 sm:px-4 sm:py-4 md:px-7">
         <div>
           <h1 className="m-0 text-lg font-bold tracking-[-0.2px] text-[rgb(var(--foreground))]" style={{ fontFamily:sans }}>PackPulse</h1>
           <span className="text-sm text-[rgb(var(--muted))]">REV Copack</span>
         </div>
-        <div className="flex items-center gap-2.5">
-          {window.__ppUser && <span className="text-sm text-[rgb(var(--muted))]">{window.__ppUser.email}</span>}
+        <div className="flex w-full items-center justify-end gap-2.5 sm:w-auto">
+          {window.__ppUser && <span className="max-w-[150px] truncate text-sm text-[rgb(var(--muted))] sm:max-w-none">{window.__ppUser.email}</span>}
           {window.__ppLogout && <Button onClick={window.__ppLogout} variant="outline" size="sm">Sign out</Button>}
           <Button onClick={() => setTheme(theme==="dark"?"light":"dark")} variant="outline" size="sm">
             {theme === "dark" ? "Light" : "Dark"}
           </Button>
         </div>
       </header>
-      <main className="mx-auto max-w-[1440px] px-7 py-5">
+      <main className="mx-auto max-w-[1440px] px-3 py-4 sm:px-4 sm:py-5 md:px-7">
       {showAutoBootstrap && (
         <NulogySync
           key={"auto-sync-" + syncNonce}
@@ -264,7 +264,7 @@ export default function ProductionReadiness() {
         </div>
         {showAutoBootstrap && !showDataSetup && (
           <div className="mb-4 flex flex-wrap items-center gap-2.5 rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3.5 py-3">
-            <div className="flex min-w-[260px] flex-col gap-0.5">
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
               <div className="text-sm font-semibold text-[rgb(var(--foreground))]">
                 Syncing live data in background
               </div>

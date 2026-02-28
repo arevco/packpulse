@@ -6,7 +6,7 @@ export default function TabsNav({ items, activeKey, onChange, className }) {
     <div
       role="tablist"
       aria-label="Primary dashboard views"
-      className={cn("mb-4 flex flex-nowrap gap-1 overflow-x-auto border-b border-[rgb(var(--border))]", className)}
+      className={cn("mb-4 flex flex-nowrap gap-1 overflow-x-auto border-b border-[rgb(var(--border))] pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", className)}
     >
       {items.map(function(item) {
         var isActive = activeKey === item.key;
@@ -21,7 +21,7 @@ export default function TabsNav({ items, activeKey, onChange, className }) {
             tabIndex={isActive ? 0 : -1}
             onClick={() => onChange(item.key)}
             className={cn(
-              "h-auto shrink-0 -mb-px rounded-none border-x-0 border-t-0 border-b-2 px-5 py-2.5 text-sm",
+              "h-auto shrink-0 -mb-px rounded-none border-x-0 border-t-0 border-b-2 px-3 py-2.5 text-sm sm:px-5",
               isActive
                 ? "border-b-[rgb(var(--accent))] text-[rgb(var(--foreground))]"
                 : "border-b-transparent text-[rgb(var(--muted))]"

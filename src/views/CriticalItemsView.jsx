@@ -262,8 +262,8 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
 
   return (<div>
     <div className="mb-3 flex flex-wrap items-center gap-1.5">
-      <Input type="text" placeholder="Search SKU, customer, PO, action..." value={search} onChange={function(e) { setSearch(e.target.value); }} className="h-10 w-72 text-sm" />
-      <select value={customerFilter} onChange={function(e) { setCustomerFilter(e.target.value); }} className="h-10 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]">
+      <Input type="text" placeholder="Search SKU, customer, PO, action..." value={search} onChange={function(e) { setSearch(e.target.value); }} className="h-10 w-full text-sm sm:w-72" />
+      <select value={customerFilter} onChange={function(e) { setCustomerFilter(e.target.value); }} className="h-10 w-full rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))] sm:w-auto">
         <option value="all">All Customers</option>
         {customerOptions.map(function(c) { return <option key={c} value={c}>{c}</option>; })}
       </select>

@@ -198,8 +198,8 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
 
   return (<div>
     <div className="mb-4 flex flex-wrap items-center gap-2">
-      <Input type="text" placeholder="Search WO, SKU, customer..." value={ovSearch} onChange={function(e) { setOvSearch(e.target.value); }} className="h-10 w-72 text-sm" />
-      <select value={ovCustomer} onChange={function(e) { setOvCustomer(e.target.value); }} className="h-10 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]">
+      <Input type="text" placeholder="Search WO, SKU, customer..." value={ovSearch} onChange={function(e) { setOvSearch(e.target.value); }} className="h-10 w-full text-sm sm:w-72" />
+      <select value={ovCustomer} onChange={function(e) { setOvCustomer(e.target.value); }} className="h-10 w-full rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))] sm:w-auto">
         <option value="all">All Customers</option>
         {customerOptions.map(function(c) { return <option key={c} value={c}>{c}</option>; })}
       </select>
@@ -207,9 +207,9 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
         return <Button key={f} onClick={function() { setOvWoStatus(function(curr) { return curr === f && f !== "all" ? "all" : f; }); }} variant={ovWoStatus===f ? "active" : "outline"} size="default">{f==="all"?"All WO Status":f}</Button>;
       })}
       <span style={{ fontSize:13, color:C.dim, marginLeft:4 }}>Due from</span>
-      <Input type="date" value={ovDateFrom} onChange={e => setOvDateFrom(e.target.value)} className="h-10 w-36 text-sm" />
+      <Input type="date" value={ovDateFrom} onChange={e => setOvDateFrom(e.target.value)} className="h-10 w-full text-sm sm:w-36" />
       <span style={{ fontSize:13, color:C.dim }}>to</span>
-      <Input type="date" value={ovDateTo} onChange={e => setOvDateTo(e.target.value)} className="h-10 w-36 text-sm" />
+      <Input type="date" value={ovDateTo} onChange={e => setOvDateTo(e.target.value)} className="h-10 w-full text-sm sm:w-36" />
       {(ovSearch || ovWoStatus!=="all" || ovCustomer!=="all" || ovDateFrom || ovDateTo) && <Button onClick={() => {setOvSearch("");setOvWoStatus("all");setOvCustomer("all");setOvDateFrom("");setOvDateTo("");}} variant="outline" size="default">Clear</Button>}
       <span style={{ fontSize:13, color:C.dim, marginLeft:4 }}>{overview.woCount} of {analysis.results.length} WOs{overview.noDueDate > 0 && ovDateFrom ? " ("+overview.noDueDate+" excluded \u2014 no due date)" : ""}</span>
     </div>
