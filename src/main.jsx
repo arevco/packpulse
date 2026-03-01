@@ -8,6 +8,26 @@ import AuthGate from "./AuthGate.jsx";
 import App from "./App.jsx";
 import { initSupabaseClient } from "./lib/supabaseClient.js";
 
+window.addEventListener("vite:preloadError", function(event) {
+  if (event && typeof event.preventDefault === "function") event.preventDefault();
+  var key = "__pp_chunk_reload_once__";
+  try {
+    var alreadyReloaded = sessionStorage.getItem(key) === "1";
+    if (!alreadyReloaded) {
+      sessionStorage.setItem(key, "1");
+      window.location.reload();
+    }
+  } catch (_) {
+    window.location.reload();
+  }
+});
+
+try {
+  sessionStorage.removeItem("__pp_chunk_reload_once__");
+} catch (_) {
+  // no-op
+}
+
 if (import.meta.env.VITE_SENTRY_DSN) {
   Sentry.init({
     dsn: import.meta.env.VITE_SENTRY_DSN,

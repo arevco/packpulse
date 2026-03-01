@@ -62,7 +62,14 @@ export default async function handler(req, res) {
       .eq("site_id", CACHE_SITE_ID)
       .order("captured_at", { ascending: false })
       .limit(20);
-    if (q.error) throw q.error;
+    if (q.error) {
+      var qMsg = String(q.error.message || "").toLowerCase();
+      if (qMsg.includes("cache_snapshot_history") && qMsg.includes("schema cache")) {
+        // Non-blocking while history table is being provisioned.
+        return res.status(200).json({ change: null, historyStatus: "missing_history_table" });
+      }
+      throw q.error;
+    }
     const rows = Array.isArray(q.data) ? q.data : [];
     if (!rows.length) return res.status(200).json({ change: null });
 
@@ -103,4 +110,3 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "Shift change request failed", details: err && err.message ? err.message : "unknown" });
   }
 }
-
