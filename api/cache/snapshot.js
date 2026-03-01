@@ -179,8 +179,18 @@ export default async function handler(req, res) {
           captured_at: up.data && up.data.synced_at ? up.data.synced_at : new Date().toISOString(),
           updated_by: user.email,
         });
-      if (hist.error) throw hist.error;
-      return res.status(200).json({ ok: true, snapshot: up.data });
+      let historyStatus = "ok";
+      if (hist.error) {
+        var msg = String(hist.error.message || "").toLowerCase();
+        if (msg.includes("cache_snapshot_history") && msg.includes("schema cache")) {
+          // Non-blocking: keep core snapshot cache live even if history table is not present yet.
+          historyStatus = "missing_history_table";
+        } else {
+          Sentry.captureException(hist.error);
+          historyStatus = "history_insert_failed";
+        }
+      }
+      return res.status(200).json({ ok: true, snapshot: up.data, historyStatus: historyStatus });
     }
 
     return res.status(405).json({ error: "Method not allowed" });
