@@ -33,3 +33,17 @@ create index if not exists idx_cache_snapshots_site_id on public.cache_snapshots
 
 alter table public.cache_snapshots disable row level security;
 
+create table if not exists public.cache_snapshot_history (
+  id uuid primary key default gen_random_uuid(),
+  site_id text not null,
+  row_counts jsonb not null default '{}'::jsonb,
+  derived_metrics jsonb not null default '{}'::jsonb,
+  captured_at timestamptz not null default now(),
+  updated_by text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_cache_snapshot_history_site_captured
+  on public.cache_snapshot_history(site_id, captured_at desc);
+
+alter table public.cache_snapshot_history disable row level security;

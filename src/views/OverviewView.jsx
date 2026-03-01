@@ -7,7 +7,7 @@ import { Input } from "../components/ui/input";
 import TableShell from "../components/ui/table-shell";
 import SortHeaderButton from "../components/ui/sort-header-button";
 
-export default function OverviewView({ analysis, woStatuses, onSelectCustomer }) {
+export default function OverviewView({ analysis, woStatuses, onSelectCustomer, shiftChange }) {
   const { C, mono } = useTheme();
   const { thS, tdN, tdM } = useStyles();
 
@@ -227,6 +227,38 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
         <div style={{ fontSize:12, color:C.dim, marginTop:5, fontWeight:500, letterSpacing:0.1 }}>{s.l}</div>
       </div>)}
     </div>
+
+    {shiftChange && shiftChange.metrics && shiftChange.metrics.length > 0 && (
+      <div style={{ marginBottom:20 }}>
+        <div style={{ fontSize:14, fontWeight:600, color:C.bright, marginBottom:10 }}>What Changed Since Last Shift</div>
+        <TableShell>
+          <table style={{ width:"100%", borderCollapse:"collapse" }}>
+            <thead><tr style={{ background:C.raised }}>
+              <th style={thS}>Metric</th>
+              <th style={thS}>Current</th>
+              <th style={thS}>Previous</th>
+              <th style={thS}>Delta</th>
+            </tr></thead>
+            <tbody>
+              {shiftChange.metrics.map(function(m) {
+                var deltaColor = m.delta > 0 ? C.ok : m.delta < 0 ? C.bad : C.dim;
+                var deltaText = m.delta > 0 ? "+" + m.delta.toLocaleString() : m.delta.toLocaleString();
+                return <tr key={m.key} style={{ borderBottom:"1px solid "+C.border }}>
+                  <td style={Object.assign({}, tdN, { fontWeight:600, color:C.bright })}>{m.label}</td>
+                  <td style={tdM}>{m.current.toLocaleString()}</td>
+                  <td style={tdM}>{m.previous.toLocaleString()}</td>
+                  <td style={Object.assign({}, tdM, { fontWeight:700, color:deltaColor })}>{deltaText}</td>
+                </tr>;
+              })}
+            </tbody>
+          </table>
+        </TableShell>
+        <div style={{ marginTop:8, fontSize:12, color:C.dim }}>
+          Current snapshot: {fmtDate(shiftChange.currentAt)} {shiftChange.currentBy ? ("by " + shiftChange.currentBy) : ""}
+          {" · "}Previous: {fmtDate(shiftChange.previousAt)} {shiftChange.previousBy ? ("by " + shiftChange.previousBy) : ""}
+        </div>
+      </div>
+    )}
 
     <div style={{ marginBottom:20 }}>
       <div style={{ fontSize:14, fontWeight:600, color:C.bright, marginBottom:10 }}>Work Orders by Customer</div>

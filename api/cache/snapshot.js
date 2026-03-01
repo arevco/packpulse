@@ -62,6 +62,72 @@ function rowCountsFromPayload(payload) {
   };
 }
 
+function toNum(v) {
+  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+  if (v == null) return 0;
+  var n = Number(String(v).replace(/,/g, "").trim());
+  return Number.isFinite(n) ? n : 0;
+}
+
+function pickField(row, keys) {
+  if (!row || typeof row !== "object") return "";
+  var rowKeys = Object.keys(row);
+  for (var i = 0; i < keys.length; i++) {
+    var target = String(keys[i]).toLowerCase();
+    for (var j = 0; j < rowKeys.length; j++) {
+      var rk = rowKeys[j];
+      if (String(rk).toLowerCase() === target) return row[rk];
+    }
+  }
+  return "";
+}
+
+function statusLooksClosed(status) {
+  var s = String(status || "").toLowerCase();
+  if (!s) return false;
+  return s.includes("close") || s.includes("complete") || s.includes("cancel") || s.includes("archive") || s.includes("done");
+}
+
+function deriveMetrics(payload, rowCounts) {
+  var workOrders = Array.isArray(payload.workOrders) ? payload.workOrders : [];
+  var remainingUnits = 0;
+  var lateWOs = 0;
+  var activeWOs = 0;
+  var today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  workOrders.forEach(function(wo) {
+    var status = pickField(wo, ["Work Order Status", "status", "project_status"]);
+    var unitsRemaining = toNum(pickField(wo, ["Units Remaining", "units_remaining"]));
+    if (!unitsRemaining) {
+      var expected = toNum(pickField(wo, ["Units Expected", "units_expected", "Order Qty", "qtyToProduce"] ));
+      var produced = toNum(pickField(wo, ["Units Produced", "units_produced", "Produced", "unitsProduced"] ));
+      unitsRemaining = Math.max(0, expected - produced);
+    }
+    remainingUnits += unitsRemaining;
+
+    var closed = statusLooksClosed(status);
+    if (!closed && unitsRemaining > 0) activeWOs += 1;
+
+    var dueRaw = pickField(wo, ["Due Date", "due_date_at", "dueDate"]);
+    if (!closed && unitsRemaining > 0 && dueRaw) {
+      var dd = new Date(dueRaw);
+      if (!isNaN(dd) && dd < today) lateWOs += 1;
+    }
+  });
+
+  return {
+    woCount: rowCounts.workOrders || 0,
+    woActive: activeWOs,
+    woLate: lateWOs,
+    woRemainingUnits: Math.round(remainingUnits),
+    inventoryRows: rowCounts.inventory || 0,
+    bomRows: rowCounts.boms || 0,
+    edrRows: rowCounts.edrData || 0,
+    dockRows: rowCounts.dockData || 0,
+  };
+}
+
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", req.headers.origin || "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -91,6 +157,7 @@ export default async function handler(req, res) {
     if (req.method === "POST") {
       const payload = sanitizePayload((req.body && req.body.payload) || {});
       const rowCounts = rowCountsFromPayload(payload);
+      const derivedMetrics = deriveMetrics(payload, rowCounts);
       const up = await supabase
         .from("cache_snapshots")
         .upsert({
@@ -103,6 +170,16 @@ export default async function handler(req, res) {
         .select("site_id,row_counts,synced_at,updated_by")
         .single();
       if (up.error) throw up.error;
+      const hist = await supabase
+        .from("cache_snapshot_history")
+        .insert({
+          site_id: CACHE_SITE_ID,
+          row_counts: rowCounts,
+          derived_metrics: derivedMetrics,
+          captured_at: up.data && up.data.synced_at ? up.data.synced_at : new Date().toISOString(),
+          updated_by: user.email,
+        });
+      if (hist.error) throw hist.error;
       return res.status(200).json({ ok: true, snapshot: up.data });
     }
 
@@ -112,4 +189,3 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "Snapshot cache request failed", details: err && err.message ? err.message : "unknown" });
   }
 }
-
