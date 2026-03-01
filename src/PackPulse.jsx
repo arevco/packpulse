@@ -60,6 +60,10 @@ export default function ProductionReadiness() {
     return ts > max ? ts : max;
   }, 0);
   var summaryStamp = newestTs ? fmtTs(new Date(newestTs)) : "--";
+  var sharedMeta = ds.sharedSnapshotMeta || { source: "unknown", syncedAt: null, updatedBy: "" };
+  var sharedSourceLabel = sharedMeta.source === "shared" ? "Shared cache" : sharedMeta.source === "local" ? "Local cache" : sharedMeta.source === "empty" ? "Shared cache empty" : "Shared cache unavailable";
+  var sharedStamp = sharedMeta.syncedAt ? fmtTs(sharedMeta.syncedAt) : "--";
+  var sharedBy = sharedMeta.updatedBy ? sharedMeta.updatedBy : "--";
 
   var fetchOpenDockApi = useCallback(async () => {
     setDockApiLoading(true);
@@ -428,6 +432,9 @@ export default function ProductionReadiness() {
           <span className="text-xs text-[rgb(var(--muted))]">
             Data freshness: <span style={{ color:freshCount===dataSourceStatus.length?C.ok:freshCount>=3?C.warn:C.bad, fontWeight:600 }}>{freshCount}/{dataSourceStatus.length}</span> fresh · Updated {summaryStamp}
           </span>
+          <span className="text-xs text-[rgb(var(--muted))]">
+            · {sharedSourceLabel}: {sharedStamp}{sharedMeta.source === "shared" ? " by " + sharedBy : ""}
+          </span>
         </div>
         {showDataControlsPanel && (
           <div className="mb-2.5 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-2.5">
@@ -449,6 +456,11 @@ export default function ProductionReadiness() {
                   <span style={{ width:6, height:6, borderRadius:"50%", background:dc }} />{s.l} <span style={{ opacity:0.6 }}>{fmtTs(s.ts)}</span>
                 </button>;
               })}
+              <span className="inline-flex items-center gap-1.5 rounded-md border border-[rgb(var(--border))] bg-white px-2.5 py-1 text-xs font-medium text-[rgb(var(--muted))]">
+                <span style={{ width:6, height:6, borderRadius:"50%", background:sharedMeta.source==="shared"?C.ok:sharedMeta.source==="local"?C.warn:C.dim }} />
+                {sharedSourceLabel}
+                <span style={{ opacity:0.6 }}>{sharedStamp}</span>
+              </span>
             </div>
           </div>
         )}

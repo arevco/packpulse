@@ -52,6 +52,7 @@ export function useDataSources() {
   const [woMapping, setWoMapping] = useState({});
   const [mappingConfirmed, setMappingConfirmed] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
+  const [sharedSnapshotMeta, setSharedSnapshotMeta] = useState({ source: "unknown", syncedAt: null, updatedBy: "" });
   const hydrateDoneRef = useRef(false);
 
   const invRefreshRef = useCallback(n => { if (n) window.__invR = n; }, []);
@@ -129,10 +130,20 @@ export function useDataSources() {
             var sharedBody = await sharedRes.json();
             if (sharedBody && sharedBody.snapshot && sharedBody.snapshot.payload) {
               sharedLoaded = hydrateFromPayloadObject(sharedBody.snapshot.payload, "shared");
+              setSharedSnapshotMeta({
+                source: "shared",
+                syncedAt: sharedBody.snapshot.synced_at ? new Date(sharedBody.snapshot.synced_at) : null,
+                updatedBy: sharedBody.snapshot.updated_by || ""
+              });
+            } else {
+              setSharedSnapshotMeta({ source: "empty", syncedAt: null, updatedBy: "" });
             }
+          } else {
+            setSharedSnapshotMeta({ source: "unavailable", syncedAt: null, updatedBy: "" });
           }
         } catch (eShared) {
           // Ignore shared fetch issues and fallback to local cache.
+          setSharedSnapshotMeta({ source: "error", syncedAt: null, updatedBy: "" });
         }
 
         var keys = [
@@ -155,6 +166,10 @@ export function useDataSources() {
           hydrateDataSet(map[STORAGE_KEYS.boms], setBoms, setBomFileName, setBomTimestamp, "Nulogy Sync (cached)");
           hydrateDataSet(map[STORAGE_KEYS.edr], setEdrData, setEdrFileName, setEdrTimestamp, "EDR (cached)");
           hydrateDataSet(map[STORAGE_KEYS.dock], setDockData, setDockFileName, setDockTimestamp, "OpenDock API (cached)");
+          setSharedSnapshotMeta(function(prev) {
+            if (prev.source === "shared") return prev;
+            return { source: "local", syncedAt: null, updatedBy: "" };
+          });
         }
 
         if (map[STORAGE_KEYS.mappingConfirmed] === "1") {
@@ -240,6 +255,16 @@ export function useDataSources() {
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ payload: payload })
+      }).then(function(resp) {
+        if (!resp.ok) return null;
+        return resp.json();
+      }).then(function(body) {
+        if (!body || !body.snapshot) return;
+        setSharedSnapshotMeta({
+          source: "shared",
+          syncedAt: body.snapshot.synced_at ? new Date(body.snapshot.synced_at) : new Date(),
+          updatedBy: body.snapshot.updated_by || ""
+        });
       }).catch(function() {
         // Local cache still works; shared cache sync is best effort.
       });
@@ -367,6 +392,7 @@ export function useDataSources() {
     bomMapping, setBomMapping,
     woMapping, setWoMapping,
     mappingConfirmed, setMappingConfirmed,
+    sharedSnapshotMeta,
     analyzing, setAnalyzing,
     invRefreshRef, bomRefreshRef, woRefreshRef, edrRefreshRef, dockRefreshRef,
     parseXlsxFile, parseEdrWorkbook, handleRefreshFile,
