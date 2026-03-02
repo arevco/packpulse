@@ -12,6 +12,7 @@ import TabsNav from "./components/ui/tabs-nav";
 import { Card } from "./components/ui/card";
 const OverviewView = lazy(() => import("./views/OverviewView"));
 const ProductionView = lazy(() => import("./views/ProductionView"));
+const OperationsView = lazy(() => import("./views/OperationsView"));
 const WorkOrdersView = lazy(() => import("./views/WorkOrdersView"));
 const CriticalItemsView = lazy(() => import("./views/CriticalItemsView"));
 const FlagsView = lazy(() => import("./views/FlagsView"));
@@ -523,13 +524,14 @@ export default function ProductionReadiness() {
         <TabsNav
           activeKey={activeView}
           onChange={setActiveView}
-          items={[{key:"overview",label:"Overview",count:null,alert:false},{key:"production",label:"Production",count:(productionSegmentsForUI.jobRows || []).length,alert:false},{key:"workorders",label:"Work Orders",count:summaryForUI.total},{key:"criticalitems",label:"Critical Items",count:criticalItemsForUI.length},{key:"recommendations",label:"Recommendations",count:recommendationsForUI.length,alert:recommendationsForUI.some(function(r){return r.priority==="P1";})}]
+          items={[{key:"overview",label:"Overview",count:null,alert:false},{key:"production",label:"Production",count:(productionSegmentsForUI.jobRows || []).length,alert:false},{key:"operations",label:"Operations",count:null,alert:false},{key:"workorders",label:"Work Orders",count:summaryForUI.total},{key:"criticalitems",label:"Critical Items",count:criticalItemsForUI.length},{key:"recommendations",label:"Recommendations",count:recommendationsForUI.length,alert:recommendationsForUI.some(function(r){return r.priority==="P1";})}]
             .concat([{key:"timeline",label:"Deliveries",count:timelineData ? timelineData.totalDeliveries : 0,alert:false},{key:"sandbox",label:"Sandbox",count:null,alert:false}])}
         />
 
         <Suspense fallback={<div className="px-0 py-2 text-sm text-[rgb(var(--muted))]">Loading view...</div>}>
           {activeView === "overview" && <OverviewView analysis={analysisForUI} woStatuses={woStatusesForUI} onSelectCustomer={openWorkOrdersForCustomer} shiftChange={shiftChange} />}
           {activeView === "production" && <ProductionView productionSegments={productionSegmentsForUI} />}
+          {activeView === "operations" && <OperationsView />}
           {activeView === "workorders" && <WorkOrdersView analysis={analysisForUI} woStatuses={woStatusesForUI} woCustomers={woCustomersForUI} recommendations={recommendationsForUI} dispatchQueue={dispatchQueue || []} prefilterCustomer={workOrdersPrefilterCustomer} prefilterNonce={workOrdersPrefilterNonce} />}
           {activeView === "criticalitems" && <CriticalItemsView rawCriticalItems={criticalItemsForUI} inboundCoverage={inboundCoverage} />}
           {activeView === "recommendations" && <RecommendationsView recommendations={recommendationsForUI} onOpenRecommendation={openRecommendation} />}

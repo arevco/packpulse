@@ -1,0 +1,53 @@
+import Sentry from "../_sentry.js";
+import { CACHE_SITE_ID, getAuthenticatedUser, getSupabaseAdmin, toDateEt, toNum, withCors } from "./_common.js";
+
+export default async function handler(req, res) {
+  withCors(req, res, ["GET", "OPTIONS"]);
+  if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+
+  try {
+    const user = getAuthenticatedUser(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+    const supabase = getSupabaseAdmin();
+
+    const days = Math.max(1, Math.min(120, Number(req.query.days || 30)));
+    const fromDate = toDateEt(days);
+
+    const q = await supabase
+      .from("production_events")
+      .select("produced_date_et,shift_label,item_code,units_produced,line,work_order_code")
+      .eq("site_id", CACHE_SITE_ID)
+      .gte("produced_date_et", fromDate)
+      .order("produced_date_et", { ascending: false });
+    if (q.error) throw q.error;
+
+    const rows = Array.isArray(q.data) ? q.data : [];
+    const bySku = {};
+    const byLine = {};
+
+    rows.forEach(function(r) {
+      const sku = String(r.item_code || "UNKNOWN");
+      const units = toNum(r.units_produced);
+      const line = String(r.line || "Unknown");
+      if (!bySku[sku]) bySku[sku] = { item_code: sku, units: 0, rows: 0 };
+      bySku[sku].units += units;
+      bySku[sku].rows += 1;
+      if (!byLine[line]) byLine[line] = { line: line, units: 0, rows: 0 };
+      byLine[line].units += units;
+      byLine[line].rows += 1;
+    });
+
+    return res.status(200).json({
+      days: days,
+      fromDate: fromDate,
+      totalRows: rows.length,
+      bySku: Object.values(bySku).sort(function(a, b) { return b.units - a.units; }).slice(0, 200),
+      byLine: Object.values(byLine).sort(function(a, b) { return b.units - a.units; })
+    });
+  } catch (err) {
+    Sentry.captureException(err);
+    return res.status(500).json({ error: "Ops production breakdown failed", details: err && err.message ? err.message : "unknown" });
+  }
+}
+
