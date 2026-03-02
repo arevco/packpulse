@@ -254,7 +254,8 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer, s
           </table>
         </TableShell>
         <div style={{ marginTop:8, fontSize:12, color:C.dim }}>
-          Current snapshot: {fmtDate(shiftChange.currentAt)} {shiftChange.currentBy ? ("by " + shiftChange.currentBy) : ""}
+          Baseline: {shiftChange.baselineLabel || "Previous snapshot"}
+          {" · "}Current: {fmtDate(shiftChange.currentAt)} {shiftChange.currentBy ? ("by " + shiftChange.currentBy) : ""}
           {" · "}Previous: {fmtDate(shiftChange.previousAt)} {shiftChange.previousBy ? ("by " + shiftChange.previousBy) : ""}
         </div>
       </div>

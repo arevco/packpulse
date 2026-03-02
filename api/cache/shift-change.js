@@ -4,6 +4,7 @@ import Sentry from "../_sentry.js";
 
 const SESSION_SECRET = process.env.SESSION_SECRET || "packpulse-default-secret-change-me";
 const CACHE_SITE_ID = process.env.CACHE_SITE_ID || "default";
+const SHIFT_HOURS = Math.max(1, Number(process.env.SHIFT_HOURS || 8));
 
 function parseCookies(cookieHeader) {
   const cookies = {};
@@ -75,9 +76,13 @@ export default async function handler(req, res) {
 
     const current = rows[0];
     const currentTs = new Date(current.captured_at).getTime();
-    const sixHoursAgo = currentTs - (6 * 3600000);
-    let previous = rows.find(function(r) { return new Date(r.captured_at).getTime() <= sixHoursAgo; }) || rows[1] || null;
+    const shiftAgo = currentTs - (SHIFT_HOURS * 3600000);
+    const previousShift = rows.find(function(r) { return new Date(r.captured_at).getTime() <= shiftAgo; }) || null;
+    const fallbackPrevious = rows[1] || null;
+    let previous = previousShift || fallbackPrevious;
     if (!previous) return res.status(200).json({ change: null });
+    const baselineType = previousShift ? "previous_shift" : "last_sync";
+    const baselineLabel = previousShift ? ("Previous shift (" + SHIFT_HOURS + "h+)") : "Last sync (fallback)";
 
     const c = current.derived_metrics || {};
     const p = previous.derived_metrics || {};
@@ -102,6 +107,9 @@ export default async function handler(req, res) {
         previousAt: previous.captured_at,
         currentBy: current.updated_by || "",
         previousBy: previous.updated_by || "",
+        baselineType: baselineType,
+        baselineLabel: baselineLabel,
+        shiftHours: SHIFT_HOURS,
         metrics: metrics,
       }
     });
