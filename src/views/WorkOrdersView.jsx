@@ -729,16 +729,9 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
               var pct = packMixTotalRemaining > 0 ? (Number(row.remainingUnits || 0) / packMixTotalRemaining) * 100 : 0;
               return (
                 <Button key={row.packType} onClick={function() { setFilterPackType(function(curr) { return curr === row.packType ? "all" : row.packType; }); }} variant={activePack ? "active" : "outline"} size="sm" className="rounded-full">
-                  <span style={{ display:"inline-flex", flexDirection:"column", alignItems:"flex-start", lineHeight:1.15 }}>
-                    <span style={{ color:C.bright, fontWeight:700 }}>{row.packType}</span>
-                    <span style={{ display:"inline-flex", alignItems:"center", gap:6 }}>
-                      <span style={{ color:C.text }}>{fmtNum(row.remainingUnits)}</span>
-                      <span style={{ color:C.dim }}>({pct.toFixed(1)}%)</span>
-                    </span>
-                    <span style={{ width:56, height:3, borderRadius:999, background:C.border, overflow:"hidden", marginTop:4 }}>
-                      <span style={{ display:"block", height:"100%", width:Math.max(4, Math.min(100, pct)) + "%", background:activePack ? C.accent : C.dim }} />
-                    </span>
-                  </span>
+                  <span style={{ color:C.bright, fontWeight:700 }}>{row.packType}</span>
+                  <span style={{ color:C.text }}>{fmtNum(row.remainingUnits)}</span>
+                  <span style={{ color:C.dim }}>({Math.round(pct)}%)</span>
                 </Button>
               );
             })}
