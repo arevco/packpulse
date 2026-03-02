@@ -150,6 +150,10 @@ const COLUMN_MAPS = {
   production: {
     "produced_at": "Produced At",
     "Produced At": "Produced At",
+    "actual_job_start_at": "Actual Job Start",
+    "Actual Job Start At": "Actual Job Start",
+    "actual_job_end_at": "Actual Job End",
+    "Actual Job End At": "Actual Job End",
     "job_id": "Job ID",
     "Job ID": "Job ID",
     "line": "Line",

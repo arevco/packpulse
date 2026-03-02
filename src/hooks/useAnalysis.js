@@ -129,32 +129,56 @@ function classifyShiftET(parts) {
   var hour = Number(parts.hour || 0);
   if (hour >= 7 && hour < 15) return "Shift 1 (7a-3p)";
   if (hour >= 15 && hour < 23) return "Shift 2 (3p-11p)";
-  return "";
+  // Keep rows visible even when source timestamps are date-only or off-window.
+  return "Unassigned";
 }
 
 export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMaster, boms, workOrders, productionData, invMapping, bomMapping, woMapping, poData, poMapping, edrData, dockData }) {
 
   var productionSegments = useMemo(function() {
+    function firstValueLoose(row, keys) {
+      var direct = firstValue(row, keys);
+      if (direct) return direct;
+      if (!row || !keys || !keys.length) return "";
+      var wanted = {};
+      keys.forEach(function(k) { wanted[normalizeStr(k)] = true; });
+      var rowKeys = Object.keys(row);
+      for (var i = 0; i < rowKeys.length; i++) {
+        var rk = rowKeys[i];
+        if (!wanted[normalizeStr(rk)]) continue;
+        var v = row[rk];
+        if (v != null && v !== "") return v;
+      }
+      return "";
+    }
     var productionRows = Array.isArray(productionData) ? productionData : [];
     var byShiftDay = {};
     var byJob = {};
+    var totalRows = 0;
+    var rowsWithShift = 0;
     productionRows.forEach(function(row) {
-      var units = safeNum(firstValue(row, ["Units Produced", "units_produced", "unitsProduced"]));
+      totalRows += 1;
+      var units = safeNum(firstValueLoose(row, ["Units Produced", "units_produced", "unitsProduced", "Produced Units", "Quantity Produced", "Qty Produced"]));
       if (!(units > 0)) return;
-      var producedAt = firstValue(row, ["Produced At", "produced_at", "Produced date", "producedAt"]);
+      var producedAt = firstValueLoose(row, [
+        "Produced At", "produced_at", "Produced date", "producedAt",
+        "Actual Job Start", "actual_job_start_at",
+        "Actual Job End", "actual_job_end_at"
+      ]);
       var parts = toEasternParts(producedAt);
       var shift = classifyShiftET(parts);
       if (!parts || !shift) return;
+      rowsWithShift += 1;
 
       var shiftKey = parts.dateKey + "|" + shift;
       if (!byShiftDay[shiftKey]) byShiftDay[shiftKey] = { date: parts.dateKey, shift: shift, unitsProduced: 0, jobs: 0 };
       byShiftDay[shiftKey].unitsProduced += units;
 
-      var jobId = (firstValue(row, ["Job ID", "job_id", "Job"]) || "").toString().trim() || "Unknown Job";
-      var woCode = (firstValue(row, ["Work Order Code", "project_code", "Project Code"]) || "").toString().trim();
-      var line = (firstValue(row, ["Line", "line", "line_name", "Line Name"]) || "").toString().trim();
-      var itemCode = (firstValue(row, ["Item Code", "item_code"]) || "").toString().trim();
-      var itemDesc = (firstValue(row, ["Description", "item_description", "Item Description"]) || "").toString().trim();
+      var jobId = (firstValueLoose(row, ["Job ID", "job_id", "Job"]) || "").toString().trim() || "Unknown Job";
+      var woCode = (firstValueLoose(row, ["Work Order Code", "project_code", "Project Code"]) || "").toString().trim();
+      var line = (firstValueLoose(row, ["Line", "line", "line_name", "Line Name"]) || "").toString().trim();
+      var itemCode = (firstValueLoose(row, ["Item Code", "item_code"]) || "").toString().trim();
+      var itemDesc = (firstValueLoose(row, ["Description", "item_description", "Item Description"]) || "").toString().trim();
       var jobKey = [parts.dateKey, shift, jobId, woCode, itemCode].join("|");
       if (!byJob[jobKey]) {
         byJob[jobKey] = {
@@ -180,7 +204,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       if (a.shift !== b.shift) return a.shift < b.shift ? 1 : -1;
       return b.unitsProduced - a.unitsProduced;
     });
-    return { shiftRows: shiftRows, jobRows: jobRows };
+    return { shiftRows: shiftRows, jobRows: jobRows, totalRows: totalRows, rowsWithShift: rowsWithShift };
   }, [productionData]);
 
   /* ====== ANALYSIS ENGINE ====== */

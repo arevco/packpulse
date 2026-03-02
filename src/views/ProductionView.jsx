@@ -14,6 +14,8 @@ export default function ProductionView({ productionSegments }) {
 
   var prodShiftRows = productionSegments && Array.isArray(productionSegments.shiftRows) ? productionSegments.shiftRows : [];
   var prodJobRows = productionSegments && Array.isArray(productionSegments.jobRows) ? productionSegments.jobRows : [];
+  var totalRows = productionSegments && productionSegments.totalRows ? productionSegments.totalRows : 0;
+  var rowsWithShift = productionSegments && productionSegments.rowsWithShift ? productionSegments.rowsWithShift : 0;
   var prodDates = Array.from(new Set(prodShiftRows.map(function(r) { return r.date; }))).sort().reverse();
   var selectedProdDate = prodDate === "latest" ? (prodDates[0] || "") : prodDate;
   var selectedShiftRows = selectedProdDate ? prodShiftRows.filter(function(r) { return r.date === selectedProdDate; }) : [];
@@ -37,7 +39,11 @@ export default function ProductionView({ productionSegments }) {
   var dayJobs = selectedShiftRows.reduce(function(sum, r) { return sum + safeNum(r.jobs); }, 0);
 
   if (!prodShiftRows.length) {
-    return <div className="rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-4 text-sm text-[rgb(var(--muted))]">No production data yet. Run Nulogy sync and include the Production report.</div>;
+    return <div className="rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-4 text-sm text-[rgb(var(--muted))]">
+      {totalRows > 0
+        ? ("Production rows loaded (" + totalRows.toLocaleString() + "), but " + (rowsWithShift || 0).toLocaleString() + " had usable shift timestamps. Check Nulogy timestamp columns.")
+        : "No production data yet. Run Nulogy sync and include the Production report."}
+    </div>;
   }
 
   return (

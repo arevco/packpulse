@@ -23,9 +23,14 @@ function formatNulogyDateTime(date) {
 
 function buildProductionFilters() {
   var shiftHours = Number(process.env.NULOGY_SHIFT_HOURS || 8);
+  var shiftsPerDay = Number(process.env.NULOGY_SHIFTS_PER_DAY || 2);
   var lookbackShifts = Number(process.env.NULOGY_PRODUCTION_LOOKBACK_SHIFTS || 60);
   var now = new Date();
-  var from = new Date(now.getTime() - Math.max(1, shiftHours) * Math.max(1, lookbackShifts) * 3600000);
+  // Convert "shifts" to wall-clock hours using shifts/day.
+  // Example: 60 shifts at 2 shifts/day => 30 calendar days => 720 hours.
+  var hoursPerShiftWindow = (24 / Math.max(1, shiftsPerDay)) * Math.max(1, lookbackShifts);
+  var lookbackHours = Math.max(1, shiftHours, hoursPerShiftWindow);
+  var from = new Date(now.getTime() - lookbackHours * 3600000);
   return [
     {
       column: "produced_at",
@@ -107,9 +112,9 @@ const REPORT_CONFIGS = {
   production: {
     report: "production",
     columnSets: [
-      ["produced_at", "job_id", "project_code", "item_code", "item_description",
+      ["produced_at", "actual_job_start_at", "actual_job_end_at", "job_id", "project_code", "item_code", "item_description",
        "line", "units_produced", "project_status", "purchase_order_number"],
-      ["produced_at", "job_id", "project_code", "item_code", "units_produced", "line"],
+      ["produced_at", "actual_job_start_at", "actual_job_end_at", "job_id", "project_code", "item_code", "units_produced", "line"],
       ["produced_at", "job_id", "units_produced"]
     ],
     filters: buildProductionFilters
