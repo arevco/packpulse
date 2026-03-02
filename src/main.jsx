@@ -22,12 +22,6 @@ window.addEventListener("vite:preloadError", function(event) {
   }
 });
 
-try {
-  sessionStorage.removeItem("__pp_chunk_reload_once__");
-} catch (_) {
-  // no-op
-}
-
 if (import.meta.env.VITE_SENTRY_DSN) {
   Sentry.init({
     dsn: import.meta.env.VITE_SENTRY_DSN,
