@@ -65,8 +65,8 @@ function rowCountsFromPayload(payload) {
 
 function toNum(v) {
   if (typeof v === "number") return Number.isFinite(v) ? v : 0;
-  if (v == null) return 0;
-  var n = Number(String(v).replace(/,/g, "").trim());
+  if (v == null || v === "") return 0;
+  var n = parseFloat(String(v).replace(/[^0-9.\-]/g, ""));
   return Number.isFinite(n) ? n : 0;
 }
 
