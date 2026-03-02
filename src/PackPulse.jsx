@@ -43,7 +43,6 @@ export default function ProductionReadiness() {
   const [dockApiInfo, setDockApiInfo] = useState("");
   const [syncVisualPct, setSyncVisualPct] = useState(0);
   const [showQuickControls, setShowQuickControls] = useState(false);
-  const [shiftChange, setShiftChange] = useState(null);
 
   var showAutoBootstrap = autoBootstrapEnabled;
 
@@ -95,21 +94,6 @@ export default function ProductionReadiness() {
     setAutoDockAttempted(true);
     fetchOpenDockApi();
   }, [showAutoBootstrap, autoDockAttempted, fetchOpenDockApi]);
-
-  useEffect(() => {
-    var cancelled = false;
-    (async function() {
-      try {
-        var resp = await fetch("/api/cache/shift-change", { credentials: "include" });
-        if (!resp.ok) return;
-        var body = await resp.json();
-        if (!cancelled) setShiftChange(body && body.change ? body.change : null);
-      } catch (e) {
-        if (!cancelled) setShiftChange(null);
-      }
-    })();
-    return function() { cancelled = true; };
-  }, [ds.invTimestamp, ds.woTimestamp, ds.productionTimestamp, ds.bomTimestamp, ds.edrTimestamp, ds.dockTimestamp]);
 
   var handleNulogyData = useCallback(function(results) {
     var ts = new Date();
@@ -565,7 +549,7 @@ export default function ProductionReadiness() {
         />
 
         <Suspense fallback={<div className="px-0 py-2 text-sm text-[rgb(var(--muted))]">Loading view...</div>}>
-          {activeView === "overview" && <OverviewView analysis={analysisForUI} woStatuses={woStatusesForUI} onSelectCustomer={openWorkOrdersForCustomer} shiftChange={shiftChange} />}
+          {activeView === "overview" && <OverviewView analysis={analysisForUI} woStatuses={woStatusesForUI} onSelectCustomer={openWorkOrdersForCustomer} />}
           {activeView === "operations" && <OperationsView productionSegments={productionSegmentsForUI} />}
           {activeView === "workorders" && <WorkOrdersView analysis={analysisForUI} woStatuses={woStatusesForUI} woCustomers={woCustomersForUI} recommendations={recommendationsForUI} dispatchQueue={dispatchQueue || []} prefilterCustomer={workOrdersPrefilterCustomer} prefilterNonce={workOrdersPrefilterNonce} />}
           {activeView === "supplyrisk" && <SupplyRiskView rawCriticalItems={criticalItemsForUI} inboundCoverage={inboundCoverage} timelineData={timelineData} deliveriesV2={deliveriesV2} />}
