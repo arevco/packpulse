@@ -219,12 +219,23 @@ export default async function handler(req, res) {
 
     let rows = Array.isArray(q.data) ? q.data : [];
     let backfilledRows = 0;
+    let backfillError = "";
+    let snapshotProductionRows = 0;
+    let snapshotSyncedAt = "";
     if (!rows.length) {
       const sq = await supabase
         .from("cache_snapshots")
         .select("payload,row_counts,synced_at,updated_by")
         .eq("site_id", CACHE_SITE_ID)
         .maybeSingle();
+      if (!sq.error && sq.data) {
+        snapshotSyncedAt = sq.data.synced_at || "";
+        if (sq.data.row_counts && typeof sq.data.row_counts.productionData !== "undefined") {
+          snapshotProductionRows = Number(sq.data.row_counts.productionData || 0);
+        } else if (sq.data.payload && Array.isArray(sq.data.payload.productionData)) {
+          snapshotProductionRows = sq.data.payload.productionData.length;
+        }
+      }
       if (!sq.error && sq.data && sq.data.payload && Array.isArray(sq.data.payload.productionData) && sq.data.payload.productionData.length) {
         const events = buildProductionEventsFromSnapshotRows(
           sq.data.payload.productionData,
@@ -239,7 +250,10 @@ export default async function handler(req, res) {
             const ins = await supabase
               .from("production_events")
               .upsert(chunk, { onConflict: "site_id,event_key" });
-            if (ins.error) break;
+            if (ins.error) {
+              backfillError = String(ins.error.message || "backfill_insert_failed");
+              break;
+            }
             backfilledRows += chunk.length;
           }
           const q2 = await supabase
@@ -288,7 +302,10 @@ export default async function handler(req, res) {
         diagnostics: {
           totalRowsInTable: rows.length,
           rowsMissingProducedDateEt: rowsMissingProducedDate,
-          backfilledRows: backfilledRows
+          backfilledRows: backfilledRows,
+          backfillError: backfillError || null,
+          snapshotProductionRows: snapshotProductionRows,
+          snapshotSyncedAt: snapshotSyncedAt || null
         }
       }
     });
