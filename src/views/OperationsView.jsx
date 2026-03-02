@@ -28,6 +28,18 @@ function fmtMoney(v) {
   return "$" + Math.round(safeNum(v)).toLocaleString();
 }
 
+function pctDelta(actual, plan) {
+  if (!plan) return 0;
+  return Math.round(((safeNum(actual) - safeNum(plan)) / safeNum(plan)) * 100);
+}
+
+function shortShiftLabel(label) {
+  var s = String(label || "").toLowerCase();
+  if (s.indexOf("shift 1") !== -1) return "S1";
+  if (s.indexOf("shift 2") !== -1) return "S2";
+  return "Un";
+}
+
 export default function OperationsView() {
   const { C, mono } = useTheme();
   const [days, setDays] = useState(30);
@@ -35,7 +47,7 @@ export default function OperationsView() {
   const [err, setErr] = useState("");
   const [trends, setTrends] = useState(null);
   const [inputs, setInputs] = useState([]);
-  const [breakdown, setBreakdown] = useState({ bySku: [], byLine: [], totalRows: 0 });
+  const [breakdown, setBreakdown] = useState({ bySku: [], byLine: [], latestByLine: [], latestDate: null, totalRows: 0 });
   const [rates, setRates] = useState([
     { role: "labor", hourly_rate: 20.1, markup_pct: 0.2 },
     { role: "fork", hourly_rate: 20.1, markup_pct: 0.2 },
@@ -81,6 +93,8 @@ export default function OperationsView() {
       setBreakdown({
         bySku: Array.isArray(brBody.bySku) ? brBody.bySku : [],
         byLine: Array.isArray(brBody.byLine) ? brBody.byLine : [],
+        latestByLine: Array.isArray(brBody.latestByLine) ? brBody.latestByLine : [],
+        latestDate: brBody.latestDate || null,
         totalRows: safeNum(brBody.totalRows),
       });
     } catch (e) {
@@ -176,13 +190,107 @@ export default function OperationsView() {
     });
   }, [breakdown, targetBySku]);
 
-  var barData = useMemo(function() {
-    var byDay = (trends && Array.isArray(trends.byDay)) ? trends.byDay.slice().reverse() : [];
-    var max = byDay.reduce(function(m, d) { return Math.max(m, safeNum(d.units)); }, 0) || 1;
-    return byDay.map(function(d) {
-      return { date: d.date, units: safeNum(d.units), pct: Math.round((safeNum(d.units) / max) * 100) };
+  var commandBoard = useMemo(function() {
+    var byDay = (trends && Array.isArray(trends.byDay)) ? trends.byDay : [];
+    var latest = byDay.length ? byDay[0] : null;
+    var latestUnits = latest ? safeNum(latest.units) : 0;
+    var latestRows = latest ? safeNum(latest.rows) : 0;
+    var planUnits = metrics.avgDailyUnits || 0;
+    var variance = latestUnits - planUnits;
+    var status = "On Track";
+    if (planUnits > 0) {
+      var ratio = latestUnits / planUnits;
+      if (ratio < 0.85) status = "Off Track";
+      else if (ratio < 0.95) status = "At Risk";
+    }
+    var topLine = (breakdown.latestByLine && breakdown.latestByLine[0]) || null;
+    var topConstraint = metrics.coveragePct < 70 ? "Missing Labor Inputs" : metrics.unmappedSkuCount > 0 ? "Unmapped SKU Targets" : "No major constraint detected";
+    var actions = [];
+    if (metrics.coveragePct < 90) actions.push("Capture missing shift labor inputs to improve cost confidence.");
+    if (variance < 0) actions.push("Prioritize high-rate jobs to recover " + Math.abs(variance).toLocaleString() + " units.");
+    if (metrics.unmappedSkuCount > 0) actions.push("Map " + metrics.unmappedSkuCount + " SKU targets to unlock revenue/margin views.");
+    if (!actions.length) actions.push("Maintain current sequence and monitor line attainment.");
+    return {
+      latestDate: latest ? latest.date : null,
+      latestUnits: latestUnits,
+      latestRows: latestRows,
+      planUnits: planUnits,
+      variance: variance,
+      variancePct: pctDelta(latestUnits, planUnits),
+      status: status,
+      topLine: topLine,
+      topConstraint: topConstraint,
+      actions: actions.slice(0, 3)
+    };
+  }, [trends, metrics, breakdown.latestByLine]);
+
+  var shiftPlanVsActual = useMemo(function() {
+    var rows = (metrics.byShift || []).slice();
+    var planByShift = {};
+    rows.forEach(function(r) {
+      var k = String(r.shift || "Unassigned");
+      if (!planByShift[k]) planByShift[k] = { total: 0, count: 0 };
+      planByShift[k].total += safeNum(r.units);
+      planByShift[k].count += 1;
     });
-  }, [trends]);
+    var enriched = rows.map(function(r) {
+      var key = String(r.shift || "Unassigned");
+      var plan = planByShift[key] && planByShift[key].count ? Math.round(planByShift[key].total / planByShift[key].count) : 0;
+      return {
+        key: String(r.date || "") + "-" + key,
+        date: String(r.date || ""),
+        shift: key,
+        actual: safeNum(r.units),
+        plan: plan,
+        rows: safeNum(r.rows)
+      };
+    }).sort(function(a, b) { return a.date.localeCompare(b.date); });
+    var recent = enriched.slice(-20);
+    var max = recent.reduce(function(m, r) { return Math.max(m, r.actual, r.plan); }, 0) || 1;
+    return {
+      rows: recent.map(function(r) {
+        return Object.assign({}, r, {
+          actualPct: Math.round((r.actual / max) * 100),
+          planPct: Math.round((r.plan / max) * 100),
+          variance: r.actual - r.plan
+        });
+      }),
+      max: max
+    };
+  }, [metrics.byShift]);
+
+  var linePerformance = useMemo(function() {
+    var laborByLine = {};
+    inputs.forEach(function(r) {
+      var line = String(r.line_name || "Unknown");
+      if (!laborByLine[line]) laborByLine[line] = { laborHours: 0, shifts: 0 };
+      var hrs = r.hours_run_override == null || r.hours_run_override === "" ? 8 : safeNum(r.hours_run_override);
+      var heads = safeNum(r.labor_count) + safeNum(r.fork_count) + safeNum(r.qa_count) + safeNum(r.maint_count) + safeNum(r.recycling_count);
+      laborByLine[line].laborHours += heads * hrs;
+      laborByLine[line].shifts += 1;
+    });
+    var rows = (breakdown.byLine || []).map(function(l) {
+      var line = String(l.line || "Unknown");
+      var labor = laborByLine[line] ? laborByLine[line].laborHours : 0;
+      var shifts = laborByLine[line] ? laborByLine[line].shifts : 0;
+      var units = safeNum(l.units);
+      var cplh = labor > 0 ? units / labor : 0;
+      var avgPerShift = shifts > 0 ? units / shifts : 0;
+      var latest = (breakdown.latestByLine || []).find(function(x) { return String(x.line || "") === line; });
+      var latestUnits = latest ? safeNum(latest.units) : 0;
+      var attainment = avgPerShift > 0 ? Math.round((latestUnits / avgPerShift) * 100) : 0;
+      return {
+        line: line,
+        units: units,
+        laborHours: labor,
+        cplh: cplh,
+        avgPerShift: avgPerShift,
+        latestUnits: latestUnits,
+        attainment: attainment
+      };
+    }).sort(function(a, b) { return b.latestUnits - a.latestUnits; });
+    return rows;
+  }, [breakdown.byLine, breakdown.latestByLine, inputs]);
 
   async function saveShiftInput() {
     setSaving(true);
@@ -240,26 +348,128 @@ export default function OperationsView() {
 
       {err && <Card className="border-[rgb(var(--danger-line))] bg-[rgb(var(--danger-soft))] px-3 py-2 text-sm text-[rgb(var(--danger))]">{err}</Card>}
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Card className="px-4 py-3"><div className="text-2xl font-bold" style={{ fontFamily: mono }}>{metrics.totalUnits.toLocaleString()}</div><div className="text-xs text-[rgb(var(--muted))]">Cases Produced</div></Card>
-        <Card className="px-4 py-3"><div className="text-2xl font-bold" style={{ fontFamily: mono }}>{metrics.avgDailyUnits.toLocaleString()}</div><div className="text-xs text-[rgb(var(--muted))]">Avg Cases / Day</div></Card>
-        <Card className="px-4 py-3"><div className="text-2xl font-bold" style={{ fontFamily: mono }}>{metrics.coveragePct}%</div><div className="text-xs text-[rgb(var(--muted))]">Labor Input Coverage ({metrics.enteredShifts}/{metrics.expectedShifts} shifts)</div></Card>
-        <Card className="px-4 py-3"><div className="text-2xl font-bold" style={{ fontFamily: mono }}>{fmtMoney(metrics.laborCost)}</div><div className="text-xs text-[rgb(var(--muted))]">Estimated Labor Cost</div></Card>
+      <div className="grid gap-3 lg:grid-cols-12">
+        <Card className="lg:col-span-8 px-4 py-4">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div className="text-sm font-semibold">Shift Command Board</div>
+              <div className="text-xs text-[rgb(var(--muted))]">
+                {commandBoard.latestDate ? ("Latest day: " + commandBoard.latestDate) : "No production day available yet"}
+              </div>
+            </div>
+            <span className={"inline-flex rounded-full px-2.5 py-1 text-xs font-semibold " + (commandBoard.status === "Off Track" ? "bg-[rgb(var(--danger-soft))] text-[rgb(var(--danger))]" : commandBoard.status === "At Risk" ? "bg-[rgb(var(--accent-soft))] text-[rgb(var(--accent))]" : "bg-[rgb(var(--success-soft))] text-[rgb(var(--success))]")}>
+              {commandBoard.status}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
+              <div className="text-xl font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{commandBoard.latestUnits.toLocaleString()}</div>
+              <div className="text-xs text-[rgb(var(--muted))]">Actual Cases</div>
+            </div>
+            <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
+              <div className="text-xl font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{commandBoard.planUnits.toLocaleString()}</div>
+              <div className="text-xs text-[rgb(var(--muted))]">Plan Cases</div>
+            </div>
+            <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
+              <div className={"text-xl font-bold [font-variant-numeric:tabular-nums] " + (commandBoard.variance < 0 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")} style={{ fontFamily: mono }}>
+                {commandBoard.variance >= 0 ? "+" : ""}{commandBoard.variance.toLocaleString()}
+              </div>
+              <div className="text-xs text-[rgb(var(--muted))]">Variance ({commandBoard.variancePct >= 0 ? "+" : ""}{commandBoard.variancePct}%)</div>
+            </div>
+            <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
+              <div className="text-xl font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{commandBoard.topLine ? commandBoard.topLine.line : "--"}</div>
+              <div className="text-xs text-[rgb(var(--muted))]">Top Line ({commandBoard.topLine ? commandBoard.topLine.units.toLocaleString() : "--"} cases)</div>
+            </div>
+          </div>
+          <div className="mt-3 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-2">
+            <div className="text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Top Constraint</div>
+            <div className="text-sm text-[rgb(var(--foreground))]">{commandBoard.topConstraint}</div>
+          </div>
+          <div className="mt-3 space-y-1">
+            {commandBoard.actions.map(function(a, i) {
+              return <div key={i} className="text-sm text-[rgb(var(--muted))]">{i + 1}. {a}</div>;
+            })}
+          </div>
+        </Card>
+
+        <Card className="lg:col-span-4 px-4 py-4">
+          <div className="mb-2 text-sm font-semibold">Operations KPI</div>
+          <div className="space-y-2">
+            <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
+              <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{metrics.totalUnits.toLocaleString()}</div>
+              <div className="text-xs text-[rgb(var(--muted))]">Cases Produced ({days}d)</div>
+            </div>
+            <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
+              <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{metrics.avgDailyUnits.toLocaleString()}</div>
+              <div className="text-xs text-[rgb(var(--muted))]">Avg Cases / Day</div>
+            </div>
+            <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
+              <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{metrics.coveragePct}%</div>
+              <div className="text-xs text-[rgb(var(--muted))]">Labor Input Coverage ({metrics.enteredShifts}/{metrics.expectedShifts} shifts)</div>
+            </div>
+            <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
+              <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{fmtMoney(metrics.laborCost)}</div>
+              <div className="text-xs text-[rgb(var(--muted))]">Estimated Labor Cost</div>
+            </div>
+          </div>
+        </Card>
       </div>
 
-      <Card className="px-4 py-4">
-        <div className="mb-2 text-sm font-semibold">Daily Production Trend</div>
-        <div className="flex h-44 items-end gap-1.5 overflow-x-auto">
-          {barData.map(function(d) {
-            return (
-              <div key={d.date} className="flex min-w-[34px] flex-col items-center gap-1">
-                <div className="w-7 rounded-t bg-[rgb(var(--accent))]" style={{ height: Math.max(8, Math.round((d.pct / 100) * 130)) + "px", opacity: 0.85 }} />
-                <div className="text-[10px] text-[rgb(var(--muted))]">{d.date.slice(5)}</div>
-              </div>
-            );
-          })}
-        </div>
-      </Card>
+      <div className="grid gap-3 lg:grid-cols-12">
+        <Card className="lg:col-span-7 px-4 py-4">
+          <div className="mb-2 text-sm font-semibold">Plan vs Actual by Shift</div>
+          <div className="flex h-52 items-end gap-1.5 overflow-x-auto">
+            {shiftPlanVsActual.rows.map(function(r) {
+              return (
+                <div key={r.key} className="flex min-w-[30px] flex-col items-center gap-1">
+                  <div className="relative h-36 w-5">
+                    <div className="absolute inset-x-0 bottom-0 rounded-t bg-[rgb(var(--accent))]" style={{ height: Math.max(8, Math.round((r.actualPct / 100) * 132)) + "px", opacity: 0.9 }} />
+                    <div className="absolute inset-x-0 border-t-2 border-dashed border-[rgb(var(--muted))]" style={{ bottom: Math.max(8, Math.round((r.planPct / 100) * 132)) + "px" }} />
+                  </div>
+                  <div className="text-[10px] text-[rgb(var(--muted))]">{shortShiftLabel(r.shift)}</div>
+                  <div className="text-[10px] text-[rgb(var(--muted))]">{r.date.slice(5)}</div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-[rgb(var(--muted))]">
+            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-[rgb(var(--accent))]" />Actual</span>
+            <span className="inline-flex items-center gap-1"><span className="h-px w-3 border-t-2 border-dashed border-[rgb(var(--muted))]" />Plan baseline</span>
+          </div>
+        </Card>
+
+        <Card className="lg:col-span-5 px-4 py-4">
+          <div className="mb-2 text-sm font-semibold">Line Performance (Latest Day vs Baseline)</div>
+          <TableShell>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ background: C.raised }}>
+                  <th className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Line</th>
+                  <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Today</th>
+                  <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Attain</th>
+                  <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Cases/LH</th>
+                </tr>
+              </thead>
+              <tbody>
+                {linePerformance.slice(0, 8).map(function(r) {
+                  return (
+                    <tr key={r.line} style={{ borderBottom: "1px solid " + C.border }}>
+                      <td className="px-2 py-2 text-sm">{r.line}</td>
+                      <td className="px-2 py-2 text-right text-sm [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{Math.round(r.latestUnits).toLocaleString()}</td>
+                      <td className={"px-2 py-2 text-right text-sm [font-variant-numeric:tabular-nums] " + (r.attainment < 90 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")} style={{ fontFamily: mono }}>
+                        {r.attainment ? r.attainment + "%" : "--"}
+                      </td>
+                      <td className="px-2 py-2 text-right text-sm [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{r.cplh ? r.cplh.toFixed(1) : "--"}</td>
+                    </tr>
+                  );
+                })}
+                {!linePerformance.length && <tr><td colSpan={4} className="px-2 py-6 text-center text-sm text-[rgb(var(--muted))]">No line performance data yet.</td></tr>}
+              </tbody>
+            </table>
+          </TableShell>
+          <div className="mt-2 text-xs text-[rgb(var(--muted))]">Attainment compares latest day output to each line's average output per entered shift.</div>
+        </Card>
+      </div>
 
       <div className="grid gap-3 lg:grid-cols-2">
         <Card className="px-4 py-4">
@@ -367,4 +577,3 @@ export default function OperationsView() {
     </div>
   );
 }
-

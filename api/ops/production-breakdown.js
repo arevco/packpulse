@@ -25,29 +25,41 @@ export default async function handler(req, res) {
     const rows = Array.isArray(q.data) ? q.data : [];
     const bySku = {};
     const byLine = {};
+    const byDate = {};
 
     rows.forEach(function(r) {
       const sku = String(r.item_code || "UNKNOWN");
       const units = toNum(r.units_produced);
       const line = String(r.line || "Unknown");
+      const dateKey = String(r.produced_date_et || "");
       if (!bySku[sku]) bySku[sku] = { item_code: sku, units: 0, rows: 0 };
       bySku[sku].units += units;
       bySku[sku].rows += 1;
       if (!byLine[line]) byLine[line] = { line: line, units: 0, rows: 0 };
       byLine[line].units += units;
       byLine[line].rows += 1;
+      if (dateKey) {
+        if (!byDate[dateKey]) byDate[dateKey] = {};
+        if (!byDate[dateKey][line]) byDate[dateKey][line] = { line: line, units: 0, rows: 0 };
+        byDate[dateKey][line].units += units;
+        byDate[dateKey][line].rows += 1;
+      }
     });
+
+    const latestDate = Object.keys(byDate).sort().pop() || null;
+    const latestByLine = latestDate ? Object.values(byDate[latestDate]).sort(function(a, b) { return b.units - a.units; }) : [];
 
     return res.status(200).json({
       days: days,
       fromDate: fromDate,
       totalRows: rows.length,
       bySku: Object.values(bySku).sort(function(a, b) { return b.units - a.units; }).slice(0, 200),
-      byLine: Object.values(byLine).sort(function(a, b) { return b.units - a.units; })
+      byLine: Object.values(byLine).sort(function(a, b) { return b.units - a.units; }),
+      latestDate: latestDate,
+      latestByLine: latestByLine
     });
   } catch (err) {
     Sentry.captureException(err);
     return res.status(500).json({ error: "Ops production breakdown failed", details: err && err.message ? err.message : "unknown" });
   }
 }
-
