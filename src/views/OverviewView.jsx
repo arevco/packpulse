@@ -155,6 +155,7 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer, s
 
   if (!overview) return null;
 
+
   var onCustSort = function(field) {
     if (custSortField === field) setCustSortDir(custSortDir === "asc" ? "desc" : "asc");
     else { setCustSortField(field); setCustSortDir(field === "name" ? "asc" : "desc"); }

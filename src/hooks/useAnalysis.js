@@ -99,7 +99,40 @@ function firstValue(row, keys) {
   return "";
 }
 
-export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMaster, boms, workOrders, invMapping, bomMapping, woMapping, poData, poMapping, edrData, dockData }) {
+function toEasternParts(value) {
+  if (!value) return null;
+  var d = value instanceof Date ? value : new Date(value);
+  if (isNaN(d)) return null;
+  var dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  });
+  var out = {};
+  dtf.formatToParts(d).forEach(function(p) {
+    if (p.type !== "literal") out[p.type] = p.value;
+  });
+  if (!out.year || !out.month || !out.day || !out.hour) return null;
+  return {
+    dateKey: out.year + "-" + out.month + "-" + out.day,
+    hour: parseInt(out.hour, 10),
+    minute: parseInt(out.minute || "0", 10)
+  };
+}
+
+function classifyShiftET(parts) {
+  if (!parts) return "";
+  var hour = Number(parts.hour || 0);
+  if (hour >= 7 && hour < 15) return "Shift 1 (7a-3p)";
+  if (hour >= 15 && hour < 23) return "Shift 2 (3p-11p)";
+  return "";
+}
+
+export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMaster, boms, workOrders, productionData, invMapping, bomMapping, woMapping, poData, poMapping, edrData, dockData }) {
 
   /* ====== ANALYSIS ENGINE ====== */
   var analysis = useMemo(() => {
@@ -253,8 +286,54 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       flags.push({ id:flagId++, type:"zero-stock", severity:"bad", sku:comp.sku, skuNorm:cn, desc:comp.desc, source:"Inventory", detail:"Component exists in inventory but has zero stock. Verify count or expedite PO.", affectedWOs:aws });
     } }); });
 
-    return { results:results, diagnostics:diag, flags:flags };
-  }, [mappingConfirmed, allUploaded, inventory, itemMaster, boms, workOrders, invMapping, bomMapping, woMapping]);
+    var productionRows = Array.isArray(productionData) ? productionData : [];
+    var byShiftDay = {};
+    var byJob = {};
+    productionRows.forEach(function(row) {
+      var units = safeNum(firstValue(row, ["Units Produced", "units_produced", "unitsProduced"]));
+      if (!(units > 0)) return;
+      var producedAt = firstValue(row, ["Produced At", "produced_at", "Produced date", "producedAt"]);
+      var parts = toEasternParts(producedAt);
+      var shift = classifyShiftET(parts);
+      if (!parts || !shift) return;
+
+      var shiftKey = parts.dateKey + "|" + shift;
+      if (!byShiftDay[shiftKey]) byShiftDay[shiftKey] = { date: parts.dateKey, shift: shift, unitsProduced: 0, jobs: 0 };
+      byShiftDay[shiftKey].unitsProduced += units;
+
+      var jobId = (firstValue(row, ["Job ID", "job_id", "Job"]) || "").toString().trim() || "Unknown Job";
+      var woCode = (firstValue(row, ["Work Order Code", "project_code", "Project Code"]) || "").toString().trim();
+      var line = (firstValue(row, ["Line", "line", "line_name", "Line Name"]) || "").toString().trim();
+      var itemCode = (firstValue(row, ["Item Code", "item_code"]) || "").toString().trim();
+      var itemDesc = (firstValue(row, ["Description", "item_description", "Item Description"]) || "").toString().trim();
+      var jobKey = [parts.dateKey, shift, jobId, woCode, itemCode].join("|");
+      if (!byJob[jobKey]) {
+        byJob[jobKey] = {
+          date: parts.dateKey,
+          shift: shift,
+          jobId: jobId,
+          workOrder: woCode || "--",
+          line: line || "--",
+          itemCode: itemCode || "--",
+          itemDesc: itemDesc || "--",
+          unitsProduced: 0
+        };
+        byShiftDay[shiftKey].jobs += 1;
+      }
+      byJob[jobKey].unitsProduced += units;
+    });
+    var shiftRows = Object.values(byShiftDay).sort(function(a, b) {
+      if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+      return a.shift < b.shift ? 1 : -1;
+    });
+    var jobRows = Object.values(byJob).sort(function(a, b) {
+      if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+      if (a.shift !== b.shift) return a.shift < b.shift ? 1 : -1;
+      return b.unitsProduced - a.unitsProduced;
+    });
+
+    return { results:results, diagnostics:diag, flags:flags, productionSegments: { shiftRows: shiftRows, jobRows: jobRows } };
+  }, [mappingConfirmed, allUploaded, inventory, itemMaster, boms, workOrders, productionData, invMapping, bomMapping, woMapping]);
 
   var summary = useMemo(() => { if (!analysis) return null; var r = analysis.results; return { total:r.length, ready:r.filter(w=>w.runStatus==="ready").length, partial:r.filter(w=>w.runStatus==="partial").length, blocked:r.filter(w=>w.runStatus==="blocked").length, nobom:r.filter(w=>w.runStatus==="nobom").length }; }, [analysis]);
 

@@ -1,6 +1,6 @@
 // POST /api/nulogy/create
 // Creates a Nulogy report job with automatic column name discovery
-// Body: { reportType: "inventory" | "workorders" | "bom" | "itemmaster" }
+// Body: { reportType: "inventory" | "workorders" | "bom" | "itemmaster" | "production" }
 
 import Sentry from "../_sentry.js";
 
@@ -73,6 +73,15 @@ const REPORT_CONFIGS = {
        "substitute_for", "priority", "version_name"],
       ["finished_good_code", "subcomponent_code", "subcomponent_unit_quantity"]
     ]
+  },
+  production: {
+    report: "production",
+    columnSets: [
+      ["produced_at", "job_id", "project_code", "item_code", "item_description",
+       "line", "units_produced", "project_status", "purchase_order_number"],
+      ["produced_at", "job_id", "project_code", "item_code", "units_produced", "line"],
+      ["produced_at", "job_id", "units_produced"]
+    ]
   }
 };
 
@@ -96,7 +105,7 @@ export default async function handler(req, res) {
   const config = REPORT_CONFIGS[reportType];
 
   if (!config) {
-    return res.status(400).json({ error: `Invalid report type: ${reportType}. Use: inventory, workorders, itemmaster, or bom` });
+    return res.status(400).json({ error: `Invalid report type: ${reportType}. Use: inventory, workorders, itemmaster, bom, or production` });
   }
 
   const auth = Buffer.from(`${user}:${pass}`).toString("base64");

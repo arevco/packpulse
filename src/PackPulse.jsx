@@ -11,6 +11,7 @@ import { Progress } from "./components/ui/progress";
 import TabsNav from "./components/ui/tabs-nav";
 import { Card } from "./components/ui/card";
 const OverviewView = lazy(() => import("./views/OverviewView"));
+const ProductionView = lazy(() => import("./views/ProductionView"));
 const WorkOrdersView = lazy(() => import("./views/WorkOrdersView"));
 const CriticalItemsView = lazy(() => import("./views/CriticalItemsView"));
 const FlagsView = lazy(() => import("./views/FlagsView"));
@@ -24,6 +25,7 @@ export default function ProductionReadiness() {
   const { analysis, summary, criticalItems, woStatuses, woCustomers, timelineData, deliveriesV2, inboundCoverage, recommendations, dispatchQueue } = useAnalysis({
     mappingConfirmed: ds.mappingConfirmed, allUploaded: ds.allUploaded,
     inventory: ds.inventory, itemMaster: ds.itemMaster, boms: ds.boms, workOrders: ds.workOrders,
+    productionData: ds.productionData,
     invMapping: ds.invMapping, bomMapping: ds.bomMapping, woMapping: ds.woMapping,
     edrData: ds.edrData, dockData: ds.dockData,
   });
@@ -51,6 +53,7 @@ export default function ProductionReadiness() {
   var dataSourceStatus = [
     { k:"inv", l:"Inventory", ts:ds.invTimestamp, cad:"daily", ref:() => window.__invR && window.__invR.click() },
     { k:"wo", l:"Work Orders", ts:ds.woTimestamp, cad:"monthly", ref:() => window.__woR && window.__woR.click() },
+    { k:"prod", l:"Production", ts:ds.productionTimestamp, cad:"daily", ref:null },
     { k:"bom", l:"BOMs", ts:ds.bomTimestamp, cad:"rare", ref:() => window.__bomR && window.__bomR.click() },
     { k:"edr", l:"EDR", ts:ds.edrTimestamp, cad:"monthly", ref:() => window.__edrR && window.__edrR.click() },
     { k:"dock", l:"OpenDock", ts:ds.dockTimestamp, cad:"daily", ref:() => window.__dockR && window.__dockR.click() },
@@ -107,7 +110,7 @@ export default function ProductionReadiness() {
       }
     })();
     return function() { cancelled = true; };
-  }, [ds.invTimestamp, ds.woTimestamp, ds.bomTimestamp, ds.edrTimestamp, ds.dockTimestamp]);
+  }, [ds.invTimestamp, ds.woTimestamp, ds.productionTimestamp, ds.bomTimestamp, ds.edrTimestamp, ds.dockTimestamp]);
 
   var handleNulogyData = useCallback(function(results) {
     var ts = new Date();
@@ -125,6 +128,11 @@ export default function ProductionReadiness() {
       ds.setItemMaster(results.itemmaster.data);
       ds.setItemMasterFileName("Nulogy Sync");
       ds.setItemMasterTimestamp(ts);
+    }
+    if (results.production) {
+      ds.setProductionData(results.production.data);
+      ds.setProductionFileName("Nulogy Sync");
+      ds.setProductionTimestamp(ts);
     }
     if (results.bom) {
       ds.setBoms(results.bom.data);
@@ -158,6 +166,7 @@ export default function ProductionReadiness() {
       { key:"workorders", label:"Work Orders" },
       { key:"itemmaster", label:"Item Master" },
       { key:"bom", label:"BOM" },
+      { key:"production", label:"Production" },
       { key:"opendock", label:"OpenDock API", synthetic:true }
     ];
     var done = 0;
@@ -505,12 +514,13 @@ export default function ProductionReadiness() {
         <TabsNav
           activeKey={activeView}
           onChange={setActiveView}
-          items={[{key:"overview",label:"Overview",count:null,alert:false},{key:"workorders",label:"Work Orders",count:summaryForUI.total},{key:"criticalitems",label:"Critical Items",count:criticalItemsForUI.length},{key:"recommendations",label:"Recommendations",count:recommendationsForUI.length,alert:recommendationsForUI.some(function(r){return r.priority==="P1";})}]
+          items={[{key:"overview",label:"Overview",count:null,alert:false},{key:"production",label:"Production",count:(analysisForUI.productionSegments && analysisForUI.productionSegments.jobRows) ? analysisForUI.productionSegments.jobRows.length : 0,alert:false},{key:"workorders",label:"Work Orders",count:summaryForUI.total},{key:"criticalitems",label:"Critical Items",count:criticalItemsForUI.length},{key:"recommendations",label:"Recommendations",count:recommendationsForUI.length,alert:recommendationsForUI.some(function(r){return r.priority==="P1";})}]
             .concat([{key:"timeline",label:"Deliveries",count:timelineData ? timelineData.totalDeliveries : 0,alert:false},{key:"sandbox",label:"Sandbox",count:null,alert:false}])}
         />
 
         <Suspense fallback={<div className="px-0 py-2 text-sm text-[rgb(var(--muted))]">Loading view...</div>}>
           {activeView === "overview" && <OverviewView analysis={analysisForUI} woStatuses={woStatusesForUI} onSelectCustomer={openWorkOrdersForCustomer} shiftChange={shiftChange} />}
+          {activeView === "production" && <ProductionView productionSegments={analysisForUI.productionSegments || null} />}
           {activeView === "workorders" && <WorkOrdersView analysis={analysisForUI} woStatuses={woStatusesForUI} woCustomers={woCustomersForUI} recommendations={recommendationsForUI} dispatchQueue={dispatchQueue || []} prefilterCustomer={workOrdersPrefilterCustomer} prefilterNonce={workOrdersPrefilterNonce} />}
           {activeView === "criticalitems" && <CriticalItemsView rawCriticalItems={criticalItemsForUI} inboundCoverage={inboundCoverage} />}
           {activeView === "recommendations" && <RecommendationsView recommendations={recommendationsForUI} onOpenRecommendation={openRecommendation} />}

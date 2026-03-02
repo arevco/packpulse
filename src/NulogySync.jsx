@@ -13,10 +13,11 @@ const REPORT_TYPES = [
   { key: "inventory", label: "Inventory", required: true },
   { key: "workorders", label: "Work Orders", required: true },
   { key: "itemmaster", label: "Item Master", required: false },
-  { key: "bom", label: "Bill of Materials", required: false }
+  { key: "bom", label: "Bill of Materials", required: false },
+  { key: "production", label: "Production", required: false }
 ];
 const CORE_REPORT_TYPES = ["inventory", "workorders"];
-const OPTIONAL_DEFERRED_TYPES = ["itemmaster", "bom"];
+const OPTIONAL_DEFERRED_TYPES = ["itemmaster", "bom", "production"];
 
 const POLL_INTERVAL = 4000; // 4 seconds between polls
 const MAX_POLLS = 60; // max ~4 minutes of polling
@@ -35,9 +36,10 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
     inventory: { status: IDLE, progress: "", error: null, rowCount: 0 },
     workorders: { status: IDLE, progress: "", error: null, rowCount: 0 },
     itemmaster: { status: IDLE, progress: "", error: null, rowCount: 0 },
-    bom: { status: IDLE, progress: "", error: null, rowCount: 0 }
+    bom: { status: IDLE, progress: "", error: null, rowCount: 0 },
+    production: { status: IDLE, progress: "", error: null, rowCount: 0 }
   });
-  const [syncTypes, setSyncTypes] = useState(["inventory", "workorders", "itemmaster", "bom"]);
+  const [syncTypes, setSyncTypes] = useState(["inventory", "workorders", "itemmaster", "bom", "production"]);
   const abortRef = useRef(false);
   const autoStartedRef = useRef(false);
 
@@ -330,7 +332,7 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
                 ? "Connected — pull live data from Nulogy"
                 : connectionStatus?.configured
                 ? "Credentials set but not connected"
-                : "Pull inventory, WOs, item master, and BOMs from Nulogy"}
+                : "Pull inventory, WOs, item master, BOMs, and production from Nulogy"}
             </div>
           </div>
           <span aria-hidden="true" style={{

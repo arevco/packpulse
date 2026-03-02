@@ -7,6 +7,7 @@ const STORAGE_KEYS = {
   workOrders: "wo-data",
   itemMaster: "itemmaster-data",
   boms: "bom-data",
+  production: "production-data",
   edr: "edr-data",
   dock: "dock-data",
   mappingConfirmed: "mapping-confirmed",
@@ -28,14 +29,17 @@ export function useDataSources() {
   const [itemMaster, setItemMaster] = useState(null);
   const [boms, setBoms] = useState(null);
   const [workOrders, setWorkOrders] = useState(null);
+  const [productionData, setProductionData] = useState(null);
   const [invFileName, setInvFileName] = useState("");
   const [itemMasterFileName, setItemMasterFileName] = useState("");
   const [bomFileName, setBomFileName] = useState("");
   const [woFileName, setWoFileName] = useState("");
+  const [productionFileName, setProductionFileName] = useState("");
   const [invTimestamp, setInvTimestamp] = useState(null);
   const [itemMasterTimestamp, setItemMasterTimestamp] = useState(null);
   const [bomTimestamp, setBomTimestamp] = useState(null);
   const [woTimestamp, setWoTimestamp] = useState(null);
+  const [productionTimestamp, setProductionTimestamp] = useState(null);
   const [edrData, setEdrData] = useState(null);
   const [edrFileName, setEdrFileName] = useState("");
   const [edrTimestamp, setEdrTimestamp] = useState(null);
@@ -108,6 +112,7 @@ export function useDataSources() {
 
     applyData("inventory", setInventory, setInvFileName, setInvTimestamp, "Nulogy Sync");
     applyData("workOrders", setWorkOrders, setWoFileName, setWoTimestamp, "Nulogy Sync");
+    applyData("productionData", setProductionData, setProductionFileName, setProductionTimestamp, "Nulogy Production");
     applyData("itemMaster", setItemMaster, setItemMasterFileName, setItemMasterTimestamp, "Nulogy Sync");
     applyData("boms", setBoms, setBomFileName, setBomTimestamp, "Nulogy Sync");
     applyData("edrData", setEdrData, setEdrFileName, setEdrTimestamp, "EDR");
@@ -149,6 +154,7 @@ export function useDataSources() {
         var keys = [
           STORAGE_KEYS.inventory,
           STORAGE_KEYS.workOrders,
+          STORAGE_KEYS.production,
           STORAGE_KEYS.itemMaster,
           STORAGE_KEYS.boms,
           STORAGE_KEYS.edr,
@@ -162,6 +168,7 @@ export function useDataSources() {
         if (!sharedLoaded) {
           hydrateDataSet(map[STORAGE_KEYS.inventory], setInventory, setInvFileName, setInvTimestamp, "Nulogy Sync (cached)");
           hydrateDataSet(map[STORAGE_KEYS.workOrders], setWorkOrders, setWoFileName, setWoTimestamp, "Nulogy Sync (cached)");
+          hydrateDataSet(map[STORAGE_KEYS.production], setProductionData, setProductionFileName, setProductionTimestamp, "Nulogy Production (cached)");
           hydrateDataSet(map[STORAGE_KEYS.itemMaster], setItemMaster, setItemMasterFileName, setItemMasterTimestamp, "Nulogy Sync (cached)");
           hydrateDataSet(map[STORAGE_KEYS.boms], setBoms, setBomFileName, setBomTimestamp, "Nulogy Sync (cached)");
           hydrateDataSet(map[STORAGE_KEYS.edr], setEdrData, setEdrFileName, setEdrTimestamp, "EDR (cached)");
@@ -191,6 +198,10 @@ export function useDataSources() {
   useEffect(() => {
     persistDataSet(STORAGE_KEYS.workOrders, workOrders, woFileName, woTimestamp);
   }, [workOrders, woFileName, woTimestamp, persistDataSet]);
+
+  useEffect(() => {
+    persistDataSet(STORAGE_KEYS.production, productionData, productionFileName, productionTimestamp);
+  }, [productionData, productionFileName, productionTimestamp, persistDataSet]);
 
   useEffect(() => {
     persistDataSet(STORAGE_KEYS.itemMaster, itemMaster, itemMasterFileName, itemMasterTimestamp);
@@ -229,6 +240,7 @@ export function useDataSources() {
     var payload = {
       inventory: inventory || [],
       workOrders: workOrders || [],
+      productionData: productionData || [],
       itemMaster: itemMaster || [],
       boms: boms || [],
       edrData: edrData || [],
@@ -236,12 +248,14 @@ export function useDataSources() {
       meta: {
         inventoryFileName: invFileName || "",
         workOrdersFileName: woFileName || "",
+        productionDataFileName: productionFileName || "",
         itemMasterFileName: itemMasterFileName || "",
         bomsFileName: bomFileName || "",
         edrDataFileName: edrFileName || "",
         dockDataFileName: dockFileName || "",
         inventoryTimestamp: invTimestamp ? invTimestamp.toISOString() : null,
         workOrdersTimestamp: woTimestamp ? woTimestamp.toISOString() : null,
+        productionDataTimestamp: productionTimestamp ? productionTimestamp.toISOString() : null,
         itemMasterTimestamp: itemMasterTimestamp ? itemMasterTimestamp.toISOString() : null,
         bomsTimestamp: bomTimestamp ? bomTimestamp.toISOString() : null,
         edrDataTimestamp: edrTimestamp ? edrTimestamp.toISOString() : null,
@@ -271,9 +285,9 @@ export function useDataSources() {
     }, 1400);
     return function() { clearTimeout(timer); };
   }, [
-    inventory, workOrders, itemMaster, boms, edrData, dockData,
-    invFileName, woFileName, itemMasterFileName, bomFileName, edrFileName, dockFileName,
-    invTimestamp, woTimestamp, itemMasterTimestamp, bomTimestamp, edrTimestamp, dockTimestamp,
+    inventory, workOrders, productionData, itemMaster, boms, edrData, dockData,
+    invFileName, woFileName, productionFileName, itemMasterFileName, bomFileName, edrFileName, dockFileName,
+    invTimestamp, woTimestamp, productionTimestamp, itemMasterTimestamp, bomTimestamp, edrTimestamp, dockTimestamp,
     mappingConfirmed
   ]);
 
@@ -369,14 +383,17 @@ export function useDataSources() {
     itemMaster, setItemMaster,
     boms, setBoms,
     workOrders, setWorkOrders,
+    productionData, setProductionData,
     invFileName, setInvFileName,
     itemMasterFileName, setItemMasterFileName,
     bomFileName, setBomFileName,
     woFileName, setWoFileName,
+    productionFileName, setProductionFileName,
     invTimestamp, setInvTimestamp,
     itemMasterTimestamp, setItemMasterTimestamp,
     bomTimestamp, setBomTimestamp,
     woTimestamp, setWoTimestamp,
+    productionTimestamp, setProductionTimestamp,
     edrData, setEdrData,
     edrFileName, setEdrFileName,
     edrTimestamp, setEdrTimestamp,
