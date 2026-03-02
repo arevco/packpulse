@@ -86,6 +86,13 @@ function shortShiftLabel(label) {
   return "Un";
 }
 
+function extractTagValue(notes, tag) {
+  var n = String(notes || "");
+  var re = new RegExp("\\[" + tag + ":([^\\]]+)\\]", "i");
+  var m = n.match(re);
+  return m && m[1] ? m[1].trim() : "";
+}
+
 export default function OperationsView({ productionSegments }) {
   const { C, mono } = useTheme();
   const [windowPreset, setWindowPreset] = useState("last_14");
@@ -103,11 +110,14 @@ export default function OperationsView({ productionSegments }) {
   ]);
   const [targets, setTargets] = useState([]);
   const [saving, setSaving] = useState(false);
+  const [showEntryModal, setShowEntryModal] = useState(false);
 
   const [entry, setEntry] = useState({
     date_et: new Date().toISOString().slice(0, 10),
     shift_label: "Shift 1 (7a-3p)",
     line_name: "Line 1",
+    item_code: "",
+    work_order_code: "",
     labor_count: 10,
     fork_count: 1.5,
     qa_count: 0.5,
@@ -390,19 +400,47 @@ export default function OperationsView({ productionSegments }) {
     return rows;
   }, [filteredBreakdown.byLine, filteredBreakdown.latestByLine, filteredInputs]);
 
+  var lineOptions = useMemo(function() {
+    var set = new Set();
+    ["Line 1", "Line 2", "Line 3", "Line 4"].forEach(function(l) { set.add(l); });
+    (filteredBreakdown.byLine || []).forEach(function(r) { if (r && r.line) set.add(String(r.line)); });
+    (inputs || []).forEach(function(r) { if (r && r.line_name) set.add(String(r.line_name)); });
+    return Array.from(set).sort();
+  }, [filteredBreakdown.byLine, inputs]);
+
+  var skuOptions = useMemo(function() {
+    return (filteredBreakdown.bySku || []).map(function(r) { return String(r.item_code || "").trim(); }).filter(Boolean).slice(0, 500);
+  }, [filteredBreakdown.bySku]);
+
   async function saveShiftInput() {
     setSaving(true);
     setErr("");
     try {
+      var noteParts = [];
+      if (entry.item_code) noteParts.push("[SKU:" + String(entry.item_code).trim() + "]");
+      if (entry.work_order_code) noteParts.push("[WO:" + String(entry.work_order_code).trim() + "]");
+      var plainNotes = String(entry.notes || "").trim();
+      if (plainNotes) noteParts.push(plainNotes);
+      var payload = Object.assign({}, entry, {
+        notes: noteParts.join(" ").trim()
+      });
       var resp = await fetch("/api/ops/shift-inputs", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(entry)
+        body: JSON.stringify(payload)
       });
       var body = await resp.json();
       if (!resp.ok) throw new Error(body.error || "Could not save shift input");
       await loadAll();
+      setShowEntryModal(false);
+      setEntry(function(prev) {
+        return Object.assign({}, prev, {
+          item_code: "",
+          work_order_code: "",
+          notes: ""
+        });
+      });
     } catch (e) {
       setErr(e && e.message ? e.message : "Save failed");
     } finally {
@@ -573,56 +611,46 @@ export default function OperationsView({ productionSegments }) {
         </Card>
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-2">
-        <Card className="px-4 py-4">
-          <div className="mb-2 text-sm font-semibold">Manual Shift Labor Input</div>
-          <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
-            <Input type="date" value={entry.date_et} onChange={function(e){ setEntry(Object.assign({}, entry, { date_et: e.target.value })); }} />
-            <select value={entry.shift_label} onChange={function(e){ setEntry(Object.assign({}, entry, { shift_label: e.target.value })); }} className="h-10 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm">
-              <option>Shift 1 (7a-3p)</option>
-              <option>Shift 2 (3p-11p)</option>
-            </select>
-            <Input value={entry.line_name} onChange={function(e){ setEntry(Object.assign({}, entry, { line_name: e.target.value })); }} placeholder="Line 1" />
-            <Input type="number" step="0.5" value={entry.labor_count} onChange={function(e){ setEntry(Object.assign({}, entry, { labor_count: e.target.value })); }} placeholder="Labor" />
-            <Input type="number" step="0.5" value={entry.fork_count} onChange={function(e){ setEntry(Object.assign({}, entry, { fork_count: e.target.value })); }} placeholder="Fork" />
-            <Input type="number" step="0.5" value={entry.qa_count} onChange={function(e){ setEntry(Object.assign({}, entry, { qa_count: e.target.value })); }} placeholder="QA" />
-            <Input type="number" step="0.5" value={entry.maint_count} onChange={function(e){ setEntry(Object.assign({}, entry, { maint_count: e.target.value })); }} placeholder="Maint" />
-            <Input type="number" step="0.5" value={entry.recycling_count} onChange={function(e){ setEntry(Object.assign({}, entry, { recycling_count: e.target.value })); }} placeholder="Recycling" />
-            <Input type="number" step="0.25" value={entry.hours_run_override} onChange={function(e){ setEntry(Object.assign({}, entry, { hours_run_override: e.target.value })); }} placeholder="Hours Run (optional)" />
+      <div className="grid gap-3 lg:grid-cols-12">
+        <Card className="lg:col-span-7 px-4 py-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold">Shift Inputs</div>
+              <div className="text-xs text-[rgb(var(--muted))]">Managers can add line-level labor entries without editing dashboard settings.</div>
+            </div>
+            <Button onClick={function() { setShowEntryModal(true); }} disabled={saving}>{saving ? "Saving..." : "Add Shift Entry"}</Button>
           </div>
-          <div className="mt-2">
-            <Input value={entry.notes} onChange={function(e){ setEntry(Object.assign({}, entry, { notes: e.target.value })); }} placeholder="Notes (optional)" />
-          </div>
-          <div className="mt-3 flex items-center gap-2">
-            <Button onClick={saveShiftInput} disabled={saving}>{saving ? "Saving..." : "Save Shift Input"}</Button>
-            <span className="text-xs text-[rgb(var(--muted))]">Inputs power labor cost and margin reporting.</span>
+          <div className="mt-3 text-xs text-[rgb(var(--muted))]">
+            Labor rates are managed separately and usually remain constant.
           </div>
         </Card>
 
-        <Card className="px-4 py-4">
-          <div className="mb-2 text-sm font-semibold">Labor Rate Settings</div>
-          <div className="space-y-2">
-            {rates.map(function(r, idx) {
-              return (
-                <div key={r.role + idx} className="grid grid-cols-[120px_1fr_1fr] gap-2">
-                  <div className="flex items-center text-sm capitalize">{r.role}</div>
-                  <Input type="number" step="0.01" value={r.hourly_rate} onChange={function(e){
-                    var next = rates.slice();
-                    next[idx] = Object.assign({}, next[idx], { hourly_rate: e.target.value });
-                    setRates(next);
-                  }} placeholder="Hourly rate" />
-                  <Input type="number" step="0.01" value={r.markup_pct} onChange={function(e){
-                    var next = rates.slice();
-                    next[idx] = Object.assign({}, next[idx], { markup_pct: e.target.value });
-                    setRates(next);
-                  }} placeholder="Markup (0.2 = 20%)" />
-                </div>
-              );
-            })}
-          </div>
-          <div className="mt-3">
-            <Button variant="outline" onClick={saveRates} disabled={saving}>{saving ? "Saving..." : "Save Rates"}</Button>
-          </div>
+        <Card className="lg:col-span-5 px-4 py-4">
+          <details>
+            <summary className="cursor-pointer text-sm font-semibold">Labor Rate Settings</summary>
+            <div className="mt-3 space-y-2">
+              {rates.map(function(r, idx) {
+                return (
+                  <div key={r.role + idx} className="grid grid-cols-[120px_1fr_1fr] gap-2">
+                    <div className="flex items-center text-sm capitalize">{r.role}</div>
+                    <Input type="number" step="0.01" value={r.hourly_rate} onChange={function(e){
+                      var next = rates.slice();
+                      next[idx] = Object.assign({}, next[idx], { hourly_rate: e.target.value });
+                      setRates(next);
+                    }} placeholder="Hourly rate" />
+                    <Input type="number" step="0.01" value={r.markup_pct} onChange={function(e){
+                      var next = rates.slice();
+                      next[idx] = Object.assign({}, next[idx], { markup_pct: e.target.value });
+                      setRates(next);
+                    }} placeholder="Markup (0.2 = 20%)" />
+                  </div>
+                );
+              })}
+              <div className="mt-3">
+                <Button variant="outline" onClick={saveRates} disabled={saving}>{saving ? "Saving..." : "Save Rates"}</Button>
+              </div>
+            </div>
+          </details>
         </Card>
       </div>
 
@@ -658,19 +686,25 @@ export default function OperationsView({ productionSegments }) {
                 <th className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Date</th>
                 <th className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Shift</th>
                 <th className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Line</th>
+                <th className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">SKU</th>
+                <th className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">WO</th>
                 <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Total HC</th>
               </tr></thead>
               <tbody>
                 {inputs.slice(0, 12).map(function(r, i) {
                   var total = safeNum(r.labor_count) + safeNum(r.fork_count) + safeNum(r.qa_count) + safeNum(r.maint_count) + safeNum(r.recycling_count);
+                  var sku = extractTagValue(r.notes, "SKU");
+                  var wo = extractTagValue(r.notes, "WO");
                   return <tr key={i} style={{ borderBottom:"1px solid " + C.border }}>
                     <td className="px-2 py-2 text-sm">{r.date_et}</td>
                     <td className="px-2 py-2 text-sm">{r.shift_label}</td>
                     <td className="px-2 py-2 text-sm">{r.line_name}</td>
+                    <td className="px-2 py-2 text-sm">{sku || "--"}</td>
+                    <td className="px-2 py-2 text-sm">{wo || "--"}</td>
                     <td className="px-2 py-2 text-right text-sm" style={{ fontFamily: mono }}>{total}</td>
                   </tr>;
                 })}
-                {!inputs.length && <tr><td colSpan={4} className="px-2 py-6 text-center text-sm text-[rgb(var(--muted))]">No labor inputs saved yet.</td></tr>}
+                {!inputs.length && <tr><td colSpan={6} className="px-2 py-6 text-center text-sm text-[rgb(var(--muted))]">No labor inputs saved yet.</td></tr>}
               </tbody>
             </table>
           </TableShell>
@@ -684,6 +718,51 @@ export default function OperationsView({ productionSegments }) {
         </div>
         <ProductionView productionSegments={productionSegments} />
       </Card>
+
+      {showEntryModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={function() { if (!saving) setShowEntryModal(false); }}>
+          <Card className="w-full max-w-4xl px-4 py-4" onClick={function(e) { e.stopPropagation(); }}>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <div className="text-base font-semibold">Add Shift Entry</div>
+                <div className="text-xs text-[rgb(var(--muted))]">Capture day, shift, line, SKU, and labor for manager reporting.</div>
+              </div>
+              <Button variant="outline" onClick={function() { if (!saving) setShowEntryModal(false); }} disabled={saving}>Close</Button>
+            </div>
+
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-4">
+              <Input type="date" value={entry.date_et} onChange={function(e){ setEntry(Object.assign({}, entry, { date_et: e.target.value })); }} />
+              <select value={entry.shift_label} onChange={function(e){ setEntry(Object.assign({}, entry, { shift_label: e.target.value })); }} className="h-10 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm">
+                <option>Shift 1 (7a-3p)</option>
+                <option>Shift 2 (3p-11p)</option>
+              </select>
+              <select value={entry.line_name} onChange={function(e){ setEntry(Object.assign({}, entry, { line_name: e.target.value })); }} className="h-10 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm">
+                {lineOptions.map(function(line) { return <option key={line} value={line}>{line}</option>; })}
+              </select>
+              <Input value={entry.item_code} onChange={function(e){ setEntry(Object.assign({}, entry, { item_code: e.target.value })); }} placeholder="SKU (optional)" list="ops-sku-list" />
+              <datalist id="ops-sku-list">
+                {skuOptions.map(function(sku) { return <option key={sku} value={sku} />; })}
+              </datalist>
+            </div>
+
+            <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-4">
+              <Input value={entry.work_order_code} onChange={function(e){ setEntry(Object.assign({}, entry, { work_order_code: e.target.value })); }} placeholder="Work Order (optional)" />
+              <Input type="number" step="0.5" value={entry.labor_count} onChange={function(e){ setEntry(Object.assign({}, entry, { labor_count: e.target.value })); }} placeholder="Labor" />
+              <Input type="number" step="0.5" value={entry.fork_count} onChange={function(e){ setEntry(Object.assign({}, entry, { fork_count: e.target.value })); }} placeholder="Fork" />
+              <Input type="number" step="0.5" value={entry.qa_count} onChange={function(e){ setEntry(Object.assign({}, entry, { qa_count: e.target.value })); }} placeholder="QA" />
+              <Input type="number" step="0.5" value={entry.maint_count} onChange={function(e){ setEntry(Object.assign({}, entry, { maint_count: e.target.value })); }} placeholder="Maint" />
+              <Input type="number" step="0.5" value={entry.recycling_count} onChange={function(e){ setEntry(Object.assign({}, entry, { recycling_count: e.target.value })); }} placeholder="Recycling" />
+              <Input type="number" step="0.25" value={entry.hours_run_override} onChange={function(e){ setEntry(Object.assign({}, entry, { hours_run_override: e.target.value })); }} placeholder="Hours Run (optional)" />
+              <Input value={entry.notes} onChange={function(e){ setEntry(Object.assign({}, entry, { notes: e.target.value })); }} placeholder="Notes (optional)" />
+            </div>
+
+            <div className="mt-3 flex items-center gap-2">
+              <Button onClick={saveShiftInput} disabled={saving}>{saving ? "Saving..." : "Save Shift Entry"}</Button>
+              <span className="text-xs text-[rgb(var(--muted))]">Wages use Labor Rate Settings and generally remain constant.</span>
+            </div>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }
