@@ -43,7 +43,7 @@ function getSupabaseAdmin() {
 
 function sanitizePayload(p) {
   if (!p || typeof p !== "object") return {};
-  const allowed = ["inventory", "workOrders", "itemMaster", "boms", "edrData", "dockData", "meta"];
+  const allowed = ["inventory", "workOrders", "productionData", "itemMaster", "boms", "edrData", "dockData", "meta"];
   const out = {};
   allowed.forEach(function(k) {
     if (Object.prototype.hasOwnProperty.call(p, k)) out[k] = p[k];
@@ -55,6 +55,7 @@ function rowCountsFromPayload(payload) {
   return {
     inventory: Array.isArray(payload.inventory) ? payload.inventory.length : 0,
     workOrders: Array.isArray(payload.workOrders) ? payload.workOrders.length : 0,
+    productionData: Array.isArray(payload.productionData) ? payload.productionData.length : 0,
     itemMaster: Array.isArray(payload.itemMaster) ? payload.itemMaster.length : 0,
     boms: Array.isArray(payload.boms) ? payload.boms.length : 0,
     edrData: Array.isArray(payload.edrData) ? payload.edrData.length : 0,
@@ -122,10 +123,112 @@ function deriveMetrics(payload, rowCounts) {
     woLate: lateWOs,
     woRemainingUnits: Math.round(remainingUnits),
     inventoryRows: rowCounts.inventory || 0,
+    productionRows: rowCounts.productionData || 0,
     bomRows: rowCounts.boms || 0,
     edrRows: rowCounts.edrData || 0,
     dockRows: rowCounts.dockData || 0,
   };
+}
+
+function normalizeKey(s) {
+  return String(s || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+
+function pickFieldLoose(row, keys) {
+  if (!row || typeof row !== "object") return "";
+  var rowKeys = Object.keys(row);
+  for (var i = 0; i < keys.length; i++) {
+    var target = String(keys[i]).toLowerCase();
+    for (var j = 0; j < rowKeys.length; j++) {
+      var rk = rowKeys[j];
+      if (String(rk).toLowerCase() === target) return row[rk];
+    }
+  }
+  var wanted = {};
+  keys.forEach(function(k) { wanted[normalizeKey(k)] = true; });
+  for (var x = 0; x < rowKeys.length; x++) {
+    var rowKey = rowKeys[x];
+    if (wanted[normalizeKey(rowKey)]) return row[rowKey];
+  }
+  return "";
+}
+
+function toEasternParts(value) {
+  if (!value) return null;
+  var d = value instanceof Date ? value : new Date(value);
+  if (isNaN(d)) return null;
+  var dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  });
+  var out = {};
+  dtf.formatToParts(d).forEach(function(p) {
+    if (p.type !== "literal") out[p.type] = p.value;
+  });
+  if (!out.year || !out.month || !out.day) return null;
+  return {
+    dateKey: out.year + "-" + out.month + "-" + out.day,
+    hour: parseInt(out.hour || "0", 10)
+  };
+}
+
+function classifyShiftET(parts) {
+  if (!parts) return "Unassigned";
+  var hour = Number(parts.hour || 0);
+  if (hour >= 7 && hour < 15) return "Shift 1 (7a-3p)";
+  if (hour >= 15 && hour < 23) return "Shift 2 (3p-11p)";
+  return "Unassigned";
+}
+
+function toIso(value) {
+  if (!value) return null;
+  var d = value instanceof Date ? value : new Date(value);
+  if (isNaN(d)) return null;
+  return d.toISOString();
+}
+
+function buildProductionEvents(payload, siteId, syncedAt, updatedBy) {
+  var rows = Array.isArray(payload && payload.productionData) ? payload.productionData : [];
+  var out = [];
+  rows.forEach(function(row) {
+    var units = toNum(pickFieldLoose(row, ["Units Produced", "units_produced", "unitsProduced", "Produced Units", "Quantity Produced", "Qty Produced"]));
+    if (!(units > 0)) return;
+    var producedRaw = pickFieldLoose(row, [
+      "Produced At", "produced_at", "Produced date", "producedAt",
+      "Actual Job Start", "actual_job_start_at",
+      "Actual Job End", "actual_job_end_at"
+    ]);
+    var producedIso = toIso(producedRaw);
+    var eastern = toEasternParts(producedIso || producedRaw);
+    var shift = classifyShiftET(eastern);
+    var jobId = String(pickFieldLoose(row, ["Job ID", "job_id", "Job"]) || "").trim();
+    var wo = String(pickFieldLoose(row, ["Work Order Code", "project_code", "Project Code"]) || "").trim();
+    var itemCode = String(pickFieldLoose(row, ["Item Code", "item_code"]) || "").trim();
+    var line = String(pickFieldLoose(row, ["Line", "line", "line_name", "Line Name"]) || "").trim();
+    var keyBase = [siteId, producedIso || producedRaw || "", jobId, wo, itemCode, line, units].join("|");
+    var eventKey = crypto.createHash("sha1").update(keyBase).digest("hex");
+    out.push({
+      site_id: siteId,
+      event_key: eventKey,
+      produced_at_utc: producedIso,
+      produced_date_et: eastern ? eastern.dateKey : null,
+      shift_label: shift,
+      job_id: jobId || null,
+      work_order_code: wo || null,
+      item_code: itemCode || null,
+      line: line || null,
+      units_produced: units,
+      source_snapshot_at: syncedAt,
+      updated_by: updatedBy,
+      raw: row
+    });
+  });
+  return out;
 }
 
 export default async function handler(req, res) {
@@ -158,13 +261,14 @@ export default async function handler(req, res) {
       const payload = sanitizePayload((req.body && req.body.payload) || {});
       const rowCounts = rowCountsFromPayload(payload);
       const derivedMetrics = deriveMetrics(payload, rowCounts);
+      const syncedAt = new Date().toISOString();
       const up = await supabase
         .from("cache_snapshots")
         .upsert({
           site_id: CACHE_SITE_ID,
           payload: payload,
           row_counts: rowCounts,
-          synced_at: new Date().toISOString(),
+          synced_at: syncedAt,
           updated_by: user.email,
         }, { onConflict: "site_id" })
         .select("site_id,row_counts,synced_at,updated_by")
@@ -176,7 +280,7 @@ export default async function handler(req, res) {
           site_id: CACHE_SITE_ID,
           row_counts: rowCounts,
           derived_metrics: derivedMetrics,
-          captured_at: up.data && up.data.synced_at ? up.data.synced_at : new Date().toISOString(),
+          captured_at: up.data && up.data.synced_at ? up.data.synced_at : syncedAt,
           updated_by: user.email,
         });
       let historyStatus = "ok";
@@ -190,7 +294,37 @@ export default async function handler(req, res) {
           historyStatus = "history_insert_failed";
         }
       }
-      return res.status(200).json({ ok: true, snapshot: up.data, historyStatus: historyStatus });
+      var productionEvents = buildProductionEvents(payload, CACHE_SITE_ID, syncedAt, user.email);
+      var productionStatus = "ok";
+      var productionWritten = 0;
+      if (productionEvents.length > 0) {
+        var chunkSize = 500;
+        for (var i = 0; i < productionEvents.length; i += chunkSize) {
+          var chunk = productionEvents.slice(i, i + chunkSize);
+          var pe = await supabase
+            .from("production_events")
+            .upsert(chunk, { onConflict: "site_id,event_key" });
+          if (pe.error) {
+            var peMsg = String(pe.error.message || "").toLowerCase();
+            if (peMsg.includes("production_events") && peMsg.includes("schema cache")) {
+              productionStatus = "missing_production_events_table";
+            } else {
+              productionStatus = "production_events_upsert_failed";
+              Sentry.captureException(pe.error);
+            }
+            break;
+          }
+          productionWritten += chunk.length;
+        }
+      }
+      return res.status(200).json({
+        ok: true,
+        snapshot: up.data,
+        historyStatus: historyStatus,
+        productionStatus: productionStatus,
+        productionRowsSubmitted: productionEvents.length,
+        productionRowsWritten: productionWritten
+      });
     }
 
     return res.status(405).json({ error: "Method not allowed" });
