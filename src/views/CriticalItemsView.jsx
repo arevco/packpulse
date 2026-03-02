@@ -232,22 +232,24 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
         out.push(
           <tr key={rowKey + "-detail"}><td colSpan={11} style={{ padding:"0 12px 14px 36px", background:C.raised }}>
             <div style={{ display:"flex", gap:14, flexWrap:"wrap", marginTop:10, marginBottom:8, fontSize:12 }}>
+              <span style={{ color:C.dim }}>Blocking Component: <span style={{ color:C.bright, fontFamily:mono }}>{ci.sku || "--"}</span></span>
+              <span style={{ color:C.dim }}>Component Short: <span style={{ color:C.bad, fontFamily:mono, fontWeight:700 }}>{Math.round(ci.shortQty || 0).toLocaleString()}</span></span>
               <span style={{ color:C.dim }}>Inbound Source: <span style={{ color:C.bright, fontFamily:mono }}>EDR {Math.round(ci.inboundQty || 0).toLocaleString()} | OpenDock Scheduled {Math.round(ci.scheduledQty || 0).toLocaleString()}</span></span>
               <span style={{ color:C.dim }}>Earliest Inbound: <span style={{ color:C.bright, fontFamily:mono }}>{fmtDate(ci.earliestInboundDate)}</span></span>
               <span style={{ color:C.dim }}>Earliest Scheduled: <span style={{ color:C.bright, fontFamily:mono }}>{fmtDate(ci.earliestScheduledDate)}</span></span>
               <span style={{ color:C.dim }}>POs: <span style={{ color:C.bright }}>{(ci.openPOs || []).length ? ci.openPOs.join(", ") : "--"}</span></span>
               <span style={{ color:C.dim }}>Unlocked Units: <span style={{ color:C.bright }}>{Math.round(ci.unlockedUnits || 0).toLocaleString()}</span></span>
             </div>
-            <div style={{ fontSize:12, fontWeight:600, color:C.accent, marginBottom:6, letterSpacing:0.1 }}>Affected Work Orders</div>
+            <div style={{ fontSize:12, fontWeight:600, color:C.accent, marginBottom:6, letterSpacing:0.1 }}>Affected Work Orders (blocked finished goods)</div>
             <table style={{ width:"100%", borderCollapse:"collapse" }}>
-              <thead><tr>{["WO#", "Product", "Customer", "WO Qty", "Needed", "Short", "Due"].map(function(h) { return <th key={h} style={thDS}>{h}</th>; })}</tr></thead>
+              <thead><tr>{["WO#", "WO Product (FG)", "Customer", "WO Remaining", "Component Needed", "Component Short", "Due"].map(function(h) { return <th key={h} style={thDS}>{h}</th>; })}</tr></thead>
               <tbody>
                 {(ci.affectedWOs || []).map(function(wo, wi) {
                   return <tr key={wi} style={{ borderBottom:"1px solid " + C.border }}>
                     <td style={Object.assign({}, tdDM, { fontWeight:600, color:C.bright })}>{wo.woNum}</td>
-                    <td style={tdDM}>{wo.productSku}</td>
+                    <td style={tdDM}>{wo.productSku}{wo.productDesc ? (" - " + formatDescriptionForDisplay(wo.productDesc)) : ""}</td>
                     <td style={Object.assign({}, tdDN, { color:C.dim })}>{wo.customer || "--"}</td>
-                    <td style={Object.assign({}, tdDM, { color:C.bright })}>{(wo.qtyToProduce || 0).toLocaleString()}</td>
+                    <td style={Object.assign({}, tdDM, { color:C.bright })}>{(wo.unitsRemaining || 0).toLocaleString()}</td>
                     <td style={tdDM}>{Math.round(wo.needed || 0).toLocaleString()}</td>
                     <td style={Object.assign({}, tdDM, { fontWeight:600, color:C.bad })}>{Math.round(wo.short || 0).toLocaleString()}</td>
                     <td style={tdDM}>{fmtDate(wo.dueDate)}</td>
