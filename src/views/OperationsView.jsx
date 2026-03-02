@@ -93,7 +93,19 @@ function presetRange(preset) {
 
 function inRange(dateIso, range) {
   if (!dateIso || !range) return false;
-  return dateIso >= range.start && dateIso <= range.end;
+  var raw = String(dateIso || "").trim();
+  if (!raw) return false;
+  var normalized = "";
+  var isoPrefix = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (isoPrefix && isoPrefix[1]) {
+    normalized = isoPrefix[1];
+  } else {
+    var parsed = new Date(raw);
+    if (isNaN(parsed)) return false;
+    normalized = toIsoDateET(parsed);
+  }
+  if (!normalized) return false;
+  return normalized >= range.start && normalized <= range.end;
 }
 
 function shortShiftLabel(label) {
