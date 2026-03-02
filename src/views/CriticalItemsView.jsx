@@ -34,12 +34,12 @@ function classifyMaterialType(sku, desc) {
   return "wip";
 }
 
-export default function CriticalItemsView({ rawCriticalItems, inboundCoverage }) {
+export default function CriticalItemsView({ rawCriticalItems, inboundCoverage, customerFilter: customerFilterProp, onCustomerFilterChange }) {
   const { C, mono } = useTheme();
   const { thC, tdN, tdM, thDS, tdDN, tdDM, truncate } = useStyles();
 
   const [search, setSearch] = useState("");
-  const [customerFilter, setCustomerFilter] = useState("all");
+  const [customerFilterLocal, setCustomerFilterLocal] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [materialTypeFilter, setMaterialTypeFilter] = useState("all");
   const [sortField, setSortField] = useState("uncoveredQty");
@@ -361,3 +361,8 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
     </div>
   </div>);
 }
+  var customerFilter = customerFilterProp != null ? customerFilterProp : customerFilterLocal;
+  var setCustomerFilter = function(nextValue) {
+    if (onCustomerFilterChange) onCustomerFilterChange(nextValue);
+    if (customerFilterProp == null) setCustomerFilterLocal(nextValue);
+  };
