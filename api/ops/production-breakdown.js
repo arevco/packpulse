@@ -1,6 +1,29 @@
 import Sentry from "../_sentry.js";
 import { CACHE_SITE_ID, getAuthenticatedUser, getSupabaseAdmin, toDateEt, toNum, withCors } from "./_common.js";
 
+async function fetchAllProductionRows(supabase, siteId, fromDate) {
+  var pageSize = 1000;
+  var from = 0;
+  var out = [];
+  while (true) {
+    var to = from + pageSize - 1;
+    var q = await supabase
+      .from("production_events")
+      .select("produced_date_et,shift_label,item_code,units_produced,line,work_order_code")
+      .eq("site_id", siteId)
+      .gte("produced_date_et", fromDate)
+      .order("produced_date_et", { ascending: false })
+      .range(from, to);
+    if (q.error) return { error: q.error, data: out };
+    var rows = Array.isArray(q.data) ? q.data : [];
+    out = out.concat(rows);
+    if (rows.length < pageSize) break;
+    from += pageSize;
+    if (from > 500000) break;
+  }
+  return { error: null, data: out };
+}
+
 export default async function handler(req, res) {
   withCors(req, res, ["GET", "OPTIONS"]);
   if (req.method === "OPTIONS") return res.status(200).end();
@@ -14,14 +37,8 @@ export default async function handler(req, res) {
     const days = Math.max(1, Math.min(120, Number(req.query.days || 30)));
     const fromDate = toDateEt(days);
 
-    const q = await supabase
-      .from("production_events")
-      .select("produced_date_et,shift_label,item_code,units_produced,line,work_order_code")
-      .eq("site_id", CACHE_SITE_ID)
-      .gte("produced_date_et", fromDate)
-      .order("produced_date_et", { ascending: false });
+    const q = await fetchAllProductionRows(supabase, CACHE_SITE_ID, fromDate);
     if (q.error) throw q.error;
-
     const rows = Array.isArray(q.data) ? q.data : [];
     const bySku = {};
     const byLine = {};

@@ -190,6 +190,28 @@ function businessDateDaysAgo(days) {
   return d;
 }
 
+async function fetchAllProductionEvents(supabase, siteId) {
+  var pageSize = 1000;
+  var from = 0;
+  var out = [];
+  while (true) {
+    var to = from + pageSize - 1;
+    var q = await supabase
+      .from("production_events")
+      .select("produced_date_et,produced_at_utc,source_snapshot_at,shift_label,units_produced,job_id,work_order_code,line,item_code")
+      .eq("site_id", siteId)
+      .order("source_snapshot_at", { ascending: false })
+      .range(from, to);
+    if (q.error) return { error: q.error, data: out };
+    var rows = Array.isArray(q.data) ? q.data : [];
+    out = out.concat(rows);
+    if (rows.length < pageSize) break;
+    from += pageSize;
+    if (from > 500000) break;
+  }
+  return { error: null, data: out };
+}
+
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", req.headers.origin || "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
@@ -212,12 +234,7 @@ export default async function handler(req, res) {
     })();
     const fromDate = toEasternDateKey(from);
 
-    const q = await supabase
-      .from("production_events")
-      .select("produced_date_et,produced_at_utc,source_snapshot_at,shift_label,units_produced,job_id,work_order_code,line,item_code")
-      .eq("site_id", CACHE_SITE_ID)
-      .order("source_snapshot_at", { ascending: false })
-      .limit(60000);
+    const q = await fetchAllProductionEvents(supabase, CACHE_SITE_ID);
 
     if (q.error) {
       const msg = String(q.error.message || "").toLowerCase();
@@ -266,12 +283,7 @@ export default async function handler(req, res) {
             }
             backfilledRows += chunk.length;
           }
-          const q2 = await supabase
-            .from("production_events")
-            .select("produced_date_et,produced_at_utc,source_snapshot_at,shift_label,units_produced,job_id,work_order_code,line,item_code")
-            .eq("site_id", CACHE_SITE_ID)
-            .order("source_snapshot_at", { ascending: false })
-            .limit(60000);
+          const q2 = await fetchAllProductionEvents(supabase, CACHE_SITE_ID);
           if (!q2.error) rows = Array.isArray(q2.data) ? q2.data : [];
         }
       }
