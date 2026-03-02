@@ -98,8 +98,7 @@ export default function ProductionReadiness() {
       setDockApiLoading(false);
     }
   }, []);
-  var loadUserActivity = useCallback(async function(force) {
-    if (!force && userActivityLoading) return;
+  var loadUserActivity = useCallback(async function() {
     setUserActivityLoading(true);
     setUserActivityError("");
     try {
@@ -115,7 +114,7 @@ export default function ProductionReadiness() {
     } finally {
       setUserActivityLoading(false);
     }
-  }, [userActivityLoading]);
+  }, []);
 
   useEffect(() => {
     if (!showAutoBootstrap || autoDockAttempted) return;
@@ -543,7 +542,7 @@ export default function ProductionReadiness() {
               <div className="mb-2 rounded-md border border-[rgb(var(--border))] bg-white px-2.5 py-2">
                 <div className="mb-1 flex items-center justify-between">
                   <div className="text-xs font-semibold text-[rgb(var(--foreground))]">Recent Logins</div>
-                  <Button variant="outline" size="sm" onClick={() => loadUserActivity(true)} disabled={userActivityLoading}>
+                  <Button variant="outline" size="sm" onClick={loadUserActivity} disabled={userActivityLoading}>
                     {userActivityLoading ? "Loading..." : "Refresh"}
                   </Button>
                 </div>
