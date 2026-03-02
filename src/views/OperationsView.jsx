@@ -42,6 +42,23 @@ function toIsoDateLocal(d) {
   return y + "-" + m + "-" + day;
 }
 
+function toIsoDateET(d) {
+  var dt = d instanceof Date ? d : new Date(d);
+  if (isNaN(dt)) return "";
+  var parts = {};
+  var fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  });
+  fmt.formatToParts(dt).forEach(function(p) {
+    if (p.type !== "literal") parts[p.type] = p.value;
+  });
+  if (!parts.year || !parts.month || !parts.day) return "";
+  return parts.year + "-" + parts.month + "-" + parts.day;
+}
+
 function shiftDays(dateIso, n) {
   var d = new Date(dateIso + "T00:00:00");
   d.setDate(d.getDate() + n);
@@ -57,7 +74,7 @@ function weekStart(dateIso) {
 }
 
 function presetRange(preset) {
-  var today = toIsoDateLocal(new Date());
+  var today = toIsoDateET(new Date());
   if (preset === "today") return { start: today, end: today, fetchDays: 14 };
   if (preset === "yesterday") {
     var y = shiftDays(today, -1);
@@ -114,7 +131,7 @@ export default function OperationsView({ productionSegments }) {
   const [showRecentLaborInputs, setShowRecentLaborInputs] = useState(false);
 
   const [entry, setEntry] = useState({
-    date_et: new Date().toISOString().slice(0, 10),
+    date_et: toIsoDateET(new Date()),
     shift_label: "Shift 1 (7a-3p)",
     line_name: "Line 1",
     item_code: "",
@@ -232,7 +249,7 @@ export default function OperationsView({ productionSegments }) {
     var byShift = filteredTrends.byShift || [];
     var totalUnits = byDay.reduce(function(sum, d) { return sum + safeNum(d.units); }, 0);
     var avgDailyUnits = byDay.length ? Math.round(totalUnits / byDay.length) : 0;
-    var today = new Date().toISOString().slice(0, 10);
+    var today = toIsoDateET(new Date());
     var expectedShifts = businessDaysBetween(filteredTrends.fromDate, range.end || today) * 2;
     var shiftKeySet = {};
     filteredInputs.forEach(function(r) {
