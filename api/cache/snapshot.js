@@ -194,7 +194,7 @@ function toIso(value) {
 
 function buildProductionEvents(payload, siteId, syncedAt, updatedBy) {
   var rows = Array.isArray(payload && payload.productionData) ? payload.productionData : [];
-  var out = [];
+  var dedup = {};
   rows.forEach(function(row) {
     var units = toNum(pickFieldLoose(row, ["Units Produced", "units_produced", "unitsProduced", "Produced Units", "Quantity Produced", "Qty Produced"]));
     if (!(units > 0)) return;
@@ -212,7 +212,7 @@ function buildProductionEvents(payload, siteId, syncedAt, updatedBy) {
     var line = String(pickFieldLoose(row, ["Line", "line", "line_name", "Line Name"]) || "").trim();
     var keyBase = [siteId, producedIso || producedRaw || "", jobId, wo, itemCode, line, units].join("|");
     var eventKey = crypto.createHash("sha1").update(keyBase).digest("hex");
-    out.push({
+    dedup[eventKey] = {
       site_id: siteId,
       event_key: eventKey,
       produced_at_utc: producedIso,
@@ -226,9 +226,9 @@ function buildProductionEvents(payload, siteId, syncedAt, updatedBy) {
       source_snapshot_at: syncedAt,
       updated_by: updatedBy,
       raw: row
-    });
+    };
   });
-  return out;
+  return Object.values(dedup);
 }
 
 export default async function handler(req, res) {

@@ -114,7 +114,7 @@ function classifyShiftET(parts) {
 }
 
 function buildProductionEventsFromSnapshotRows(rows, siteId, syncedAt, updatedBy) {
-  var out = [];
+  var dedup = {};
   (Array.isArray(rows) ? rows : []).forEach(function(row) {
     var units = toNumLoose(pickFieldLoose(row, ["Units Produced", "units_produced", "unitsProduced", "Produced Units", "Quantity Produced", "Qty Produced"]));
     if (!(units > 0)) return;
@@ -132,7 +132,7 @@ function buildProductionEventsFromSnapshotRows(rows, siteId, syncedAt, updatedBy
     var line = String(pickFieldLoose(row, ["Line", "line", "line_name", "Line Name"]) || "").trim();
     var keyBase = [siteId, producedIso || producedRaw || syncedAt || "", jobId, wo, itemCode, line, units].join("|");
     var eventKey = crypto.createHash("sha1").update(keyBase).digest("hex");
-    out.push({
+    dedup[eventKey] = {
       site_id: siteId,
       event_key: eventKey,
       produced_at_utc: producedIso,
@@ -146,9 +146,9 @@ function buildProductionEventsFromSnapshotRows(rows, siteId, syncedAt, updatedBy
       source_snapshot_at: syncedAt || new Date().toISOString(),
       updated_by: updatedBy || null,
       raw: row
-    });
+    };
   });
-  return out;
+  return Object.values(dedup);
 }
 
 function toEasternDateKey(value) {
