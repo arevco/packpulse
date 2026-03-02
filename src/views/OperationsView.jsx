@@ -73,6 +73,33 @@ function weekStart(dateIso) {
   return toIsoDateLocal(d);
 }
 
+function monthStart(dateIso) {
+  var d = new Date(dateIso + "T00:00:00");
+  d.setDate(1);
+  return toIsoDateLocal(d);
+}
+
+function monthEnd(dateIso) {
+  var d = new Date(dateIso + "T00:00:00");
+  d.setMonth(d.getMonth() + 1);
+  d.setDate(0);
+  return toIsoDateLocal(d);
+}
+
+function daysInclusive(startIso, endIso) {
+  var start = new Date(startIso + "T00:00:00");
+  var end = new Date(endIso + "T00:00:00");
+  if (isNaN(start) || isNaN(end) || end < start) return 0;
+  return Math.floor((end - start) / 86400000) + 1;
+}
+
+function shiftRange(range, days) {
+  return {
+    start: shiftDays(range.start, days),
+    end: shiftDays(range.end, days)
+  };
+}
+
 function presetRange(preset) {
   var today = toIsoDateET(new Date());
   if (preset === "today") return { start: today, end: today, fetchDays: 14 };
@@ -86,9 +113,48 @@ function presetRange(preset) {
     var lastEnd = shiftDays(thisStart, -1);
     return { start: shiftDays(lastEnd, -6), end: lastEnd, fetchDays: 45 };
   }
+  if (preset === "this_month") {
+    return { start: monthStart(today), end: today, fetchDays: 90 };
+  }
+  if (preset === "last_month") {
+    var thisMonthStart = monthStart(today);
+    var prevMonthEnd = shiftDays(thisMonthStart, -1);
+    return { start: monthStart(prevMonthEnd), end: monthEnd(prevMonthEnd), fetchDays: 120 };
+  }
   if (preset === "last_30") return { start: shiftDays(today, -29), end: today, fetchDays: 45 };
   if (preset === "last_60") return { start: shiftDays(today, -59), end: today, fetchDays: 75 };
   return { start: shiftDays(today, -13), end: today, fetchDays: 30 };
+}
+
+function compareRange(preset, range) {
+  if (!range || !range.start || !range.end) return { start: "", end: "", label: "Previous Period" };
+  if (preset === "today") {
+    var d = shiftDays(range.start, -1);
+    return { start: d, end: d, label: "Yesterday" };
+  }
+  if (preset === "yesterday") {
+    var dd = shiftDays(range.start, -1);
+    return { start: dd, end: dd, label: "Prior Day" };
+  }
+  if (preset === "this_week") {
+    return { start: shiftDays(range.start, -7), end: shiftDays(range.end, -7), label: "Last Week" };
+  }
+  if (preset === "last_week") {
+    return { start: shiftDays(range.start, -7), end: shiftDays(range.end, -7), label: "Prior Week" };
+  }
+  if (preset === "this_month") {
+    var prevMonthEnd = shiftDays(range.start, -1);
+    return { start: monthStart(prevMonthEnd), end: monthEnd(prevMonthEnd), label: "Last Month" };
+  }
+  if (preset === "last_month") {
+    var lastMonthStart = monthStart(range.start);
+    var priorMonthEnd = shiftDays(lastMonthStart, -1);
+    return { start: monthStart(priorMonthEnd), end: monthEnd(priorMonthEnd), label: "Prior Month" };
+  }
+  var span = Math.max(1, daysInclusive(range.start, range.end));
+  var prevEnd = shiftDays(range.start, -1);
+  var prevStart = shiftDays(prevEnd, -(span - 1));
+  return { start: prevStart, end: prevEnd, label: "Previous " + span + " days" };
 }
 
 function inRange(dateIso, range) {
@@ -106,6 +172,11 @@ function inRange(dateIso, range) {
   }
   if (!normalized) return false;
   return normalized >= range.start && normalized <= range.end;
+}
+
+function inRangeIso(dateIso, range) {
+  if (!dateIso || !range || !range.start || !range.end) return false;
+  return dateIso >= range.start && dateIso <= range.end;
 }
 
 function shortShiftLabel(label) {
@@ -255,6 +326,70 @@ export default function OperationsView({ productionSegments }) {
       totalRows: rows.length
     };
   }, [breakdown, range]);
+
+  var periodCompare = useMemo(function() {
+    var allByDay = (trends && Array.isArray(trends.byDay)) ? trends.byDay : [];
+    var allByShift = (trends && Array.isArray(trends.byShift)) ? trends.byShift : [];
+    var prior = compareRange(windowPreset, range);
+
+    var currentUnits = allByDay.reduce(function(sum, d) {
+      var date = String(d.date || "");
+      return inRangeIso(date, range) ? (sum + safeNum(d.units)) : sum;
+    }, 0);
+    var priorUnits = allByDay.reduce(function(sum, d) {
+      var date = String(d.date || "");
+      return inRangeIso(date, prior) ? (sum + safeNum(d.units)) : sum;
+    }, 0);
+    var currentRows = allByDay.reduce(function(sum, d) {
+      var date = String(d.date || "");
+      return inRangeIso(date, range) ? (sum + safeNum(d.rows)) : sum;
+    }, 0);
+    var priorRows = allByDay.reduce(function(sum, d) {
+      var date = String(d.date || "");
+      return inRangeIso(date, prior) ? (sum + safeNum(d.rows)) : sum;
+    }, 0);
+
+    var currentShift1 = 0;
+    var priorShift1 = 0;
+    var currentShift2 = 0;
+    var priorShift2 = 0;
+    allByShift.forEach(function(r) {
+      var date = String(r.date || "");
+      var shift = String(r.shift || "");
+      var units = safeNum(r.units);
+      if (shift.indexOf("Shift 1") !== -1) {
+        if (inRangeIso(date, range)) currentShift1 += units;
+        if (inRangeIso(date, prior)) priorShift1 += units;
+      }
+      if (shift.indexOf("Shift 2") !== -1) {
+        if (inRangeIso(date, range)) currentShift2 += units;
+        if (inRangeIso(date, prior)) priorShift2 += units;
+      }
+    });
+
+    var delta = currentUnits - priorUnits;
+    var deltaPct = priorUnits > 0 ? Math.round((delta / priorUnits) * 100) : 0;
+    return {
+      labelCurrent: windowPreset === "today" ? "Today" :
+        windowPreset === "yesterday" ? "Yesterday" :
+        windowPreset === "this_week" ? "This Week" :
+        windowPreset === "last_week" ? "Last Week" :
+        windowPreset === "this_month" ? "This Month" :
+        windowPreset === "last_month" ? "Last Month" : "Selected Window",
+      labelPrior: prior.label,
+      priorRange: prior.start && prior.end ? (prior.start + " to " + prior.end) : "--",
+      currentUnits: currentUnits,
+      priorUnits: priorUnits,
+      currentRows: currentRows,
+      priorRows: priorRows,
+      currentShift1: currentShift1,
+      priorShift1: priorShift1,
+      currentShift2: currentShift2,
+      priorShift2: priorShift2,
+      delta: delta,
+      deltaPct: deltaPct
+    };
+  }, [trends, windowPreset, range]);
 
   var metrics = useMemo(function() {
     var byDay = filteredTrends.byDay || [];
@@ -513,6 +648,8 @@ export default function OperationsView({ productionSegments }) {
           <option value="yesterday">Yesterday</option>
           <option value="this_week">This Week</option>
           <option value="last_week">Last Week</option>
+          <option value="this_month">This Month</option>
+          <option value="last_month">Last Month</option>
           <option value="last_14">Last 14 Days</option>
           <option value="last_30">Last 30 Days</option>
           <option value="last_60">Last 60 Days</option>
@@ -559,6 +696,36 @@ export default function OperationsView({ productionSegments }) {
             <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
               <div className="text-xl font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{commandBoard.topLine ? commandBoard.topLine.line : "--"}</div>
               <div className="text-xs text-[rgb(var(--muted))]">Top Line ({commandBoard.topLine ? commandBoard.topLine.units.toLocaleString() : "--"} cases in window)</div>
+            </div>
+          </div>
+          <div className="mt-3 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-2.5">
+            <div className="mb-1.5 text-xs font-semibold text-[rgb(var(--muted))]">
+              Compare: {periodCompare.labelCurrent} vs {periodCompare.labelPrior}
+            </div>
+            <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+              <div className="text-xs text-[rgb(var(--muted))]">
+                <div className="font-semibold text-[rgb(var(--foreground))] [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{periodCompare.currentUnits.toLocaleString()}</div>
+                <div>{periodCompare.labelCurrent} cases</div>
+              </div>
+              <div className="text-xs text-[rgb(var(--muted))]">
+                <div className="font-semibold text-[rgb(var(--foreground))] [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{periodCompare.priorUnits.toLocaleString()}</div>
+                <div>{periodCompare.labelPrior} cases</div>
+              </div>
+              <div className="text-xs text-[rgb(var(--muted))]">
+                <div className={"font-semibold [font-variant-numeric:tabular-nums] " + (periodCompare.delta < 0 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")} style={{ fontFamily: mono }}>
+                  {periodCompare.delta >= 0 ? "+" : ""}{periodCompare.delta.toLocaleString()}
+                </div>
+                <div>Case delta</div>
+              </div>
+              <div className="text-xs text-[rgb(var(--muted))]">
+                <div className={"font-semibold [font-variant-numeric:tabular-nums] " + (periodCompare.deltaPct < 0 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")} style={{ fontFamily: mono }}>
+                  {periodCompare.deltaPct >= 0 ? "+" : ""}{periodCompare.deltaPct}%
+                </div>
+                <div>Percent delta</div>
+              </div>
+            </div>
+            <div className="mt-1 text-[11px] text-[rgb(var(--muted))]">
+              Prior window: {periodCompare.priorRange}
             </div>
           </div>
         </Card>
