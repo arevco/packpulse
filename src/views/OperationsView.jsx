@@ -330,29 +330,43 @@ export default function OperationsView({ productionSegments }) {
 
   var commandBoard = useMemo(function() {
     var byDay = filteredTrends.byDay || [];
+    var dayCount = byDay.length;
     var latest = byDay.length ? byDay[0] : null;
-    var latestUnits = latest ? safeNum(latest.units) : 0;
     var latestRows = latest ? safeNum(latest.rows) : 0;
-    var planUnits = metrics.avgDailyUnits || 0;
-    var variance = latestUnits - planUnits;
+    var windowActual = safeNum(metrics.totalUnits);
+
+    // Baseline plan = avg daily output from days outside the current window, scaled to current window size.
+    // Fallback to current-window avg when there is no older data loaded.
+    var allDays = (trends && Array.isArray(trends.byDay)) ? trends.byDay : [];
+    var inWindow = {};
+    byDay.forEach(function(d) { inWindow[String(d.date || "")] = true; });
+    var priorDays = allDays.filter(function(d) { return !inWindow[String(d.date || "")]; });
+    var priorSlice = dayCount > 0 ? priorDays.slice(0, dayCount) : [];
+    var priorAvg = priorSlice.length
+      ? Math.round(priorSlice.reduce(function(sum, d) { return sum + safeNum(d.units); }, 0) / priorSlice.length)
+      : safeNum(metrics.avgDailyUnits);
+    var planUnits = dayCount > 0 ? Math.round(priorAvg * dayCount) : 0;
+    var variance = windowActual - planUnits;
+
     var status = "On Track";
     if (planUnits > 0) {
-      var ratio = latestUnits / planUnits;
+      var ratio = windowActual / planUnits;
       if (ratio < 0.85) status = "Off Track";
       else if (ratio < 0.95) status = "At Risk";
     }
-    var topLine = (filteredBreakdown.latestByLine && filteredBreakdown.latestByLine[0]) || null;
+    var topLine = (filteredBreakdown.byLine && filteredBreakdown.byLine[0]) || null;
     return {
       latestDate: latest ? latest.date : null,
-      latestUnits: latestUnits,
+      latestUnits: windowActual,
       latestRows: latestRows,
+      dayCount: dayCount,
       planUnits: planUnits,
       variance: variance,
-      variancePct: pctDelta(latestUnits, planUnits),
+      variancePct: pctDelta(windowActual, planUnits),
       status: status,
       topLine: topLine
     };
-  }, [filteredTrends, metrics, filteredBreakdown.latestByLine]);
+  }, [filteredTrends, metrics, filteredBreakdown.byLine, trends]);
 
   var shiftPlanVsActual = useMemo(function() {
     var rows = (metrics.byShift || []).slice();
@@ -516,7 +530,11 @@ export default function OperationsView({ productionSegments }) {
             <div>
               <div className="text-sm font-semibold">Shift Command Board</div>
               <div className="text-xs text-[rgb(var(--muted))]">
-                {commandBoard.latestDate ? ("Latest day: " + commandBoard.latestDate) : "No production day available yet"}
+                {commandBoard.dayCount > 1
+                  ? ("Window: " + range.start + " to " + range.end + " · " + commandBoard.dayCount + " production day" + (commandBoard.dayCount === 1 ? "" : "s"))
+                  : commandBoard.latestDate
+                    ? ("Day: " + commandBoard.latestDate)
+                    : "No production day available yet"}
               </div>
             </div>
             <span className={"inline-flex rounded-full px-2.5 py-1 text-xs font-semibold " + (commandBoard.status === "Off Track" ? "bg-[rgb(var(--danger-soft))] text-[rgb(var(--danger))]" : commandBoard.status === "At Risk" ? "bg-[rgb(var(--accent-soft))] text-[rgb(var(--accent))]" : "bg-[rgb(var(--success-soft))] text-[rgb(var(--success))]")}>
@@ -530,7 +548,7 @@ export default function OperationsView({ productionSegments }) {
             </div>
             <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
               <div className="text-xl font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{commandBoard.planUnits.toLocaleString()}</div>
-              <div className="text-xs text-[rgb(var(--muted))]">Plan Cases</div>
+              <div className="text-xs text-[rgb(var(--muted))]">Baseline Plan</div>
             </div>
             <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
               <div className={"text-xl font-bold [font-variant-numeric:tabular-nums] " + (commandBoard.variance < 0 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")} style={{ fontFamily: mono }}>
@@ -540,7 +558,7 @@ export default function OperationsView({ productionSegments }) {
             </div>
             <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
               <div className="text-xl font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{commandBoard.topLine ? commandBoard.topLine.line : "--"}</div>
-              <div className="text-xs text-[rgb(var(--muted))]">Top Line ({commandBoard.topLine ? commandBoard.topLine.units.toLocaleString() : "--"} cases)</div>
+              <div className="text-xs text-[rgb(var(--muted))]">Top Line ({commandBoard.topLine ? commandBoard.topLine.units.toLocaleString() : "--"} cases in window)</div>
             </div>
           </div>
         </Card>
