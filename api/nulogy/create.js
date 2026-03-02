@@ -21,6 +21,15 @@ function formatNulogyDateTime(date) {
   return `${year}-${month}-${day} ${hour12}:${minute} ${ampm}`;
 }
 
+function formatNulogyDate(date) {
+  var d = date instanceof Date ? date : new Date(date);
+  if (isNaN(d)) return "";
+  var y = d.getFullYear();
+  var m = String(d.getMonth() + 1).padStart(2, "0");
+  var day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 function buildProductionFilters() {
   var shiftHours = Number(process.env.NULOGY_SHIFT_HOURS || 8);
   var shiftsPerDay = Number(process.env.NULOGY_SHIFTS_PER_DAY || 2);
@@ -35,8 +44,9 @@ function buildProductionFilters() {
     {
       column: "produced_at",
       operator: "between",
-      from_threshold: formatNulogyDateTime(from),
-      to_threshold: formatNulogyDateTime(now)
+      // Use date-only thresholds for stable parsing across Nulogy accounts/locales.
+      from_threshold: formatNulogyDate(from),
+      to_threshold: formatNulogyDate(now)
     }
   ];
 }
