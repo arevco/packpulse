@@ -111,6 +111,7 @@ export default function OperationsView({ productionSegments }) {
   const [targets, setTargets] = useState([]);
   const [saving, setSaving] = useState(false);
   const [showEntryModal, setShowEntryModal] = useState(false);
+  const [showRecentLaborInputs, setShowRecentLaborInputs] = useState(false);
 
   const [entry, setEntry] = useState({
     date_et: new Date().toISOString().slice(0, 10),
@@ -312,12 +313,6 @@ export default function OperationsView({ productionSegments }) {
       else if (ratio < 0.95) status = "At Risk";
     }
     var topLine = (filteredBreakdown.latestByLine && filteredBreakdown.latestByLine[0]) || null;
-    var topConstraint = metrics.coveragePct < 70 ? "Missing Labor Inputs" : metrics.unmappedSkuCount > 0 ? "Unmapped SKU Targets" : "No major constraint detected";
-    var actions = [];
-    if (metrics.coveragePct < 90) actions.push("Capture missing shift labor inputs to improve cost confidence.");
-    if (variance < 0) actions.push("Prioritize high-rate jobs to recover " + Math.abs(variance).toLocaleString() + " units.");
-    if (metrics.unmappedSkuCount > 0) actions.push("Map " + metrics.unmappedSkuCount + " SKU targets to unlock revenue/margin views.");
-    if (!actions.length) actions.push("Maintain current sequence and monitor line attainment.");
     return {
       latestDate: latest ? latest.date : null,
       latestUnits: latestUnits,
@@ -326,9 +321,7 @@ export default function OperationsView({ productionSegments }) {
       variance: variance,
       variancePct: pctDelta(latestUnits, planUnits),
       status: status,
-      topLine: topLine,
-      topConstraint: topConstraint,
-      actions: actions.slice(0, 3)
+      topLine: topLine
     };
   }, [filteredTrends, metrics, filteredBreakdown.latestByLine]);
 
@@ -521,15 +514,6 @@ export default function OperationsView({ productionSegments }) {
               <div className="text-xs text-[rgb(var(--muted))]">Top Line ({commandBoard.topLine ? commandBoard.topLine.units.toLocaleString() : "--"} cases)</div>
             </div>
           </div>
-          <div className="mt-3 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-2">
-            <div className="text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Top Constraint</div>
-            <div className="text-sm text-[rgb(var(--foreground))]">{commandBoard.topConstraint}</div>
-          </div>
-          <div className="mt-3 space-y-1">
-            {commandBoard.actions.map(function(a, i) {
-              return <div key={i} className="text-sm text-[rgb(var(--muted))]">{i + 1}. {a}</div>;
-            })}
-          </div>
         </Card>
 
         <Card className="lg:col-span-4 px-4 py-4">
@@ -679,35 +663,44 @@ export default function OperationsView({ productionSegments }) {
         </Card>
 
         <Card className="px-4 py-4">
-          <div className="mb-2 text-sm font-semibold">Recent Labor Inputs</div>
-          <TableShell>
-            <table style={{ width:"100%", borderCollapse:"collapse" }}>
-              <thead><tr style={{ background:C.raised }}>
-                <th className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Date</th>
-                <th className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Shift</th>
-                <th className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Line</th>
-                <th className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">SKU</th>
-                <th className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">WO</th>
-                <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Total HC</th>
-              </tr></thead>
-              <tbody>
-                {inputs.slice(0, 12).map(function(r, i) {
-                  var total = safeNum(r.labor_count) + safeNum(r.fork_count) + safeNum(r.qa_count) + safeNum(r.maint_count) + safeNum(r.recycling_count);
-                  var sku = extractTagValue(r.notes, "SKU");
-                  var wo = extractTagValue(r.notes, "WO");
-                  return <tr key={i} style={{ borderBottom:"1px solid " + C.border }}>
-                    <td className="px-2 py-2 text-sm">{r.date_et}</td>
-                    <td className="px-2 py-2 text-sm">{r.shift_label}</td>
-                    <td className="px-2 py-2 text-sm">{r.line_name}</td>
-                    <td className="px-2 py-2 text-sm">{sku || "--"}</td>
-                    <td className="px-2 py-2 text-sm">{wo || "--"}</td>
-                    <td className="px-2 py-2 text-right text-sm" style={{ fontFamily: mono }}>{total}</td>
-                  </tr>;
-                })}
-                {!inputs.length && <tr><td colSpan={6} className="px-2 py-6 text-center text-sm text-[rgb(var(--muted))]">No labor inputs saved yet.</td></tr>}
-              </tbody>
-            </table>
-          </TableShell>
+          <button
+            type="button"
+            onClick={function() { setShowRecentLaborInputs(function(v) { return !v; }); }}
+            className="mb-2 flex w-full items-center justify-between text-left"
+          >
+            <span className="text-sm font-semibold">Recent Labor Inputs</span>
+            <span className="text-xs text-[rgb(var(--muted))]">{showRecentLaborInputs ? "Hide" : "Show"}</span>
+          </button>
+          {showRecentLaborInputs && (
+            <TableShell>
+              <table style={{ width:"100%", borderCollapse:"collapse" }}>
+                <thead><tr style={{ background:C.raised }}>
+                  <th className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Date</th>
+                  <th className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Shift</th>
+                  <th className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Line</th>
+                  <th className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">SKU</th>
+                  <th className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">WO</th>
+                  <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Total HC</th>
+                </tr></thead>
+                <tbody>
+                  {inputs.slice(0, 12).map(function(r, i) {
+                    var total = safeNum(r.labor_count) + safeNum(r.fork_count) + safeNum(r.qa_count) + safeNum(r.maint_count) + safeNum(r.recycling_count);
+                    var sku = extractTagValue(r.notes, "SKU");
+                    var wo = extractTagValue(r.notes, "WO");
+                    return <tr key={i} style={{ borderBottom:"1px solid " + C.border }}>
+                      <td className="px-2 py-2 text-sm">{r.date_et}</td>
+                      <td className="px-2 py-2 text-sm">{r.shift_label}</td>
+                      <td className="px-2 py-2 text-sm">{r.line_name}</td>
+                      <td className="px-2 py-2 text-sm">{sku || "--"}</td>
+                      <td className="px-2 py-2 text-sm">{wo || "--"}</td>
+                      <td className="px-2 py-2 text-right text-sm" style={{ fontFamily: mono }}>{total}</td>
+                    </tr>;
+                  })}
+                  {!inputs.length && <tr><td colSpan={6} className="px-2 py-6 text-center text-sm text-[rgb(var(--muted))]">No labor inputs saved yet.</td></tr>}
+                </tbody>
+              </table>
+            </TableShell>
+          )}
         </Card>
       </div>
 
