@@ -483,6 +483,9 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       return b.remainingUnits - a.remainingUnits;
     });
   }, [filteredResults]);
+  var packMixTotalRemaining = useMemo(function() {
+    return packMixBreakdown.reduce(function(sum, row) { return sum + Number(row.remainingUnits || 0); }, 0);
+  }, [packMixBreakdown]);
 
   var exportCSV = () => { if (!analysis) return; var h = ["Work Order","Product SKU","Description","Customer","WO Status","Due Date","Planned Start","Planned End","Order Qty","Produced","Remaining","Complete %","Ready %","Can Make","Est Hours","Run Status","Reference"]; var rows = analysis.results.map(w => [w.woNum, w.productSkuRaw, '"'+(w.productDesc||"").replace(/"/g,'""')+'"', '"'+(w.customer||"")+'"', w.status||"", w.dueDate||"", w.plannedStart||"", w.plannedEnd||"", w.qtyToProduce, w.unitsProduced, w.unitsRemaining, w.prodPct, w.readiness<0?"N/A":Math.round(w.readiness), w.maxRunnable, w.estHours||"", w.runStatus, '"'+(w.reference1||"").replace(/"/g,'""')+'"']); triggerDownload([h.join(",")].concat(rows.map(r => r.join(","))).join("\n"), "packpulse_" + new Date().toISOString().slice(0,10) + ".csv", "text/csv"); };
   var exportPDF = () => { if (!analysis) return; var th = ["WO#","Product","Customer","Qty","Produced","Remaining","Complete","Ready","Est Hrs","Status","Due"].map(h => "<th>"+h+"</th>").join(""); var tb = analysis.results.map(w => "<tr><td>"+w.woNum+"</td><td>"+w.productSkuRaw+"</td><td>"+(w.customer||"--")+"</td><td>"+w.qtyToProduce.toLocaleString()+"</td><td>"+w.unitsProduced.toLocaleString()+"</td><td>"+w.unitsRemaining.toLocaleString()+"</td><td>"+w.prodPct+"%</td><td>"+(w.readiness<0?"N/A":Math.round(w.readiness)+"%")+'</td><td>'+(w.estHours||"--")+'</td><td class="'+w.runStatus+'">'+w.runStatus+"</td><td>"+fmtDate(w.dueDate)+"</td></tr>").join(""); triggerDownload(buildExportHTML("PackPulse Report", th, tb), "packpulse_" + new Date().toISOString().slice(0,10) + ".html", "text/html"); };
@@ -717,14 +720,25 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
           <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
             <span style={{ fontSize:12, color:C.dim, fontWeight:700, letterSpacing:0.2 }}>Pack Mix (Remaining)</span>
             <Button onClick={function() { setFilterPackType("all"); }} variant={filterPackType === "all" ? "active" : "outline"} size="sm" className="rounded-full">
-              All Packs
+              <span style={{ color:C.bright, fontWeight:700 }}>All Packs</span>
+              <span style={{ color:C.text }}>{fmtNum(packMixTotalRemaining)}</span>
+              <span style={{ color:C.dim }}>(100%)</span>
             </Button>
             {packMixBreakdown.map(function(row) {
               var activePack = filterPackType === row.packType;
+              var pct = packMixTotalRemaining > 0 ? (Number(row.remainingUnits || 0) / packMixTotalRemaining) * 100 : 0;
               return (
                 <Button key={row.packType} onClick={function() { setFilterPackType(function(curr) { return curr === row.packType ? "all" : row.packType; }); }} variant={activePack ? "active" : "outline"} size="sm" className="rounded-full">
-                  <span style={{ color:C.bright, fontWeight:700 }}>{row.packType}</span>
-                  <span style={{ color:C.text }}>{fmtNum(row.remainingUnits)}</span>
+                  <span style={{ display:"inline-flex", flexDirection:"column", alignItems:"flex-start", lineHeight:1.15 }}>
+                    <span style={{ color:C.bright, fontWeight:700 }}>{row.packType}</span>
+                    <span style={{ display:"inline-flex", alignItems:"center", gap:6 }}>
+                      <span style={{ color:C.text }}>{fmtNum(row.remainingUnits)}</span>
+                      <span style={{ color:C.dim }}>({pct.toFixed(1)}%)</span>
+                    </span>
+                    <span style={{ width:56, height:3, borderRadius:999, background:C.border, overflow:"hidden", marginTop:4 }}>
+                      <span style={{ display:"block", height:"100%", width:Math.max(4, Math.min(100, pct)) + "%", background:activePack ? C.accent : C.dim }} />
+                    </span>
+                  </span>
                 </Button>
               );
             })}
