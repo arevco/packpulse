@@ -7,6 +7,14 @@ import { Input } from "../components/ui/input";
 import TableShell from "../components/ui/table-shell";
 import SortHeaderButton from "../components/ui/sort-header-button";
 
+function statusLabel(s) {
+  if (s === "missing") return "No Inbound Found";
+  if (s === "unscheduled") return "Inbound Found, Not Scheduled";
+  if (s === "partial") return "Partially Covered";
+  if (s === "covered") return "Fully Covered";
+  return s || "--";
+}
+
 export default function CriticalItemsView({ rawCriticalItems, inboundCoverage }) {
   const { C, mono } = useTheme();
   const { thC, tdN, tdM, tdToggle, thDS, tdDN, tdDM, truncate } = useStyles();
@@ -214,7 +222,10 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
           <td style={Object.assign({}, tdM, { textAlign:"right", fontWeight:700, color:(ci.uncoveredQty || 0) > 0 ? C.bad : C.ok })}>{Math.round(ci.uncoveredQty || 0).toLocaleString()}</td>
           <td style={Object.assign({}, tdM, { textAlign:"right", fontWeight:600, color:(ci.scheduledCoveragePct || 0) >= 100 ? C.ok : (ci.scheduledCoveragePct || 0) >= 50 ? C.warn : C.bad })}>{(ci.scheduledCoveragePct || 0)}%</td>
           <td style={Object.assign({}, tdN, { color:riskColor(ci.riskLevel), fontWeight:600 })}>{ci.riskLevel === "high" ? "High" : ci.riskLevel === "medium" ? "Medium" : "Low"}</td>
-          <td style={Object.assign({}, tdN, { color:(ci.status === "covered" ? C.ok : ci.status === "partial" ? C.warn : C.bad), fontWeight:600 }, truncate(170))}>{ci.recommendedAction || "Monitor"}</td>
+          <td style={Object.assign({}, tdN, { color:(ci.status === "covered" ? C.ok : ci.status === "partial" ? C.warn : C.bad), fontWeight:600 }, truncate(170))}>
+            <div>{ci.recommendedAction || "Monitor"}</div>
+            <div style={{ fontSize:11, color:C.dim, marginTop:2 }}>{statusLabel(ci.status)}</div>
+          </td>
           <td style={Object.assign({}, tdM, { color:ci.dueBeforeScheduled ? C.bad : C.dim })}>{fmtDate(ci.earliestDueDate)}</td>
         </tr>
       );
@@ -222,6 +233,7 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
         out.push(
           <tr key={rowKey + "-detail"}><td colSpan={12} style={{ padding:"0 12px 14px 36px", background:C.raised }}>
             <div style={{ display:"flex", gap:14, flexWrap:"wrap", marginTop:10, marginBottom:8, fontSize:12 }}>
+              <span style={{ color:C.dim }}>Inbound Source: <span style={{ color:C.bright, fontFamily:mono }}>EDR {Math.round(ci.inboundQty || 0).toLocaleString()} | OpenDock Scheduled {Math.round(ci.scheduledQty || 0).toLocaleString()}</span></span>
               <span style={{ color:C.dim }}>Earliest Inbound: <span style={{ color:C.bright, fontFamily:mono }}>{fmtDate(ci.earliestInboundDate)}</span></span>
               <span style={{ color:C.dim }}>Earliest Scheduled: <span style={{ color:C.bright, fontFamily:mono }}>{fmtDate(ci.earliestScheduledDate)}</span></span>
               <span style={{ color:C.dim }}>POs: <span style={{ color:C.bright }}>{(ci.openPOs || []).length ? ci.openPOs.join(", ") : "--"}</span></span>
@@ -267,7 +279,7 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
         <option value="all">All Customers</option>
         {customerOptions.map(function(c) { return <option key={c} value={c}>{c}</option>; })}
       </select>
-      {[{ key:"all", label:"All" }, { key:"missing", label:"Missing" }, { key:"unscheduled", label:"Unscheduled" }, { key:"partial", label:"Partial" }].map(function(f) {
+      {[{ key:"all", label:"All" }, { key:"missing", label:"No Inbound Found" }, { key:"unscheduled", label:"Inbound Not Scheduled" }, { key:"partial", label:"Partially Covered" }].map(function(f) {
         return <Button key={f.key} onClick={function() { setStatusFilter(function(curr) { return curr === f.key && f.key !== "all" ? "all" : f.key; }); }} variant={statusFilter === f.key ? "active" : "outline"} size="default">{f.label}</Button>;
       })}
       <span style={{ fontSize:13, color:C.dim }}><span style={{ color:C.bad, fontWeight:600 }}>{summary.atRisk}</span> at risk | <span style={{ color:C.bad, fontWeight:600 }}>{Math.round(summary.uncovered).toLocaleString()}</span> uncovered units</span>
@@ -295,6 +307,9 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
 
     <div style={{ marginTop:8, fontSize:13, color:C.dim }}>
       {summary.total + " critical materials" + (inboundCoverage ? (" · horizon " + inboundCoverage.horizonDays + "d") : "")}
+    </div>
+    <div style={{ marginTop:6, fontSize:12, color:C.dim }}>
+      Status guide: <strong>No Inbound Found</strong> = no EDR qty and no OpenDock scheduled qty. <strong>Inbound Not Scheduled</strong> = inbound exists but none is scheduled in OpenDock.
     </div>
   </div>);
 }
