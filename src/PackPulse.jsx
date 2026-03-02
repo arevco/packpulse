@@ -133,6 +133,14 @@ export default function ProductionReadiness() {
       ds.setProductionData(results.production.data);
       ds.setProductionFileName("Nulogy Sync");
       ds.setProductionTimestamp(ts);
+      fetch("/api/cache/production-events", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rows: results.production.data || [], syncedAt: ts.toISOString() })
+      }).catch(function() {
+        // Non-blocking: local dashboard still works even if trend ingest fails.
+      });
     }
     if (results.bom) {
       ds.setBoms(results.bom.data);
