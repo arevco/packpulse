@@ -4,6 +4,7 @@ import { Card } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import TableShell from "../components/ui/table-shell";
+import ProductionView from "./ProductionView";
 
 function safeNum(v) {
   var n = Number(v || 0);
@@ -40,7 +41,7 @@ function shortShiftLabel(label) {
   return "Un";
 }
 
-export default function OperationsView() {
+export default function OperationsView({ productionSegments }) {
   const { C, mono } = useTheme();
   const [days, setDays] = useState(30);
   const [loading, setLoading] = useState(true);
@@ -574,6 +575,14 @@ export default function OperationsView() {
           </TableShell>
         </Card>
       </div>
+
+      <Card className="px-4 py-4">
+        <div className="mb-2 text-sm font-semibold">Production Jobs</div>
+        <div className="text-xs text-[rgb(var(--muted))] mb-3">
+          Job-level production detail is now consolidated here for shift execution and performance review.
+        </div>
+        <ProductionView productionSegments={productionSegments} />
+      </Card>
     </div>
   );
 }
