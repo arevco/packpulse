@@ -55,6 +55,16 @@ export function toNum(v) {
 export function toDateEt(daysAgo) {
   const d = new Date();
   d.setDate(d.getDate() - Math.max(0, Number(daysAgo || 0)));
-  return d.toISOString().slice(0, 10);
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  });
+  const out = {};
+  dtf.formatToParts(d).forEach(function(p) {
+    if (p.type !== "literal") out[p.type] = p.value;
+  });
+  if (!out.year || !out.month || !out.day) return "";
+  return out.year + "-" + out.month + "-" + out.day;
 }
-

@@ -200,7 +200,7 @@ export default async function handler(req, res) {
       cd.setDate(cd.getDate() - days);
       return cd;
     })();
-    const fromDate = from.toISOString().slice(0, 10);
+    const fromDate = toEasternDateKey(from);
 
     const q = await supabase
       .from("production_events")
