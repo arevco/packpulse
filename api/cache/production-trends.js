@@ -212,6 +212,26 @@ async function fetchAllProductionEvents(supabase, siteId) {
   return { error: null, data: out };
 }
 
+function dedupeProductionRows(rows) {
+  var map = {};
+  (Array.isArray(rows) ? rows : []).forEach(function(r) {
+    var producedDate = String(r.produced_date_et || "");
+    var producedAt = String(r.produced_at_utc || "");
+    var shift = String(r.shift_label || "Unassigned");
+    var job = String(r.job_id || "");
+    var wo = String(r.work_order_code || "");
+    var item = String(r.item_code || "");
+    var line = String(r.line || "");
+    var src = String(r.source_snapshot_at || "");
+    var businessKey = [producedDate, producedAt, shift, job, wo, item, line].join("|");
+    var prev = map[businessKey];
+    if (!prev || src > String(prev.source_snapshot_at || "")) {
+      map[businessKey] = r;
+    }
+  });
+  return Object.values(map);
+}
+
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", req.headers.origin || "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
@@ -244,7 +264,7 @@ export default async function handler(req, res) {
       throw q.error;
     }
 
-    let rows = Array.isArray(q.data) ? q.data : [];
+    let rows = dedupeProductionRows(Array.isArray(q.data) ? q.data : []);
     let backfilledRows = 0;
     let backfillError = "";
     let snapshotProductionRows = 0;
@@ -284,7 +304,7 @@ export default async function handler(req, res) {
             backfilledRows += chunk.length;
           }
           const q2 = await fetchAllProductionEvents(supabase, CACHE_SITE_ID);
-          if (!q2.error) rows = Array.isArray(q2.data) ? q2.data : [];
+          if (!q2.error) rows = dedupeProductionRows(Array.isArray(q2.data) ? q2.data : []);
         }
       }
     }

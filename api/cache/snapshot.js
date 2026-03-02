@@ -219,8 +219,9 @@ function buildProductionEvents(payload, siteId, syncedAt, updatedBy) {
     var itemCode = String(pickFieldLoose(row, ["Item Code", "item_code"]) || "").trim();
     var line = String(pickFieldLoose(row, ["Line", "line", "line_name", "Line Name"]) || "").trim();
     var rowHash = stableRowHash(row);
-    var keyDisambiguator = (producedIso || producedRaw) ? "" : rowHash;
-    var keyBase = [siteId, producedIso || producedRaw || "", jobId, wo, itemCode, line, units, keyDisambiguator].join("|");
+    var keyDisambiguator = (producedIso || producedRaw || eastern) ? "" : rowHash;
+    // Stable event identity: do not include mutable measures (units) to avoid duplicate growth across resyncs.
+    var keyBase = [siteId, producedIso || producedRaw || (eastern ? eastern.dateKey : ""), shift, jobId, wo, itemCode, line, keyDisambiguator].join("|");
     var eventKey = crypto.createHash("sha1").update(keyBase).digest("hex");
     dedup[eventKey] = {
       site_id: siteId,
