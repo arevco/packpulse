@@ -196,6 +196,9 @@ function extractTagValue(notes, tag) {
 export default function OperationsView({ productionSegments }) {
   const { C, mono } = useTheme();
   const [windowPreset, setWindowPreset] = useState("last_14");
+  const initialRange = presetRange("last_14");
+  const [rangeStart, setRangeStart] = useState(initialRange.start);
+  const [rangeEnd, setRangeEnd] = useState(initialRange.end);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [trends, setTrends] = useState(null);
@@ -228,11 +231,38 @@ export default function OperationsView({ productionSegments }) {
     notes: "",
   });
 
+  var range = useMemo(function() {
+    if (windowPreset === "custom") {
+      var start = rangeStart || initialRange.start;
+      var end = rangeEnd || start;
+      if (end < start) {
+        var tmp = start; start = end; end = tmp;
+      }
+      return { start: start, end: end, fetchDays: Math.max(30, Math.min(180, daysInclusive(start, end) + 21)) };
+    }
+    return presetRange(windowPreset);
+  }, [windowPreset, rangeStart, rangeEnd, initialRange.start, initialRange.end]);
+
+  var applyPreset = function(nextPreset) {
+    var cfg = presetRange(nextPreset);
+    setWindowPreset(nextPreset);
+    setRangeStart(cfg.start);
+    setRangeEnd(cfg.end);
+  };
+
+  var setCustomStart = function(v) {
+    setWindowPreset("custom");
+    setRangeStart(v);
+  };
+  var setCustomEnd = function(v) {
+    setWindowPreset("custom");
+    setRangeEnd(v);
+  };
+
   var loadAll = async function() {
     setLoading(true);
     setErr("");
     try {
-      var range = presetRange(windowPreset);
       var fetchDays = range.fetchDays;
       var [tr, ip, cfg, br] = await Promise.all([
         fetch("/api/cache/production-trends?days=" + fetchDays, { credentials: "include" }),
@@ -266,7 +296,7 @@ export default function OperationsView({ productionSegments }) {
 
   useEffect(function() {
     loadAll();
-  }, [windowPreset]);
+  }, [windowPreset, rangeStart, rangeEnd]);
 
   var targetBySku = useMemo(function() {
     var map = {};
@@ -277,10 +307,6 @@ export default function OperationsView({ productionSegments }) {
     });
     return map;
   }, [targets]);
-
-  var range = useMemo(function() {
-    return presetRange(windowPreset);
-  }, [windowPreset]);
 
   var filteredTrends = useMemo(function() {
     var byDay = (trends && Array.isArray(trends.byDay)) ? trends.byDay.filter(function(r) { return inRange(String(r.date || ""), range); }) : [];
@@ -375,7 +401,9 @@ export default function OperationsView({ productionSegments }) {
         windowPreset === "this_week" ? "This Week" :
         windowPreset === "last_week" ? "Last Week" :
         windowPreset === "this_month" ? "This Month" :
-        windowPreset === "last_month" ? "Last Month" : "Selected Window",
+        windowPreset === "last_month" ? "Last Month" :
+        windowPreset === "custom" ? (range.start + " to " + range.end) :
+        "Selected Window",
       labelPrior: prior.label,
       priorRange: prior.start && prior.end ? (prior.start + " to " + prior.end) : "--",
       currentUnits: currentUnits,
@@ -643,18 +671,33 @@ export default function OperationsView({ productionSegments }) {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <div className="text-sm text-[rgb(var(--muted))]">Operations Window</div>
-        <select value={windowPreset} onChange={function(e) { setWindowPreset(e.target.value); }} className="h-10 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm">
-          <option value="today">Today</option>
-          <option value="yesterday">Yesterday</option>
-          <option value="this_week">This Week</option>
-          <option value="last_week">Last Week</option>
-          <option value="this_month">This Month</option>
-          <option value="last_month">Last Month</option>
-          <option value="last_14">Last 14 Days</option>
-          <option value="last_30">Last 30 Days</option>
-          <option value="last_60">Last 60 Days</option>
-        </select>
-        <span className="text-xs text-[rgb(var(--muted))]">{range.start} to {range.end}</span>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {[
+            { key: "today", label: "Today" },
+            { key: "yesterday", label: "Yesterday" },
+            { key: "this_week", label: "This Week" },
+            { key: "last_week", label: "Last Week" },
+            { key: "this_month", label: "This Month" },
+            { key: "last_month", label: "Last Month" }
+          ].map(function(p) {
+            return (
+              <Button
+                key={p.key}
+                variant={windowPreset === p.key ? "active" : "outline"}
+                size="sm"
+                onClick={function() { applyPreset(p.key); }}
+              >
+                {p.label}
+              </Button>
+            );
+          })}
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Input type="date" value={range.start} onChange={function(e) { setCustomStart(e.target.value); }} className="h-10 w-[150px]" />
+          <span className="text-xs text-[rgb(var(--muted))]">to</span>
+          <Input type="date" value={range.end} onChange={function(e) { setCustomEnd(e.target.value); }} className="h-10 w-[150px]" />
+          <span className="text-xs text-[rgb(var(--muted))]">{windowPreset === "custom" ? "Custom range" : (range.start + " to " + range.end)}</span>
+        </div>
         <Button variant="outline" size="sm" onClick={loadAll} disabled={loading || saving}>Refresh</Button>
         {loading && <span className="text-xs text-[rgb(var(--muted))]">Loading…</span>}
       </div>
