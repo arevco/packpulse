@@ -42,6 +42,7 @@ export default function ProductionReadiness() {
   const [dockApiError, setDockApiError] = useState("");
   const [dockApiInfo, setDockApiInfo] = useState("");
   const [syncVisualPct, setSyncVisualPct] = useState(0);
+  const [syncBannerExpanded, setSyncBannerExpanded] = useState(true);
   const [shiftChange, setShiftChange] = useState(null);
 
   var showAutoBootstrap = autoBootstrapEnabled;
@@ -214,6 +215,10 @@ export default function ProductionReadiness() {
     dockApiLoading ||
     (nulogySyncState && nulogySyncState.syncing)
   );
+  var hasAnySyncedData = !!(ds.invTimestamp || ds.woTimestamp || ds.productionTimestamp || ds.bomTimestamp || ds.edrTimestamp || ds.dockTimestamp);
+  var hasSyncErrors = !!dockApiError || !!(nulogySyncState && nulogySyncState.errorCount > 0);
+  var showSyncBannerCollapsedState = showAutoBootstrap && hasAnySyncedData && !isActivelySyncing && !hasSyncErrors;
+  var showSyncBannerContainer = showSyncBanner || showSyncBannerCollapsedState;
   var syncBarColor = isActivelySyncing ? C.accent : C.ok;
   var syncPctColor = C.dim;
   useEffect(() => {
@@ -235,6 +240,15 @@ export default function ProductionReadiness() {
     }, 420);
     return function() { clearInterval(id); };
   }, [showSyncBanner, isActivelySyncing, syncProgress.pct]);
+  useEffect(() => {
+    if (isActivelySyncing || hasSyncErrors) {
+      setSyncBannerExpanded(true);
+      return;
+    }
+    if (showSyncBannerCollapsedState) {
+      setSyncBannerExpanded(false);
+    }
+  }, [isActivelySyncing, hasSyncErrors, showSyncBannerCollapsedState]);
   var goToDashboard = function() {
     setShowDataSetup(false);
     setTimeout(function() {
@@ -264,20 +278,20 @@ export default function ProductionReadiness() {
   /* ====== MAIN RENDER ====== */
   return (
     <div className="min-h-screen bg-[rgb(var(--background))] text-[rgb(var(--foreground))]" style={{ fontFamily:sans }}>
-      <header className="flex flex-wrap items-start justify-between gap-2 border-b border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-3 sm:items-center sm:gap-3 sm:px-4 sm:py-4 md:px-7">
-        <div>
+      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-2 sm:gap-3 sm:px-4 md:px-7">
+        <div className="flex items-center gap-2">
           <h1 className="m-0 text-lg font-bold tracking-[-0.2px] text-[rgb(var(--foreground))]" style={{ fontFamily:sans }}>PackPulse</h1>
-          <span className="text-sm text-[rgb(var(--muted))]">REV Copack</span>
+          <span className="rounded-full border border-[rgb(var(--border))] bg-white px-2 py-0.5 text-[11px] font-medium text-[rgb(var(--muted))]">REV Copack</span>
         </div>
         <div className="flex w-full items-center justify-end gap-2.5 sm:w-auto">
-          {window.__ppUser && <span className="max-w-[150px] truncate text-sm text-[rgb(var(--muted))] sm:max-w-none">{window.__ppUser.email}</span>}
+          {window.__ppUser && <span className="max-w-[150px] truncate text-xs text-[rgb(var(--muted))] sm:max-w-none sm:text-sm">{window.__ppUser.email}</span>}
           {window.__ppLogout && <Button onClick={window.__ppLogout} variant="outline" size="sm">Sign out</Button>}
           <Button onClick={() => setTheme(theme==="dark"?"light":"dark")} variant="outline" size="sm">
             {theme === "dark" ? "Light" : "Dark"}
           </Button>
         </div>
       </header>
-      <main className="mx-auto max-w-[1440px] px-3 py-4 sm:px-4 sm:py-5 md:px-7">
+      <main className="mx-auto max-w-[1440px] px-3 py-2.5 sm:px-4 sm:py-3 md:px-7">
       {showAutoBootstrap && (
         <NulogySync
           key={"auto-sync-" + syncNonce}
@@ -426,8 +440,17 @@ export default function ProductionReadiness() {
         <input ref={ds.edrRefreshRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e => {ds.handleRefreshFile("edr",e.target.files[0]);e.target.value="";}} />
         <input ref={ds.dockRefreshRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e => {ds.handleRefreshFile("dock",e.target.files[0]);e.target.value="";}} />
 
-        {showSyncBanner ? (
-          <div className="mb-2.5 flex flex-wrap items-center gap-2 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2.5 py-2">
+        {showSyncBannerContainer ? (
+          <div className="mb-2.5 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2.5 py-2">
+            {!syncBannerExpanded && showSyncBannerCollapsedState ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-semibold text-[rgb(var(--foreground))]">Live Sync</span>
+                <span className="text-xs text-[rgb(var(--muted))]">Up to date</span>
+                <Badge variant="success">100%</Badge>
+                <Button variant="outline" size="sm" onClick={() => setSyncBannerExpanded(true)}>Show</Button>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-semibold text-[rgb(var(--foreground))]">Live Sync</span>
             <span className="text-xs text-[rgb(var(--muted))]">
               {isActivelySyncing ? "Syncing data..." : "Up to date"}
@@ -451,26 +474,33 @@ export default function ProductionReadiness() {
                 Retry
               </Button>
             )}
+            {showSyncBannerCollapsedState && (
+              <Button variant="outline" size="sm" onClick={() => setSyncBannerExpanded(false)}>
+                Hide
+              </Button>
+            )}
             <Button variant="outline" size="sm" onClick={() => setShowDataSetup(v => !v)}>
               {showDataSetup ? "Close Setup" : "Open Data Setup"}
             </Button>
+              </div>
+            )}
           </div>
         ) : null}
 
-        <div className="mb-2.5 flex flex-wrap items-center gap-1.5">
+        <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
           <Button onClick={() => setShowDataControlsPanel(v => !v)} variant={showDataControlsPanel ? "active" : "outline"} size="sm">
             {showDataControlsPanel ? "Hide Data Controls" : "Data Controls"}
           </Button>
           <Button onClick={() => setShowSettings(!showSettings)} variant={showSettings ? "active" : "outline"} size="sm">Data Mapping</Button>
           <span className="text-xs text-[rgb(var(--muted))]">
-            Data freshness: <span style={{ color:freshCount===dataSourceStatus.length?C.ok:freshCount>=3?C.warn:C.bad, fontWeight:600 }}>{freshCount}/{dataSourceStatus.length}</span> fresh · Updated {summaryStamp}
+            <span style={{ color:freshCount===dataSourceStatus.length?C.ok:freshCount>=3?C.warn:C.bad, fontWeight:600 }}>{freshCount}/{dataSourceStatus.length}</span> fresh · updated {summaryStamp}
           </span>
           <span className="text-xs text-[rgb(var(--muted))]">
-            · {sharedSourceLabel}: {sharedStamp}{sharedMeta.source === "shared" ? " by " + sharedBy : ""}
+            · {sharedSourceLabel}: {sharedStamp}{sharedMeta.source === "shared" ? " · " + sharedBy : ""}
           </span>
         </div>
         {showDataControlsPanel && (
-          <div className="mb-2.5 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-2.5">
+          <div className="mb-2 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-2">
             <div className="mb-2 flex flex-wrap items-center gap-1.5">
             <Button onClick={fetchOpenDockApi} disabled={dockApiLoading} variant={dockApiLoading ? "soft" : "active"} size="sm">
               {dockApiLoading ? "Syncing OpenDock..." : "Sync OpenDock API"}
