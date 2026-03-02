@@ -46,8 +46,9 @@ function buildProductionFilters() {
   toInclusive.setDate(toInclusive.getDate() + 1);
   return [
     {
-      // Use job completion timestamp for stable operational/close reporting windows.
-      column: "actual_job_end_at",
+      // Pull on produced_at so "Today" includes in-flight production from open jobs.
+      // Downstream logic still prefers actual_job_end_at when present for stable historical reporting.
+      column: "produced_at",
       operator: "between",
       from_threshold: formatNulogyDateTime(from),
       to_threshold: formatNulogyDateTime(toInclusive)
