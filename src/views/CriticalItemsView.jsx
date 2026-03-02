@@ -320,12 +320,17 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
         <option value="all">All Customers</option>
         {customerOptions.map(function(c) { return <option key={c} value={c}>{c}</option>; })}
       </select>
-      {[{ key:"all", label:"All" }, { key:"missing", label:"No Inbound Found" }, { key:"unscheduled", label:"Inbound Not Scheduled" }, { key:"partial", label:"Partially Covered" }].map(function(f) {
-        return <Button key={f.key} onClick={function() { setStatusFilter(function(curr) { return curr === f.key && f.key !== "all" ? "all" : f.key; }); }} variant={statusFilter === f.key ? "active" : "outline"} size="default">{f.label}</Button>;
-      })}
-      {[{ key:"all", label:"All Types" }, { key:"packaging", label:"Packaging" }, { key:"wip", label:"WIP" }].map(function(f) {
-        return <Button key={f.key} onClick={function() { setMaterialTypeFilter(function(curr) { return curr === f.key && f.key !== "all" ? "all" : f.key; }); }} variant={materialTypeFilter === f.key ? "active" : "outline"} size="default">{f.label}</Button>;
-      })}
+      <select value={statusFilter} onChange={function(e) { setStatusFilter(e.target.value); }} className="h-10 w-full rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))] sm:w-auto">
+        <option value="all">All Coverage</option>
+        <option value="missing">No Inbound Found</option>
+        <option value="unscheduled">Inbound Not Scheduled</option>
+        <option value="partial">Partially Covered</option>
+      </select>
+      <select value={materialTypeFilter} onChange={function(e) { setMaterialTypeFilter(e.target.value); }} className="h-10 w-full rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))] sm:w-auto">
+        <option value="all">All Types</option>
+        <option value="packaging">Packaging</option>
+        <option value="wip">WIP</option>
+      </select>
       <span style={{ fontSize:13, color:C.dim }}><span style={{ color:C.bad, fontWeight:600 }}>{summary.atRisk}</span> at risk | <span style={{ color:C.bad, fontWeight:600 }}>{Math.round(summary.uncovered).toLocaleString()}</span> uncovered units</span>
       <div style={{ flex:1 }} />
       {hasActiveFilters && (
