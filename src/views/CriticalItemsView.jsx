@@ -17,7 +17,7 @@ function statusLabel(s) {
 
 export default function CriticalItemsView({ rawCriticalItems, inboundCoverage }) {
   const { C, mono } = useTheme();
-  const { thC, tdN, tdM, tdToggle, thDS, tdDN, tdDM, truncate } = useStyles();
+  const { thC, tdN, tdM, thDS, tdDN, tdDM, truncate } = useStyles();
 
   const [search, setSearch] = useState("");
   const [customerFilter, setCustomerFilter] = useState("all");
@@ -204,7 +204,7 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
   };
 
   var renderRows = function() {
-    if (!consolidatedItems.length) return <tr><td colSpan={12} style={{ padding:36, textAlign:"center", color:C.dim }}>No critical materials match current filters.</td></tr>;
+    if (!consolidatedItems.length) return <tr><td colSpan={11} style={{ padding:36, textAlign:"center", color:C.dim }}>No critical materials match current filters.</td></tr>;
     var out = [];
     consolidatedItems.forEach(function(ci, idx) {
       var rowKey = "cm-" + idx;
@@ -212,7 +212,6 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
       out.push(
         <tr key={rowKey} onClick={function() { setExpanded(isX ? null : rowKey); }} style={{ cursor:"pointer", borderBottom:"1px solid " + C.border, background:isX ? C.raised : "transparent" }}
           onMouseEnter={function(e) { if (!isX) e.currentTarget.style.background = C.hover; }} onMouseLeave={function(e) { if (!isX) e.currentTarget.style.background = isX ? C.raised : "transparent"; }}>
-          <td style={tdToggle}>{isX ? "\u25BE" : "\u25B8"}</td>
           <td title={ci.sku} style={Object.assign({}, tdM, { fontWeight:600, color:C.bright }, truncate(140))}>{truncateItem(ci.sku)}</td>
           <td style={Object.assign({}, tdN, { color:C.dim }, truncate(220))}>{formatDescriptionForDisplay(ci.desc) || "--"}</td>
           <td style={Object.assign({}, tdN, { color:C.dim }, truncate(220))}>{ci.customerLabel || "--"}</td>
@@ -231,7 +230,7 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
       );
       if (isX) {
         out.push(
-          <tr key={rowKey + "-detail"}><td colSpan={12} style={{ padding:"0 12px 14px 36px", background:C.raised }}>
+          <tr key={rowKey + "-detail"}><td colSpan={11} style={{ padding:"0 12px 14px 36px", background:C.raised }}>
             <div style={{ display:"flex", gap:14, flexWrap:"wrap", marginTop:10, marginBottom:8, fontSize:12 }}>
               <span style={{ color:C.dim }}>Inbound Source: <span style={{ color:C.bright, fontFamily:mono }}>EDR {Math.round(ci.inboundQty || 0).toLocaleString()} | OpenDock Scheduled {Math.round(ci.scheduledQty || 0).toLocaleString()}</span></span>
               <span style={{ color:C.dim }}>Earliest Inbound: <span style={{ color:C.bright, fontFamily:mono }}>{fmtDate(ci.earliestInboundDate)}</span></span>
@@ -295,7 +294,6 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
       <div style={{ overflowX:"auto" }}>
         <table style={{ width:"100%", borderCollapse:"collapse" }}>
           <thead><tr style={{ background:C.raised }}>
-            <th style={{ width:24, padding:"0 8px", borderBottom:"1px solid " + C.border }} />
             {[{ f:"sku", l:"Item" }, { f:"desc", l:"Description" }, { f:"customer", l:"Customer" }, { f:"onHand", l:"On Hand" }, { f:"shortQty", l:"Short" }, { f:"scheduledQty", l:"Scheduled" }, { f:"uncoveredQty", l:"Uncovered" }, { f:"coverage", l:"Coverage" }, { f:"risk", l:"Risk" }, { f:"action", l:"Action" }, { f:"dueDate", l:"Earliest Due" }].map(function(col) {
               return <th key={col.f} style={Object.assign({}, thC(sortField===col.f), { textAlign:col.f==="sku"||col.f==="desc"||col.f==="customer"||col.f==="risk"||col.f==="action"?"left":"right" })}><SortHeaderButton onClick={function() { handleSort(col.f); }} className={col.f==="sku"||col.f==="desc"||col.f==="customer"||col.f==="risk"||col.f==="action"?"text-left":"text-right"}>{col.l}{sortField===col.f ? (sortDir==="asc" ? " \u2191" : " \u2193") : ""}</SortHeaderButton></th>;
             })}

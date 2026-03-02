@@ -31,7 +31,7 @@ function parseDateValue(value) {
 
 export default function WorkOrdersView({ analysis, woStatuses, woCustomers, recommendations, dispatchQueue, prefilterCustomer, prefilterNonce }) {
   const { C, sans, mono } = useTheme();
-  const { thC, tdN, tdM, tdToggle, thDS, tdDN, tdDM, truncate } = useStyles();
+  const { thC, tdN, tdM, thDS, tdDN, tdDM, truncate } = useStyles();
 
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
@@ -501,7 +501,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
   };
 
   var renderWORows = () => {
-    if (filteredResults.length === 0) return <tr><td colSpan={19} style={{ padding:36, textAlign:"center", color:C.dim, fontSize:14 }}>No work orders match filters.</td></tr>;
+    if (filteredResults.length === 0) return <tr><td colSpan={17} style={{ padding:36, textAlign:"center", color:C.dim, fontSize:14 }}>No work orders match filters.</td></tr>;
     var out = [];
     filteredResults.forEach((wo, idx) => {
       var rowKey = wo.woNum + "|" + idx;
@@ -519,7 +519,6 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
           });
         }} style={{ cursor:"pointer", borderBottom:"1px solid "+C.border, background:isX?C.raised:"transparent" }}
           onMouseEnter={e => { if (!isX) e.currentTarget.style.background = C.hover; }} onMouseLeave={e => { if (!isX) e.currentTarget.style.background = isX ? C.raised : "transparent"; }}>
-          <td style={tdToggle}>{isX ? "\u25BE" : "\u25B8"}</td>
           <td style={Object.assign({}, tdM, { fontWeight:600, color:C.bright })}>{wo.woNum}</td>
           <td style={tdM}>{wo.productSkuRaw}</td>
           <td style={Object.assign({}, tdN, { color:C.dim }, truncate(220))}>{formatDescriptionForDisplay(wo.productDesc) || "--"}</td>
@@ -641,7 +640,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
           </div>
         );
         out.push(
-          <tr key={"d"+idx}><td colSpan={19} style={{ padding:"0 12px 14px 36px", background:C.raised }}>
+          <tr key={"d"+idx}><td colSpan={17} style={{ padding:"0 12px 14px 36px", background:C.raised }}>
             {details}
           </td></tr>
         );
@@ -742,7 +741,6 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       <div style={{ overflowX:"auto" }}>
         <table style={{ width:"100%", borderCollapse:"collapse" }}>
           <thead><tr style={{ background:C.raised }}>
-            <th style={{ width:24, padding:"0 8px", borderBottom:"1px solid "+C.border }} />
             <SortTh field="woNum">WO#</SortTh>
             <SortTh field="product">Product</SortTh>
             <SortTh field="desc">Product Description</SortTh>

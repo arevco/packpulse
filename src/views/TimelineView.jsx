@@ -142,7 +142,7 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead><tr style={{ background: C.raised }}>
-              {["", "Scheduled", "Expected", "PO", "Confirmation", "Status", "Materials", "Qty", "Linked WOs", "Units Unlocked", "Match"].map(function(h) { return <th key={h} style={thC(false)}>{h}</th>; })}
+              {["Scheduled", "Expected", "PO", "Confirmation", "Status", "Materials", "Qty", "Linked WOs", "Units Unlocked", "Match"].map(function(h) { return <th key={h} style={thC(false)}>{h}</th>; })}
             </tr></thead>
             <tbody>
               {filteredLoads.map(function(r, i) {
@@ -151,7 +151,6 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
                 var materials = Array.isArray(r.materials) ? r.materials : [];
                 return [
                   <tr key={(r.key || i) + "-main"} style={{ borderBottom: "1px solid " + C.border, background: isOpen ? C.raised : "transparent", cursor: "pointer" }} onClick={function() { setExpanded(isOpen ? "" : r.key); }}>
-                    <td style={tdM}>{isOpen ? "▾" : "▸"}</td>
                     <td style={tdM}>{fmtDateShort(r.scheduledDate)}</td>
                     <td style={tdM}>{fmtDateShort(r.expectedDate)}</td>
                     <td style={Object.assign({}, tdN, { maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>{r.po || "--"}</td>
@@ -168,7 +167,7 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
                     </td>
                   </tr>,
                   isOpen ? <tr key={(r.key || i) + "-detail"}>
-                    <td colSpan={11} style={{ padding: "10px 12px", borderBottom: "1px solid " + C.border, background: C.surface }}>
+                    <td colSpan={10} style={{ padding: "10px 12px", borderBottom: "1px solid " + C.border, background: C.surface }}>
                       {isEdrStale ? (
                         <div style={{ fontSize: 12, color: C.dim }}>
                           Material details unavailable due to stale/missing EDR. Use PO and Confirmation to reconcile in OpenDock.
@@ -207,7 +206,7 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
                   </tr> : null
                 ];
               })}
-              {!filteredLoads.length && <tr><td colSpan={11} style={{ padding: 24, textAlign: "center", color: C.dim }}>No loads match current filters.</td></tr>}
+              {!filteredLoads.length && <tr><td colSpan={10} style={{ padding: 24, textAlign: "center", color: C.dim }}>No loads match current filters.</td></tr>}
             </tbody>
           </table>
         </div>
