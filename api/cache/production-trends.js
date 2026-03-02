@@ -44,6 +44,24 @@ function toNum(v) {
   return Number.isFinite(n) ? n : 0;
 }
 
+function toEasternDateKey(value) {
+  if (!value) return "";
+  const d = value instanceof Date ? value : new Date(value);
+  if (isNaN(d)) return "";
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const out = {};
+  dtf.formatToParts(d).forEach(function(p) {
+    if (p.type !== "literal") out[p.type] = p.value;
+  });
+  if (!out.year || !out.month || !out.day) return "";
+  return out.year + "-" + out.month + "-" + out.day;
+}
+
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", req.headers.origin || "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
@@ -64,10 +82,10 @@ export default async function handler(req, res) {
 
     const q = await supabase
       .from("production_events")
-      .select("produced_date_et,shift_label,units_produced,job_id,work_order_code,line,item_code")
+      .select("produced_date_et,produced_at_utc,source_snapshot_at,shift_label,units_produced,job_id,work_order_code,line,item_code")
       .eq("site_id", CACHE_SITE_ID)
-      .gte("produced_date_et", fromDate)
-      .order("produced_date_et", { ascending: false });
+      .order("source_snapshot_at", { ascending: false })
+      .limit(60000);
 
     if (q.error) {
       const msg = String(q.error.message || "").toLowerCase();
@@ -80,11 +98,17 @@ export default async function handler(req, res) {
     const rows = Array.isArray(q.data) ? q.data : [];
     const byDay = {};
     const byShift = {};
+    let rowsMissingProducedDate = 0;
+    let rowsInWindow = 0;
     rows.forEach(function(r) {
-      const d = String(r.produced_date_et || "");
+      const fromProducedDate = String(r.produced_date_et || "");
+      const fallbackDate = toEasternDateKey(r.produced_at_utc) || toEasternDateKey(r.source_snapshot_at);
+      const d = fromProducedDate || fallbackDate;
+      if (!fromProducedDate) rowsMissingProducedDate += 1;
+      if (!d || d < fromDate) return;
+      rowsInWindow += 1;
       const s = String(r.shift_label || "Unassigned");
       const u = toNum(r.units_produced);
-      if (!d) return;
       if (!byDay[d]) byDay[d] = { date: d, units: 0, rows: 0 };
       byDay[d].units += u;
       byDay[d].rows += 1;
@@ -98,12 +122,16 @@ export default async function handler(req, res) {
       trends: {
         days: days,
         fromDate: fromDate,
-        totalRows: rows.length,
+        totalRows: rowsInWindow,
         byDay: Object.values(byDay).sort(function(a, b) { return a.date < b.date ? 1 : -1; }),
         byShift: Object.values(byShift).sort(function(a, b) {
           if (a.date !== b.date) return a.date < b.date ? 1 : -1;
           return a.shift < b.shift ? -1 : 1;
-        })
+        }),
+        diagnostics: {
+          totalRowsInTable: rows.length,
+          rowsMissingProducedDateEt: rowsMissingProducedDate
+        }
       }
     });
   } catch (err) {
@@ -111,4 +139,3 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "Production trends request failed", details: err && err.message ? err.message : "unknown" });
   }
 }
-
