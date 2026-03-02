@@ -15,6 +15,25 @@ function statusLabel(s) {
   return s || "--";
 }
 
+function classifyMaterialType(sku, desc) {
+  var skuDigits = String(sku || "").replace(/\D/g, "");
+  var descNorm = normalizeStr(desc || "");
+  if (skuDigits.startsWith("32") || skuDigits.startsWith("33")) return "packaging";
+  if (
+    descNorm.includes("carrier") ||
+    descNorm.includes("carton") ||
+    descNorm.includes("tray") ||
+    descNorm.includes("slipsheet") ||
+    descNorm.includes("slip sheet") ||
+    descNorm.includes("cornerboard") ||
+    descNorm.includes("corner board") ||
+    descNorm.includes("shrinkwrap") ||
+    descNorm.includes("shrink wrap") ||
+    descNorm.includes("pallet")
+  ) return "packaging";
+  return "wip";
+}
+
 export default function CriticalItemsView({ rawCriticalItems, inboundCoverage }) {
   const { C, mono } = useTheme();
   const { thC, tdN, tdM, thDS, tdDN, tdDM, truncate } = useStyles();
@@ -22,6 +41,7 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
   const [search, setSearch] = useState("");
   const [customerFilter, setCustomerFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [materialTypeFilter, setMaterialTypeFilter] = useState("all");
   const [sortField, setSortField] = useState("uncoveredQty");
   const [sortDir, setSortDir] = useState("desc");
   const [expanded, setExpanded] = useState(null);
@@ -74,6 +94,7 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
         return {
           sku: row.sku || base.sku,
           desc: row.desc || base.desc || "",
+          materialType: classifyMaterialType(row.sku || base.sku, row.desc || base.desc || ""),
           customerLabel: row.customerLabel || base.customerLabel || "--",
           customers: base.customers || [],
           onHand: base.onHand || 0,
@@ -100,6 +121,7 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
         return {
           sku: base.sku,
           desc: base.desc,
+          materialType: classifyMaterialType(base.sku, base.desc),
           customerLabel: base.customerLabel,
           customers: base.customers,
           onHand: base.onHand,
@@ -141,6 +163,7 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
       });
     }
     if (statusFilter !== "all") rows = rows.filter(function(r) { return r.status === statusFilter; });
+    if (materialTypeFilter !== "all") rows = rows.filter(function(r) { return r.materialType === materialTypeFilter; });
 
     rows.sort(function(a, b) {
       var c = 0;
@@ -158,20 +181,21 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
       return sortDir === "desc" ? -c : c;
     });
     return rows;
-  }, [rawCriticalItems, inboundCoverage, search, customerFilter, statusFilter, sortField, sortDir]);
+  }, [rawCriticalItems, inboundCoverage, search, customerFilter, statusFilter, materialTypeFilter, sortField, sortDir]);
 
   var handleSort = function(field) {
     if (sortField === field) setSortDir(function(d) { return d === "asc" ? "desc" : "asc"; });
     else { setSortField(field); setSortDir("desc"); }
   };
 
-  var hasActiveFilters = !!search || customerFilter !== "all" || statusFilter !== "all";
+  var hasActiveFilters = !!search || customerFilter !== "all" || statusFilter !== "all" || materialTypeFilter !== "all";
 
   var exportCSV = function() {
-    var h = ["Item Code", "Description", "Customer", "On Hand", "Short Qty", "Scheduled Qty", "Uncovered Qty", "Inbound Qty", "Coverage %", "Risk", "Action", "Earliest Due", "POs"];
+    var h = ["Item Code", "Material Type", "Description", "Customer", "On Hand", "Short Qty", "Scheduled Qty", "Uncovered Qty", "Inbound Qty", "Coverage %", "Risk", "Action", "Earliest Due", "POs"];
     var rows = consolidatedItems.map(function(i) {
       return [
         i.sku,
+        i.materialType === "packaging" ? "Packaging" : "WIP",
         '"' + (i.desc || "").replace(/"/g, '""') + '"',
         '"' + (i.customerLabel || "--").replace(/"/g, '""') + '"',
         Math.round(i.onHand || 0),
@@ -190,9 +214,9 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
   };
 
   var exportPDF = function() {
-    var th = ["Item", "Desc", "Customer", "Short", "Scheduled", "Uncovered", "Coverage", "Risk", "Action", "Due"].map(function(hd) { return "<th>" + hd + "</th>"; }).join("");
+    var th = ["Item", "Type", "Desc", "Customer", "Short", "Scheduled", "Uncovered", "Coverage", "Risk", "Action", "Due"].map(function(hd) { return "<th>" + hd + "</th>"; }).join("");
     var tb = consolidatedItems.map(function(i) {
-      return "<tr><td>" + i.sku + "</td><td>" + (i.desc || "--") + "</td><td>" + (i.customerLabel || "--") + "</td><td>" + Math.round(i.shortQty || 0).toLocaleString() + "</td><td>" + Math.round(i.scheduledQty || 0).toLocaleString() + "</td><td>" + Math.round(i.uncoveredQty || 0).toLocaleString() + "</td><td>" + (i.scheduledCoveragePct || 0) + "%</td><td>" + (i.riskLevel || "") + "</td><td>" + (i.recommendedAction || "") + "</td><td>" + fmtDate(i.earliestDueDate) + "</td></tr>";
+      return "<tr><td>" + i.sku + "</td><td>" + (i.materialType === "packaging" ? "Packaging" : "WIP") + "</td><td>" + (i.desc || "--") + "</td><td>" + (i.customerLabel || "--") + "</td><td>" + Math.round(i.shortQty || 0).toLocaleString() + "</td><td>" + Math.round(i.scheduledQty || 0).toLocaleString() + "</td><td>" + Math.round(i.uncoveredQty || 0).toLocaleString() + "</td><td>" + (i.scheduledCoveragePct || 0) + "%</td><td>" + (i.riskLevel || "") + "</td><td>" + (i.recommendedAction || "") + "</td><td>" + fmtDate(i.earliestDueDate) + "</td></tr>";
     }).join("");
     triggerDownload(buildExportHTML("Critical Materials Report", th, tb), "critical_materials_" + new Date().toISOString().slice(0, 10) + ".html", "text/html");
   };
@@ -212,7 +236,23 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
       out.push(
         <tr key={rowKey} onClick={function() { setExpanded(isX ? null : rowKey); }} style={{ cursor:"pointer", borderBottom:"1px solid " + C.border, background:isX ? C.raised : "transparent" }}
           onMouseEnter={function(e) { if (!isX) e.currentTarget.style.background = C.hover; }} onMouseLeave={function(e) { if (!isX) e.currentTarget.style.background = isX ? C.raised : "transparent"; }}>
-          <td title={ci.sku} style={Object.assign({}, tdM, { fontWeight:600, color:C.bright }, truncate(140))}>{truncateItem(ci.sku)}</td>
+          <td title={ci.sku} style={Object.assign({}, tdM, { fontWeight:600, color:C.bright }, truncate(140))}>
+            <div>{truncateItem(ci.sku)}</div>
+            <div style={{ marginTop:3 }}>
+              <span style={{
+                display:"inline-block",
+                fontSize:10,
+                padding:"1px 6px",
+                borderRadius:999,
+                color:ci.materialType === "packaging" ? C.accent : C.ok,
+                background:ci.materialType === "packaging" ? C.accentSoft : C.okSoft,
+                border:"1px solid " + (ci.materialType === "packaging" ? C.accentLine : C.okLine),
+                fontWeight:600
+              }}>
+                {ci.materialType === "packaging" ? "Packaging" : "WIP"}
+              </span>
+            </div>
+          </td>
           <td style={Object.assign({}, tdN, { color:C.dim }, truncate(220))}>{formatDescriptionForDisplay(ci.desc) || "--"}</td>
           <td style={Object.assign({}, tdN, { color:C.dim }, truncate(220))}>{ci.customerLabel || "--"}</td>
           <td style={Object.assign({}, tdM, { textAlign:"right", fontWeight:600, color:ci.isZeroStock ? C.bad : C.warn })}>{Math.round(ci.onHand || 0).toLocaleString()}</td>
@@ -283,10 +323,13 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage })
       {[{ key:"all", label:"All" }, { key:"missing", label:"No Inbound Found" }, { key:"unscheduled", label:"Inbound Not Scheduled" }, { key:"partial", label:"Partially Covered" }].map(function(f) {
         return <Button key={f.key} onClick={function() { setStatusFilter(function(curr) { return curr === f.key && f.key !== "all" ? "all" : f.key; }); }} variant={statusFilter === f.key ? "active" : "outline"} size="default">{f.label}</Button>;
       })}
+      {[{ key:"all", label:"All Types" }, { key:"packaging", label:"Packaging" }, { key:"wip", label:"WIP" }].map(function(f) {
+        return <Button key={f.key} onClick={function() { setMaterialTypeFilter(function(curr) { return curr === f.key && f.key !== "all" ? "all" : f.key; }); }} variant={materialTypeFilter === f.key ? "active" : "outline"} size="default">{f.label}</Button>;
+      })}
       <span style={{ fontSize:13, color:C.dim }}><span style={{ color:C.bad, fontWeight:600 }}>{summary.atRisk}</span> at risk | <span style={{ color:C.bad, fontWeight:600 }}>{Math.round(summary.uncovered).toLocaleString()}</span> uncovered units</span>
       <div style={{ flex:1 }} />
       {hasActiveFilters && (
-        <Button onClick={function() { setSearch(""); setCustomerFilter("all"); setStatusFilter("all"); }} variant="outline" size="default">Clear Filters</Button>
+        <Button onClick={function() { setSearch(""); setCustomerFilter("all"); setStatusFilter("all"); setMaterialTypeFilter("all"); }} variant="outline" size="default">Clear Filters</Button>
       )}
       <Button onClick={exportCSV} variant="outline" size="default">CSV</Button>
       <Button onClick={exportPDF} variant="outline" size="default">PDF</Button>
