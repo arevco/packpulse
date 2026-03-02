@@ -16,8 +16,8 @@ const REPORT_TYPES = [
   { key: "bom", label: "Bill of Materials", required: false },
   { key: "production", label: "Production", required: false }
 ];
-const CORE_REPORT_TYPES = ["inventory", "workorders"];
-const OPTIONAL_DEFERRED_TYPES = ["itemmaster", "bom", "production"];
+const CORE_REPORT_TYPES = ["inventory", "workorders", "production"];
+const OPTIONAL_DEFERRED_TYPES = ["itemmaster", "bom"];
 
 const POLL_INTERVAL = 4000; // 4 seconds between polls
 const MAX_POLLS = 60; // max ~4 minutes of polling
