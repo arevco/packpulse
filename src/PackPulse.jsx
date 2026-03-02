@@ -42,7 +42,7 @@ export default function ProductionReadiness() {
   const [dockApiError, setDockApiError] = useState("");
   const [dockApiInfo, setDockApiInfo] = useState("");
   const [syncVisualPct, setSyncVisualPct] = useState(0);
-  const [syncBannerExpanded, setSyncBannerExpanded] = useState(true);
+  const [showQuickControls, setShowQuickControls] = useState(false);
   const [shiftChange, setShiftChange] = useState(null);
 
   var showAutoBootstrap = autoBootstrapEnabled;
@@ -217,8 +217,8 @@ export default function ProductionReadiness() {
   );
   var hasAnySyncedData = !!(ds.invTimestamp || ds.woTimestamp || ds.productionTimestamp || ds.bomTimestamp || ds.edrTimestamp || ds.dockTimestamp);
   var hasSyncErrors = !!dockApiError || !!(nulogySyncState && nulogySyncState.errorCount > 0);
-  var showSyncBannerCollapsedState = showAutoBootstrap && hasAnySyncedData && !isActivelySyncing && !hasSyncErrors;
-  var showSyncBannerContainer = showSyncBanner || showSyncBannerCollapsedState;
+  var syncHealthy = showAutoBootstrap && hasAnySyncedData && !isActivelySyncing && !hasSyncErrors;
+  var showSyncBannerContainer = showSyncBanner;
   var syncBarColor = isActivelySyncing ? C.accent : C.ok;
   var syncPctColor = C.dim;
   useEffect(() => {
@@ -241,14 +241,13 @@ export default function ProductionReadiness() {
     return function() { clearInterval(id); };
   }, [showSyncBanner, isActivelySyncing, syncProgress.pct]);
   useEffect(() => {
-    if (isActivelySyncing || hasSyncErrors) {
-      setSyncBannerExpanded(true);
-      return;
+    if (!syncHealthy) setShowQuickControls(false);
+  }, [syncHealthy]);
+  useEffect(() => {
+    if (syncHealthy && !showQuickControls && showDataControlsPanel) {
+      setShowDataControlsPanel(false);
     }
-    if (showSyncBannerCollapsedState) {
-      setSyncBannerExpanded(false);
-    }
-  }, [isActivelySyncing, hasSyncErrors, showSyncBannerCollapsedState]);
+  }, [syncHealthy, showQuickControls, showDataControlsPanel]);
   var goToDashboard = function() {
     setShowDataSetup(false);
     setTimeout(function() {
@@ -286,6 +285,11 @@ export default function ProductionReadiness() {
         <div className="flex w-full items-center justify-end gap-2.5 sm:w-auto">
           {window.__ppUser && <span className="max-w-[150px] truncate text-xs text-[rgb(var(--muted))] sm:max-w-none sm:text-sm">{window.__ppUser.email}</span>}
           {window.__ppLogout && <Button onClick={window.__ppLogout} variant="outline" size="sm">Sign out</Button>}
+          {syncHealthy && (
+            <Button onClick={() => setShowQuickControls(v => !v)} variant={showQuickControls ? "active" : "outline"} size="sm" title="Data & sync controls">
+              ⚙
+            </Button>
+          )}
           <Button onClick={() => setTheme(theme==="dark"?"light":"dark")} variant="outline" size="sm">
             {theme === "dark" ? "Light" : "Dark"}
           </Button>
@@ -442,15 +446,7 @@ export default function ProductionReadiness() {
 
         {showSyncBannerContainer ? (
           <div className="mb-2.5 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2.5 py-2">
-            {!syncBannerExpanded && showSyncBannerCollapsedState ? (
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-sm font-semibold text-[rgb(var(--foreground))]">Live Sync</span>
-                <span className="text-xs text-[rgb(var(--muted))]">Up to date</span>
-                <Badge variant="success">100%</Badge>
-                <Button variant="outline" size="sm" onClick={() => setSyncBannerExpanded(true)}>Show</Button>
-              </div>
-            ) : (
-              <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-semibold text-[rgb(var(--foreground))]">Live Sync</span>
             <span className="text-xs text-[rgb(var(--muted))]">
               {isActivelySyncing ? "Syncing data..." : "Up to date"}
@@ -474,19 +470,30 @@ export default function ProductionReadiness() {
                 Retry
               </Button>
             )}
-            {showSyncBannerCollapsedState && (
-              <Button variant="outline" size="sm" onClick={() => setSyncBannerExpanded(false)}>
-                Hide
-              </Button>
-            )}
             <Button variant="outline" size="sm" onClick={() => setShowDataSetup(v => !v)}>
               {showDataSetup ? "Close Setup" : "Open Data Setup"}
             </Button>
-              </div>
-            )}
+            </div>
           </div>
         ) : null}
 
+        {syncHealthy && showQuickControls && (
+          <div className="mb-1.5 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-2.5">
+            <div className="mb-2 flex flex-wrap items-center gap-1.5">
+              <Button onClick={() => setShowDataControlsPanel(v => !v)} variant={showDataControlsPanel ? "active" : "outline"} size="sm">
+                {showDataControlsPanel ? "Hide Data Controls" : "Data Controls"}
+              </Button>
+              <Button onClick={() => setShowSettings(!showSettings)} variant={showSettings ? "active" : "outline"} size="sm">Data Mapping</Button>
+              <span className="text-xs text-[rgb(var(--muted))]">
+                <span style={{ color:freshCount===dataSourceStatus.length?C.ok:freshCount>=3?C.warn:C.bad, fontWeight:600 }}>{freshCount}/{dataSourceStatus.length}</span> fresh · updated {summaryStamp}
+              </span>
+              <span className="text-xs text-[rgb(var(--muted))]">
+                · {sharedSourceLabel}: {sharedStamp}{sharedMeta.source === "shared" ? " · " + sharedBy : ""}
+              </span>
+            </div>
+          </div>
+        )}
+        {!syncHealthy && (
         <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
           <Button onClick={() => setShowDataControlsPanel(v => !v)} variant={showDataControlsPanel ? "active" : "outline"} size="sm">
             {showDataControlsPanel ? "Hide Data Controls" : "Data Controls"}
@@ -499,7 +506,8 @@ export default function ProductionReadiness() {
             · {sharedSourceLabel}: {sharedStamp}{sharedMeta.source === "shared" ? " · " + sharedBy : ""}
           </span>
         </div>
-        {showDataControlsPanel && (
+        )}
+        {showDataControlsPanel && (!syncHealthy || showQuickControls) && (
           <div className="mb-2 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-2">
             <div className="mb-2 flex flex-wrap items-center gap-1.5">
             <Button onClick={fetchOpenDockApi} disabled={dockApiLoading} variant={dockApiLoading ? "soft" : "active"} size="sm">
