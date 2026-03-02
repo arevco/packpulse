@@ -207,9 +207,10 @@ function buildProductionEvents(payload, siteId, syncedAt, updatedBy) {
     var units = toNum(pickFieldLoose(row, ["Units Produced", "units_produced", "unitsProduced", "Produced Units", "Quantity Produced", "Qty Produced"]));
     if (!(units > 0)) return;
     var producedRaw = pickFieldLoose(row, [
+      // Canonical production timestamp: completed job time aligns with close reporting.
+      "Actual Job End", "actual_job_end_at",
       "Produced At", "produced_at", "Produced date", "producedAt",
-      "Actual Job Start", "actual_job_start_at",
-      "Actual Job End", "actual_job_end_at"
+      "Actual Job Start", "actual_job_start_at"
     ]);
     var producedIso = toIso(producedRaw);
     var eastern = toEasternParts(producedIso || producedRaw);

@@ -46,11 +46,11 @@ function buildProductionFilters() {
   toInclusive.setDate(toInclusive.getDate() + 1);
   return [
     {
-      column: "produced_at",
+      // Use job completion timestamp for stable operational/close reporting windows.
+      column: "actual_job_end_at",
       operator: "between",
-      // Use date-only thresholds for stable parsing across Nulogy accounts/locales.
-      from_threshold: formatNulogyDate(from),
-      to_threshold: formatNulogyDate(toInclusive)
+      from_threshold: formatNulogyDateTime(from),
+      to_threshold: formatNulogyDateTime(toInclusive)
     }
   ];
 }
