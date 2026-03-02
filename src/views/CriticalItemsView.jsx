@@ -45,6 +45,11 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage, c
   const [sortField, setSortField] = useState("uncoveredQty");
   const [sortDir, setSortDir] = useState("desc");
   const [expanded, setExpanded] = useState(null);
+  var customerFilter = customerFilterProp != null ? customerFilterProp : customerFilterLocal;
+  var setCustomerFilter = function(nextValue) {
+    if (onCustomerFilterChange) onCustomerFilterChange(nextValue);
+    if (customerFilterProp == null) setCustomerFilterLocal(nextValue);
+  };
 
   const ITEM_TRUNCATE_LEN = 14;
   var truncateItem = function(v) {
@@ -361,8 +366,3 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage, c
     </div>
   </div>);
 }
-  var customerFilter = customerFilterProp != null ? customerFilterProp : customerFilterLocal;
-  var setCustomerFilter = function(nextValue) {
-    if (onCustomerFilterChange) onCustomerFilterChange(nextValue);
-    if (customerFilterProp == null) setCustomerFilterLocal(nextValue);
-  };
