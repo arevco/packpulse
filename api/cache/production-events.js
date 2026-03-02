@@ -118,7 +118,7 @@ function classifyShiftET(parts) {
 
 function buildProductionEvents(rows, siteId, syncedAt, updatedBy) {
   var dedup = {};
-  (Array.isArray(rows) ? rows : []).forEach(function(row) {
+  (Array.isArray(rows) ? rows : []).forEach(function(row, idx) {
     var units = toNum(pickFieldLoose(row, ["Units Produced", "units_produced", "unitsProduced", "Produced Units", "Quantity Produced", "Qty Produced"]));
     if (!(units > 0)) return;
     var producedRaw = pickFieldLoose(row, [
@@ -134,9 +134,8 @@ function buildProductionEvents(rows, siteId, syncedAt, updatedBy) {
     var itemCode = String(pickFieldLoose(row, ["Item Code", "item_code"]) || "").trim();
     var line = String(pickFieldLoose(row, ["Line", "line", "line_name", "Line Name"]) || "").trim();
     var rowHash = stableRowHash(row);
-    var keyDisambiguator = (producedIso || producedRaw || eastern) ? "" : rowHash;
-    // Stable event identity: do not include mutable measures (units) to avoid duplicate growth across resyncs.
-    var keyBase = [siteId, producedIso || producedRaw || (eastern ? eastern.dateKey : ""), shift, jobId, wo, itemCode, line, keyDisambiguator].join("|");
+    // Production rows are replaced per sync; keep row-level identity to avoid collapsing valid events.
+    var keyBase = [siteId, rowHash, String(idx)].join("|");
     var eventKey = crypto.createHash("sha1").update(keyBase).digest("hex");
     dedup[eventKey] = {
       site_id: siteId,
@@ -175,6 +174,14 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, submitted: rows.length, written: 0, note: "no_positive_unit_rows" });
     }
     const supabase = getSupabaseAdmin();
+    var del = await supabase.from("production_events").delete().eq("site_id", CACHE_SITE_ID);
+    if (del.error) {
+      var dmsg = String(del.error.message || "").toLowerCase();
+      if (dmsg.includes("production_events") && dmsg.includes("schema cache")) {
+        return res.status(200).json({ ok: false, productionStatus: "missing_production_events_table", submitted: rows.length, written: 0 });
+      }
+      throw del.error;
+    }
     var written = 0;
     var chunkSize = 500;
     for (var i = 0; i < events.length; i += chunkSize) {

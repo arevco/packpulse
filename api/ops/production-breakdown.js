@@ -9,7 +9,7 @@ async function fetchAllProductionRows(supabase, siteId, fromDate) {
     var to = from + pageSize - 1;
     var q = await supabase
       .from("production_events")
-      .select("produced_date_et,shift_label,item_code,units_produced,line,work_order_code,job_id,source_snapshot_at")
+      .select("event_key,produced_date_et,shift_label,item_code,units_produced,line,work_order_code")
       .eq("site_id", siteId)
       .gte("produced_date_et", fromDate)
       .order("produced_date_et", { ascending: false })
@@ -24,24 +24,6 @@ async function fetchAllProductionRows(supabase, siteId, fromDate) {
   return { error: null, data: out };
 }
 
-function dedupeProductionRows(rows) {
-  var map = {};
-  (Array.isArray(rows) ? rows : []).forEach(function(r) {
-    var producedDate = String(r.produced_date_et || "");
-    var shift = String(r.shift_label || "Unassigned");
-    var job = String(r.job_id || "");
-    var wo = String(r.work_order_code || "");
-    var item = String(r.item_code || "");
-    var line = String(r.line || "");
-    var src = String(r.source_snapshot_at || "");
-    var key = [producedDate, shift, job, wo, item, line].join("|");
-    var prev = map[key];
-    if (!prev || src > String(prev.source_snapshot_at || "")) {
-      map[key] = r;
-    }
-  });
-  return Object.values(map);
-}
 
 export default async function handler(req, res) {
   withCors(req, res, ["GET", "OPTIONS"]);
@@ -58,7 +40,7 @@ export default async function handler(req, res) {
 
     const q = await fetchAllProductionRows(supabase, CACHE_SITE_ID, fromDate);
     if (q.error) throw q.error;
-    const rows = dedupeProductionRows(Array.isArray(q.data) ? q.data : []);
+    const rows = Array.isArray(q.data) ? q.data : [];
     const bySku = {};
     const byLine = {};
     const byDate = {};

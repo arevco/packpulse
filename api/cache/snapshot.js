@@ -203,7 +203,7 @@ function toIso(value) {
 function buildProductionEvents(payload, siteId, syncedAt, updatedBy) {
   var rows = Array.isArray(payload && payload.productionData) ? payload.productionData : [];
   var dedup = {};
-  rows.forEach(function(row) {
+  rows.forEach(function(row, idx) {
     var units = toNum(pickFieldLoose(row, ["Units Produced", "units_produced", "unitsProduced", "Produced Units", "Quantity Produced", "Qty Produced"]));
     if (!(units > 0)) return;
     var producedRaw = pickFieldLoose(row, [
@@ -219,9 +219,8 @@ function buildProductionEvents(payload, siteId, syncedAt, updatedBy) {
     var itemCode = String(pickFieldLoose(row, ["Item Code", "item_code"]) || "").trim();
     var line = String(pickFieldLoose(row, ["Line", "line", "line_name", "Line Name"]) || "").trim();
     var rowHash = stableRowHash(row);
-    var keyDisambiguator = (producedIso || producedRaw || eastern) ? "" : rowHash;
-    // Stable event identity: do not include mutable measures (units) to avoid duplicate growth across resyncs.
-    var keyBase = [siteId, producedIso || producedRaw || (eastern ? eastern.dateKey : ""), shift, jobId, wo, itemCode, line, keyDisambiguator].join("|");
+    // Snapshot rows are replaced per sync; preserve row-level granularity and avoid accidental merges.
+    var keyBase = [siteId, rowHash, String(idx)].join("|");
     var eventKey = crypto.createHash("sha1").update(keyBase).digest("hex");
     dedup[eventKey] = {
       site_id: siteId,
@@ -309,6 +308,18 @@ export default async function handler(req, res) {
       var productionStatus = "ok";
       var productionWritten = 0;
       if (productionEvents.length > 0) {
+        var del = await supabase.from("production_events").delete().eq("site_id", CACHE_SITE_ID);
+        if (del.error) {
+          var delMsg = String(del.error.message || "").toLowerCase();
+          if (delMsg.includes("production_events") && delMsg.includes("schema cache")) {
+            productionStatus = "missing_production_events_table";
+          } else {
+            productionStatus = "production_events_delete_failed";
+            Sentry.captureException(del.error);
+          }
+        }
+      }
+      if (productionEvents.length > 0 && productionStatus === "ok") {
         var chunkSize = 500;
         for (var i = 0; i < productionEvents.length; i += chunkSize) {
           var chunk = productionEvents.slice(i, i + chunkSize);
