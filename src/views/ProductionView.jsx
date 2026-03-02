@@ -53,7 +53,7 @@ export default function ProductionView({ productionSegments }) {
   return (
     <div>
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <Input type="text" placeholder="Search job, WO, item, line..." value={search} onChange={function(e) { setSearch(e.target.value); }} className="h-10 w-full text-sm sm:w-72" />
+        <Input type="text" placeholder="Search job / WO / SKU" value={search} onChange={function(e) { setSearch(e.target.value); }} className="h-10 w-full text-sm sm:w-72" />
         <select value={prodDate} onChange={function(e) { setProdDate(e.target.value); }} className="h-10 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]">
           <option value="all">All Days</option>
           <option value="latest">Latest Day</option>

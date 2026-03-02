@@ -199,7 +199,7 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer, s
 
   return (<div>
     <div className="mb-4 flex flex-wrap items-center gap-2">
-      <Input type="text" placeholder="Search WO, SKU, customer..." value={ovSearch} onChange={function(e) { setOvSearch(e.target.value); }} className="h-10 w-full text-sm sm:w-72" />
+      <Input type="text" placeholder="Search WO / SKU / customer" value={ovSearch} onChange={function(e) { setOvSearch(e.target.value); }} className="h-10 w-full text-sm sm:w-72" />
       <select value={ovCustomer} onChange={function(e) { setOvCustomer(e.target.value); }} className="h-10 w-full rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))] sm:w-auto">
         <option value="all">All Customers</option>
         {customerOptions.map(function(c) { return <option key={c} value={c}>{c}</option>; })}

@@ -134,7 +134,7 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
       <TableShell>
         <div className="flex flex-wrap items-center gap-1.5 border-b border-[rgb(var(--border))] px-3 py-2.5">
           <div style={{ fontSize: 14, fontWeight: 700, color: C.bright, marginRight: 8 }}>Loads (OpenDock-first)</div>
-          <Input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search PO, confirmation, material..." className="h-10 w-full text-sm sm:w-72" />
+          <Input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search PO / confirmation / material" className="h-10 w-full text-sm sm:w-72" />
           <Button onClick={function() { setAtRiskOnly(function(v) { return !v; }); }} variant={atRiskOnly ? "active" : "outline"} size="default">{atRiskOnly ? "At-Risk WO" : "All Loads"}</Button>
           <Badge variant="secondary">{filteredLoads.length} loads</Badge>
         </div>
