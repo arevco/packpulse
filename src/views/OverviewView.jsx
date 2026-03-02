@@ -12,7 +12,7 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
   const { thS, tdN, tdM } = useStyles();
 
   const [ovSearch, setOvSearch] = useState("");
-  const [ovWoStatus, setOvWoStatus] = useState("all");
+  const [ovWoStatus, setOvWoStatus] = useState("Booked");
   const [ovCustomer, setOvCustomer] = useState("all");
   const [ovDateFrom, setOvDateFrom] = useState("");
   const [ovDateTo, setOvDateTo] = useState("");
