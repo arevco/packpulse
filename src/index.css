@@ -39,7 +39,7 @@
     text-rendering: optimizeLegibility;
   }
 
-  :focus-visible:not(select) {
+  :focus-visible:not(select):not(input):not(textarea) {
     outline: none;
     box-shadow: 0 0 0 2px rgb(var(--accent));
   }
