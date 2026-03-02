@@ -6,6 +6,36 @@ import Sentry from "../_sentry.js";
 
 const NULOGY_URL = process.env.NULOGY_URL || "https://app.nulogy.net";
 
+function formatNulogyDateTime(date) {
+  var d = date instanceof Date ? date : new Date(date);
+  if (isNaN(d)) return "";
+  var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  var year = d.getFullYear();
+  var month = months[d.getMonth()];
+  var day = String(d.getDate()).padStart(2, "0");
+  var hour24 = d.getHours();
+  var minute = String(d.getMinutes()).padStart(2, "0");
+  var ampm = hour24 >= 12 ? "PM" : "AM";
+  var hour12 = hour24 % 12;
+  if (hour12 === 0) hour12 = 12;
+  return `${year}-${month}-${day} ${hour12}:${minute} ${ampm}`;
+}
+
+function buildProductionFilters() {
+  var shiftHours = Number(process.env.NULOGY_SHIFT_HOURS || 8);
+  var lookbackShifts = Number(process.env.NULOGY_PRODUCTION_LOOKBACK_SHIFTS || 60);
+  var now = new Date();
+  var from = new Date(now.getTime() - Math.max(1, shiftHours) * Math.max(1, lookbackShifts) * 3600000);
+  return [
+    {
+      column: "produced_at",
+      operator: "between",
+      from_threshold: formatNulogyDateTime(from),
+      to_threshold: formatNulogyDateTime(now)
+    }
+  ];
+}
+
 // Column codes verified against actual REV Copack Nulogy instance
 // CRITICAL: item_code is a FIXED FIELD on inventory_snapshot — always auto-included
 // Do NOT pass it in the columns array or the API will reject the request
@@ -81,7 +111,8 @@ const REPORT_CONFIGS = {
        "line", "units_produced", "project_status", "purchase_order_number"],
       ["produced_at", "job_id", "project_code", "item_code", "units_produced", "line"],
       ["produced_at", "job_id", "units_produced"]
-    ]
+    ],
+    filters: buildProductionFilters
   }
 };
 
@@ -119,7 +150,9 @@ export default async function handler(req, res) {
       columns: columns,
       locale: "en_US"
     };
-    if (config.filters) body.filters = config.filters;
+    if (config.filters) {
+      body.filters = typeof config.filters === "function" ? config.filters() : config.filters;
+    }
     if (siteUuid) body.site_uuid = siteUuid;
 
     try {
