@@ -13,9 +13,8 @@ import { Card } from "./components/ui/card";
 const OverviewView = lazy(() => import("./views/OverviewView"));
 const OperationsView = lazy(() => import("./views/OperationsView"));
 const WorkOrdersView = lazy(() => import("./views/WorkOrdersView"));
-const CriticalItemsView = lazy(() => import("./views/CriticalItemsView"));
+const SupplyRiskView = lazy(() => import("./views/SupplyRiskView"));
 const FlagsView = lazy(() => import("./views/FlagsView"));
-const TimelineView = lazy(() => import("./views/TimelineView"));
 const SandboxView = lazy(() => import("./views/SandboxView"));
 
 export default function ProductionReadiness() {
@@ -257,6 +256,9 @@ export default function ProductionReadiness() {
   }, [activeView]);
   useEffect(function() {
     if (activeView === "recommendations") setActiveView("workorders");
+  }, [activeView]);
+  useEffect(function() {
+    if (activeView === "criticalitems" || activeView === "timeline") setActiveView("supplyrisk");
   }, [activeView]);
 
   /* ====== MAIN RENDER ====== */
@@ -520,18 +522,17 @@ export default function ProductionReadiness() {
         <TabsNav
           activeKey={activeView}
           onChange={setActiveView}
-          items={[{key:"overview",label:"Overview",count:null,alert:false},{key:"operations",label:"Operations",count:(productionSegmentsForUI.jobRows || []).length,alert:false},{key:"workorders",label:"Work Orders",count:summaryForUI.total},{key:"criticalitems",label:"Critical Items",count:criticalItemsForUI.length}]
-            .concat([{key:"timeline",label:"Deliveries",count:timelineData ? timelineData.totalDeliveries : 0,alert:false},{key:"sandbox",label:"Sandbox",count:null,alert:false}])}
+          items={[{key:"overview",label:"Overview",count:null,alert:false},{key:"operations",label:"Operations",count:(productionSegmentsForUI.jobRows || []).length,alert:false},{key:"workorders",label:"Work Orders",count:summaryForUI.total},{key:"supplyrisk",label:"Supply Risk",count:criticalItemsForUI.length,alert:false}]
+            .concat([{key:"sandbox",label:"Sandbox",count:null,alert:false}])}
         />
 
         <Suspense fallback={<div className="px-0 py-2 text-sm text-[rgb(var(--muted))]">Loading view...</div>}>
           {activeView === "overview" && <OverviewView analysis={analysisForUI} woStatuses={woStatusesForUI} onSelectCustomer={openWorkOrdersForCustomer} shiftChange={shiftChange} />}
           {activeView === "operations" && <OperationsView productionSegments={productionSegmentsForUI} />}
           {activeView === "workorders" && <WorkOrdersView analysis={analysisForUI} woStatuses={woStatusesForUI} woCustomers={woCustomersForUI} recommendations={recommendationsForUI} dispatchQueue={dispatchQueue || []} prefilterCustomer={workOrdersPrefilterCustomer} prefilterNonce={workOrdersPrefilterNonce} />}
-          {activeView === "criticalitems" && <CriticalItemsView rawCriticalItems={criticalItemsForUI} inboundCoverage={inboundCoverage} />}
+          {activeView === "supplyrisk" && <SupplyRiskView rawCriticalItems={criticalItemsForUI} inboundCoverage={inboundCoverage} timelineData={timelineData} deliveriesV2={deliveriesV2} />}
           {activeView === "sandbox" && <SandboxView />}
           {activeView === "flags" && <FlagsView flags={analysisForUI.flags} />}
-          {activeView === "timeline" && <TimelineView timelineData={timelineData} deliveriesV2={deliveriesV2} />}
         </Suspense>
 
       </div>
