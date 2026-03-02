@@ -40,13 +40,17 @@ function buildProductionFilters() {
   var hoursPerShiftWindow = (24 / Math.max(1, shiftsPerDay)) * Math.max(1, lookbackShifts);
   var lookbackHours = Math.max(1, shiftHours, hoursPerShiftWindow);
   var from = new Date(now.getTime() - lookbackHours * 3600000);
+  // Date-only "between" filters can be interpreted as midnight boundaries by upstream APIs.
+  // Query through tomorrow so today's intraday production is not dropped.
+  var toInclusive = new Date(now);
+  toInclusive.setDate(toInclusive.getDate() + 1);
   return [
     {
       column: "produced_at",
       operator: "between",
       // Use date-only thresholds for stable parsing across Nulogy accounts/locales.
       from_threshold: formatNulogyDate(from),
-      to_threshold: formatNulogyDate(now)
+      to_threshold: formatNulogyDate(toInclusive)
     }
   ];
 }
