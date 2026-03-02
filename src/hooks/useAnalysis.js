@@ -134,6 +134,55 @@ function classifyShiftET(parts) {
 
 export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMaster, boms, workOrders, productionData, invMapping, bomMapping, woMapping, poData, poMapping, edrData, dockData }) {
 
+  var productionSegments = useMemo(function() {
+    var productionRows = Array.isArray(productionData) ? productionData : [];
+    var byShiftDay = {};
+    var byJob = {};
+    productionRows.forEach(function(row) {
+      var units = safeNum(firstValue(row, ["Units Produced", "units_produced", "unitsProduced"]));
+      if (!(units > 0)) return;
+      var producedAt = firstValue(row, ["Produced At", "produced_at", "Produced date", "producedAt"]);
+      var parts = toEasternParts(producedAt);
+      var shift = classifyShiftET(parts);
+      if (!parts || !shift) return;
+
+      var shiftKey = parts.dateKey + "|" + shift;
+      if (!byShiftDay[shiftKey]) byShiftDay[shiftKey] = { date: parts.dateKey, shift: shift, unitsProduced: 0, jobs: 0 };
+      byShiftDay[shiftKey].unitsProduced += units;
+
+      var jobId = (firstValue(row, ["Job ID", "job_id", "Job"]) || "").toString().trim() || "Unknown Job";
+      var woCode = (firstValue(row, ["Work Order Code", "project_code", "Project Code"]) || "").toString().trim();
+      var line = (firstValue(row, ["Line", "line", "line_name", "Line Name"]) || "").toString().trim();
+      var itemCode = (firstValue(row, ["Item Code", "item_code"]) || "").toString().trim();
+      var itemDesc = (firstValue(row, ["Description", "item_description", "Item Description"]) || "").toString().trim();
+      var jobKey = [parts.dateKey, shift, jobId, woCode, itemCode].join("|");
+      if (!byJob[jobKey]) {
+        byJob[jobKey] = {
+          date: parts.dateKey,
+          shift: shift,
+          jobId: jobId,
+          workOrder: woCode || "--",
+          line: line || "--",
+          itemCode: itemCode || "--",
+          itemDesc: itemDesc || "--",
+          unitsProduced: 0
+        };
+        byShiftDay[shiftKey].jobs += 1;
+      }
+      byJob[jobKey].unitsProduced += units;
+    });
+    var shiftRows = Object.values(byShiftDay).sort(function(a, b) {
+      if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+      return a.shift < b.shift ? 1 : -1;
+    });
+    var jobRows = Object.values(byJob).sort(function(a, b) {
+      if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+      if (a.shift !== b.shift) return a.shift < b.shift ? 1 : -1;
+      return b.unitsProduced - a.unitsProduced;
+    });
+    return { shiftRows: shiftRows, jobRows: jobRows };
+  }, [productionData]);
+
   /* ====== ANALYSIS ENGINE ====== */
   var analysis = useMemo(() => {
     if (!mappingConfirmed || !allUploaded) return null;
@@ -286,54 +335,8 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       flags.push({ id:flagId++, type:"zero-stock", severity:"bad", sku:comp.sku, skuNorm:cn, desc:comp.desc, source:"Inventory", detail:"Component exists in inventory but has zero stock. Verify count or expedite PO.", affectedWOs:aws });
     } }); });
 
-    var productionRows = Array.isArray(productionData) ? productionData : [];
-    var byShiftDay = {};
-    var byJob = {};
-    productionRows.forEach(function(row) {
-      var units = safeNum(firstValue(row, ["Units Produced", "units_produced", "unitsProduced"]));
-      if (!(units > 0)) return;
-      var producedAt = firstValue(row, ["Produced At", "produced_at", "Produced date", "producedAt"]);
-      var parts = toEasternParts(producedAt);
-      var shift = classifyShiftET(parts);
-      if (!parts || !shift) return;
-
-      var shiftKey = parts.dateKey + "|" + shift;
-      if (!byShiftDay[shiftKey]) byShiftDay[shiftKey] = { date: parts.dateKey, shift: shift, unitsProduced: 0, jobs: 0 };
-      byShiftDay[shiftKey].unitsProduced += units;
-
-      var jobId = (firstValue(row, ["Job ID", "job_id", "Job"]) || "").toString().trim() || "Unknown Job";
-      var woCode = (firstValue(row, ["Work Order Code", "project_code", "Project Code"]) || "").toString().trim();
-      var line = (firstValue(row, ["Line", "line", "line_name", "Line Name"]) || "").toString().trim();
-      var itemCode = (firstValue(row, ["Item Code", "item_code"]) || "").toString().trim();
-      var itemDesc = (firstValue(row, ["Description", "item_description", "Item Description"]) || "").toString().trim();
-      var jobKey = [parts.dateKey, shift, jobId, woCode, itemCode].join("|");
-      if (!byJob[jobKey]) {
-        byJob[jobKey] = {
-          date: parts.dateKey,
-          shift: shift,
-          jobId: jobId,
-          workOrder: woCode || "--",
-          line: line || "--",
-          itemCode: itemCode || "--",
-          itemDesc: itemDesc || "--",
-          unitsProduced: 0
-        };
-        byShiftDay[shiftKey].jobs += 1;
-      }
-      byJob[jobKey].unitsProduced += units;
-    });
-    var shiftRows = Object.values(byShiftDay).sort(function(a, b) {
-      if (a.date !== b.date) return a.date < b.date ? 1 : -1;
-      return a.shift < b.shift ? 1 : -1;
-    });
-    var jobRows = Object.values(byJob).sort(function(a, b) {
-      if (a.date !== b.date) return a.date < b.date ? 1 : -1;
-      if (a.shift !== b.shift) return a.shift < b.shift ? 1 : -1;
-      return b.unitsProduced - a.unitsProduced;
-    });
-
-    return { results:results, diagnostics:diag, flags:flags, productionSegments: { shiftRows: shiftRows, jobRows: jobRows } };
-  }, [mappingConfirmed, allUploaded, inventory, itemMaster, boms, workOrders, productionData, invMapping, bomMapping, woMapping]);
+    return { results:results, diagnostics:diag, flags:flags };
+  }, [mappingConfirmed, allUploaded, inventory, itemMaster, boms, workOrders, invMapping, bomMapping, woMapping]);
 
   var summary = useMemo(() => { if (!analysis) return null; var r = analysis.results; return { total:r.length, ready:r.filter(w=>w.runStatus==="ready").length, partial:r.filter(w=>w.runStatus==="partial").length, blocked:r.filter(w=>w.runStatus==="blocked").length, nobom:r.filter(w=>w.runStatus==="nobom").length }; }, [analysis]);
 
@@ -1377,5 +1380,5 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
   var recommendations = recommendationBundle && recommendationBundle.recommendations ? recommendationBundle.recommendations : [];
   var dispatchQueue = recommendationBundle && recommendationBundle.dispatchQueue ? recommendationBundle.dispatchQueue : [];
 
-  return { analysis, summary, criticalItems, woStatuses, woCustomers, poCheck, timelineData, deliveriesV2, inboundCoverage, recommendations, dispatchQueue };
+  return { analysis, summary, criticalItems, woStatuses, woCustomers, poCheck, timelineData, deliveriesV2, inboundCoverage, recommendations, dispatchQueue, productionSegments };
 }
