@@ -43,10 +43,20 @@ export default function ProductionReadiness() {
   const [dockApiInfo, setDockApiInfo] = useState("");
   const [syncVisualPct, setSyncVisualPct] = useState(0);
   const [showQuickControls, setShowQuickControls] = useState(false);
+  const [showUserActivity, setShowUserActivity] = useState(false);
+  const [userActivityLoading, setUserActivityLoading] = useState(false);
+  const [userActivityError, setUserActivityError] = useState("");
+  const [userActivityRows, setUserActivityRows] = useState([]);
 
   var showAutoBootstrap = autoBootstrapEnabled;
 
   var fmtTs = ts => { if (!ts) return "--"; var d = Date.now() - ts; return d < 60000 ? "now" : d < 3600000 ? Math.floor(d/60000) + "m" : d < 86400000 ? Math.floor(d/3600000) + "h" : Math.floor(d/86400000) + "d"; };
+  var fmtClock = ts => {
+    if (!ts) return "--";
+    var d = new Date(ts);
+    if (isNaN(d)) return "--";
+    return d.toLocaleString([], { month:"2-digit", day:"2-digit", hour:"numeric", minute:"2-digit" });
+  };
   var staleLevel = (ts, cad) => { if (!ts) return "stale"; var h = (Date.now()-ts)/3600000; if (cad==="daily") return h<8?"fresh":h<24?"stale":"old"; if (cad==="rare") return h<720?"fresh":"stale"; return h<168?"fresh":"stale"; };
   var dataSourceStatus = [
     { k:"inv", l:"Inventory", ts:ds.invTimestamp, cad:"daily", ref:() => window.__invR && window.__invR.click() },
@@ -88,6 +98,24 @@ export default function ProductionReadiness() {
       setDockApiLoading(false);
     }
   }, []);
+  var loadUserActivity = useCallback(async function(force) {
+    if (!force && userActivityLoading) return;
+    setUserActivityLoading(true);
+    setUserActivityError("");
+    try {
+      var r = await fetch("/api/ops/user-logins?limit=20", { credentials: "include" });
+      var body = await r.json();
+      if (!r.ok) throw new Error(body && body.error ? body.error : "Could not load user activity");
+      setUserActivityRows(Array.isArray(body.rows) ? body.rows : []);
+      if (body && body.status === "missing_user_login_events_table") {
+        setUserActivityError("Login tracking table not set up yet.");
+      }
+    } catch (e) {
+      setUserActivityError(e && e.message ? e.message : "Could not load user activity");
+    } finally {
+      setUserActivityLoading(false);
+    }
+  }, [userActivityLoading]);
 
   useEffect(() => {
     if (!showAutoBootstrap || autoDockAttempted) return;
@@ -232,6 +260,9 @@ export default function ProductionReadiness() {
       setShowDataControlsPanel(false);
     }
   }, [syncHealthy, showQuickControls, showDataControlsPanel]);
+  useEffect(() => {
+    if (showUserActivity) loadUserActivity();
+  }, [showUserActivity, loadUserActivity]);
   var goToDashboard = function() {
     setShowDataSetup(false);
     setTimeout(function() {
@@ -468,6 +499,7 @@ export default function ProductionReadiness() {
                 {showDataControlsPanel ? "Hide Data Controls" : "Data Controls"}
               </Button>
               <Button onClick={() => setShowSettings(!showSettings)} variant={showSettings ? "active" : "outline"} size="sm">Data Mapping</Button>
+              <Button onClick={() => setShowUserActivity(v => !v)} variant={showUserActivity ? "active" : "outline"} size="sm">User Activity</Button>
               <span className="text-xs text-[rgb(var(--muted))]">
                 <span style={{ color:freshCount===dataSourceStatus.length?C.ok:freshCount>=3?C.warn:C.bad, fontWeight:600 }}>{freshCount}/{dataSourceStatus.length}</span> fresh · updated {summaryStamp}
               </span>
@@ -503,7 +535,38 @@ export default function ProductionReadiness() {
               <Button onClick={() => setActiveView("flags")} variant={activeView==="flags" ? "active" : "outline"} size="sm">
                 Data Flags {analysisForUI.flags.length > 0 ? "(" + analysisForUI.flags.length + ")" : ""}
               </Button>
+              <Button onClick={() => setShowUserActivity(v => !v)} variant={showUserActivity ? "active" : "outline"} size="sm">
+                User Activity
+              </Button>
             </div>
+            {showUserActivity && (
+              <div className="mb-2 rounded-md border border-[rgb(var(--border))] bg-white px-2.5 py-2">
+                <div className="mb-1 flex items-center justify-between">
+                  <div className="text-xs font-semibold text-[rgb(var(--foreground))]">Recent Logins</div>
+                  <Button variant="outline" size="sm" onClick={() => loadUserActivity(true)} disabled={userActivityLoading}>
+                    {userActivityLoading ? "Loading..." : "Refresh"}
+                  </Button>
+                </div>
+                {userActivityError ? (
+                  <div className="text-xs text-[rgb(var(--danger))]">{userActivityError}</div>
+                ) : userActivityRows.length ? (
+                  <div className="space-y-1">
+                    {userActivityRows.slice(0, 8).map(function(row) {
+                      return (
+                        <div key={row.id} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-[rgb(var(--muted))]">
+                          <span className="font-medium text-[rgb(var(--foreground))]">{row.user_email || "--"}</span>
+                          <span>{fmtClock(row.created_at)}</span>
+                          <span>{row.auth_provider || "auth"}</span>
+                          <span className="opacity-70">{row.source || "--"}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-xs text-[rgb(var(--muted))]">No login events yet.</div>
+                )}
+              </div>
+            )}
             <div className="flex flex-wrap items-center gap-1.5">
               {dataSourceStatus.map(function(s) {
                 var sl = staleLevel(s.ts, s.cad); var dc = sl==="fresh"?C.ok:sl==="stale"?C.warn:C.bad;
