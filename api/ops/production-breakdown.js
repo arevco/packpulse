@@ -53,6 +53,16 @@ export default async function handler(req, res) {
       days: days,
       fromDate: fromDate,
       totalRows: rows.length,
+      rowsLite: rows.map(function(r) {
+        return {
+          produced_date_et: r.produced_date_et || null,
+          shift_label: r.shift_label || null,
+          item_code: r.item_code || null,
+          units_produced: toNum(r.units_produced),
+          line: r.line || null,
+          work_order_code: r.work_order_code || null
+        };
+      }),
       bySku: Object.values(bySku).sort(function(a, b) { return b.units - a.units; }).slice(0, 200),
       byLine: Object.values(byLine).sort(function(a, b) { return b.units - a.units; }),
       latestDate: latestDate,

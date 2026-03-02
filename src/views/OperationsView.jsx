@@ -34,6 +34,51 @@ function pctDelta(actual, plan) {
   return Math.round(((safeNum(actual) - safeNum(plan)) / safeNum(plan)) * 100);
 }
 
+function toIsoDateLocal(d) {
+  var dt = new Date(d);
+  var y = dt.getFullYear();
+  var m = String(dt.getMonth() + 1).padStart(2, "0");
+  var day = String(dt.getDate()).padStart(2, "0");
+  return y + "-" + m + "-" + day;
+}
+
+function shiftDays(dateIso, n) {
+  var d = new Date(dateIso + "T00:00:00");
+  d.setDate(d.getDate() + n);
+  return toIsoDateLocal(d);
+}
+
+function weekStart(dateIso) {
+  var d = new Date(dateIso + "T00:00:00");
+  var dow = d.getDay();
+  var delta = dow === 0 ? -6 : 1 - dow; // monday start
+  d.setDate(d.getDate() + delta);
+  return toIsoDateLocal(d);
+}
+
+function presetRange(preset) {
+  var today = toIsoDateLocal(new Date());
+  if (preset === "today") return { start: today, end: today, fetchDays: 14 };
+  if (preset === "yesterday") {
+    var y = shiftDays(today, -1);
+    return { start: y, end: y, fetchDays: 21 };
+  }
+  if (preset === "this_week") return { start: weekStart(today), end: today, fetchDays: 30 };
+  if (preset === "last_week") {
+    var thisStart = weekStart(today);
+    var lastEnd = shiftDays(thisStart, -1);
+    return { start: shiftDays(lastEnd, -6), end: lastEnd, fetchDays: 45 };
+  }
+  if (preset === "last_30") return { start: shiftDays(today, -29), end: today, fetchDays: 45 };
+  if (preset === "last_60") return { start: shiftDays(today, -59), end: today, fetchDays: 75 };
+  return { start: shiftDays(today, -13), end: today, fetchDays: 30 };
+}
+
+function inRange(dateIso, range) {
+  if (!dateIso || !range) return false;
+  return dateIso >= range.start && dateIso <= range.end;
+}
+
 function shortShiftLabel(label) {
   var s = String(label || "").toLowerCase();
   if (s.indexOf("shift 1") !== -1) return "S1";
@@ -43,12 +88,12 @@ function shortShiftLabel(label) {
 
 export default function OperationsView({ productionSegments }) {
   const { C, mono } = useTheme();
-  const [days, setDays] = useState(30);
+  const [windowPreset, setWindowPreset] = useState("last_14");
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [trends, setTrends] = useState(null);
   const [inputs, setInputs] = useState([]);
-  const [breakdown, setBreakdown] = useState({ bySku: [], byLine: [], latestByLine: [], latestDate: null, totalRows: 0 });
+  const [breakdown, setBreakdown] = useState({ rowsLite: [], bySku: [], byLine: [], latestByLine: [], latestDate: null, totalRows: 0 });
   const [rates, setRates] = useState([
     { role: "labor", hourly_rate: 20.1, markup_pct: 0.2 },
     { role: "fork", hourly_rate: 20.1, markup_pct: 0.2 },
@@ -76,11 +121,13 @@ export default function OperationsView({ productionSegments }) {
     setLoading(true);
     setErr("");
     try {
+      var range = presetRange(windowPreset);
+      var fetchDays = range.fetchDays;
       var [tr, ip, cfg, br] = await Promise.all([
-        fetch("/api/cache/production-trends?days=" + days, { credentials: "include" }),
-        fetch("/api/ops/shift-inputs?days=" + days, { credentials: "include" }),
+        fetch("/api/cache/production-trends?days=" + fetchDays, { credentials: "include" }),
+        fetch("/api/ops/shift-inputs?days=" + fetchDays, { credentials: "include" }),
         fetch("/api/ops/config", { credentials: "include" }),
-        fetch("/api/ops/production-breakdown?days=" + days, { credentials: "include" }),
+        fetch("/api/ops/production-breakdown?days=" + fetchDays, { credentials: "include" }),
       ]);
       var [trBody, ipBody, cfgBody, brBody] = await Promise.all([tr.json(), ip.json(), cfg.json(), br.json()]);
       if (!tr.ok) throw new Error(trBody.error || "Could not load production trends");
@@ -92,6 +139,7 @@ export default function OperationsView({ productionSegments }) {
       setRates(Array.isArray(cfgBody.rates) && cfgBody.rates.length ? cfgBody.rates : rates);
       setTargets(Array.isArray(cfgBody.skuTargets) ? cfgBody.skuTargets : []);
       setBreakdown({
+        rowsLite: Array.isArray(brBody.rowsLite) ? brBody.rowsLite : [],
         bySku: Array.isArray(brBody.bySku) ? brBody.bySku : [],
         byLine: Array.isArray(brBody.byLine) ? brBody.byLine : [],
         latestByLine: Array.isArray(brBody.latestByLine) ? brBody.latestByLine : [],
@@ -107,7 +155,7 @@ export default function OperationsView({ productionSegments }) {
 
   useEffect(function() {
     loadAll();
-  }, [days]);
+  }, [windowPreset]);
 
   var targetBySku = useMemo(function() {
     var map = {};
@@ -119,15 +167,64 @@ export default function OperationsView({ productionSegments }) {
     return map;
   }, [targets]);
 
+  var range = useMemo(function() {
+    return presetRange(windowPreset);
+  }, [windowPreset]);
+
+  var filteredTrends = useMemo(function() {
+    var byDay = (trends && Array.isArray(trends.byDay)) ? trends.byDay.filter(function(r) { return inRange(String(r.date || ""), range); }) : [];
+    var byShift = (trends && Array.isArray(trends.byShift)) ? trends.byShift.filter(function(r) { return inRange(String(r.date || ""), range); }) : [];
+    return { byDay: byDay, byShift: byShift, fromDate: range.start };
+  }, [trends, range]);
+
+  var filteredInputs = useMemo(function() {
+    return (inputs || []).filter(function(r) { return inRange(String(r.date_et || ""), range); });
+  }, [inputs, range]);
+
+  var filteredBreakdown = useMemo(function() {
+    var rows = (breakdown && Array.isArray(breakdown.rowsLite)) ? breakdown.rowsLite.filter(function(r) { return inRange(String(r.produced_date_et || ""), range); }) : [];
+    var bySku = {};
+    var byLine = {};
+    var byDateLine = {};
+    rows.forEach(function(r) {
+      var sku = String(r.item_code || "UNKNOWN");
+      var line = String(r.line || "Unknown");
+      var date = String(r.produced_date_et || "");
+      var units = safeNum(r.units_produced);
+      if (!bySku[sku]) bySku[sku] = { item_code: sku, units: 0, rows: 0 };
+      bySku[sku].units += units;
+      bySku[sku].rows += 1;
+      if (!byLine[line]) byLine[line] = { line: line, units: 0, rows: 0 };
+      byLine[line].units += units;
+      byLine[line].rows += 1;
+      if (date) {
+        if (!byDateLine[date]) byDateLine[date] = {};
+        if (!byDateLine[date][line]) byDateLine[date][line] = { line: line, units: 0, rows: 0 };
+        byDateLine[date][line].units += units;
+        byDateLine[date][line].rows += 1;
+      }
+    });
+    var latestDate = Object.keys(byDateLine).sort().pop() || null;
+    var latestByLine = latestDate ? Object.values(byDateLine[latestDate]).sort(function(a, b) { return b.units - a.units; }) : [];
+    return {
+      rowsLite: rows,
+      bySku: Object.values(bySku).sort(function(a, b) { return b.units - a.units; }),
+      byLine: Object.values(byLine).sort(function(a, b) { return b.units - a.units; }),
+      latestDate: latestDate,
+      latestByLine: latestByLine,
+      totalRows: rows.length
+    };
+  }, [breakdown, range]);
+
   var metrics = useMemo(function() {
-    var byDay = (trends && Array.isArray(trends.byDay)) ? trends.byDay : [];
-    var byShift = (trends && Array.isArray(trends.byShift)) ? trends.byShift : [];
+    var byDay = filteredTrends.byDay || [];
+    var byShift = filteredTrends.byShift || [];
     var totalUnits = byDay.reduce(function(sum, d) { return sum + safeNum(d.units); }, 0);
     var avgDailyUnits = byDay.length ? Math.round(totalUnits / byDay.length) : 0;
     var today = new Date().toISOString().slice(0, 10);
-    var expectedShifts = trends ? businessDaysBetween(trends.fromDate, today) * 2 : 0;
+    var expectedShifts = businessDaysBetween(filteredTrends.fromDate, range.end || today) * 2;
     var shiftKeySet = {};
-    inputs.forEach(function(r) {
+    filteredInputs.forEach(function(r) {
       var key = String(r.date_et || "") + "|" + String(r.shift_label || "");
       if (r.date_et && r.shift_label) shiftKeySet[key] = true;
     });
@@ -142,7 +239,7 @@ export default function OperationsView({ productionSegments }) {
       };
     });
     var laborCost = 0;
-    inputs.forEach(function(r) {
+    filteredInputs.forEach(function(r) {
       var hrs = r.hours_run_override == null || r.hours_run_override === "" ? 8 : safeNum(r.hours_run_override);
       var roleHours = {
         labor: safeNum(r.labor_count) * hrs,
@@ -157,14 +254,14 @@ export default function OperationsView({ productionSegments }) {
       });
     });
 
-    var estimatedRevenue = breakdown.bySku.reduce(function(sum, s) {
+    var estimatedRevenue = filteredBreakdown.bySku.reduce(function(sum, s) {
       var k = String(s.item_code || "").trim();
       var t = targetBySku[k];
       if (!t) return sum;
       return sum + safeNum(s.units) * safeNum(t.revenue_per_case);
     }, 0);
-    var mappedSkuCount = breakdown.bySku.filter(function(s) { return !!targetBySku[String(s.item_code || "").trim()]; }).length;
-    var unmappedSkuCount = Math.max(0, breakdown.bySku.length - mappedSkuCount);
+    var mappedSkuCount = filteredBreakdown.bySku.filter(function(s) { return !!targetBySku[String(s.item_code || "").trim()]; }).length;
+    var unmappedSkuCount = Math.max(0, filteredBreakdown.bySku.length - mappedSkuCount);
 
     return {
       totalUnits: totalUnits,
@@ -178,10 +275,10 @@ export default function OperationsView({ productionSegments }) {
       unmappedSkuCount: unmappedSkuCount,
       byShift: byShift,
     };
-  }, [trends, inputs, rates, breakdown, targetBySku]);
+  }, [filteredTrends, filteredInputs, rates, filteredBreakdown, targetBySku, range.end]);
 
   var topSku = useMemo(function() {
-    return breakdown.bySku.slice(0, 10).map(function(s) {
+    return filteredBreakdown.bySku.slice(0, 10).map(function(s) {
       var t = targetBySku[String(s.item_code || "").trim()];
       return {
         item_code: s.item_code,
@@ -189,10 +286,10 @@ export default function OperationsView({ productionSegments }) {
         estRev: t ? safeNum(t.revenue_per_case) * safeNum(s.units) : null,
       };
     });
-  }, [breakdown, targetBySku]);
+  }, [filteredBreakdown, targetBySku]);
 
   var commandBoard = useMemo(function() {
-    var byDay = (trends && Array.isArray(trends.byDay)) ? trends.byDay : [];
+    var byDay = filteredTrends.byDay || [];
     var latest = byDay.length ? byDay[0] : null;
     var latestUnits = latest ? safeNum(latest.units) : 0;
     var latestRows = latest ? safeNum(latest.rows) : 0;
@@ -204,7 +301,7 @@ export default function OperationsView({ productionSegments }) {
       if (ratio < 0.85) status = "Off Track";
       else if (ratio < 0.95) status = "At Risk";
     }
-    var topLine = (breakdown.latestByLine && breakdown.latestByLine[0]) || null;
+    var topLine = (filteredBreakdown.latestByLine && filteredBreakdown.latestByLine[0]) || null;
     var topConstraint = metrics.coveragePct < 70 ? "Missing Labor Inputs" : metrics.unmappedSkuCount > 0 ? "Unmapped SKU Targets" : "No major constraint detected";
     var actions = [];
     if (metrics.coveragePct < 90) actions.push("Capture missing shift labor inputs to improve cost confidence.");
@@ -223,7 +320,7 @@ export default function OperationsView({ productionSegments }) {
       topConstraint: topConstraint,
       actions: actions.slice(0, 3)
     };
-  }, [trends, metrics, breakdown.latestByLine]);
+  }, [filteredTrends, metrics, filteredBreakdown.latestByLine]);
 
   var shiftPlanVsActual = useMemo(function() {
     var rows = (metrics.byShift || []).slice();
@@ -262,7 +359,7 @@ export default function OperationsView({ productionSegments }) {
 
   var linePerformance = useMemo(function() {
     var laborByLine = {};
-    inputs.forEach(function(r) {
+    filteredInputs.forEach(function(r) {
       var line = String(r.line_name || "Unknown");
       if (!laborByLine[line]) laborByLine[line] = { laborHours: 0, shifts: 0 };
       var hrs = r.hours_run_override == null || r.hours_run_override === "" ? 8 : safeNum(r.hours_run_override);
@@ -270,14 +367,14 @@ export default function OperationsView({ productionSegments }) {
       laborByLine[line].laborHours += heads * hrs;
       laborByLine[line].shifts += 1;
     });
-    var rows = (breakdown.byLine || []).map(function(l) {
+    var rows = (filteredBreakdown.byLine || []).map(function(l) {
       var line = String(l.line || "Unknown");
       var labor = laborByLine[line] ? laborByLine[line].laborHours : 0;
       var shifts = laborByLine[line] ? laborByLine[line].shifts : 0;
       var units = safeNum(l.units);
       var cplh = labor > 0 ? units / labor : 0;
       var avgPerShift = shifts > 0 ? units / shifts : 0;
-      var latest = (breakdown.latestByLine || []).find(function(x) { return String(x.line || "") === line; });
+      var latest = (filteredBreakdown.latestByLine || []).find(function(x) { return String(x.line || "") === line; });
       var latestUnits = latest ? safeNum(latest.units) : 0;
       var attainment = avgPerShift > 0 ? Math.round((latestUnits / avgPerShift) * 100) : 0;
       return {
@@ -291,7 +388,7 @@ export default function OperationsView({ productionSegments }) {
       };
     }).sort(function(a, b) { return b.latestUnits - a.latestUnits; });
     return rows;
-  }, [breakdown.byLine, breakdown.latestByLine, inputs]);
+  }, [filteredBreakdown.byLine, filteredBreakdown.latestByLine, filteredInputs]);
 
   async function saveShiftInput() {
     setSaving(true);
@@ -337,12 +434,16 @@ export default function OperationsView({ productionSegments }) {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <div className="text-sm text-[rgb(var(--muted))]">Operations Window</div>
-        <select value={days} onChange={function(e) { setDays(Number(e.target.value)); }} className="h-10 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm">
-          <option value={14}>14 days</option>
-          <option value={30}>30 days</option>
-          <option value={60}>60 days</option>
-          <option value={90}>90 days</option>
+        <select value={windowPreset} onChange={function(e) { setWindowPreset(e.target.value); }} className="h-10 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm">
+          <option value="today">Today</option>
+          <option value="yesterday">Yesterday</option>
+          <option value="this_week">This Week</option>
+          <option value="last_week">Last Week</option>
+          <option value="last_14">Last 14 Days</option>
+          <option value="last_30">Last 30 Days</option>
+          <option value="last_60">Last 60 Days</option>
         </select>
+        <span className="text-xs text-[rgb(var(--muted))]">{range.start} to {range.end}</span>
         <Button variant="outline" size="sm" onClick={loadAll} disabled={loading || saving}>Refresh</Button>
         {loading && <span className="text-xs text-[rgb(var(--muted))]">Loading…</span>}
       </div>
@@ -398,7 +499,7 @@ export default function OperationsView({ productionSegments }) {
           <div className="space-y-2">
             <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
               <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{metrics.totalUnits.toLocaleString()}</div>
-              <div className="text-xs text-[rgb(var(--muted))]">Cases Produced ({days}d)</div>
+              <div className="text-xs text-[rgb(var(--muted))]">Cases Produced ({windowPreset === "today" ? "today" : windowPreset === "yesterday" ? "yesterday" : windowPreset === "this_week" ? "this week" : windowPreset === "last_week" ? "last week" : range.start + " to " + range.end})</div>
             </div>
             <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
               <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{metrics.avgDailyUnits.toLocaleString()}</div>
