@@ -9,7 +9,7 @@ export default function ProductionView({ productionSegments }) {
   const { C, mono } = useTheme();
   const { thS, tdN, tdM } = useStyles();
 
-  const [prodDate, setProdDate] = useState("latest");
+  const [prodDate, setProdDate] = useState("all");
   const [search, setSearch] = useState("");
 
   var prodShiftRows = productionSegments && Array.isArray(productionSegments.shiftRows) ? productionSegments.shiftRows : [];
@@ -18,8 +18,12 @@ export default function ProductionView({ productionSegments }) {
   var rowsWithShift = productionSegments && productionSegments.rowsWithShift ? productionSegments.rowsWithShift : 0;
   var prodDates = Array.from(new Set(prodShiftRows.map(function(r) { return r.date; }))).sort().reverse();
   var selectedProdDate = prodDate === "latest" ? (prodDates[0] || "") : prodDate;
-  var selectedShiftRows = selectedProdDate ? prodShiftRows.filter(function(r) { return r.date === selectedProdDate; }) : [];
-  var selectedJobRows = selectedProdDate ? prodJobRows.filter(function(r) { return r.date === selectedProdDate; }) : [];
+  var selectedShiftRows = prodDate === "all"
+    ? prodShiftRows
+    : (selectedProdDate ? prodShiftRows.filter(function(r) { return r.date === selectedProdDate; }) : []);
+  var selectedJobRows = prodDate === "all"
+    ? prodJobRows
+    : (selectedProdDate ? prodJobRows.filter(function(r) { return r.date === selectedProdDate; }) : []);
   var filteredJobRows = useMemo(function() {
     if (!search) return selectedJobRows;
     var q = search.toLowerCase();
@@ -51,6 +55,7 @@ export default function ProductionView({ productionSegments }) {
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Input type="text" placeholder="Search job, WO, item, line..." value={search} onChange={function(e) { setSearch(e.target.value); }} className="h-10 w-full text-sm sm:w-72" />
         <select value={prodDate} onChange={function(e) { setProdDate(e.target.value); }} className="h-10 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]">
+          <option value="all">All Days</option>
           <option value="latest">Latest Day</option>
           {prodDates.map(function(d) { return <option key={d} value={d}>{d}</option>; })}
         </select>
