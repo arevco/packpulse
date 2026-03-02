@@ -55,6 +55,14 @@ function normalizeKey(s) {
   return String(s || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
 }
 
+function stableRowHash(row) {
+  if (!row || typeof row !== "object") return "";
+  var keys = Object.keys(row).sort();
+  var out = {};
+  keys.forEach(function(k) { out[k] = row[k]; });
+  return crypto.createHash("sha1").update(JSON.stringify(out)).digest("hex");
+}
+
 function pickFieldLoose(row, keys) {
   if (!row || typeof row !== "object") return "";
   var rowKeys = Object.keys(row);
@@ -130,7 +138,9 @@ function buildProductionEventsFromSnapshotRows(rows, siteId, syncedAt, updatedBy
     var wo = String(pickFieldLoose(row, ["Work Order Code", "project_code", "Project Code"]) || "").trim();
     var itemCode = String(pickFieldLoose(row, ["Item Code", "item_code"]) || "").trim();
     var line = String(pickFieldLoose(row, ["Line", "line", "line_name", "Line Name"]) || "").trim();
-    var keyBase = [siteId, producedIso || producedRaw || syncedAt || "", jobId, wo, itemCode, line, units].join("|");
+    var rowHash = stableRowHash(row);
+    var keyDisambiguator = (producedIso || producedRaw) ? "" : rowHash;
+    var keyBase = [siteId, producedIso || producedRaw || syncedAt || "", jobId, wo, itemCode, line, units, keyDisambiguator].join("|");
     var eventKey = crypto.createHash("sha1").update(keyBase).digest("hex");
     dedup[eventKey] = {
       site_id: siteId,
