@@ -204,9 +204,14 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
         <option value="all">All Customers</option>
         {customerOptions.map(function(c) { return <option key={c} value={c}>{c}</option>; })}
       </select>
-      {["all"].concat(woStatuses).map(function(f) {
-        return <Button key={f} onClick={function() { setOvWoStatus(function(curr) { return curr === f && f !== "all" ? "all" : f; }); }} variant={ovWoStatus===f ? "active" : "outline"} size="default">{f==="all"?"All WO Status":f}</Button>;
-      })}
+      <select
+        value={ovWoStatus}
+        onChange={function(e) { setOvWoStatus(e.target.value); }}
+        className="h-10 w-full rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))] sm:w-auto"
+      >
+        <option value="all">All WO Status</option>
+        {woStatuses.map(function(s) { return <option key={s} value={s}>{s}</option>; })}
+      </select>
       <span style={{ fontSize:13, color:C.dim, marginLeft:4 }}>Due from</span>
       <Input type="date" value={ovDateFrom} onChange={e => setOvDateFrom(e.target.value)} className="h-10 w-full text-sm sm:w-36" />
       <span style={{ fontSize:13, color:C.dim }}>to</span>
