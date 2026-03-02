@@ -718,7 +718,6 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
 
         {packMixBreakdown.length > 0 && (
           <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
-            <span style={{ fontSize:12, color:C.dim, fontWeight:700, letterSpacing:0.2 }}>Pack Mix (Remaining)</span>
             <Button onClick={function() { setFilterPackType("all"); }} variant={filterPackType === "all" ? "active" : "outline"} size="sm" className="rounded-full">
               <span style={{ color:C.bright, fontWeight:700 }}>All Packs</span>
               <span style={{ color:C.text }}>{fmtNum(packMixTotalRemaining)}</span>
