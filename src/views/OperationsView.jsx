@@ -8,6 +8,7 @@ import TableShell from "../components/ui/table-shell";
 import ProductionView from "./ProductionView";
 import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, XAxis, YAxis } from "recharts";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "../components/ui/chart";
+import { detectPackType } from "../utils";
 
 function safeNum(v) {
   var n = Number(v || 0);
@@ -201,6 +202,11 @@ function toLineKey(lineName) {
   return "line_" + (base || "unknown");
 }
 
+function toSeriesKey(prefix, label) {
+  var base = String(label || "unknown").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  return prefix + "_" + (base || "unknown");
+}
+
 function lineColor(index) {
   var palette = [
     "rgb(var(--accent))",
@@ -235,6 +241,7 @@ export default function OperationsView({ productionSegments }) {
   const [saving, setSaving] = useState(false);
   const [showEntryModal, setShowEntryModal] = useState(false);
   const [showRecentLaborInputs, setShowRecentLaborInputs] = useState(false);
+  const [skuMixMode, setSkuMixMode] = useState("type");
 
   const [entry, setEntry] = useState({
     date_et: toIsoDateET(new Date()),
@@ -706,6 +713,71 @@ export default function OperationsView({ productionSegments }) {
     };
   }, []);
 
+  var skuMixByDay = useMemo(function() {
+    var rowsLite = (filteredBreakdown && Array.isArray(filteredBreakdown.rowsLite)) ? filteredBreakdown.rowsLite : [];
+    if (!rowsLite.length) return { rows: [], series: [] };
+
+    var totalsBySeries = {};
+    var byDateSeries = {};
+    rowsLite.forEach(function(r) {
+      var date = String(r.produced_date_et || "");
+      if (!date) return;
+      var item = String(r.item_code || "").trim();
+      var desc = String(r.item_desc || r.description || "");
+      var label = skuMixMode === "item"
+        ? (item || "Unknown")
+        : detectPackType(desc || item, item || "");
+      var key = toSeriesKey(skuMixMode === "item" ? "item" : "type", label);
+      var units = safeNum(r.units_produced);
+
+      totalsBySeries[key] = (totalsBySeries[key] || 0) + units;
+      if (!byDateSeries[date]) byDateSeries[date] = {};
+      byDateSeries[date][key] = (byDateSeries[date][key] || 0) + units;
+    });
+
+    var maxSeries = skuMixMode === "item" ? 8 : 7;
+    var topKeys = Object.keys(totalsBySeries)
+      .sort(function(a, b) { return safeNum(totalsBySeries[b]) - safeNum(totalsBySeries[a]); })
+      .slice(0, maxSeries);
+    var topKeySet = {};
+    topKeys.forEach(function(k) { topKeySet[k] = true; });
+
+    var keyToLabel = {};
+    rowsLite.forEach(function(r) {
+      var item = String(r.item_code || "").trim();
+      var desc = String(r.item_desc || r.description || "");
+      var label = skuMixMode === "item"
+        ? (item || "Unknown")
+        : detectPackType(desc || item, item || "");
+      var key = toSeriesKey(skuMixMode === "item" ? "item" : "type", label);
+      if (!keyToLabel[key]) keyToLabel[key] = label;
+    });
+
+    var series = topKeys.map(function(key, idx) {
+      return { key: key, label: keyToLabel[key] || key, color: lineColor(idx) };
+    });
+
+    var dates = Object.keys(byDateSeries).sort();
+    var chartRows = dates.map(function(date) {
+      var row = { date: date };
+      series.forEach(function(s) {
+        row[s.key] = safeNum(byDateSeries[date] && byDateSeries[date][s.key]);
+      });
+      row.total = series.reduce(function(sum, s) { return sum + safeNum(row[s.key]); }, 0);
+      return row;
+    });
+
+    return { rows: chartRows, series: series };
+  }, [filteredBreakdown, skuMixMode]);
+
+  const skuMixChartConfig = useMemo(function() {
+    var cfg = {};
+    (skuMixByDay.series || []).forEach(function(s) {
+      cfg[s.key] = { label: s.label, color: s.color };
+    });
+    return cfg;
+  }, [skuMixByDay.series]);
+
   var lineOptions = useMemo(function() {
     var set = new Set();
     ["Line 1", "Line 2", "Line 3", "Line 4"].forEach(function(l) { set.add(l); });
@@ -1048,6 +1120,77 @@ export default function OperationsView({ productionSegments }) {
       </div>
 
       <div className="grid gap-3 lg:grid-cols-12">
+        <Card className="lg:col-span-12 px-4 py-4">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <div className="text-sm font-semibold">SKU Mix by Day</div>
+            <div className="flex items-center gap-1.5">
+              <Button size="sm" variant={skuMixMode === "type" ? "active" : "outline"} onClick={function() { setSkuMixMode("type"); }}>
+                SKU Type
+              </Button>
+              <Button size="sm" variant={skuMixMode === "item" ? "active" : "outline"} onClick={function() { setSkuMixMode("item"); }}>
+                Item #
+              </Button>
+            </div>
+          </div>
+          {skuMixByDay.rows.length ? (
+            <ChartContainer config={skuMixChartConfig} className="h-60">
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={skuMixByDay.rows} margin={{ top: 8, right: 8, left: 4, bottom: 8 }}>
+                  <CartesianGrid vertical={false} stroke="rgb(var(--border))" strokeOpacity={0.4} />
+                  <XAxis
+                    dataKey="date"
+                    tickFormatter={function(v) { return String(v || "").slice(5); }}
+                    tickLine={false}
+                    axisLine={false}
+                    minTickGap={16}
+                    tick={{ fill: "rgb(var(--muted))", fontSize: 11 }}
+                  />
+                  <YAxis
+                    width={62}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={function(v) { return Math.round(safeNum(v)).toLocaleString(); }}
+                    tick={{ fill: "rgb(var(--muted))", fontSize: 11 }}
+                  />
+                  <ChartTooltip
+                    cursor={{ fill: "rgb(var(--surface))" }}
+                    content={
+                      <ChartTooltipContent
+                        labelFormatter={function(value) { return value; }}
+                        formatter={function(value) { return Math.round(safeNum(value)); }}
+                      />
+                    }
+                  />
+                  {(skuMixByDay.series || []).map(function(s, idx) {
+                    return (
+                      <Bar
+                        key={s.key}
+                        stackId="skuMix"
+                        dataKey={s.key}
+                        fill={"var(--color-" + s.key + ")"}
+                        radius={idx === 0 ? [4, 4, 0, 0] : [0, 0, 0, 0]}
+                        maxBarSize={30}
+                      />
+                    );
+                  })}
+                </ComposedChart>
+              </ResponsiveContainer>
+            </ChartContainer>
+          ) : (
+            <div className="h-56 w-full self-center text-center text-sm text-[rgb(var(--muted))] leading-[14rem]">No SKU mix data in selected window.</div>
+          )}
+          <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-[rgb(var(--muted))]">
+            {(skuMixByDay.series || []).map(function(s) {
+              return (
+                <span key={s.key} className="inline-flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-sm" style={{ background: s.color }} />
+                  {s.label}
+                </span>
+              );
+            })}
+          </div>
+        </Card>
+
         <Card className="lg:col-span-12 px-4 py-4">
           <div className="mb-2 text-sm font-semibold">Line Performance (Latest Day vs Baseline)</div>
           {lineYieldChartData.length ? (
