@@ -1,5 +1,9 @@
 # PackPulse — Nulogy API Integration
 
+## Planning Docs
+- `/Users/aj/Documents/New project/docs/V1-Roadmap.md`
+- `/Users/aj/Documents/New project/docs/AI-Product-Backlog.md`
+
 ## Fast Local Prototyping
 
 Use this when you want to iterate on UI/UX quickly before pushing to production.
