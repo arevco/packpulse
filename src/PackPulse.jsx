@@ -180,6 +180,14 @@ export default function ProductionReadiness() {
   var woCustomersForUI = woCustomers || [];
   var recommendationsForUI = recommendations || [];
   var productionSegmentsForUI = productionSegments || { shiftRows: [], jobRows: [] };
+  var toNumSafe = function(v) {
+    var n = Number(v || 0);
+    return Number.isFinite(n) ? n : 0;
+  };
+  var isClosedStatus = function(status) {
+    var s = String(status || "").toLowerCase();
+    return s.indexOf("close") !== -1 || s.indexOf("complete") !== -1 || s.indexOf("cancel") !== -1 || s.indexOf("done") !== -1;
+  };
   var todayEt = (function() {
     var parts = {};
     new Intl.DateTimeFormat("en-US", { timeZone:"America/New_York", year:"numeric", month:"2-digit", day:"2-digit" })
@@ -253,11 +261,63 @@ export default function ProductionReadiness() {
     lastWeekShift1Cases: sumShift(lastWeekRows, "shift 1"),
     lastWeekShift2Cases: sumShift(lastWeekRows, "shift 2"),
   };
+  var marchMonth = (todayEt || "").slice(0, 4) + "-03";
+  var marchWOs = (analysisForUI.results || []).filter(function(w) {
+    var due = String(w && w.dueDate || "").slice(0, 7);
+    return due === marchMonth && !isClosedStatus(w && w.status);
+  });
+  var marchRemainingUnits = marchWOs.reduce(function(sum, w) {
+    var rem = toNumSafe(w && w.unitsRemaining);
+    if (!(rem > 0)) {
+      var qty = toNumSafe(w && w.qtyToProduce);
+      var prod = toNumSafe(w && w.unitsProduced);
+      rem = Math.max(0, qty - prod);
+    }
+    return sum + rem;
+  }, 0);
+  var businessDaysInMarch = (function() {
+    if (!marchMonth) return 0;
+    var y = Number(marchMonth.slice(0, 4));
+    var m = Number(marchMonth.slice(5, 7));
+    if (!y || !m) return 0;
+    var d = new Date(y, m - 1, 1);
+    var c = 0;
+    while (d.getMonth() === m - 1) {
+      var dow = d.getDay();
+      if (dow !== 0 && dow !== 6) c += 1;
+      d.setDate(d.getDate() + 1);
+    }
+    return c;
+  })();
+  var businessDaysRemainingInMarch = (function() {
+    if (!marchMonth || !todayEt) return 0;
+    var start = new Date(todayEt + "T00:00:00");
+    var y = Number(marchMonth.slice(0, 4));
+    var m = Number(marchMonth.slice(5, 7));
+    var end = new Date(y, m, 0);
+    if (isNaN(start) || isNaN(end) || start > end) return 0;
+    var c = 0;
+    var d = new Date(start);
+    while (d <= end) {
+      var dow = d.getDay();
+      if (dow !== 0 && dow !== 6) c += 1;
+      d.setDate(d.getDate() + 1);
+    }
+    return c;
+  })();
+  askAiMetrics.marchMonth = marchMonth;
+  askAiMetrics.marchWorkOrders = marchWOs.length;
+  askAiMetrics.marchRemainingUnits = marchRemainingUnits;
+  askAiMetrics.marchBusinessDays = businessDaysInMarch;
+  askAiMetrics.marchBusinessDaysRemaining = businessDaysRemainingInMarch;
+  askAiMetrics.marchDailyTargetFullMonth = businessDaysInMarch ? Math.ceil(marchRemainingUnits / businessDaysInMarch) : 0;
+  askAiMetrics.marchDailyTargetRemaining = businessDaysRemainingInMarch ? Math.ceil(marchRemainingUnits / businessDaysRemainingInMarch) : 0;
   var askAiContextLines = [
     "Active view: " + (activeView || "overview"),
     "Work Orders: " + summaryForUI.total + " | Ready: " + summaryForUI.ready + " | Blocked: " + summaryForUI.blocked,
     "Supply risk items: " + criticalItemsForUI.length,
     "Fresh data: " + freshCount + "/" + dataSourceStatus.length + " | Produced today: " + productionTodayTotal,
+    "March due remaining: " + marchRemainingUnits + " over " + businessDaysRemainingInMarch + " business days",
   ];
   var syncProgress = (() => {
     var reportStates = nulogySyncState && nulogySyncState.reportStates ? nulogySyncState.reportStates : null;

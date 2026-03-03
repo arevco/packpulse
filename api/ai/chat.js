@@ -41,6 +41,15 @@ function isChartSummaryQuestion(prompt) {
   );
 }
 
+function isMarchYieldQuestion(prompt) {
+  var q = toText(prompt).toLowerCase();
+  if (!q) return false;
+  var mentionsYield = q.includes("daily production yield") || q.includes("daily yield") || q.includes("cases per day") || q.includes("daily production");
+  var mentionsMarch = q.includes("march");
+  var mentionsTarget = q.includes("hit") || q.includes("necessary") || q.includes("need") || q.includes("target");
+  return mentionsYield && mentionsMarch && mentionsTarget;
+}
+
 async function loadSupabaseAiContext() {
   var supabase = getSupabaseAdmin();
 
@@ -218,6 +227,29 @@ export default async function handler(req, res) {
           "Low day: " + String(worst.date || "--") + " (" + toNum(worst.units).toLocaleString() + "). " +
           "Period trend: " + (trend >= 0 ? "+" : "") + trend + "%. " +
           "Top lines: " + topLineText + ".",
+        model: "deterministic",
+      });
+    }
+    if (isMarchYieldQuestion(prompt)) {
+      var marchMonth = toText(metrics.marchMonth);
+      var marchRemaining = toNum(metrics.marchRemainingUnits);
+      var marchWOs = toNum(metrics.marchWorkOrders);
+      var daysRemaining = toNum(metrics.marchBusinessDaysRemaining);
+      var daysFull = toNum(metrics.marchBusinessDays);
+      var targetRemain = toNum(metrics.marchDailyTargetRemaining);
+      var targetFull = toNum(metrics.marchDailyTargetFullMonth);
+      if (!(marchRemaining > 0) || !(daysFull > 0)) {
+        return res.status(200).json({
+          answer: "I can’t calculate March daily target yet because March due-volume metrics are not available in current context.",
+          model: "deterministic",
+        });
+      }
+      return res.status(200).json({
+        answer:
+          "March target (" + (marchMonth || "March") + "): " + marchRemaining.toLocaleString() +
+          " remaining cases across " + marchWOs.toLocaleString() + " active WOs. " +
+          "Required daily yield is " + targetFull.toLocaleString() + " cases/day over all March business days (" + daysFull + "). " +
+          "From today forward, required pace is " + targetRemain.toLocaleString() + " cases/day over " + daysRemaining + " remaining business days.",
         model: "deterministic",
       });
     }
