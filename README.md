@@ -3,6 +3,13 @@
 ## Planning Docs
 - `/Users/aj/Documents/New project/docs/V1-Roadmap.md`
 - `/Users/aj/Documents/New project/docs/AI-Product-Backlog.md`
+- `/Users/aj/Documents/New project/docs/Architecture.md`
+- `/Users/aj/Documents/New project/docs/API-Contracts.md`
+- `/Users/aj/Documents/New project/docs/Data-Dictionary.md`
+- `/Users/aj/Documents/New project/docs/AI-Intent-Routing.md`
+- `/Users/aj/Documents/New project/docs/Supabase-Migrations.md`
+- `/Users/aj/Documents/New project/docs/Troubleshooting.md`
+- `/Users/aj/Documents/New project/AGENTS.md`
 
 ## Fast Local Prototyping
 
