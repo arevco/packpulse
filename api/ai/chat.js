@@ -30,6 +30,21 @@ function isLastWeekSummaryQuestion(prompt) {
   return hasLastWeek && hasProd;
 }
 
+function wantsDetailedBreakdown(prompt) {
+  var q = toText(prompt).toLowerCase();
+  if (!q) return false;
+  return (
+    q.includes("include") ||
+    q.includes("breakdown") ||
+    q.includes("reasoning") ||
+    q.includes("why") ||
+    q.includes("sku") ||
+    q.includes("yield") ||
+    q.includes("utilization") ||
+    q.includes("machine")
+  );
+}
+
 function isChartSummaryQuestion(prompt) {
   var q = toText(prompt).toLowerCase();
   if (!q) return false;
@@ -82,6 +97,7 @@ async function loadSupabaseAiContext() {
 
   var byDay = {};
   var lineTotals = {};
+  var skuTotals = {};
   productionRows.forEach(function(r) {
     var date = toText(r.produced_date_et);
     var units = toNum(r.units_produced);
@@ -89,6 +105,8 @@ async function loadSupabaseAiContext() {
     byDay[date] = (byDay[date] || 0) + units;
     var line = toText(r.line_name || "Unassigned");
     lineTotals[line] = (lineTotals[line] || 0) + units;
+    var sku = toText(r.item_code || "Unknown");
+    skuTotals[sku] = (skuTotals[sku] || 0) + units;
   });
   var dayPairs = Object.keys(byDay).sort().map(function(d) { return { date: d, units: byDay[d] }; });
   var latestProdDate = dayPairs.length ? dayPairs[dayPairs.length - 1].date : "";
@@ -98,6 +116,33 @@ async function loadSupabaseAiContext() {
     .map(function(line) { return { line: line, units: lineTotals[line] }; })
     .sort(function(a, b) { return b.units - a.units; })
     .slice(0, 5);
+  var skuTop = Object.keys(skuTotals)
+    .map(function(sku) { return { sku: sku, units: skuTotals[sku] }; })
+    .sort(function(a, b) { return b.units - a.units; })
+    .slice(0, 8);
+
+  function rangeTotals(start, end) {
+    if (!start || !end) return { totalCases: 0, byLineTop: [], bySkuTop: [] };
+    var rangeRows = productionRows.filter(function(r) {
+      var d = toText(r.produced_date_et);
+      return d && d >= start && d <= end;
+    });
+    var totalCases = 0;
+    var lineMap = {};
+    var skuMap = {};
+    rangeRows.forEach(function(r) {
+      var u = toNum(r.units_produced);
+      if (!(u > 0)) return;
+      totalCases += u;
+      var ln = toText(r.line_name || "Unassigned");
+      var sk = toText(r.item_code || "Unknown");
+      lineMap[ln] = (lineMap[ln] || 0) + u;
+      skuMap[sk] = (skuMap[sk] || 0) + u;
+    });
+    var byLineTop = Object.keys(lineMap).map(function(k) { return { line: k, units: lineMap[k] }; }).sort(function(a, b) { return b.units - a.units; }).slice(0, 5);
+    var bySkuTop = Object.keys(skuMap).map(function(k) { return { sku: k, units: skuMap[k] }; }).sort(function(a, b) { return b.units - a.units; }).slice(0, 8);
+    return { totalCases: totalCases, byLineTop: byLineTop, bySkuTop: bySkuTop };
+  }
 
   var latestLaborDate = "";
   var laborByDate = {};
@@ -120,6 +165,8 @@ async function loadSupabaseAiContext() {
       latestDateUnits: latestProdUnits,
       byDayLast7: last7,
       topLines: lineTop,
+      topSkus: skuTop,
+      range: rangeTotals,
     },
     labor: {
       totalRows: laborRows.length,
@@ -175,7 +222,7 @@ export default async function handler(req, res) {
         model: "deterministic",
       });
     }
-    if (isLastWeekSummaryQuestion(prompt)) {
+    if (isLastWeekSummaryQuestion(prompt) && !wantsDetailedBreakdown(prompt)) {
       var lwTotal = toNum(metrics.lastWeekCases);
       var lwS1 = toNum(metrics.lastWeekShift1Cases);
       var lwS2 = toNum(metrics.lastWeekShift2Cases);
@@ -254,12 +301,33 @@ export default async function handler(req, res) {
       });
     }
 
+    var lastWeekRange = {
+      start: toText(metrics.lastWeekStartEt),
+      end: toText(metrics.lastWeekEndEt),
+    };
+    var thisWeekRange = {
+      start: toText(metrics.thisWeekStartEt),
+      end: toText(metrics.thisWeekEndEt),
+    };
+    var lastWeekAgg = (supabaseContext && supabaseContext.production && typeof supabaseContext.production.range === "function")
+      ? supabaseContext.production.range(lastWeekRange.start, lastWeekRange.end)
+      : { totalCases: 0, byLineTop: [], bySkuTop: [] };
+    var thisWeekAgg = (supabaseContext && supabaseContext.production && typeof supabaseContext.production.range === "function")
+      ? supabaseContext.production.range(thisWeekRange.start, thisWeekRange.end)
+      : { totalCases: 0, byLineTop: [], bySkuTop: [] };
+
+    if (supabaseContext && supabaseContext.production) {
+      // remove function before serialization
+      delete supabaseContext.production.range;
+    }
+
     var system = [
       "You are PackPulse AI copilot for factory operations.",
       "Be concise, practical, and action-oriented.",
       "Prioritize: what happened, why it matters, and what to do next.",
       "Use provided numeric context directly; do not invent metrics.",
       "If the user asks for a number and it is present in context, answer with the exact value first.",
+      "For summary questions, include: total, trend, top SKU mix, top lines, and concrete actions.",
       "If data is missing or uncertain, say so clearly.",
       "Never claim actions were completed unless explicitly provided in context."
     ].join(" ");
@@ -273,6 +341,8 @@ export default async function handler(req, res) {
         "- Active view: " + activeView + "\n" +
         (contextLines.length ? "- Dashboard context:\n  - " + contextLines.join("\n  - ") + "\n" : "") +
         "- Metrics JSON: " + JSON.stringify(metrics) + "\n" +
+        "- Last week aggregate JSON: " + JSON.stringify(lastWeekAgg) + "\n" +
+        "- This week aggregate JSON: " + JSON.stringify(thisWeekAgg) + "\n" +
         "- Supabase context JSON: " + JSON.stringify(supabaseContext || {})
     });
 
