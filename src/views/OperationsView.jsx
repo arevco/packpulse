@@ -3,6 +3,7 @@ import { useTheme } from "../theme";
 import { Card } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
+import { DatePicker } from "../components/ui/date-picker";
 import TableShell from "../components/ui/table-shell";
 import ProductionView from "./ProductionView";
 import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, XAxis, YAxis } from "recharts";
@@ -769,9 +770,9 @@ export default function OperationsView({ productionSegments }) {
           })}
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          <Input type="date" value={range.start} onChange={function(e) { setCustomStart(e.target.value); }} className="h-10 w-[150px]" />
+          <DatePicker value={range.start} onChange={setCustomStart} />
           <span className="text-xs text-[rgb(var(--muted))]">to</span>
-          <Input type="date" value={range.end} onChange={function(e) { setCustomEnd(e.target.value); }} className="h-10 w-[150px]" />
+          <DatePicker value={range.end} onChange={setCustomEnd} />
           <span className="text-xs text-[rgb(var(--muted))]">{windowPreset === "custom" ? "Custom range" : (range.start + " to " + range.end)}</span>
         </div>
         <Button variant="outline" size="sm" onClick={loadAll} disabled={loading || saving}>Refresh</Button>
@@ -1145,7 +1146,7 @@ export default function OperationsView({ productionSegments }) {
             </div>
 
             <div className="grid grid-cols-1 gap-2 md:grid-cols-4">
-              <Input type="date" value={entry.date_et} onChange={function(e){ setEntry(Object.assign({}, entry, { date_et: e.target.value })); }} />
+              <DatePicker value={entry.date_et} onChange={function(nextDate){ setEntry(Object.assign({}, entry, { date_et: nextDate })); }} className="w-full" />
               <select value={entry.shift_label} onChange={function(e){ setEntry(Object.assign({}, entry, { shift_label: e.target.value })); }} className="h-10 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm">
                 <option>Shift 1 (7a-3p)</option>
                 <option>Shift 2 (3p-11p)</option>
