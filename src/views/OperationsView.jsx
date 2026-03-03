@@ -572,7 +572,16 @@ export default function OperationsView({ productionSegments }) {
           s2Pct: Math.round((totalPct * s2PctOfTotal) / 100),
           unPct: Math.round((totalPct * unPctOfTotal) / 100),
           plan: baselineDaily,
-          planPct: Math.round((baselineDaily / max) * 100)
+          planPct: Math.round((baselineDaily / max) * 100),
+          tooltip: [
+            r.date || "--",
+            "Shift 1: " + Math.round(r.s1).toLocaleString(),
+            "Shift 2: " + Math.round(r.s2).toLocaleString(),
+            "Unassigned: " + Math.round(r.un).toLocaleString(),
+            "Total: " + Math.round(r.total).toLocaleString(),
+            "Baseline: " + baselineDaily.toLocaleString(),
+            "Variance: " + ((r.total - baselineDaily) >= 0 ? "+" : "") + (r.total - baselineDaily).toLocaleString()
+          ].join("\n")
         };
       }),
       max: max
@@ -595,13 +604,20 @@ export default function OperationsView({ productionSegments }) {
     return {
       rows: rows.map(function(r) {
         var actual = safeNum(r.units);
+        var variance = actual - baselineDaily;
         return {
           date: String(r.date || ""),
           actual: actual,
           plan: baselineDaily,
           actualPct: Math.round((actual / max) * 100),
           planPct: Math.round((baselineDaily / max) * 100),
-          variance: actual - baselineDaily
+          variance: variance,
+          tooltip: [
+            String(r.date || "--"),
+            "Actual: " + actual.toLocaleString(),
+            "Baseline: " + baselineDaily.toLocaleString(),
+            "Variance: " + (variance >= 0 ? "+" : "") + variance.toLocaleString()
+          ].join("\n")
         };
       }),
       max: max
@@ -844,7 +860,7 @@ export default function OperationsView({ productionSegments }) {
           <div className="flex h-52 items-end gap-2 overflow-x-auto">
             {dailyPlanVsActual.rows.map(function(r) {
               return (
-                <div key={r.date} className="flex min-w-[42px] flex-col items-center gap-1">
+                <div key={r.date} className="flex min-w-[42px] flex-col items-center gap-1" title={r.tooltip}>
                   <div className="relative h-36 w-7">
                     <div className="absolute inset-x-0 bottom-0 rounded-t bg-[rgb(var(--accent))]" style={{ height: Math.max(8, Math.round((r.actualPct / 100) * 132)) + "px", opacity: 0.9 }} />
                     <div className="absolute inset-x-0 border-t-2 border-dashed border-[rgb(var(--muted))]" style={{ bottom: Math.max(8, Math.round((r.planPct / 100) * 132)) + "px" }} />
@@ -870,7 +886,7 @@ export default function OperationsView({ productionSegments }) {
           <div className="flex h-52 items-end gap-2 overflow-x-auto">
             {shiftPlanVsActual.rows.map(function(r) {
               return (
-                <div key={r.date} className="flex min-w-[38px] flex-col items-center gap-1">
+                <div key={r.date} className="flex min-w-[38px] flex-col items-center gap-1" title={r.tooltip}>
                   <div className="relative h-36 w-6">
                     <div className="absolute inset-x-0 bottom-0 rounded-t bg-[rgb(var(--muted))/0.3]" style={{ height: Math.max(2, Math.round((r.unPct / 100) * 132)) + "px" }} />
                     <div className="absolute inset-x-0 rounded-t bg-[rgb(var(--accent))/0.7]" style={{ bottom: Math.max(2, Math.round((r.unPct / 100) * 132)) + "px", height: Math.max(2, Math.round((r.s2Pct / 100) * 132)) + "px" }} />
