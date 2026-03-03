@@ -890,8 +890,8 @@ export default function OperationsView({ productionSegments }) {
         </Card>
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-12">
-        <Card className="lg:col-span-12 px-4 py-4">
+      <div className="grid gap-3 lg:grid-cols-2">
+        <Card className="px-4 py-4">
           <div className="mb-2 text-sm font-semibold">Daily Production Yield</div>
           {dailyPlanVsActual.rows.length ? (
             <ChartContainer config={dailyChartConfig} className="h-56">
@@ -942,10 +942,7 @@ export default function OperationsView({ productionSegments }) {
             <span className="inline-flex items-center gap-1"><span className="h-px w-3 border-t-2 border-dashed border-[rgb(var(--muted))]" />Baseline daily plan</span>
           </div>
         </Card>
-      </div>
-
-      <div className="grid gap-3 lg:grid-cols-12">
-        <Card className="lg:col-span-7 px-4 py-4">
+        <Card className="px-4 py-4">
           <div className="mb-2 text-sm font-semibold">Shift Mix by Day</div>
           {shiftPlanVsActual.rows.length ? (
             <ChartContainer config={shiftChartConfig} className="h-56">
@@ -1000,8 +997,10 @@ export default function OperationsView({ productionSegments }) {
             <span className="inline-flex items-center gap-1"><span className="h-px w-3 border-t-2 border-dashed border-[rgb(var(--muted))]" />Baseline daily plan</span>
           </div>
         </Card>
+      </div>
 
-        <Card className="lg:col-span-5 px-4 py-4">
+      <div className="grid gap-3 lg:grid-cols-12">
+        <Card className="lg:col-span-12 px-4 py-4">
           <div className="mb-2 text-sm font-semibold">Line Performance (Latest Day vs Baseline)</div>
           {lineYieldChartData.length ? (
             <ChartContainer config={lineYieldChartConfig} className="mb-3 h-48">
