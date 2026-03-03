@@ -42,6 +42,7 @@ export default function AskAiPanel(props) {
 
   var viewLabel = labelByView[activeView] || "Current View";
   var [draft, setDraft] = useState("");
+  var [sending, setSending] = useState(false);
   var [messages, setMessages] = useState([
     {
       role: "assistant",
@@ -80,18 +81,46 @@ export default function AskAiPanel(props) {
   }, [activeView]);
 
   function sendMessage(text) {
+    if (sending) return;
     var prompt = (text || draft || "").trim();
     if (!prompt) return;
-    setMessages(function(prev) {
-      return prev.concat([{ role: "user", text: prompt }]);
-    });
+    var nextMessages = messages.concat([{ role: "user", text: prompt }]);
+    setMessages(nextMessages);
     setDraft("");
-    var response = buildPrototypeReply(prompt, viewLabel);
-    setTimeout(function() {
-      setMessages(function(prev) {
-        return prev.concat([{ role: "assistant", text: response }]);
+    setSending(true);
+    fetch("/api/ai/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({
+        prompt: prompt,
+        activeView: activeView,
+        contextLines: contextLines,
+        history: nextMessages.slice(-8),
+      }),
+    })
+      .then(async function(r) {
+        var body = await r.json().catch(function() { return {}; });
+        if (!r.ok) {
+          var detail = body && (body.details || body.error) ? (body.details || body.error) : "AI request failed";
+          throw new Error(detail);
+        }
+        var answer = body && body.answer ? String(body.answer) : "";
+        if (!answer) answer = "No AI response returned.";
+        setMessages(function(prev) {
+          return prev.concat([{ role: "assistant", text: answer }]);
+        });
+      })
+      .catch(function() {
+        // Fail safe for prototype mode or missing API key.
+        var fallback = buildPrototypeReply(prompt, viewLabel);
+        setMessages(function(prev) {
+          return prev.concat([{ role: "assistant", text: fallback }]);
+        });
+      })
+      .finally(function() {
+        setSending(false);
       });
-    }, 220);
   }
 
   return (
@@ -171,8 +200,8 @@ export default function AskAiPanel(props) {
                 }}
                 placeholder="Ask about risk, production, or what to run next..."
               />
-              <Button onClick={function() { sendMessage(); }} size="sm">
-                Send
+              <Button onClick={function() { sendMessage(); }} size="sm" disabled={sending}>
+                {sending ? "Sending..." : "Send"}
               </Button>
             </div>
           </div>
