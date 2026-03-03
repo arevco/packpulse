@@ -10,6 +10,7 @@ import { Badge } from "./components/ui/badge";
 import { Progress } from "./components/ui/progress";
 import TabsNav from "./components/ui/tabs-nav";
 import { Card } from "./components/ui/card";
+import AskAiPanel from "./components/AskAiPanel";
 const OverviewView = lazy(() => import("./views/OverviewView"));
 const OperationsView = lazy(() => import("./views/OperationsView"));
 const WorkOrdersView = lazy(() => import("./views/WorkOrdersView"));
@@ -47,6 +48,7 @@ export default function ProductionReadiness() {
   const [userActivityLoading, setUserActivityLoading] = useState(false);
   const [userActivityError, setUserActivityError] = useState("");
   const [userActivityRows, setUserActivityRows] = useState([]);
+  const [showAskAi, setShowAskAi] = useState(false);
 
   var showAutoBootstrap = autoBootstrapEnabled;
 
@@ -178,6 +180,12 @@ export default function ProductionReadiness() {
   var woCustomersForUI = woCustomers || [];
   var recommendationsForUI = recommendations || [];
   var productionSegmentsForUI = productionSegments || { shiftRows: [], jobRows: [] };
+  var askAiContextLines = [
+    "Active view: " + (activeView || "overview"),
+    "Work Orders: " + summaryForUI.total + " | Ready: " + summaryForUI.ready + " | Blocked: " + summaryForUI.blocked,
+    "Supply risk items: " + criticalItemsForUI.length,
+    "Fresh data: " + freshCount + "/" + dataSourceStatus.length,
+  ];
   var syncProgress = (() => {
     var reportStates = nulogySyncState && nulogySyncState.reportStates ? nulogySyncState.reportStates : null;
     var steps = [
@@ -621,6 +629,19 @@ export default function ProductionReadiness() {
 
       </div>
       </main>
+      <Button
+        onClick={() => setShowAskAi(true)}
+        className="fixed bottom-4 right-4 z-[105] shadow-lg"
+        size="sm"
+      >
+        Ask AI
+      </Button>
+      <AskAiPanel
+        open={showAskAi}
+        onClose={() => setShowAskAi(false)}
+        activeView={activeView}
+        contextLines={askAiContextLines}
+      />
     </div>
   );
 }
