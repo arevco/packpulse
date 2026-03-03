@@ -6,6 +6,22 @@ function toText(value) {
   return String(value).trim();
 }
 
+function toNum(value) {
+  var n = Number(value || 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function isTodayCasesQuestion(prompt) {
+  var q = toText(prompt).toLowerCase();
+  if (!q) return false;
+  return (
+    q.includes("how many cases") && q.includes("today") ||
+    q.includes("cases produced today") ||
+    q.includes("today production") ||
+    q.includes("produced today")
+  );
+}
+
 export default async function handler(req, res) {
   withCors(req, res, ["POST", "OPTIONS"]);
   if (req.method === "OPTIONS") return res.status(200).end();
@@ -25,13 +41,31 @@ export default async function handler(req, res) {
     var prompt = toText(body.prompt);
     var activeView = toText(body.activeView || "overview");
     var contextLines = Array.isArray(body.contextLines) ? body.contextLines.map(toText).filter(Boolean).slice(0, 8) : [];
+    var metrics = body.metrics && typeof body.metrics === "object" ? body.metrics : {};
     var history = Array.isArray(body.history) ? body.history.slice(-8) : [];
     if (!prompt) return res.status(400).json({ error: "Prompt is required" });
+
+    // Deterministic answer for high-frequency operational ask.
+    if (isTodayCasesQuestion(prompt)) {
+      var todayCases = toNum(metrics.productionTodayCases);
+      var s1 = toNum(metrics.productionTodayShift1Cases);
+      var s2 = toNum(metrics.productionTodayShift2Cases);
+      var todayEt = toText(metrics.todayEt);
+      return res.status(200).json({
+        answer:
+          "Cases produced today (" + (todayEt || "ET") + "): " + todayCases.toLocaleString() +
+          ". Shift 1: " + s1.toLocaleString() +
+          ", Shift 2: " + s2.toLocaleString() + ".",
+        model: "deterministic",
+      });
+    }
 
     var system = [
       "You are PackPulse AI copilot for factory operations.",
       "Be concise, practical, and action-oriented.",
       "Prioritize: what happened, why it matters, and what to do next.",
+      "Use provided numeric context directly; do not invent metrics.",
+      "If the user asks for a number and it is present in context, answer with the exact value first.",
       "If data is missing or uncertain, say so clearly.",
       "Never claim actions were completed unless explicitly provided in context."
     ].join(" ");
@@ -43,7 +77,8 @@ export default async function handler(req, res) {
         "Context\n" +
         "- User: " + user.email + "\n" +
         "- Active view: " + activeView + "\n" +
-        (contextLines.length ? "- Dashboard context:\n  - " + contextLines.join("\n  - ") + "\n" : "")
+        (contextLines.length ? "- Dashboard context:\n  - " + contextLines.join("\n  - ") + "\n" : "") +
+        "- Metrics JSON: " + JSON.stringify(metrics)
     });
 
     history.forEach(function(msg) {

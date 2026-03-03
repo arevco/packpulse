@@ -31,6 +31,7 @@ export default function AskAiPanel(props) {
   var onClose = props.onClose;
   var activeView = props.activeView || "overview";
   var contextLines = Array.isArray(props.contextLines) ? props.contextLines : [];
+  var metrics = props.metrics && typeof props.metrics === "object" ? props.metrics : {};
   var labelByView = {
     overview: "Overview",
     operations: "Operations",
@@ -95,6 +96,7 @@ export default function AskAiPanel(props) {
         prompt: prompt,
         activeView: activeView,
         contextLines: contextLines,
+        metrics: metrics,
         history: nextMessages.slice(-8),
       }),
     })

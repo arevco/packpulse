@@ -180,11 +180,44 @@ export default function ProductionReadiness() {
   var woCustomersForUI = woCustomers || [];
   var recommendationsForUI = recommendations || [];
   var productionSegmentsForUI = productionSegments || { shiftRows: [], jobRows: [] };
+  var todayEt = (function() {
+    var parts = {};
+    new Intl.DateTimeFormat("en-US", { timeZone:"America/New_York", year:"numeric", month:"2-digit", day:"2-digit" })
+      .formatToParts(new Date())
+      .forEach(function(p) { if (p.type !== "literal") parts[p.type] = p.value; });
+    return parts.year && parts.month && parts.day ? (parts.year + "-" + parts.month + "-" + parts.day) : "";
+  })();
+  var productionTodayRows = (productionSegmentsForUI.shiftRows || []).filter(function(r) { return (r && r.date) === todayEt; });
+  var productionTodayTotal = productionTodayRows.reduce(function(sum, r) { return sum + (Number(r && r.unitsProduced || 0) || 0); }, 0);
+  var productionTodayS1 = productionTodayRows
+    .filter(function(r) { return String(r && r.shift || "").toLowerCase().indexOf("shift 1") !== -1; })
+    .reduce(function(sum, r) { return sum + (Number(r && r.unitsProduced || 0) || 0); }, 0);
+  var productionTodayS2 = productionTodayRows
+    .filter(function(r) { return String(r && r.shift || "").toLowerCase().indexOf("shift 2") !== -1; })
+    .reduce(function(sum, r) { return sum + (Number(r && r.unitsProduced || 0) || 0); }, 0);
+  var productionLatestDate = (productionSegmentsForUI.shiftRows || []).length ? productionSegmentsForUI.shiftRows[0].date : "";
+  var productionLatestTotal = (productionSegmentsForUI.shiftRows || [])
+    .filter(function(r) { return (r && r.date) === productionLatestDate; })
+    .reduce(function(sum, r) { return sum + (Number(r && r.unitsProduced || 0) || 0); }, 0);
+  var askAiMetrics = {
+    todayEt: todayEt,
+    workOrdersTotal: summaryForUI.total,
+    workOrdersReady: summaryForUI.ready,
+    workOrdersBlocked: summaryForUI.blocked,
+    supplyRiskItems: criticalItemsForUI.length,
+    freshData: freshCount,
+    freshDataTotal: dataSourceStatus.length,
+    productionTodayCases: productionTodayTotal,
+    productionTodayShift1Cases: productionTodayS1,
+    productionTodayShift2Cases: productionTodayS2,
+    productionLatestDate: productionLatestDate,
+    productionLatestCases: productionLatestTotal,
+  };
   var askAiContextLines = [
     "Active view: " + (activeView || "overview"),
     "Work Orders: " + summaryForUI.total + " | Ready: " + summaryForUI.ready + " | Blocked: " + summaryForUI.blocked,
     "Supply risk items: " + criticalItemsForUI.length,
-    "Fresh data: " + freshCount + "/" + dataSourceStatus.length,
+    "Fresh data: " + freshCount + "/" + dataSourceStatus.length + " | Produced today: " + productionTodayTotal,
   ];
   var syncProgress = (() => {
     var reportStates = nulogySyncState && nulogySyncState.reportStates ? nulogySyncState.reportStates : null;
@@ -641,6 +674,7 @@ export default function ProductionReadiness() {
         onClose={() => setShowAskAi(false)}
         activeView={activeView}
         contextLines={askAiContextLines}
+        metrics={askAiMetrics}
       />
     </div>
   );
