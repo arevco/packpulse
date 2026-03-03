@@ -1,6 +1,19 @@
 import Sentry from "../_sentry.js";
 import { CACHE_SITE_ID, getAuthenticatedUser, getSupabaseAdmin, toDateEt, toNum, withCors } from "./_common.js";
 
+function pickFieldLoose(row, keys) {
+  if (!row || typeof row !== "object") return "";
+  var rowKeys = Object.keys(row);
+  for (var i = 0; i < keys.length; i++) {
+    var target = String(keys[i]).toLowerCase();
+    for (var j = 0; j < rowKeys.length; j++) {
+      var rk = rowKeys[j];
+      if (String(rk).toLowerCase() === target) return row[rk];
+    }
+  }
+  return "";
+}
+
 async function fetchAllProductionRows(supabase, siteId, fromDate) {
   var pageSize = 1000;
   var from = 0;
@@ -9,7 +22,7 @@ async function fetchAllProductionRows(supabase, siteId, fromDate) {
     var to = from + pageSize - 1;
     var q = await supabase
       .from("production_events")
-      .select("event_key,produced_date_et,shift_label,item_code,units_produced,line,work_order_code")
+      .select("event_key,produced_date_et,shift_label,item_code,units_produced,line,work_order_code,raw")
       .eq("site_id", siteId)
       .gte("produced_date_et", fromDate)
       .order("produced_date_et", { ascending: false })
@@ -72,10 +85,12 @@ export default async function handler(req, res) {
       fromDate: fromDate,
       totalRows: rows.length,
       rowsLite: rows.map(function(r) {
+        var itemDesc = pickFieldLoose(r.raw, ["item_description", "Item Description", "Description", "description"]);
         return {
           produced_date_et: r.produced_date_et || null,
           shift_label: r.shift_label || null,
           item_code: r.item_code || null,
+          item_desc: itemDesc ? String(itemDesc) : null,
           units_produced: toNum(r.units_produced),
           line: r.line || null,
           work_order_code: r.work_order_code || null
