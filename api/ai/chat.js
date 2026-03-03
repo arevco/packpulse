@@ -39,6 +39,43 @@ function isCasesProducedQuestion(prompt) {
   return q.includes("how many cases") || q.includes("cases produced") || q.includes("production cases");
 }
 
+function isAverageDailyQuestion(prompt) {
+  var q = toText(prompt).toLowerCase();
+  if (!q) return false;
+  return (q.includes("average") || q.includes("avg")) && (q.includes("daily") || q.includes("per day")) && (q.includes("production") || q.includes("yield") || q.includes("cases"));
+}
+
+function isTopLineQuestion(prompt) {
+  var q = toText(prompt).toLowerCase();
+  if (!q) return false;
+  return q.includes("top line") || q.includes("best line") || q.includes("which line produced") || q.includes("line produced most");
+}
+
+function isTopSkuQuestion(prompt) {
+  var q = toText(prompt).toLowerCase();
+  if (!q) return false;
+  return q.includes("top sku") || q.includes("top skus") || q.includes("top item") || q.includes("sku mix") || q.includes("item mix");
+}
+
+function isShiftSplitQuestion(prompt) {
+  var q = toText(prompt).toLowerCase();
+  if (!q) return false;
+  return q.includes("shift split") || q.includes("shift breakdown") || q.includes("which shift") || q.includes("shift 1 vs shift 2");
+}
+
+function isPeriodComparisonQuestion(prompt) {
+  var q = toText(prompt).toLowerCase();
+  if (!q) return false;
+  return (
+    q.includes("compare this week vs last week") ||
+    q.includes("this week vs last week") ||
+    q.includes("week over week") ||
+    q.includes("compare this month vs last month") ||
+    q.includes("this month vs last month") ||
+    q.includes("month over month")
+  );
+}
+
 function detectPeriodLabel(prompt) {
   var q = toText(prompt).toLowerCase();
   if (!q) return "";
@@ -94,6 +131,46 @@ function endOfMonthIso(dateIso) {
   var d = new Date(dateIso + "T00:00:00");
   d.setMonth(d.getMonth() + 1, 0);
   return d.toISOString().slice(0, 10);
+}
+
+function resolvePeriodRange(periodLabel, anchorDateIso) {
+  var anchor = anchorDateIso || ymdInEtFromDate(new Date());
+  var start = "";
+  var end = "";
+  var label = "";
+  if (periodLabel === "today") {
+    start = anchor;
+    end = anchor;
+    label = "today";
+  } else if (periodLabel === "yesterday") {
+    start = shiftIsoDate(anchor, -1);
+    end = start;
+    label = "yesterday";
+  } else if (periodLabel === "this_week") {
+    start = startOfWeekIso(anchor);
+    end = anchor;
+    label = "this week";
+  } else if (periodLabel === "last_week") {
+    var thisWeekStart = startOfWeekIso(anchor);
+    start = shiftIsoDate(thisWeekStart, -7);
+    end = shiftIsoDate(thisWeekStart, -1);
+    label = "last week";
+  } else if (periodLabel === "this_month") {
+    start = startOfMonthIso(anchor);
+    end = anchor;
+    label = "this month";
+  } else if (periodLabel === "last_month") {
+    var thisMonthStart = startOfMonthIso(anchor);
+    var lastMonthAnchor = shiftIsoDate(thisMonthStart, -1);
+    start = startOfMonthIso(lastMonthAnchor);
+    end = endOfMonthIso(lastMonthAnchor);
+    label = "last month";
+  } else {
+    start = shiftIsoDate(anchor, -6);
+    end = anchor;
+    label = "last 7 days";
+  }
+  return { start: start, end: end, label: label };
 }
 
 function isLastWeekSummaryQuestion(prompt) {
@@ -252,7 +329,7 @@ async function loadSupabaseAiContext() {
     .slice(0, 8);
 
   function rangeTotals(start, end) {
-    if (!start || !end) return { totalCases: 0, byLineTop: [], bySkuTop: [] };
+    if (!start || !end) return { totalCases: 0, byLineTop: [], bySkuTop: [], byShift: [], productionDays: 0, rows: 0 };
     var rangeRows = productionRows.filter(function(r) {
       var d = toText(r.produced_date_et);
       return d && d >= start && d <= end;
@@ -260,18 +337,25 @@ async function loadSupabaseAiContext() {
     var totalCases = 0;
     var lineMap = {};
     var skuMap = {};
+    var shiftMap = {};
+    var dayMap = {};
     rangeRows.forEach(function(r) {
       var u = toNum(r.units_produced);
       if (!(u > 0)) return;
       totalCases += u;
       var ln = toText(r.line_name || "Unassigned");
       var sk = toText(r.item_code || "Unknown");
+      var sh = toText(r.shift_label || "Unassigned");
+      var dy = toText(r.produced_date_et);
       lineMap[ln] = (lineMap[ln] || 0) + u;
       skuMap[sk] = (skuMap[sk] || 0) + u;
+      shiftMap[sh] = (shiftMap[sh] || 0) + u;
+      if (dy) dayMap[dy] = true;
     });
     var byLineTop = Object.keys(lineMap).map(function(k) { return { line: k, units: lineMap[k] }; }).sort(function(a, b) { return b.units - a.units; }).slice(0, 5);
     var bySkuTop = Object.keys(skuMap).map(function(k) { return { sku: k, units: skuMap[k] }; }).sort(function(a, b) { return b.units - a.units; }).slice(0, 8);
-    return { totalCases: totalCases, byLineTop: byLineTop, bySkuTop: bySkuTop };
+    var byShift = Object.keys(shiftMap).map(function(k) { return { shift: k, units: shiftMap[k] }; }).sort(function(a, b) { return b.units - a.units; });
+    return { totalCases: totalCases, byLineTop: byLineTop, bySkuTop: bySkuTop, byShift: byShift, productionDays: Object.keys(dayMap).length, rows: rangeRows.length };
   }
 
   var latestLaborDate = "";
@@ -417,6 +501,93 @@ export default async function handler(req, res) {
         model: "deterministic",
       });
     }
+    if (
+      (isAverageDailyQuestion(prompt) || isTopLineQuestion(prompt) || isTopSkuQuestion(prompt) || isShiftSplitQuestion(prompt)) &&
+      supabaseContext &&
+      supabaseContext.production &&
+      typeof supabaseContext.production.range === "function"
+    ) {
+      var anchorDate = toText(metrics.todayEt) || ymdInEtFromDate(new Date());
+      var periodForOps = resolvePeriodRange(detectPeriodLabel(prompt), anchorDate);
+      var opsAgg = supabaseContext.production.range(periodForOps.start, periodForOps.end);
+      if (!(toNum(opsAgg && opsAgg.totalCases) > 0)) {
+        return res.status(200).json({
+          answer: "No production rows found for " + periodForOps.label + " (" + periodForOps.start + " to " + periodForOps.end + ").",
+          model: "deterministic",
+        });
+      }
+
+      if (isAverageDailyQuestion(prompt)) {
+        var days = Math.max(1, toNum(opsAgg.productionDays));
+        var avgDaily = Math.round(toNum(opsAgg.totalCases) / days);
+        return res.status(200).json({
+          answer:
+            "Average daily production for " + periodForOps.label + " (" + periodForOps.start + " to " + periodForOps.end + "): " +
+            avgDaily.toLocaleString() + " cases/day across " + days + " production day" + (days === 1 ? "" : "s") + ".",
+          model: "deterministic",
+        });
+      }
+      if (isTopLineQuestion(prompt)) {
+        var topLine = opsAgg.byLineTop && opsAgg.byLineTop.length ? opsAgg.byLineTop[0] : null;
+        if (!topLine) {
+          return res.status(200).json({ answer: "No line totals found for " + periodForOps.label + ".", model: "deterministic" });
+        }
+        return res.status(200).json({
+          answer:
+            "Top line for " + periodForOps.label + " (" + periodForOps.start + " to " + periodForOps.end + "): " +
+            String(topLine.line || "--") + " with " + toNum(topLine.units).toLocaleString() + " cases.",
+          model: "deterministic",
+        });
+      }
+      if (isTopSkuQuestion(prompt)) {
+        var skuList = (opsAgg.bySkuTop || []).slice(0, 5).map(function(x, idx) {
+          return (idx + 1) + ". " + String(x.sku || "--") + " - " + toNum(x.units).toLocaleString() + " cases";
+        });
+        return res.status(200).json({
+          answer:
+            "Top SKU mix for " + periodForOps.label + " (" + periodForOps.start + " to " + periodForOps.end + "):\n" +
+            (skuList.length ? skuList.join("\n") : "No SKU totals found."),
+          model: "deterministic",
+        });
+      }
+      if (isShiftSplitQuestion(prompt)) {
+        var shiftList = (opsAgg.byShift || []).map(function(x) {
+          return String(x.shift || "Unassigned") + ": " + toNum(x.units).toLocaleString();
+        });
+        var topShift = opsAgg.byShift && opsAgg.byShift.length ? opsAgg.byShift[0] : null;
+        return res.status(200).json({
+          answer:
+            "Shift split for " + periodForOps.label + " (" + periodForOps.start + " to " + periodForOps.end + "): " +
+            (shiftList.length ? shiftList.join(" | ") : "No shift totals found.") +
+            (topShift ? ". Highest output: " + String(topShift.shift || "--") + "." : ""),
+          model: "deterministic",
+        });
+      }
+    }
+    if (
+      isPeriodComparisonQuestion(prompt) &&
+      supabaseContext &&
+      supabaseContext.production &&
+      typeof supabaseContext.production.range === "function"
+    ) {
+      var anchorCmp = toText(metrics.todayEt) || ymdInEtFromDate(new Date());
+      var qLower = toText(prompt).toLowerCase();
+      var periodA = qLower.includes("month") ? resolvePeriodRange("this_month", anchorCmp) : resolvePeriodRange("this_week", anchorCmp);
+      var periodB = qLower.includes("month") ? resolvePeriodRange("last_month", anchorCmp) : resolvePeriodRange("last_week", anchorCmp);
+      var aggA = supabaseContext.production.range(periodA.start, periodA.end);
+      var aggB = supabaseContext.production.range(periodB.start, periodB.end);
+      var aTotal = toNum(aggA && aggA.totalCases);
+      var bTotal = toNum(aggB && aggB.totalCases);
+      var pct = bTotal ? Math.round(((aTotal - bTotal) / bTotal) * 100) : 0;
+      return res.status(200).json({
+        answer:
+          periodA.label + ": " + aTotal.toLocaleString() + " cases (" + periodA.start + " to " + periodA.end + "). " +
+          periodB.label + ": " + bTotal.toLocaleString() + " cases (" + periodB.start + " to " + periodB.end + "). " +
+          "Change: " + (pct >= 0 ? "+" : "") + pct + "%.",
+        model: "deterministic",
+      });
+    }
+
     var periodLabel = detectPeriodLabel(prompt);
     if (
       isCasesProducedQuestion(prompt) &&
@@ -428,34 +599,12 @@ export default async function handler(req, res) {
       typeof supabaseContext.production.range === "function"
     ) {
       var anchor = toText(metrics.todayEt) || ymdInEtFromDate(new Date());
-      var start = "";
-      var end = "";
-      var label = "";
-      if (periodLabel === "this_week") {
-        start = startOfWeekIso(anchor);
-        end = anchor;
-        label = "this week";
-      } else if (periodLabel === "last_week") {
-        var thisWeekStart = startOfWeekIso(anchor);
-        start = shiftIsoDate(thisWeekStart, -7);
-        end = shiftIsoDate(thisWeekStart, -1);
-        label = "last week";
-      } else if (periodLabel === "this_month") {
-        start = startOfMonthIso(anchor);
-        end = anchor;
-        label = "this month";
-      } else if (periodLabel === "last_month") {
-        var thisMonthStart = startOfMonthIso(anchor);
-        var lastMonthAnchor = shiftIsoDate(thisMonthStart, -1);
-        start = startOfMonthIso(lastMonthAnchor);
-        end = endOfMonthIso(lastMonthAnchor);
-        label = "last month";
-      }
-      var agg = supabaseContext.production.range(start, end);
+      var periodCases = resolvePeriodRange(periodLabel, anchor);
+      var agg = supabaseContext.production.range(periodCases.start, periodCases.end);
       var totalCases = toNum(agg && agg.totalCases);
       return res.status(200).json({
         answer:
-          "Cases produced " + label + " (" + (start || "--") + " to " + (end || "--") + "): " +
+          "Cases produced " + periodCases.label + " (" + (periodCases.start || "--") + " to " + (periodCases.end || "--") + "): " +
           totalCases.toLocaleString() + ".",
         model: "deterministic",
       });
