@@ -532,39 +532,52 @@ export default function OperationsView({ productionSegments }) {
   }, [filteredTrends, metrics, filteredBreakdown.byLine, trends]);
 
   var shiftPlanVsActual = useMemo(function() {
-    var rows = (metrics.byShift || []).slice();
-    var planByShift = {};
+    var rows = (filteredTrends.byShift || []).slice();
+    var byDate = {};
     rows.forEach(function(r) {
-      var k = String(r.shift || "Unassigned");
-      if (!planByShift[k]) planByShift[k] = { total: 0, count: 0 };
-      planByShift[k].total += safeNum(r.units);
-      planByShift[k].count += 1;
+      var date = String(r.date || "");
+      if (!date) return;
+      var shift = String(r.shift || "Unassigned");
+      if (!byDate[date]) byDate[date] = { date: date, s1: 0, s2: 0, un: 0, total: 0 };
+      var units = safeNum(r.units);
+      if (shift.indexOf("Shift 1") !== -1) byDate[date].s1 += units;
+      else if (shift.indexOf("Shift 2") !== -1) byDate[date].s2 += units;
+      else byDate[date].un += units;
+      byDate[date].total += units;
     });
-    var enriched = rows.map(function(r) {
-      var key = String(r.shift || "Unassigned");
-      var plan = planByShift[key] && planByShift[key].count ? Math.round(planByShift[key].total / planByShift[key].count) : 0;
-      return {
-        key: String(r.date || "") + "-" + key,
-        date: String(r.date || ""),
-        shift: key,
-        actual: safeNum(r.units),
-        plan: plan,
-        rows: safeNum(r.rows)
-      };
-    }).sort(function(a, b) { return a.date.localeCompare(b.date); });
-    var recent = enriched.slice(-20);
-    var max = recent.reduce(function(m, r) { return Math.max(m, r.actual, r.plan); }, 0) || 1;
+    var dayRows = Object.values(byDate).sort(function(a, b) { return a.date.localeCompare(b.date); });
+    var priorDays = (trends && Array.isArray(trends.byDay)) ? trends.byDay.filter(function(d) {
+      var date = String(d.date || "");
+      return date && date < range.start;
+    }) : [];
+    var baselineDaily = priorDays.length
+      ? Math.round(priorDays.reduce(function(sum, d) { return sum + safeNum(d.units); }, 0) / priorDays.length)
+      : (metrics.avgDailyUnits || 0);
+    var max = dayRows.reduce(function(m, r) { return Math.max(m, r.total, baselineDaily); }, 0) || 1;
     return {
-      rows: recent.map(function(r) {
-        return Object.assign({}, r, {
-          actualPct: Math.round((r.actual / max) * 100),
-          planPct: Math.round((r.plan / max) * 100),
-          variance: r.actual - r.plan
-        });
+      rows: dayRows.map(function(r) {
+        var total = Math.max(1, r.total);
+        var totalPct = Math.round((r.total / max) * 100);
+        var s1PctOfTotal = Math.round((r.s1 / total) * 100);
+        var s2PctOfTotal = Math.round((r.s2 / total) * 100);
+        var unPctOfTotal = Math.max(0, 100 - s1PctOfTotal - s2PctOfTotal);
+        return {
+          date: r.date,
+          s1: r.s1,
+          s2: r.s2,
+          un: r.un,
+          total: r.total,
+          totalPct: totalPct,
+          s1Pct: Math.round((totalPct * s1PctOfTotal) / 100),
+          s2Pct: Math.round((totalPct * s2PctOfTotal) / 100),
+          unPct: Math.round((totalPct * unPctOfTotal) / 100),
+          plan: baselineDaily,
+          planPct: Math.round((baselineDaily / max) * 100)
+        };
       }),
       max: max
     };
-  }, [metrics.byShift]);
+  }, [filteredTrends.byShift, trends, range.start, metrics.avgDailyUnits]);
 
   var dailyPlanVsActual = useMemo(function() {
     var rows = (filteredTrends.byDay || []).slice().sort(function(a, b) { return String(a.date || "").localeCompare(String(b.date || "")); });
@@ -826,29 +839,7 @@ export default function OperationsView({ productionSegments }) {
       </div>
 
       <div className="grid gap-3 lg:grid-cols-12">
-        <Card className="lg:col-span-6 px-4 py-4">
-          <div className="mb-2 text-sm font-semibold">Plan vs Actual by Shift</div>
-          <div className="flex h-52 items-end gap-1.5 overflow-x-auto">
-            {shiftPlanVsActual.rows.map(function(r) {
-              return (
-                <div key={r.key} className="flex min-w-[30px] flex-col items-center gap-1">
-                  <div className="relative h-36 w-5">
-                    <div className="absolute inset-x-0 bottom-0 rounded-t bg-[rgb(var(--accent))]" style={{ height: Math.max(8, Math.round((r.actualPct / 100) * 132)) + "px", opacity: 0.9 }} />
-                    <div className="absolute inset-x-0 border-t-2 border-dashed border-[rgb(var(--muted))]" style={{ bottom: Math.max(8, Math.round((r.planPct / 100) * 132)) + "px" }} />
-                  </div>
-                  <div className="text-[10px] text-[rgb(var(--muted))]">{shortShiftLabel(r.shift)}</div>
-                  <div className="text-[10px] text-[rgb(var(--muted))]">{r.date.slice(5)}</div>
-                </div>
-              );
-            })}
-          </div>
-          <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-[rgb(var(--muted))]">
-            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-[rgb(var(--accent))]" />Actual</span>
-            <span className="inline-flex items-center gap-1"><span className="h-px w-3 border-t-2 border-dashed border-[rgb(var(--muted))]" />Plan baseline</span>
-          </div>
-        </Card>
-
-        <Card className="lg:col-span-6 px-4 py-4">
+        <Card className="lg:col-span-12 px-4 py-4">
           <div className="mb-2 text-sm font-semibold">Daily Production Yield</div>
           <div className="flex h-52 items-end gap-2 overflow-x-auto">
             {dailyPlanVsActual.rows.map(function(r) {
@@ -874,7 +865,35 @@ export default function OperationsView({ productionSegments }) {
       </div>
 
       <div className="grid gap-3 lg:grid-cols-12">
-        <Card className="lg:col-span-12 px-4 py-4">
+        <Card className="lg:col-span-7 px-4 py-4">
+          <div className="mb-2 text-sm font-semibold">Shift Mix by Day</div>
+          <div className="flex h-52 items-end gap-2 overflow-x-auto">
+            {shiftPlanVsActual.rows.map(function(r) {
+              return (
+                <div key={r.date} className="flex min-w-[38px] flex-col items-center gap-1">
+                  <div className="relative h-36 w-6">
+                    <div className="absolute inset-x-0 bottom-0 rounded-t bg-[rgb(var(--muted))/0.3]" style={{ height: Math.max(2, Math.round((r.unPct / 100) * 132)) + "px" }} />
+                    <div className="absolute inset-x-0 rounded-t bg-[rgb(var(--accent))/0.7]" style={{ bottom: Math.max(2, Math.round((r.unPct / 100) * 132)) + "px", height: Math.max(2, Math.round((r.s2Pct / 100) * 132)) + "px" }} />
+                    <div className="absolute inset-x-0 rounded-t bg-[rgb(var(--accent))]" style={{ bottom: Math.max(2, Math.round(((r.unPct + r.s2Pct) / 100) * 132)) + "px", height: Math.max(2, Math.round((r.s1Pct / 100) * 132)) + "px" }} />
+                    <div className="absolute inset-x-0 border-t-2 border-dashed border-[rgb(var(--muted))]" style={{ bottom: Math.max(8, Math.round((r.planPct / 100) * 132)) + "px" }} />
+                  </div>
+                  <div className="text-[10px] text-[rgb(var(--muted))]">{r.date ? r.date.slice(5) : "--"}</div>
+                </div>
+              );
+            })}
+            {!shiftPlanVsActual.rows.length && (
+              <div className="w-full self-center text-center text-sm text-[rgb(var(--muted))]">No shift production data in selected window.</div>
+            )}
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-[rgb(var(--muted))]">
+            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-[rgb(var(--accent))]" />Shift 1</span>
+            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-[rgb(var(--accent))/0.7]" />Shift 2</span>
+            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-[rgb(var(--muted))/0.3]" />Unassigned</span>
+            <span className="inline-flex items-center gap-1"><span className="h-px w-3 border-t-2 border-dashed border-[rgb(var(--muted))]" />Baseline daily plan</span>
+          </div>
+        </Card>
+
+        <Card className="lg:col-span-5 px-4 py-4">
           <div className="mb-2 text-sm font-semibold">Line Performance (Latest Day vs Baseline)</div>
           <TableShell>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
