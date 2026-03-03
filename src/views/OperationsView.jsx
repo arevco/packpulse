@@ -566,6 +566,35 @@ export default function OperationsView({ productionSegments }) {
     };
   }, [metrics.byShift]);
 
+  var dailyPlanVsActual = useMemo(function() {
+    var rows = (filteredTrends.byDay || []).slice().sort(function(a, b) { return String(a.date || "").localeCompare(String(b.date || "")); });
+    if (!rows.length) return { rows: [], max: 1 };
+    var priorDays = (trends && Array.isArray(trends.byDay)) ? trends.byDay.filter(function(d) {
+      var date = String(d.date || "");
+      return date && date < range.start;
+    }) : [];
+    var baselineDaily = priorDays.length
+      ? Math.round(priorDays.reduce(function(sum, d) { return sum + safeNum(d.units); }, 0) / priorDays.length)
+      : (metrics.avgDailyUnits || 0);
+    var max = rows.reduce(function(m, r) {
+      return Math.max(m, safeNum(r.units), baselineDaily);
+    }, 0) || 1;
+    return {
+      rows: rows.map(function(r) {
+        var actual = safeNum(r.units);
+        return {
+          date: String(r.date || ""),
+          actual: actual,
+          plan: baselineDaily,
+          actualPct: Math.round((actual / max) * 100),
+          planPct: Math.round((baselineDaily / max) * 100),
+          variance: actual - baselineDaily
+        };
+      }),
+      max: max
+    };
+  }, [filteredTrends.byDay, trends, range.start, metrics.avgDailyUnits]);
+
   var linePerformance = useMemo(function() {
     var laborByLine = {};
     filteredInputs.forEach(function(r) {
@@ -797,7 +826,7 @@ export default function OperationsView({ productionSegments }) {
       </div>
 
       <div className="grid gap-3 lg:grid-cols-12">
-        <Card className="lg:col-span-7 px-4 py-4">
+        <Card className="lg:col-span-6 px-4 py-4">
           <div className="mb-2 text-sm font-semibold">Plan vs Actual by Shift</div>
           <div className="flex h-52 items-end gap-1.5 overflow-x-auto">
             {shiftPlanVsActual.rows.map(function(r) {
@@ -819,7 +848,33 @@ export default function OperationsView({ productionSegments }) {
           </div>
         </Card>
 
-        <Card className="lg:col-span-5 px-4 py-4">
+        <Card className="lg:col-span-6 px-4 py-4">
+          <div className="mb-2 text-sm font-semibold">Daily Production Yield</div>
+          <div className="flex h-52 items-end gap-2 overflow-x-auto">
+            {dailyPlanVsActual.rows.map(function(r) {
+              return (
+                <div key={r.date} className="flex min-w-[42px] flex-col items-center gap-1">
+                  <div className="relative h-36 w-7">
+                    <div className="absolute inset-x-0 bottom-0 rounded-t bg-[rgb(var(--accent))]" style={{ height: Math.max(8, Math.round((r.actualPct / 100) * 132)) + "px", opacity: 0.9 }} />
+                    <div className="absolute inset-x-0 border-t-2 border-dashed border-[rgb(var(--muted))]" style={{ bottom: Math.max(8, Math.round((r.planPct / 100) * 132)) + "px" }} />
+                  </div>
+                  <div className="text-[10px] text-[rgb(var(--muted))]">{r.date ? r.date.slice(5) : "--"}</div>
+                </div>
+              );
+            })}
+            {!dailyPlanVsActual.rows.length && (
+              <div className="w-full self-center text-center text-sm text-[rgb(var(--muted))]">No daily production data in selected window.</div>
+            )}
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-[rgb(var(--muted))]">
+            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-[rgb(var(--accent))]" />Actual daily yield</span>
+            <span className="inline-flex items-center gap-1"><span className="h-px w-3 border-t-2 border-dashed border-[rgb(var(--muted))]" />Baseline daily plan</span>
+          </div>
+        </Card>
+      </div>
+
+      <div className="grid gap-3 lg:grid-cols-12">
+        <Card className="lg:col-span-12 px-4 py-4">
           <div className="mb-2 text-sm font-semibold">Line Performance (Latest Day vs Baseline)</div>
           <TableShell>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
