@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
@@ -79,6 +79,99 @@ export default function AskAiPanel(props) {
       "What changed since last review?",
     ];
   }, [activeView]);
+
+  function renderInline(text) {
+    var parts = String(text || "").split(/(\*\*[^*]+\*\*)/g);
+    return parts.map(function(part, idx) {
+      if (/^\*\*[^*]+\*\*$/.test(part)) {
+        return <strong key={idx}>{part.slice(2, -2)}</strong>;
+      }
+      return <Fragment key={idx}>{part}</Fragment>;
+    });
+  }
+
+  function renderAssistantText(text) {
+    var lines = String(text || "").replace(/\r\n/g, "\n").split("\n");
+    var blocks = [];
+    var listType = "";
+    var listItems = [];
+    var paragraph = [];
+
+    function flushParagraph() {
+      if (!paragraph.length) return;
+      blocks.push({
+        type: "p",
+        text: paragraph.join(" ").trim(),
+      });
+      paragraph = [];
+    }
+
+    function flushList() {
+      if (!listItems.length) return;
+      blocks.push({
+        type: listType || "ul",
+        items: listItems.slice(),
+      });
+      listItems = [];
+      listType = "";
+    }
+
+    lines.forEach(function(raw) {
+      var line = raw.trim();
+      if (!line) {
+        flushParagraph();
+        flushList();
+        return;
+      }
+      var ul = line.match(/^[-*]\s+(.+)$/);
+      var ol = line.match(/^(\d+)\.\s+(.+)$/);
+      if (ul) {
+        flushParagraph();
+        if (listType && listType !== "ul") flushList();
+        listType = "ul";
+        listItems.push(ul[1]);
+        return;
+      }
+      if (ol) {
+        flushParagraph();
+        if (listType && listType !== "ol") flushList();
+        listType = "ol";
+        listItems.push(ol[2]);
+        return;
+      }
+      flushList();
+      paragraph.push(line);
+    });
+
+    flushParagraph();
+    flushList();
+
+    return blocks.map(function(block, idx) {
+      if (block.type === "ul") {
+        return (
+          <ul key={idx} className="my-1 list-disc pl-5 space-y-1">
+            {block.items.map(function(item, itemIdx) {
+              return <li key={itemIdx}>{renderInline(item)}</li>;
+            })}
+          </ul>
+        );
+      }
+      if (block.type === "ol") {
+        return (
+          <ol key={idx} className="my-1 list-decimal pl-5 space-y-1">
+            {block.items.map(function(item, itemIdx) {
+              return <li key={itemIdx}>{renderInline(item)}</li>;
+            })}
+          </ol>
+        );
+      }
+      return (
+        <p key={idx} className="my-1">
+          {renderInline(block.text)}
+        </p>
+      );
+    });
+  }
 
   function sendMessage(text) {
     if (sending) return;
@@ -179,13 +272,13 @@ export default function AskAiPanel(props) {
                 <div
                   key={idx}
                   className={
-                    "max-w-[95%] rounded-md border px-3 py-2 text-sm " +
+                    "max-w-[95%] rounded-md border px-3 py-2 text-[15px] leading-7 " +
                     (isUser
                       ? "ml-auto border-[rgb(var(--accent))] bg-[rgba(var(--accent-rgb),0.08)] text-[rgb(var(--foreground))]"
                       : "mr-auto border-[rgb(var(--border))] bg-white text-[rgb(var(--foreground))]")
                   }
                 >
-                  {m.text}
+                  {isUser ? m.text : renderAssistantText(m.text)}
                 </div>
               );
             })}
