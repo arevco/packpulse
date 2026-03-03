@@ -660,6 +660,23 @@ export default function OperationsView({ productionSegments }) {
     return rows;
   }, [filteredBreakdown.byLine, filteredBreakdown.latestByLine, filteredInputs]);
 
+  var lineYieldChartData = useMemo(function() {
+    return (linePerformance || []).map(function(r) {
+      return {
+        line: String(r.line || "Unknown"),
+        units: Math.round(safeNum(r.units)),
+        latest: Math.round(safeNum(r.latestUnits))
+      };
+    }).slice(0, 10);
+  }, [linePerformance]);
+
+  const lineYieldChartConfig = useMemo(function() {
+    return {
+      units: { label: "Window yield", color: "rgb(var(--accent))" },
+      latest: { label: "Latest day", color: "color-mix(in oklab, rgb(var(--success)) 85%, white)" }
+    };
+  }, []);
+
   var lineOptions = useMemo(function() {
     var set = new Set();
     ["Line 1", "Line 2", "Line 3", "Line 4"].forEach(function(l) { set.add(l); });
@@ -986,6 +1003,40 @@ export default function OperationsView({ productionSegments }) {
 
         <Card className="lg:col-span-5 px-4 py-4">
           <div className="mb-2 text-sm font-semibold">Line Performance (Latest Day vs Baseline)</div>
+          {lineYieldChartData.length ? (
+            <ChartContainer config={lineYieldChartConfig} className="mb-3 h-48">
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={lineYieldChartData} margin={{ top: 8, right: 8, left: 4, bottom: 8 }}>
+                  <CartesianGrid vertical={false} stroke="rgb(var(--border))" strokeOpacity={0.4} />
+                  <XAxis
+                    dataKey="line"
+                    tickLine={false}
+                    axisLine={false}
+                    minTickGap={12}
+                    tick={{ fill: "rgb(var(--muted))", fontSize: 11 }}
+                  />
+                  <YAxis
+                    width={62}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={function(v) { return Math.round(safeNum(v)).toLocaleString(); }}
+                    tick={{ fill: "rgb(var(--muted))", fontSize: 11 }}
+                  />
+                  <ChartTooltip
+                    cursor={{ fill: "rgb(var(--surface))" }}
+                    content={
+                      <ChartTooltipContent
+                        labelFormatter={function(value) { return "Line " + value; }}
+                        formatter={function(value) { return Math.round(safeNum(value)); }}
+                      />
+                    }
+                  />
+                  <Bar dataKey="units" fill="var(--color-units)" radius={[4, 4, 0, 0]} maxBarSize={28} />
+                  <Line type="monotone" dataKey="latest" stroke="var(--color-latest)" strokeWidth={2} dot={false} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </ChartContainer>
+          ) : null}
           <TableShell>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
