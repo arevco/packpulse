@@ -22,6 +22,80 @@ function isTodayCasesQuestion(prompt) {
   );
 }
 
+function isYesterdayCasesQuestion(prompt) {
+  var q = toText(prompt).toLowerCase();
+  if (!q) return false;
+  return (
+    q.includes("how many cases") && q.includes("yesterday") ||
+    q.includes("cases produced yesterday") ||
+    q.includes("yesterday production") ||
+    q.includes("produced yesterday")
+  );
+}
+
+function isCasesProducedQuestion(prompt) {
+  var q = toText(prompt).toLowerCase();
+  if (!q) return false;
+  return q.includes("how many cases") || q.includes("cases produced") || q.includes("production cases");
+}
+
+function detectPeriodLabel(prompt) {
+  var q = toText(prompt).toLowerCase();
+  if (!q) return "";
+  if (q.includes("today")) return "today";
+  if (q.includes("yesterday")) return "yesterday";
+  if (q.includes("this week") || q.includes("current week")) return "this_week";
+  if (q.includes("last week") || q.includes("previous week") || q.includes("prior week")) return "last_week";
+  if (q.includes("this month") || q.includes("current month")) return "this_month";
+  if (q.includes("last month") || q.includes("previous month") || q.includes("prior month")) return "last_month";
+  return "";
+}
+
+function ymdInEtFromDate(date) {
+  var parts = {};
+  new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  })
+    .formatToParts(date)
+    .forEach(function(part) {
+      if (part.type !== "literal") parts[part.type] = part.value;
+    });
+  return parts.year && parts.month && parts.day ? (parts.year + "-" + parts.month + "-" + parts.day) : "";
+}
+
+function shiftIsoDate(dateIso, days) {
+  if (!dateIso) return "";
+  var d = new Date(dateIso + "T00:00:00");
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function startOfWeekIso(dateIso) {
+  if (!dateIso) return "";
+  var d = new Date(dateIso + "T00:00:00");
+  var dow = d.getDay();
+  var delta = dow === 0 ? -6 : 1 - dow; // Monday start
+  d.setDate(d.getDate() + delta);
+  return d.toISOString().slice(0, 10);
+}
+
+function startOfMonthIso(dateIso) {
+  if (!dateIso) return "";
+  var d = new Date(dateIso + "T00:00:00");
+  d.setDate(1);
+  return d.toISOString().slice(0, 10);
+}
+
+function endOfMonthIso(dateIso) {
+  if (!dateIso) return "";
+  var d = new Date(dateIso + "T00:00:00");
+  d.setMonth(d.getMonth() + 1, 0);
+  return d.toISOString().slice(0, 10);
+}
+
 function isLastWeekSummaryQuestion(prompt) {
   var q = toText(prompt).toLowerCase();
   if (!q) return false;
@@ -304,6 +378,89 @@ export default async function handler(req, res) {
         model: "deterministic",
       });
     }
+    if (isYesterdayCasesQuestion(prompt)) {
+      var todayEt = toText(metrics.todayEt) || ymdInEtFromDate(new Date());
+      var yesterdayEt = toText(metrics.yesterdayEt) || shiftIsoDate(todayEt, -1);
+      var yCases = toNum(metrics.productionYesterdayCases);
+      var yS1 = toNum(metrics.productionYesterdayShift1Cases);
+      var yS2 = toNum(metrics.productionYesterdayShift2Cases);
+
+      if (!(yCases > 0) && supabaseContext && supabaseContext.production && Array.isArray(supabaseContext.production.byDayLast7)) {
+        var dayRow = supabaseContext.production.byDayLast7.find(function(d) { return toText(d && d.date) === yesterdayEt; });
+        if (dayRow) yCases = toNum(dayRow.units);
+      }
+
+      if (!(yCases > 0) && supabaseContext && supabaseContext.production && Array.isArray(supabaseContext.production.byDayLast7) && supabaseContext.production.byDayLast7.length) {
+        var fallback = supabaseContext.production.byDayLast7[supabaseContext.production.byDayLast7.length - 1];
+        var fallbackDate = toText(fallback && fallback.date) || "--";
+        var fallbackUnits = toNum(fallback && fallback.units);
+        return res.status(200).json({
+          answer:
+            "No production rows are mapped for yesterday (" + (yesterdayEt || "--") + "). " +
+            "Latest available production day is " + fallbackDate + " with " + fallbackUnits.toLocaleString() + " cases.",
+          model: "deterministic",
+        });
+      }
+
+      if (!(yCases > 0)) {
+        return res.status(200).json({
+          answer: "No production rows are mapped for yesterday (" + (yesterdayEt || "--") + ").",
+          model: "deterministic",
+        });
+      }
+
+      return res.status(200).json({
+        answer:
+          "Cases produced yesterday (" + (yesterdayEt || "ET") + "): " + yCases.toLocaleString() +
+          ". Shift 1: " + yS1.toLocaleString() +
+          ", Shift 2: " + yS2.toLocaleString() + ".",
+        model: "deterministic",
+      });
+    }
+    var periodLabel = detectPeriodLabel(prompt);
+    if (
+      isCasesProducedQuestion(prompt) &&
+      periodLabel &&
+      periodLabel !== "today" &&
+      periodLabel !== "yesterday" &&
+      supabaseContext &&
+      supabaseContext.production &&
+      typeof supabaseContext.production.range === "function"
+    ) {
+      var anchor = toText(metrics.todayEt) || ymdInEtFromDate(new Date());
+      var start = "";
+      var end = "";
+      var label = "";
+      if (periodLabel === "this_week") {
+        start = startOfWeekIso(anchor);
+        end = anchor;
+        label = "this week";
+      } else if (periodLabel === "last_week") {
+        var thisWeekStart = startOfWeekIso(anchor);
+        start = shiftIsoDate(thisWeekStart, -7);
+        end = shiftIsoDate(thisWeekStart, -1);
+        label = "last week";
+      } else if (periodLabel === "this_month") {
+        start = startOfMonthIso(anchor);
+        end = anchor;
+        label = "this month";
+      } else if (periodLabel === "last_month") {
+        var thisMonthStart = startOfMonthIso(anchor);
+        var lastMonthAnchor = shiftIsoDate(thisMonthStart, -1);
+        start = startOfMonthIso(lastMonthAnchor);
+        end = endOfMonthIso(lastMonthAnchor);
+        label = "last month";
+      }
+      var agg = supabaseContext.production.range(start, end);
+      var totalCases = toNum(agg && agg.totalCases);
+      return res.status(200).json({
+        answer:
+          "Cases produced " + label + " (" + (start || "--") + " to " + (end || "--") + "): " +
+          totalCases.toLocaleString() + ".",
+        model: "deterministic",
+      });
+    }
+
     if (isLastWeekSummaryQuestion(prompt) && !wantsDetailedBreakdown(prompt)) {
       var lwTotal = toNum(metrics.lastWeekCases);
       var lwS1 = toNum(metrics.lastWeekShift1Cases);
