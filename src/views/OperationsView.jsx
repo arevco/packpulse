@@ -215,6 +215,7 @@ export default function OperationsView({ productionSegments }) {
   const [saving, setSaving] = useState(false);
   const [showEntryModal, setShowEntryModal] = useState(false);
   const [showRecentLaborInputs, setShowRecentLaborInputs] = useState(false);
+  const [chartTip, setChartTip] = useState({ visible: false, x: 0, y: 0, text: "" });
 
   const [entry, setEntry] = useState({
     date_et: toIsoDateET(new Date()),
@@ -725,6 +726,34 @@ export default function OperationsView({ productionSegments }) {
     }
   }
 
+  function showChartTip(e, text) {
+    setChartTip({
+      visible: true,
+      x: (e && e.clientX) ? e.clientX : 0,
+      y: (e && e.clientY) ? e.clientY : 0,
+      text: text || ""
+    });
+  }
+
+  function moveChartTip(e) {
+    setChartTip(function(prev) {
+      if (!prev.visible) return prev;
+      return {
+        visible: true,
+        x: (e && e.clientX) ? e.clientX : prev.x,
+        y: (e && e.clientY) ? e.clientY : prev.y,
+        text: prev.text
+      };
+    });
+  }
+
+  function hideChartTip() {
+    setChartTip(function(prev) {
+      if (!prev.visible) return prev;
+      return { visible: false, x: 0, y: 0, text: "" };
+    });
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -860,7 +889,13 @@ export default function OperationsView({ productionSegments }) {
           <div className="flex h-52 items-end gap-2 overflow-x-auto">
             {dailyPlanVsActual.rows.map(function(r) {
               return (
-                <div key={r.date} className="flex min-w-[42px] flex-col items-center gap-1" title={r.tooltip}>
+                <div
+                  key={r.date}
+                  className="flex min-w-[42px] flex-col items-center gap-1"
+                  onMouseEnter={function(e) { showChartTip(e, r.tooltip); }}
+                  onMouseMove={moveChartTip}
+                  onMouseLeave={hideChartTip}
+                >
                   <div className="relative h-36 w-7">
                     <div className="absolute inset-x-0 bottom-0 rounded-t bg-[rgb(var(--accent))]" style={{ height: Math.max(8, Math.round((r.actualPct / 100) * 132)) + "px", opacity: 0.9 }} />
                     <div className="absolute inset-x-0 border-t-2 border-dashed border-[rgb(var(--muted))]" style={{ bottom: Math.max(8, Math.round((r.planPct / 100) * 132)) + "px" }} />
@@ -886,7 +921,13 @@ export default function OperationsView({ productionSegments }) {
           <div className="flex h-52 items-end gap-2 overflow-x-auto">
             {shiftPlanVsActual.rows.map(function(r) {
               return (
-                <div key={r.date} className="flex min-w-[38px] flex-col items-center gap-1" title={r.tooltip}>
+                <div
+                  key={r.date}
+                  className="flex min-w-[38px] flex-col items-center gap-1"
+                  onMouseEnter={function(e) { showChartTip(e, r.tooltip); }}
+                  onMouseMove={moveChartTip}
+                  onMouseLeave={hideChartTip}
+                >
                   <div className="relative h-36 w-6">
                     <div className="absolute inset-x-0 bottom-0 rounded-t bg-[rgb(var(--muted))/0.3]" style={{ height: Math.max(2, Math.round((r.unPct / 100) * 132)) + "px" }} />
                     <div className="absolute inset-x-0 rounded-t bg-[rgb(var(--accent))/0.7]" style={{ bottom: Math.max(2, Math.round((r.unPct / 100) * 132)) + "px", height: Math.max(2, Math.round((r.s2Pct / 100) * 132)) + "px" }} />
@@ -1101,6 +1142,14 @@ export default function OperationsView({ productionSegments }) {
               <span className="text-xs text-[rgb(var(--muted))]">Wages use Labor Rate Settings and generally remain constant.</span>
             </div>
           </Card>
+        </div>
+      )}
+      {chartTip.visible && (
+        <div
+          className="fixed z-[80] pointer-events-none rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2 py-1.5 text-xs leading-5 text-[rgb(var(--foreground))] shadow-lg whitespace-pre"
+          style={{ left: chartTip.x + 12, top: chartTip.y + 12 }}
+        >
+          {chartTip.text}
         </div>
       )}
     </div>
