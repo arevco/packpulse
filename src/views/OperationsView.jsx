@@ -196,6 +196,23 @@ function extractTagValue(notes, tag) {
   return m && m[1] ? m[1].trim() : "";
 }
 
+function toLineKey(lineName) {
+  var base = String(lineName || "Unknown").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  return "line_" + (base || "unknown");
+}
+
+function lineColor(index) {
+  var palette = [
+    "rgb(var(--accent))",
+    "color-mix(in oklab, rgb(var(--accent)) 80%, white)",
+    "color-mix(in oklab, rgb(var(--success)) 85%, white)",
+    "color-mix(in oklab, rgb(var(--warning)) 85%, white)",
+    "color-mix(in oklab, rgb(var(--danger)) 85%, white)",
+    "color-mix(in oklab, rgb(var(--muted)) 55%, white)",
+  ];
+  return palette[index % palette.length];
+}
+
 export default function OperationsView({ productionSegments }) {
   const { C, mono } = useTheme();
   const [windowPreset, setWindowPreset] = useState("last_14");
@@ -592,8 +609,9 @@ export default function OperationsView({ productionSegments }) {
   }, [filteredTrends.byShift, trends, range.start, metrics.avgDailyUnits]);
 
   var dailyPlanVsActual = useMemo(function() {
-    var rows = (filteredTrends.byDay || []).slice().sort(function(a, b) { return String(a.date || "").localeCompare(String(b.date || "")); });
-    if (!rows.length) return { rows: [], max: 1 };
+    var dayRows = (filteredTrends.byDay || []).slice().sort(function(a, b) { return String(a.date || "").localeCompare(String(b.date || "")); });
+    if (!dayRows.length) return { rows: [], lineSeries: [] };
+
     var priorDays = (trends && Array.isArray(trends.byDay)) ? trends.byDay.filter(function(d) {
       var date = String(d.date || "");
       return date && date < range.start;
@@ -601,31 +619,42 @@ export default function OperationsView({ productionSegments }) {
     var baselineDaily = priorDays.length
       ? Math.round(priorDays.reduce(function(sum, d) { return sum + safeNum(d.units); }, 0) / priorDays.length)
       : (metrics.avgDailyUnits || 0);
-    var max = rows.reduce(function(m, r) {
-      return Math.max(m, safeNum(r.units), baselineDaily);
-    }, 0) || 1;
-    return {
-      rows: rows.map(function(r) {
-        var actual = safeNum(r.units);
-        var variance = actual - baselineDaily;
-        return {
-          date: String(r.date || ""),
-          actual: actual,
-          plan: baselineDaily,
-          actualPct: Math.round((actual / max) * 100),
-          planPct: Math.round((baselineDaily / max) * 100),
-          variance: variance,
-          tooltip: [
-            String(r.date || "--"),
-            "Actual: " + actual.toLocaleString(),
-            "Baseline: " + baselineDaily.toLocaleString(),
-            "Variance: " + (variance >= 0 ? "+" : "") + variance.toLocaleString()
-          ].join("\n")
-        };
-      }),
-      max: max
-    };
-  }, [filteredTrends.byDay, trends, range.start, metrics.avgDailyUnits]);
+
+    var lineTotals = {};
+    var byDateLine = {};
+    (filteredBreakdown.rowsLite || []).forEach(function(r) {
+      var date = String(r.produced_date_et || "");
+      if (!date) return;
+      var lineName = String(r.line || "Unknown");
+      var key = toLineKey(lineName);
+      var units = safeNum(r.units_produced);
+      lineTotals[key] = (lineTotals[key] || 0) + units;
+      if (!byDateLine[date]) byDateLine[date] = {};
+      byDateLine[date][key] = (byDateLine[date][key] || 0) + units;
+    });
+
+    var lineSeries = Object.keys(lineTotals)
+      .sort(function(a, b) { return safeNum(lineTotals[b]) - safeNum(lineTotals[a]); })
+      .slice(0, 6)
+      .map(function(key, idx) {
+        return { key: key, label: key.replace(/^line_/, "").replace(/_/g, " ").toUpperCase(), color: lineColor(idx) };
+      });
+
+    var rowData = dayRows.map(function(r) {
+      var date = String(r.date || "");
+      var row = {
+        date: date,
+        total: safeNum(r.units),
+        plan: baselineDaily,
+      };
+      lineSeries.forEach(function(line) {
+        row[line.key] = safeNum(byDateLine[date] && byDateLine[date][line.key]);
+      });
+      return row;
+    });
+
+    return { rows: rowData, lineSeries: lineSeries };
+  }, [filteredTrends.byDay, trends, range.start, metrics.avgDailyUnits, filteredBreakdown.rowsLite]);
 
   var linePerformance = useMemo(function() {
     var laborByLine = {};
@@ -746,11 +775,12 @@ export default function OperationsView({ productionSegments }) {
   }
 
   const dailyChartConfig = useMemo(function() {
-    return {
-      actual: { label: "Actual daily yield", color: "rgb(var(--accent))" },
-      plan: { label: "Baseline daily plan", color: "rgb(var(--muted))" }
-    };
-  }, []);
+    var cfg = { plan: { label: "Baseline daily plan", color: "rgb(var(--muted))" } };
+    (dailyPlanVsActual.lineSeries || []).forEach(function(line) {
+      cfg[line.key] = { label: line.label, color: line.color };
+    });
+    return cfg;
+  }, [dailyPlanVsActual.lineSeries]);
 
   const shiftChartConfig = useMemo(function() {
     return {
@@ -922,7 +952,18 @@ export default function OperationsView({ productionSegments }) {
                       />
                     }
                   />
-                  <Bar dataKey="actual" fill="var(--color-actual)" radius={[4, 4, 0, 0]} maxBarSize={26} />
+                  {(dailyPlanVsActual.lineSeries || []).map(function(line, idx) {
+                    return (
+                      <Bar
+                        key={line.key}
+                        stackId="line"
+                        dataKey={line.key}
+                        fill={"var(--color-" + line.key + ")"}
+                        radius={idx === 0 ? [4, 4, 0, 0] : [0, 0, 0, 0]}
+                        maxBarSize={26}
+                      />
+                    );
+                  })}
                   <Line
                     type="monotone"
                     dataKey="plan"
@@ -938,7 +979,14 @@ export default function OperationsView({ productionSegments }) {
             <div className="h-52 w-full self-center text-center text-sm text-[rgb(var(--muted))] leading-[13rem]">No daily production data in selected window.</div>
           )}
           <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-[rgb(var(--muted))]">
-            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-[rgb(var(--accent))]" />Actual daily yield</span>
+            {(dailyPlanVsActual.lineSeries || []).map(function(line) {
+              return (
+                <span key={line.key} className="inline-flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-sm" style={{ background: line.color }} />
+                  {line.label}
+                </span>
+              );
+            })}
             <span className="inline-flex items-center gap-1"><span className="h-px w-3 border-t-2 border-dashed border-[rgb(var(--muted))]" />Baseline daily plan</span>
           </div>
         </Card>
