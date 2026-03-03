@@ -7,6 +7,7 @@ import * as Sentry from "@sentry/react";
 import AuthGate from "./AuthGate.jsx";
 import App from "./App.jsx";
 import { initSupabaseClient } from "./lib/supabaseClient.js";
+import { initHeapAnalytics } from "./lib/heap.js";
 
 window.addEventListener("vite:preloadError", function(event) {
   if (event && typeof event.preventDefault === "function") event.preventDefault();
@@ -33,6 +34,7 @@ if (import.meta.env.VITE_SENTRY_DSN) {
 }
 
 initSupabaseClient();
+initHeapAnalytics();
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
