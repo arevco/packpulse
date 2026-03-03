@@ -8,21 +8,21 @@ function buildPrototypeReply(text, context) {
   if (!q.trim()) return "Type a question and I can draft an ops-focused answer from the current tab context.";
 
   if (q.includes("run next") || q.includes("what should we run")) {
-    return "Prototype answer: prioritize WOs with highest net units, nearest due dates, and lowest shared-component risk. I can rank this in real time after API keys are enabled.";
+    return "Fallback answer: prioritize WOs with highest net units, nearest due dates, and lowest shared-component risk.";
   }
   if (q.includes("risk") || q.includes("short")) {
-    return "Prototype answer: focus first on high-impact shortages (units at risk + due date urgency), then split by packaging vs WIP to route ownership faster.";
+    return "Fallback answer: focus first on high-impact shortages (units at risk + due date urgency), then split by packaging vs WIP to route ownership faster.";
   }
   if (q.includes("production") || q.includes("yield") || q.includes("operations")) {
-    return "Prototype answer: compare actual vs baseline by day, then drill into line-level variance and shift mix to isolate throughput loss.";
+    return "Fallback answer: compare actual vs baseline by day, then drill into line-level variance and shift mix to isolate throughput loss.";
   }
   if (q.includes("delivery") || q.includes("inbound") || q.includes("dock")) {
-    return "Prototype answer: anchor to OpenDock scheduled inbounds, then layer EDR confidence. Flag unknown/unmatched loads separately to avoid false certainty.";
+    return "Fallback answer: anchor to OpenDock scheduled inbounds, then layer EDR confidence. Flag unknown/unmatched loads separately to avoid false certainty.";
   }
   return (
-    "Prototype answer for " +
+    "Fallback answer for " +
     context +
-    ": I can summarize this view and recommend top actions. Once API keys are configured, this panel will return live AI responses."
+    ": I can summarize this view and recommend top actions."
   );
 }
 
@@ -46,8 +46,7 @@ export default function AskAiPanel(props) {
   var [messages, setMessages] = useState([
     {
       role: "assistant",
-      text:
-        "Ask AI is in prototype mode. I can generate UX-valid mock answers now; live model responses will be enabled after backend keys are configured.",
+      text: "Ask AI is ready. Ask about run priorities, supply risk, or production trends.",
     },
   ]);
 
@@ -111,11 +110,11 @@ export default function AskAiPanel(props) {
           return prev.concat([{ role: "assistant", text: answer }]);
         });
       })
-      .catch(function() {
-        // Fail safe for prototype mode or missing API key.
+      .catch(function(err) {
+        var reason = err && err.message ? String(err.message) : "AI route unavailable";
         var fallback = buildPrototypeReply(prompt, viewLabel);
         setMessages(function(prev) {
-          return prev.concat([{ role: "assistant", text: fallback }]);
+          return prev.concat([{ role: "assistant", text: fallback + "\n\n(Using fallback: " + reason + ")" }]);
         });
       })
       .finally(function() {
@@ -142,7 +141,7 @@ export default function AskAiPanel(props) {
               </Button>
             </div>
             <div className="flex items-center gap-2">
-              <Badge variant="secondary">Prototype</Badge>
+              <Badge variant="success">Live</Badge>
               <span className="text-xs text-[rgb(var(--muted))]">{viewLabel}</span>
             </div>
             {contextLines.length ? (
