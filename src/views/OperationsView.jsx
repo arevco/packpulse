@@ -5,6 +5,8 @@ import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import TableShell from "../components/ui/table-shell";
 import ProductionView from "./ProductionView";
+import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, XAxis, YAxis } from "recharts";
+import { ChartContainer, ChartTooltip, ChartTooltipContent } from "../components/ui/chart";
 
 function safeNum(v) {
   var n = Number(v || 0);
@@ -215,7 +217,6 @@ export default function OperationsView({ productionSegments }) {
   const [saving, setSaving] = useState(false);
   const [showEntryModal, setShowEntryModal] = useState(false);
   const [showRecentLaborInputs, setShowRecentLaborInputs] = useState(false);
-  const [chartTip, setChartTip] = useState({ visible: false, x: 0, y: 0, text: "" });
 
   const [entry, setEntry] = useState({
     date_et: toIsoDateET(new Date()),
@@ -726,33 +727,21 @@ export default function OperationsView({ productionSegments }) {
     }
   }
 
-  function showChartTip(e, text) {
-    setChartTip({
-      visible: true,
-      x: (e && e.clientX) ? e.clientX : 0,
-      y: (e && e.clientY) ? e.clientY : 0,
-      text: text || ""
-    });
-  }
+  const dailyChartConfig = useMemo(function() {
+    return {
+      actual: { label: "Actual daily yield", color: "rgb(var(--accent))" },
+      plan: { label: "Baseline daily plan", color: "rgb(var(--muted))" }
+    };
+  }, []);
 
-  function moveChartTip(e) {
-    setChartTip(function(prev) {
-      if (!prev.visible) return prev;
-      return {
-        visible: true,
-        x: (e && e.clientX) ? e.clientX : prev.x,
-        y: (e && e.clientY) ? e.clientY : prev.y,
-        text: prev.text
-      };
-    });
-  }
-
-  function hideChartTip() {
-    setChartTip(function(prev) {
-      if (!prev.visible) return prev;
-      return { visible: false, x: 0, y: 0, text: "" };
-    });
-  }
+  const shiftChartConfig = useMemo(function() {
+    return {
+      s1: { label: "Shift 1", color: "rgb(var(--accent))" },
+      s2: { label: "Shift 2", color: "color-mix(in oklab, rgb(var(--accent)) 78%, white)" },
+      un: { label: "Unassigned", color: "color-mix(in oklab, rgb(var(--muted)) 45%, white)" },
+      plan: { label: "Baseline daily plan", color: "rgb(var(--muted))" }
+    };
+  }, []);
 
   return (
     <div className="space-y-4">
@@ -886,28 +875,50 @@ export default function OperationsView({ productionSegments }) {
       <div className="grid gap-3 lg:grid-cols-12">
         <Card className="lg:col-span-12 px-4 py-4">
           <div className="mb-2 text-sm font-semibold">Daily Production Yield</div>
-          <div className="flex h-52 items-end gap-2 overflow-x-auto">
-            {dailyPlanVsActual.rows.map(function(r) {
-              return (
-                <div
-                  key={r.date}
-                  className="flex min-w-[42px] flex-col items-center gap-1"
-                  onMouseEnter={function(e) { showChartTip(e, r.tooltip); }}
-                  onMouseMove={moveChartTip}
-                  onMouseLeave={hideChartTip}
-                >
-                  <div className="relative h-36 w-7">
-                    <div className="absolute inset-x-0 bottom-0 rounded-t bg-[rgb(var(--accent))]" style={{ height: Math.max(8, Math.round((r.actualPct / 100) * 132)) + "px", opacity: 0.9 }} />
-                    <div className="absolute inset-x-0 border-t-2 border-dashed border-[rgb(var(--muted))]" style={{ bottom: Math.max(8, Math.round((r.planPct / 100) * 132)) + "px" }} />
-                  </div>
-                  <div className="text-[10px] text-[rgb(var(--muted))]">{r.date ? r.date.slice(5) : "--"}</div>
-                </div>
-              );
-            })}
-            {!dailyPlanVsActual.rows.length && (
-              <div className="w-full self-center text-center text-sm text-[rgb(var(--muted))]">No daily production data in selected window.</div>
-            )}
-          </div>
+          {dailyPlanVsActual.rows.length ? (
+            <ChartContainer config={dailyChartConfig} className="h-56">
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={dailyPlanVsActual.rows} margin={{ top: 8, right: 8, left: 4, bottom: 8 }}>
+                  <CartesianGrid vertical={false} stroke="rgb(var(--border))" strokeOpacity={0.4} />
+                  <XAxis
+                    dataKey="date"
+                    tickFormatter={function(v) { return String(v || "").slice(5); }}
+                    tickLine={false}
+                    axisLine={false}
+                    minTickGap={16}
+                    tick={{ fill: "rgb(var(--muted))", fontSize: 11 }}
+                  />
+                  <YAxis
+                    width={62}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={function(v) { return Math.round(safeNum(v)).toLocaleString(); }}
+                    tick={{ fill: "rgb(var(--muted))", fontSize: 11 }}
+                  />
+                  <ChartTooltip
+                    cursor={{ fill: "rgb(var(--surface))" }}
+                    content={
+                      <ChartTooltipContent
+                        labelFormatter={function(value) { return value; }}
+                        formatter={function(value) { return Math.round(safeNum(value)); }}
+                      />
+                    }
+                  />
+                  <Bar dataKey="actual" fill="var(--color-actual)" radius={[4, 4, 0, 0]} maxBarSize={26} />
+                  <Line
+                    type="monotone"
+                    dataKey="plan"
+                    stroke="var(--color-plan)"
+                    strokeDasharray="4 4"
+                    strokeWidth={2}
+                    dot={false}
+                  />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </ChartContainer>
+          ) : (
+            <div className="h-52 w-full self-center text-center text-sm text-[rgb(var(--muted))] leading-[13rem]">No daily production data in selected window.</div>
+          )}
           <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-[rgb(var(--muted))]">
             <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-[rgb(var(--accent))]" />Actual daily yield</span>
             <span className="inline-flex items-center gap-1"><span className="h-px w-3 border-t-2 border-dashed border-[rgb(var(--muted))]" />Baseline daily plan</span>
@@ -918,30 +929,52 @@ export default function OperationsView({ productionSegments }) {
       <div className="grid gap-3 lg:grid-cols-12">
         <Card className="lg:col-span-7 px-4 py-4">
           <div className="mb-2 text-sm font-semibold">Shift Mix by Day</div>
-          <div className="flex h-52 items-end gap-2 overflow-x-auto">
-            {shiftPlanVsActual.rows.map(function(r) {
-              return (
-                <div
-                  key={r.date}
-                  className="flex min-w-[38px] flex-col items-center gap-1"
-                  onMouseEnter={function(e) { showChartTip(e, r.tooltip); }}
-                  onMouseMove={moveChartTip}
-                  onMouseLeave={hideChartTip}
-                >
-                  <div className="relative h-36 w-6">
-                    <div className="absolute inset-x-0 bottom-0 rounded-t bg-[rgb(var(--muted))/0.3]" style={{ height: Math.max(2, Math.round((r.unPct / 100) * 132)) + "px" }} />
-                    <div className="absolute inset-x-0 rounded-t bg-[rgb(var(--accent))/0.7]" style={{ bottom: Math.max(2, Math.round((r.unPct / 100) * 132)) + "px", height: Math.max(2, Math.round((r.s2Pct / 100) * 132)) + "px" }} />
-                    <div className="absolute inset-x-0 rounded-t bg-[rgb(var(--accent))]" style={{ bottom: Math.max(2, Math.round(((r.unPct + r.s2Pct) / 100) * 132)) + "px", height: Math.max(2, Math.round((r.s1Pct / 100) * 132)) + "px" }} />
-                    <div className="absolute inset-x-0 border-t-2 border-dashed border-[rgb(var(--muted))]" style={{ bottom: Math.max(8, Math.round((r.planPct / 100) * 132)) + "px" }} />
-                  </div>
-                  <div className="text-[10px] text-[rgb(var(--muted))]">{r.date ? r.date.slice(5) : "--"}</div>
-                </div>
-              );
-            })}
-            {!shiftPlanVsActual.rows.length && (
-              <div className="w-full self-center text-center text-sm text-[rgb(var(--muted))]">No shift production data in selected window.</div>
-            )}
-          </div>
+          {shiftPlanVsActual.rows.length ? (
+            <ChartContainer config={shiftChartConfig} className="h-56">
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={shiftPlanVsActual.rows} margin={{ top: 8, right: 8, left: 4, bottom: 8 }}>
+                  <CartesianGrid vertical={false} stroke="rgb(var(--border))" strokeOpacity={0.4} />
+                  <XAxis
+                    dataKey="date"
+                    tickFormatter={function(v) { return String(v || "").slice(5); }}
+                    tickLine={false}
+                    axisLine={false}
+                    minTickGap={16}
+                    tick={{ fill: "rgb(var(--muted))", fontSize: 11 }}
+                  />
+                  <YAxis
+                    width={62}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={function(v) { return Math.round(safeNum(v)).toLocaleString(); }}
+                    tick={{ fill: "rgb(var(--muted))", fontSize: 11 }}
+                  />
+                  <ChartTooltip
+                    cursor={{ fill: "rgb(var(--surface))" }}
+                    content={
+                      <ChartTooltipContent
+                        labelFormatter={function(value) { return value; }}
+                        formatter={function(value) { return Math.round(safeNum(value)); }}
+                      />
+                    }
+                  />
+                  <Bar stackId="shift" dataKey="s1" fill="var(--color-s1)" radius={[4, 4, 0, 0]} maxBarSize={26} />
+                  <Bar stackId="shift" dataKey="s2" fill="var(--color-s2)" maxBarSize={26} />
+                  <Bar stackId="shift" dataKey="un" fill="var(--color-un)" maxBarSize={26} />
+                  <Line
+                    type="monotone"
+                    dataKey="plan"
+                    stroke="var(--color-plan)"
+                    strokeDasharray="4 4"
+                    strokeWidth={2}
+                    dot={false}
+                  />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </ChartContainer>
+          ) : (
+            <div className="h-52 w-full self-center text-center text-sm text-[rgb(var(--muted))] leading-[13rem]">No shift production data in selected window.</div>
+          )}
           <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-[rgb(var(--muted))]">
             <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-[rgb(var(--accent))]" />Shift 1</span>
             <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-[rgb(var(--accent))/0.7]" />Shift 2</span>
@@ -1142,14 +1175,6 @@ export default function OperationsView({ productionSegments }) {
               <span className="text-xs text-[rgb(var(--muted))]">Wages use Labor Rate Settings and generally remain constant.</span>
             </div>
           </Card>
-        </div>
-      )}
-      {chartTip.visible && (
-        <div
-          className="fixed z-[80] pointer-events-none rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2 py-1.5 text-xs leading-5 text-[rgb(var(--foreground))] shadow-lg whitespace-pre"
-          style={{ left: chartTip.x + 12, top: chartTip.y + 12 }}
-        >
-          {chartTip.text}
         </div>
       )}
     </div>
