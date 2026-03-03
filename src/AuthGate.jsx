@@ -146,6 +146,12 @@ export default function AuthGate({ children }) {
       return;
     }
     await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+    try {
+      if (window.heap && typeof window.heap.resetIdentity === "function") {
+        window.heap.resetIdentity();
+      }
+      window.__heapIdentifiedUser = "";
+    } catch (_) {}
     setUser(null);
     initializedRef.current = false;
   }, []);
@@ -155,6 +161,24 @@ export default function AuthGate({ children }) {
     window.__ppUser = user || null;
     window.__ppLogout = user ? handleLogout : null;
   }, [user, handleLogout]);
+
+  // Identify authenticated user in Heap once per user/session.
+  useEffect(() => {
+    try {
+      var email = user && user.email ? String(user.email).trim() : "";
+      if (!email) return;
+      if (!window.heap || typeof window.heap.identify !== "function") return;
+      if (window.__heapIdentifiedUser === email) return;
+      window.heap.identify(email);
+      if (typeof window.heap.addUserProperties === "function") {
+        window.heap.addUserProperties({
+          email: email,
+          name: user && user.name ? String(user.name) : "",
+        });
+      }
+      window.__heapIdentifiedUser = email;
+    } catch (_) {}
+  }, [user]);
 
   if (checking) {
     return (
