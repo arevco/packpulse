@@ -65,6 +65,62 @@ function isMarchYieldQuestion(prompt) {
   return mentionsYield && mentionsMarch && mentionsTarget;
 }
 
+function extractComponentLookupSku(prompt) {
+  var q = toText(prompt);
+  if (!q) return "";
+  var m = q.match(/components?\s+(?:are\s+used\s+in|for|in)\s+([a-zA-Z0-9\-]+)/i);
+  if (m && m[1]) return String(m[1]).trim();
+  var m2 = q.match(/what\s+is\s+in\s+([a-zA-Z0-9\-]+)/i);
+  if (m2 && m2[1]) return String(m2[1]).trim();
+  return "";
+}
+
+function normalizeSku(value) {
+  return String(value || "").trim().replace(/\.0+$/, "").toLowerCase();
+}
+
+function firstField(row, keys) {
+  if (!row || typeof row !== "object") return "";
+  for (var i = 0; i < keys.length; i++) {
+    var k = keys[i];
+    if (Object.prototype.hasOwnProperty.call(row, k) && row[k] != null && row[k] !== "") return row[k];
+  }
+  var wanted = keys.map(function(k) { return String(k).toLowerCase().replace(/[^a-z0-9]/g, ""); });
+  var rowKeys = Object.keys(row);
+  for (var j = 0; j < rowKeys.length; j++) {
+    var rk = rowKeys[j];
+    var norm = String(rk).toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (wanted.indexOf(norm) !== -1) {
+      var v = row[rk];
+      if (v != null && v !== "") return v;
+    }
+  }
+  return "";
+}
+
+function componentsForSkuFromPayload(payload, skuRaw) {
+  var boms = payload && Array.isArray(payload.boms) ? payload.boms : [];
+  if (!boms.length) return { hasBomData: false, items: [] };
+  var sku = normalizeSku(skuRaw);
+  var out = [];
+  var seen = {};
+  boms.forEach(function(row) {
+    var fg = normalizeSku(firstField(row, ["Finished Good Code", "finished_good_code", "bomId", "Finished Good", "fg_code"]));
+    if (!fg || fg !== sku) return;
+    var comp = String(firstField(row, ["Subcomponent Code", "subcomponent_code", "componentSku", "Component", "component_code"]) || "").trim();
+    if (!comp) return;
+    var key = normalizeSku(comp);
+    if (!key || seen[key]) return;
+    seen[key] = true;
+    out.push({
+      component: comp,
+      description: String(firstField(row, ["Subcomponent Description", "subcomponent_description", "description", "Description"]) || "").trim(),
+      qtyPer: firstField(row, ["Qty Per", "subcomponent_unit_quantity", "qtyPer", "quantity_per"]),
+    });
+  });
+  return { hasBomData: true, items: out };
+}
+
 async function loadSupabaseAiContext() {
   var supabase = getSupabaseAdmin();
 
@@ -159,6 +215,7 @@ async function loadSupabaseAiContext() {
     snapshotUpdatedBy: snapshot && snapshot.updated_by ? snapshot.updated_by : "",
     snapshotRowCounts: snapshot && snapshot.row_counts ? snapshot.row_counts : {},
     snapshotMetrics: snapshot && snapshot.metrics ? snapshot.metrics : {},
+    snapshotPayload: snapshot && snapshot.payload ? snapshot.payload : null,
     production: {
       totalRows: productionRows.length,
       latestDate: latestProdDate,
@@ -203,6 +260,31 @@ export default async function handler(req, res) {
       supabaseContext = await loadSupabaseAiContext();
     } catch (_) {
       supabaseContext = null;
+    }
+    var lookupSku = extractComponentLookupSku(prompt);
+    if (lookupSku) {
+      var result = componentsForSkuFromPayload(supabaseContext && supabaseContext.snapshotPayload, lookupSku);
+      if (!result.hasBomData) {
+        return res.status(200).json({
+          answer: "BOM data is not available in shared snapshot yet. Run Nulogy sync with BOM included, then ask again.",
+          model: "deterministic",
+        });
+      }
+      if (!result.items.length) {
+        return res.status(200).json({
+          answer: "No BOM components found for " + lookupSku + " in current snapshot.",
+          model: "deterministic",
+        });
+      }
+      var lines = result.items.slice(0, 25).map(function(item, idx) {
+        var desc = item.description ? " - " + item.description : "";
+        var qty = item.qtyPer != null && item.qtyPer !== "" ? " (qty/unit: " + item.qtyPer + ")" : "";
+        return (idx + 1) + ". " + item.component + desc + qty;
+      });
+      return res.status(200).json({
+        answer: "Components for " + lookupSku + ":\n" + lines.join("\n"),
+        model: "deterministic",
+      });
     }
 
     // Deterministic answer for high-frequency operational ask.
@@ -319,6 +401,9 @@ export default async function handler(req, res) {
     if (supabaseContext && supabaseContext.production) {
       // remove function before serialization
       delete supabaseContext.production.range;
+    }
+    if (supabaseContext && Object.prototype.hasOwnProperty.call(supabaseContext, "snapshotPayload")) {
+      delete supabaseContext.snapshotPayload;
     }
 
     var system = [
