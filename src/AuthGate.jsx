@@ -176,6 +176,11 @@ export default function AuthGate({ children }) {
           name: user && user.name ? String(user.name) : "",
         });
       }
+      if (typeof window.heap.track === "function") {
+        window.heap.track("PackPulse Authenticated", {
+          email: email,
+        });
+      }
       window.__heapIdentifiedUser = email;
     } catch (_) {}
   }, [user]);

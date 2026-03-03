@@ -70,5 +70,16 @@ export function initHeapAnalytics() {
   } else {
     document.head.appendChild(script);
   }
-}
 
+  // Emit a guaranteed initial pageview/event so data appears quickly in Heap.
+  try {
+    if (window.heap && typeof window.heap.trackPageview === "function") {
+      window.heap.trackPageview();
+    }
+    if (window.heap && typeof window.heap.track === "function") {
+      window.heap.track("PackPulse Loaded", {
+        path: window.location && window.location.pathname ? window.location.pathname : "",
+      });
+    }
+  } catch (_) {}
+}
