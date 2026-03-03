@@ -199,6 +199,36 @@ export default function ProductionReadiness() {
   var productionLatestTotal = (productionSegmentsForUI.shiftRows || [])
     .filter(function(r) { return (r && r.date) === productionLatestDate; })
     .reduce(function(sum, r) { return sum + (Number(r && r.unitsProduced || 0) || 0); }, 0);
+  var weekStartEt = (function(dateIso) {
+    if (!dateIso) return "";
+    var d = new Date(dateIso + "T00:00:00");
+    var dow = d.getDay();
+    var delta = dow === 0 ? -6 : 1 - dow;
+    d.setDate(d.getDate() + delta);
+    return d.toISOString().slice(0, 10);
+  })(todayEt);
+  var shiftDaysIso = function(dateIso, n) {
+    if (!dateIso) return "";
+    var d = new Date(dateIso + "T00:00:00");
+    d.setDate(d.getDate() + n);
+    return d.toISOString().slice(0, 10);
+  };
+  var lastWeekStartEt = shiftDaysIso(weekStartEt, -7);
+  var lastWeekEndEt = shiftDaysIso(weekStartEt, -1);
+  var rowsInRange = function(startIso, endIso) {
+    return (productionSegmentsForUI.shiftRows || []).filter(function(r) {
+      var date = (r && r.date) || "";
+      return date && startIso && endIso && date >= startIso && date <= endIso;
+    });
+  };
+  var thisWeekRows = rowsInRange(weekStartEt, todayEt);
+  var lastWeekRows = rowsInRange(lastWeekStartEt, lastWeekEndEt);
+  var sumUnits = function(rows) { return rows.reduce(function(sum, r) { return sum + (Number(r && r.unitsProduced || 0) || 0); }, 0); };
+  var sumShift = function(rows, token) {
+    return rows
+      .filter(function(r) { return String(r && r.shift || "").toLowerCase().indexOf(token) !== -1; })
+      .reduce(function(sum, r) { return sum + (Number(r && r.unitsProduced || 0) || 0); }, 0);
+  };
   var askAiMetrics = {
     todayEt: todayEt,
     workOrdersTotal: summaryForUI.total,
@@ -212,6 +242,16 @@ export default function ProductionReadiness() {
     productionTodayShift2Cases: productionTodayS2,
     productionLatestDate: productionLatestDate,
     productionLatestCases: productionLatestTotal,
+    thisWeekStartEt: weekStartEt,
+    thisWeekEndEt: todayEt,
+    thisWeekCases: sumUnits(thisWeekRows),
+    thisWeekShift1Cases: sumShift(thisWeekRows, "shift 1"),
+    thisWeekShift2Cases: sumShift(thisWeekRows, "shift 2"),
+    lastWeekStartEt: lastWeekStartEt,
+    lastWeekEndEt: lastWeekEndEt,
+    lastWeekCases: sumUnits(lastWeekRows),
+    lastWeekShift1Cases: sumShift(lastWeekRows, "shift 1"),
+    lastWeekShift2Cases: sumShift(lastWeekRows, "shift 2"),
   };
   var askAiContextLines = [
     "Active view: " + (activeView || "overview"),
