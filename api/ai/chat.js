@@ -30,6 +30,17 @@ function isLastWeekSummaryQuestion(prompt) {
   return hasLastWeek && hasProd;
 }
 
+function isChartSummaryQuestion(prompt) {
+  var q = toText(prompt).toLowerCase();
+  if (!q) return false;
+  return (
+    q.includes("summarize these charts") ||
+    q.includes("summarise these charts") ||
+    q.includes("summarize the charts") ||
+    q.includes("chart summary")
+  );
+}
+
 async function loadSupabaseAiContext() {
   var supabase = getSupabaseAdmin();
 
@@ -169,6 +180,44 @@ export default async function handler(req, res) {
           " cases. Shift 1: " + lwS1.toLocaleString() +
           ", Shift 2: " + lwS2.toLocaleString() +
           ". This week-to-date: " + twTotal.toLocaleString() + " (" + (delta >= 0 ? "+" : "") + delta + "% vs last week).",
+        model: "deterministic",
+      });
+    }
+    if (isChartSummaryQuestion(prompt)) {
+      var last7 = (supabaseContext && supabaseContext.production && Array.isArray(supabaseContext.production.byDayLast7))
+        ? supabaseContext.production.byDayLast7
+        : [];
+      var topLines = (supabaseContext && supabaseContext.production && Array.isArray(supabaseContext.production.topLines))
+        ? supabaseContext.production.topLines
+        : [];
+      if (!last7.length) {
+        return res.status(200).json({
+          answer: "I can’t summarize charts yet because recent production trend data is empty in Supabase. Run a sync and try again.",
+          model: "deterministic",
+        });
+      }
+      var total7 = last7.reduce(function(sum, d) { return sum + toNum(d.units); }, 0);
+      var avg7 = Math.round(total7 / Math.max(1, last7.length));
+      var sortedDays = last7.slice().sort(function(a, b) { return toNum(b.units) - toNum(a.units); });
+      var best = sortedDays[0] || { date: "--", units: 0 };
+      var worst = sortedDays[sortedDays.length - 1] || { date: "--", units: 0 };
+      var trend = 0;
+      if (last7.length >= 2) {
+        var first = toNum(last7[0].units);
+        var last = toNum(last7[last7.length - 1].units);
+        trend = first ? Math.round(((last - first) / first) * 100) : 0;
+      }
+      var topLineText = topLines.length
+        ? topLines.slice(0, 3).map(function(x) { return String(x.line || "--") + " (" + toNum(x.units).toLocaleString() + ")"; }).join(", ")
+        : "No line breakdown available";
+      return res.status(200).json({
+        answer:
+          "Chart summary (last 7 production days): total " + total7.toLocaleString() +
+          " cases, avg " + avg7.toLocaleString() + "/day. " +
+          "Peak day: " + String(best.date || "--") + " (" + toNum(best.units).toLocaleString() + "). " +
+          "Low day: " + String(worst.date || "--") + " (" + toNum(worst.units).toLocaleString() + "). " +
+          "Period trend: " + (trend >= 0 ? "+" : "") + trend + "%. " +
+          "Top lines: " + topLineText + ".",
         model: "deterministic",
       });
     }
