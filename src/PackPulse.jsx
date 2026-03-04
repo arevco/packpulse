@@ -767,14 +767,18 @@ export default function ProductionReadiness() {
             </div>
           </div>
         )}
-        {dockApiError && <div className="-mt-2 mb-1 text-xs text-[rgb(var(--danger))]">OpenDock API error: {dockApiError}</div>}
-        {dockApiInfo && <div className="-mt-0.5 mb-1 text-xs text-[rgb(var(--success))]">{dockApiInfo}</div>}
-        {evoconApiError && <div className="-mt-0.5 mb-1 text-xs text-[rgb(var(--danger))]">Evocon API error: {evoconApiError}</div>}
-        {evoconApiInfo && (
-          <div className="-mt-0.5 mb-2.5 text-xs text-[rgb(var(--success))]">
-            {evoconApiInfo}
-            {evoconLastSyncAt ? " · Synced " + fmtTs(evoconLastSyncAt) : ""}
-          </div>
+        {showDataControlsPanel && (!syncHealthy || showQuickControls) && (
+          <>
+            {dockApiError && <div className="-mt-2 mb-1 text-xs text-[rgb(var(--danger))]">OpenDock API error: {dockApiError}</div>}
+            {dockApiInfo && <div className="-mt-0.5 mb-1 text-xs text-[rgb(var(--success))]">{dockApiInfo}</div>}
+            {evoconApiError && <div className="-mt-0.5 mb-1 text-xs text-[rgb(var(--danger))]">Evocon API error: {evoconApiError}</div>}
+            {evoconApiInfo && (
+              <div className="-mt-0.5 mb-2.5 text-xs text-[rgb(var(--success))]">
+                {evoconApiInfo}
+                {evoconLastSyncAt ? " · Synced " + fmtTs(evoconLastSyncAt) : ""}
+              </div>
+            )}
+          </>
         )}
 
         {showSettings && (
