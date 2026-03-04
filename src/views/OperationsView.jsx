@@ -3,6 +3,7 @@ import { useTheme } from "../theme";
 import { Card } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
+import { Badge } from "../components/ui/badge";
 import { DatePicker } from "../components/ui/date-picker";
 import TableShell from "../components/ui/table-shell";
 import ProductionView from "./ProductionView";
