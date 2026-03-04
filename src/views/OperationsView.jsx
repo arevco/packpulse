@@ -219,6 +219,29 @@ function lineColor(index) {
   return palette[index % palette.length];
 }
 
+function normalizeKeyLocal(s) {
+  return String(s || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+
+function pickFieldLooseLocal(row, keys) {
+  if (!row || typeof row !== "object") return "";
+  var rowKeys = Object.keys(row);
+  for (var i = 0; i < keys.length; i++) {
+    var target = String(keys[i]).toLowerCase();
+    for (var j = 0; j < rowKeys.length; j++) {
+      var rk = rowKeys[j];
+      if (String(rk).toLowerCase() === target) return row[rk];
+    }
+  }
+  var wanted = {};
+  keys.forEach(function(k) { wanted[normalizeKeyLocal(k)] = true; });
+  for (var x = 0; x < rowKeys.length; x++) {
+    var key = rowKeys[x];
+    if (wanted[normalizeKeyLocal(key)]) return row[key];
+  }
+  return "";
+}
+
 function secToMin(v) {
   return Math.round(safeNum(v) / 60);
 }
@@ -235,6 +258,84 @@ function normalizeEvoconShift(shiftRaw) {
   if (s.includes("1") || s.includes("1st")) return "Shift 1 (7a-3p)";
   if (s.includes("2") || s.includes("2nd")) return "Shift 2 (3p-11p)";
   return "Unassigned";
+}
+
+function buildRawNulogySeries(rows) {
+  var byDay = {};
+  var byShift = {};
+  var byLine = {};
+  var bySku = {};
+  var byDateLine = {};
+  var rowsLite = [];
+  (Array.isArray(rows) ? rows : []).forEach(function(row) {
+    var units = safeNum(pickFieldLooseLocal(row, ["Units Produced", "units_produced", "unitsProduced", "Produced Units", "Quantity Produced", "Qty Produced"]));
+    if (!(units > 0)) return;
+    var producedRaw = pickFieldLooseLocal(row, [
+      "Actual Job End", "actual_job_end_at",
+      "Produced At", "produced_at", "Produced date", "producedAt",
+      "Actual Job Start", "actual_job_start_at"
+    ]);
+    var date = toIsoDateET(producedRaw || new Date());
+    if (!date) return;
+    var shift = "Unassigned";
+    var dt = new Date(producedRaw || "");
+    if (!isNaN(dt)) {
+      var hrFmt = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "2-digit", hour12: false });
+      var hour = parseInt(hrFmt.format(dt), 10);
+      if (hour >= 7 && hour < 15) shift = "Shift 1 (7a-3p)";
+      else if (hour >= 15 && hour < 23) shift = "Shift 2 (3p-11p)";
+    }
+    var line = String(pickFieldLooseLocal(row, ["Line", "line", "line_name", "Line Name"]) || "--").trim() || "--";
+    var sku = String(pickFieldLooseLocal(row, ["Item Code", "item_code"]) || "").trim() || "UNKNOWN";
+    var itemDesc = String(pickFieldLooseLocal(row, ["Description", "description", "Item Description", "item_description"]) || "").trim();
+    var wo = String(pickFieldLooseLocal(row, ["Work Order Code", "project_code", "Project Code"]) || "").trim();
+
+    if (!byDay[date]) byDay[date] = { date: date, units: 0, rows: 0 };
+    byDay[date].units += units;
+    byDay[date].rows += 1;
+    var shiftKey = date + "|" + shift;
+    if (!byShift[shiftKey]) byShift[shiftKey] = { date: date, shift: shift, units: 0, rows: 0 };
+    byShift[shiftKey].units += units;
+    byShift[shiftKey].rows += 1;
+    if (!byLine[line]) byLine[line] = { line: line, units: 0, rows: 0 };
+    byLine[line].units += units;
+    byLine[line].rows += 1;
+    if (!bySku[sku]) bySku[sku] = { item_code: sku, units: 0, rows: 0 };
+    bySku[sku].units += units;
+    bySku[sku].rows += 1;
+    if (!byDateLine[date]) byDateLine[date] = {};
+    if (!byDateLine[date][line]) byDateLine[date][line] = { line: line, units: 0, rows: 0 };
+    byDateLine[date][line].units += units;
+    byDateLine[date][line].rows += 1;
+
+    rowsLite.push({
+      produced_date_et: date,
+      shift_label: shift,
+      item_code: sku === "UNKNOWN" ? null : sku,
+      item_desc: itemDesc || null,
+      units_produced: units,
+      line: line,
+      work_order_code: wo || null
+    });
+  });
+  var latestDate = Object.keys(byDateLine).sort().pop() || null;
+  return {
+    trends: {
+      byDay: Object.values(byDay).sort(function(a, b) { return String(b.date || "").localeCompare(String(a.date || "")); }),
+      byShift: Object.values(byShift).sort(function(a, b) {
+        if (a.date !== b.date) return String(b.date || "").localeCompare(String(a.date || ""));
+        return String(a.shift || "").localeCompare(String(b.shift || ""));
+      })
+    },
+    breakdown: {
+      rowsLite: rowsLite,
+      bySku: Object.values(bySku).sort(function(a, b) { return b.units - a.units; }),
+      byLine: Object.values(byLine).sort(function(a, b) { return b.units - a.units; }),
+      latestDate: latestDate,
+      latestByLine: latestDate ? Object.values(byDateLine[latestDate]).sort(function(a, b) { return b.units - a.units; }) : [],
+      totalRows: rowsLite.length
+    }
+  };
 }
 
 function buildEvoconSeries(rows) {
@@ -337,7 +438,7 @@ function mergeDaySeries(baseRows, extraRows) {
   return Object.values(map).sort(function(a, b) { return String(b.date || "").localeCompare(String(a.date || "")); });
 }
 
-export default function OperationsView({ productionSegments, evoconData, evoconTimestamp }) {
+export default function OperationsView({ productionSegments, productionDataRaw, evoconData, evoconTimestamp }) {
   const { C, mono } = useTheme();
   const [windowPreset, setWindowPreset] = useState("last_14");
   const initialRange = presetRange("last_14");
@@ -957,7 +1058,7 @@ export default function OperationsView({ productionSegments, evoconData, evoconT
       latestByLineMap[line].units += safeNum(r.units_produced);
       latestByLineMap[line].rows += 1;
     });
-    return {
+    var fromSegments = {
       trends: {
         byDay: Object.values(byDayMap).sort(function(a, b) { return String(b.date || "").localeCompare(String(a.date || "")); }),
         byShift: shiftRows.map(function(r) {
@@ -981,7 +1082,45 @@ export default function OperationsView({ productionSegments, evoconData, evoconT
         totalRows: rowsLite.length
       }
     };
-  }, [productionSegments]);
+    var fromRaw = buildRawNulogySeries(productionDataRaw || []);
+    if (!fromSegments.trends.byDay.length && fromRaw.trends.byDay.length) return fromRaw;
+    if (!fromSegments.breakdown.rowsLite.length && fromRaw.breakdown.rowsLite.length) return fromRaw;
+    if (fromRaw.trends.byDay.length) {
+      var mergedRowsLite = (fromSegments.breakdown.rowsLite || []).concat(fromRaw.breakdown.rowsLite || []);
+      var mergedLatestDate = (fromSegments.breakdown.latestDate && fromRaw.breakdown.latestDate)
+        ? (fromSegments.breakdown.latestDate > fromRaw.breakdown.latestDate ? fromSegments.breakdown.latestDate : fromRaw.breakdown.latestDate)
+        : (fromSegments.breakdown.latestDate || fromRaw.breakdown.latestDate || null);
+      var mergedLatestByLineMap = {};
+      mergedRowsLite.forEach(function(r) {
+        if (!mergedLatestDate || String(r.produced_date_et || "") !== mergedLatestDate) return;
+        var ln = String(r.line || "Unknown");
+        if (!mergedLatestByLineMap[ln]) mergedLatestByLineMap[ln] = { line: ln, units: 0, rows: 0 };
+        mergedLatestByLineMap[ln].units += safeNum(r.units_produced);
+        mergedLatestByLineMap[ln].rows += 1;
+      });
+      return {
+        trends: {
+          byDay: mergeDaySeries(fromSegments.trends.byDay, fromRaw.trends.byDay),
+          byShift: mergeTrendSeries(fromSegments.trends.byShift, fromRaw.trends.byShift)
+        },
+        breakdown: {
+          rowsLite: mergedRowsLite,
+          bySku: mergeDaySeries(
+            (fromSegments.breakdown.bySku || []).map(function(r) { return { date: String(r.item_code || ""), units: safeNum(r.units), rows: safeNum(r.rows) }; }),
+            (fromRaw.breakdown.bySku || []).map(function(r) { return { date: String(r.item_code || ""), units: safeNum(r.units), rows: safeNum(r.rows) }; })
+          ).map(function(r) { return { item_code: r.date, units: r.units, rows: r.rows }; }).sort(function(a, b) { return b.units - a.units; }),
+          byLine: mergeDaySeries(
+            (fromSegments.breakdown.byLine || []).map(function(r) { return { date: String(r.line || ""), units: safeNum(r.units), rows: safeNum(r.rows) }; }),
+            (fromRaw.breakdown.byLine || []).map(function(r) { return { date: String(r.line || ""), units: safeNum(r.units), rows: safeNum(r.rows) }; })
+          ).map(function(r) { return { line: r.date, units: r.units, rows: r.rows }; }).sort(function(a, b) { return b.units - a.units; }),
+          latestDate: mergedLatestDate,
+          latestByLine: Object.values(mergedLatestByLineMap).sort(function(a, b) { return b.units - a.units; }),
+          totalRows: safeNum(fromSegments.breakdown.totalRows) + safeNum(fromRaw.breakdown.totalRows)
+        }
+      };
+    }
+    return fromSegments;
+  }, [productionSegments, productionDataRaw]);
 
   var evoconSeries = useMemo(function() {
     return buildEvoconSeries(evoconData || []);
