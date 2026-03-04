@@ -1,19 +1,3 @@
-var HEAP_SRC_BASE = "https://cdn.us.heap-api.com/config/";
-
-function createStub(name) {
-  return function() {
-    var args = Array.prototype.slice.call(arguments, 0);
-    window.heapReadyCb.push({
-      name: name,
-      fn: function() {
-        if (window.heap && typeof window.heap[name] === "function") {
-          window.heap[name].apply(window.heap, args);
-        }
-      },
-    });
-  };
-}
-
 export function initHeapAnalytics() {
   if (typeof window === "undefined" || typeof document === "undefined") return;
   if (window.__heapLoaded) return;
@@ -26,50 +10,59 @@ export function initHeapAnalytics() {
 
   window.heapReadyCb = window.heapReadyCb || [];
   window.heap = window.heap || [];
-  window.heap.envId = appId;
-  window.heap.clientConfig = { shouldFetchServerConfig: false };
-  window.__heapLoaded = true;
-
-  var methods = [
-    "init",
-    "startTracking",
-    "stopTracking",
-    "track",
-    "resetIdentity",
-    "identify",
-    "getSessionId",
-    "getUserId",
-    "getIdentity",
-    "addUserProperties",
-    "addEventProperties",
-    "removeEventProperty",
-    "clearEventProperties",
-    "addAccountProperties",
-    "addAdapter",
-    "addTransformer",
-    "addTransformerFn",
-    "onReady",
-    "addPageviewProperties",
-    "removePageviewProperty",
-    "clearPageviewProperties",
-    "trackPageview",
-  ];
-  for (var i = 0; i < methods.length; i++) {
-    if (typeof window.heap[methods[i]] !== "function") {
-      window.heap[methods[i]] = createStub(methods[i]);
+  window.heap.load = function(envId, clientConfig) {
+    window.heap.envId = envId;
+    window.heap.clientConfig = clientConfig = clientConfig || {};
+    window.heap.clientConfig.shouldFetchServerConfig = false;
+    var script = document.createElement("script");
+    script.type = "text/javascript";
+    script.async = true;
+    script.src = "https://cdn.us.heap-api.com/config/" + envId + "/heap_config.js";
+    var firstScript = document.getElementsByTagName("script")[0];
+    if (firstScript && firstScript.parentNode) firstScript.parentNode.insertBefore(script, firstScript);
+    else document.head.appendChild(script);
+    var methods = [
+      "init",
+      "startTracking",
+      "stopTracking",
+      "track",
+      "resetIdentity",
+      "identify",
+      "identifyHashed",
+      "getSessionId",
+      "getUserId",
+      "getIdentity",
+      "addUserProperties",
+      "addEventProperties",
+      "removeEventProperty",
+      "clearEventProperties",
+      "addAccountProperties",
+      "addAdapter",
+      "addTransformer",
+      "addTransformerFn",
+      "onReady",
+      "addPageviewProperties",
+      "removePageviewProperty",
+      "clearPageviewProperties",
+      "trackPageview",
+    ];
+    var makeStub = function(name) {
+      return function() {
+        var args = Array.prototype.slice.call(arguments, 0);
+        window.heapReadyCb.push({
+          name: name,
+          fn: function() {
+            if (window.heap[name]) window.heap[name].apply(window.heap, args);
+          },
+        });
+      };
+    };
+    for (var i = 0; i < methods.length; i++) {
+      window.heap[methods[i]] = makeStub(methods[i]);
     }
-  }
-
-  var script = document.createElement("script");
-  script.type = "text/javascript";
-  script.async = true;
-  script.src = HEAP_SRC_BASE + appId + "/heap_config.js";
-  var firstScript = document.getElementsByTagName("script")[0];
-  if (firstScript && firstScript.parentNode) {
-    firstScript.parentNode.insertBefore(script, firstScript);
-  } else {
-    document.head.appendChild(script);
-  }
+  };
+  window.heap.load(appId);
+  window.__heapLoaded = true;
 
   // Emit a guaranteed initial pageview/event so data appears quickly in Heap.
   try {
