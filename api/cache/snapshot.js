@@ -43,7 +43,7 @@ function getSupabaseAdmin() {
 
 function sanitizePayload(p) {
   if (!p || typeof p !== "object") return {};
-  const allowed = ["inventory", "workOrders", "productionData", "itemMaster", "boms", "edrData", "dockData", "meta"];
+  const allowed = ["inventory", "workOrders", "productionData", "evoconData", "itemMaster", "boms", "edrData", "dockData", "meta"];
   const out = {};
   allowed.forEach(function(k) {
     if (Object.prototype.hasOwnProperty.call(p, k)) out[k] = p[k];
@@ -56,6 +56,7 @@ function rowCountsFromPayload(payload) {
     inventory: Array.isArray(payload.inventory) ? payload.inventory.length : 0,
     workOrders: Array.isArray(payload.workOrders) ? payload.workOrders.length : 0,
     productionData: Array.isArray(payload.productionData) ? payload.productionData.length : 0,
+    evoconData: Array.isArray(payload.evoconData) ? payload.evoconData.length : 0,
     itemMaster: Array.isArray(payload.itemMaster) ? payload.itemMaster.length : 0,
     boms: Array.isArray(payload.boms) ? payload.boms.length : 0,
     edrData: Array.isArray(payload.edrData) ? payload.edrData.length : 0,
@@ -124,6 +125,7 @@ function deriveMetrics(payload, rowCounts) {
     woRemainingUnits: Math.round(remainingUnits),
     inventoryRows: rowCounts.inventory || 0,
     productionRows: rowCounts.productionData || 0,
+    evoconRows: rowCounts.evoconData || 0,
     bomRows: rowCounts.boms || 0,
     edrRows: rowCounts.edrData || 0,
     dockRows: rowCounts.dockData || 0,

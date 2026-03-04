@@ -42,6 +42,9 @@ export default function ProductionReadiness() {
   const [dockApiLoading, setDockApiLoading] = useState(false);
   const [dockApiError, setDockApiError] = useState("");
   const [dockApiInfo, setDockApiInfo] = useState("");
+  const [evoconApiLoading, setEvoconApiLoading] = useState(false);
+  const [evoconApiError, setEvoconApiError] = useState("");
+  const [evoconApiInfo, setEvoconApiInfo] = useState("");
   const [syncVisualPct, setSyncVisualPct] = useState(0);
   const [showQuickControls, setShowQuickControls] = useState(false);
   const [showUserActivity, setShowUserActivity] = useState(false);
@@ -64,6 +67,7 @@ export default function ProductionReadiness() {
     { k:"inv", l:"Inventory", ts:ds.invTimestamp, cad:"daily", ref:() => window.__invR && window.__invR.click() },
     { k:"wo", l:"Work Orders", ts:ds.woTimestamp, cad:"monthly", ref:() => window.__woR && window.__woR.click() },
     { k:"prod", l:"Production", ts:ds.productionTimestamp, cad:"daily", ref:null },
+    { k:"evocon", l:"Evocon", ts:ds.evoconTimestamp, cad:"daily", ref:null },
     { k:"bom", l:"BOMs", ts:ds.bomTimestamp, cad:"rare", ref:() => window.__bomR && window.__bomR.click() },
     { k:"edr", l:"EDR", ts:ds.edrTimestamp, cad:"monthly", ref:() => window.__edrR && window.__edrR.click() },
     { k:"dock", l:"OpenDock", ts:ds.dockTimestamp, cad:"daily", ref:() => window.__dockR && window.__dockR.click() },
@@ -98,6 +102,27 @@ export default function ProductionReadiness() {
       setDockApiError(err && err.message ? err.message : "Could not load OpenDock data");
     } finally {
       setDockApiLoading(false);
+    }
+  }, []);
+  var fetchEvoconApi = useCallback(async () => {
+    setEvoconApiLoading(true);
+    setEvoconApiError("");
+    setEvoconApiInfo("");
+    try {
+      var resp = await fetch("/api/evocon/report?endpoint=oee_json", { credentials: "include" });
+      var body = await resp.json();
+      if (!resp.ok) {
+        throw new Error(body && body.error ? body.error : "Evocon API request failed");
+      }
+      var rows = body && Array.isArray(body.rows) ? body.rows : [];
+      ds.setEvoconData(rows);
+      ds.setEvoconFileName("Evocon API");
+      ds.setEvoconTimestamp(new Date());
+      setEvoconApiInfo("Loaded " + rows.length + " Evocon rows (" + (body.endpoint || "oee_json") + ")");
+    } catch (err) {
+      setEvoconApiError(err && err.message ? err.message : "Could not load Evocon data");
+    } finally {
+      setEvoconApiLoading(false);
     }
   }, []);
   var loadUserActivity = useCallback(async function() {
@@ -669,6 +694,9 @@ export default function ProductionReadiness() {
             <Button onClick={fetchOpenDockApi} disabled={dockApiLoading} variant={dockApiLoading ? "soft" : "active"} size="sm">
               {dockApiLoading ? "Syncing OpenDock..." : "Sync OpenDock API"}
             </Button>
+              <Button onClick={fetchEvoconApi} disabled={evoconApiLoading} variant={evoconApiLoading ? "soft" : "outline"} size="sm">
+                {evoconApiLoading ? "Syncing Evocon..." : "Sync Evocon OEE"}
+              </Button>
               <Button onClick={() => setShowDataSetup(v => !v)} variant="outline" size="sm">
                 {showDataSetup ? "Close Data Setup" : "Open Data Setup"}
               </Button>
@@ -722,7 +750,10 @@ export default function ProductionReadiness() {
             </div>
           </div>
         )}
-        {dockApiError && <div className="-mt-2 mb-2.5 text-xs text-[rgb(var(--danger))]">OpenDock API error: {dockApiError}</div>}
+        {dockApiError && <div className="-mt-2 mb-1 text-xs text-[rgb(var(--danger))]">OpenDock API error: {dockApiError}</div>}
+        {dockApiInfo && <div className="-mt-0.5 mb-1 text-xs text-[rgb(var(--success))]">{dockApiInfo}</div>}
+        {evoconApiError && <div className="-mt-0.5 mb-1 text-xs text-[rgb(var(--danger))]">Evocon API error: {evoconApiError}</div>}
+        {evoconApiInfo && <div className="-mt-0.5 mb-2.5 text-xs text-[rgb(var(--success))]">{evoconApiInfo}</div>}
 
         {showSettings && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50" onClick={e => { if (e.target === e.currentTarget) setShowSettings(false); }}>

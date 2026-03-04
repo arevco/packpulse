@@ -8,6 +8,7 @@ const STORAGE_KEYS = {
   itemMaster: "itemmaster-data",
   boms: "bom-data",
   production: "production-data",
+  evocon: "evocon-data",
   edr: "edr-data",
   dock: "dock-data",
   mappingConfirmed: "mapping-confirmed",
@@ -30,16 +31,19 @@ export function useDataSources() {
   const [boms, setBoms] = useState(null);
   const [workOrders, setWorkOrders] = useState(null);
   const [productionData, setProductionData] = useState(null);
+  const [evoconData, setEvoconData] = useState(null);
   const [invFileName, setInvFileName] = useState("");
   const [itemMasterFileName, setItemMasterFileName] = useState("");
   const [bomFileName, setBomFileName] = useState("");
   const [woFileName, setWoFileName] = useState("");
   const [productionFileName, setProductionFileName] = useState("");
+  const [evoconFileName, setEvoconFileName] = useState("");
   const [invTimestamp, setInvTimestamp] = useState(null);
   const [itemMasterTimestamp, setItemMasterTimestamp] = useState(null);
   const [bomTimestamp, setBomTimestamp] = useState(null);
   const [woTimestamp, setWoTimestamp] = useState(null);
   const [productionTimestamp, setProductionTimestamp] = useState(null);
+  const [evoconTimestamp, setEvoconTimestamp] = useState(null);
   const [edrData, setEdrData] = useState(null);
   const [edrFileName, setEdrFileName] = useState("");
   const [edrTimestamp, setEdrTimestamp] = useState(null);
@@ -113,6 +117,7 @@ export function useDataSources() {
     applyData("inventory", setInventory, setInvFileName, setInvTimestamp, "Nulogy Sync");
     applyData("workOrders", setWorkOrders, setWoFileName, setWoTimestamp, "Nulogy Sync");
     applyData("productionData", setProductionData, setProductionFileName, setProductionTimestamp, "Nulogy Production");
+    applyData("evoconData", setEvoconData, setEvoconFileName, setEvoconTimestamp, "Evocon Reports");
     applyData("itemMaster", setItemMaster, setItemMasterFileName, setItemMasterTimestamp, "Nulogy Sync");
     applyData("boms", setBoms, setBomFileName, setBomTimestamp, "Nulogy Sync");
     applyData("edrData", setEdrData, setEdrFileName, setEdrTimestamp, "EDR");
@@ -155,6 +160,7 @@ export function useDataSources() {
           STORAGE_KEYS.inventory,
           STORAGE_KEYS.workOrders,
           STORAGE_KEYS.production,
+          STORAGE_KEYS.evocon,
           STORAGE_KEYS.itemMaster,
           STORAGE_KEYS.boms,
           STORAGE_KEYS.edr,
@@ -169,6 +175,7 @@ export function useDataSources() {
           hydrateDataSet(map[STORAGE_KEYS.inventory], setInventory, setInvFileName, setInvTimestamp, "Nulogy Sync (cached)");
           hydrateDataSet(map[STORAGE_KEYS.workOrders], setWorkOrders, setWoFileName, setWoTimestamp, "Nulogy Sync (cached)");
           hydrateDataSet(map[STORAGE_KEYS.production], setProductionData, setProductionFileName, setProductionTimestamp, "Nulogy Production (cached)");
+          hydrateDataSet(map[STORAGE_KEYS.evocon], setEvoconData, setEvoconFileName, setEvoconTimestamp, "Evocon Reports (cached)");
           hydrateDataSet(map[STORAGE_KEYS.itemMaster], setItemMaster, setItemMasterFileName, setItemMasterTimestamp, "Nulogy Sync (cached)");
           hydrateDataSet(map[STORAGE_KEYS.boms], setBoms, setBomFileName, setBomTimestamp, "Nulogy Sync (cached)");
           hydrateDataSet(map[STORAGE_KEYS.edr], setEdrData, setEdrFileName, setEdrTimestamp, "EDR (cached)");
@@ -202,6 +209,10 @@ export function useDataSources() {
   useEffect(() => {
     persistDataSet(STORAGE_KEYS.production, productionData, productionFileName, productionTimestamp);
   }, [productionData, productionFileName, productionTimestamp, persistDataSet]);
+
+  useEffect(() => {
+    persistDataSet(STORAGE_KEYS.evocon, evoconData, evoconFileName, evoconTimestamp);
+  }, [evoconData, evoconFileName, evoconTimestamp, persistDataSet]);
 
   useEffect(() => {
     persistDataSet(STORAGE_KEYS.itemMaster, itemMaster, itemMasterFileName, itemMasterTimestamp);
@@ -241,6 +252,7 @@ export function useDataSources() {
       inventory: inventory || [],
       workOrders: workOrders || [],
       productionData: productionData || [],
+      evoconData: evoconData || [],
       itemMaster: itemMaster || [],
       boms: boms || [],
       edrData: edrData || [],
@@ -249,6 +261,7 @@ export function useDataSources() {
         inventoryFileName: invFileName || "",
         workOrdersFileName: woFileName || "",
         productionDataFileName: productionFileName || "",
+        evoconDataFileName: evoconFileName || "",
         itemMasterFileName: itemMasterFileName || "",
         bomsFileName: bomFileName || "",
         edrDataFileName: edrFileName || "",
@@ -256,6 +269,7 @@ export function useDataSources() {
         inventoryTimestamp: invTimestamp ? invTimestamp.toISOString() : null,
         workOrdersTimestamp: woTimestamp ? woTimestamp.toISOString() : null,
         productionDataTimestamp: productionTimestamp ? productionTimestamp.toISOString() : null,
+        evoconDataTimestamp: evoconTimestamp ? evoconTimestamp.toISOString() : null,
         itemMasterTimestamp: itemMasterTimestamp ? itemMasterTimestamp.toISOString() : null,
         bomsTimestamp: bomTimestamp ? bomTimestamp.toISOString() : null,
         edrDataTimestamp: edrTimestamp ? edrTimestamp.toISOString() : null,
@@ -285,9 +299,9 @@ export function useDataSources() {
     }, 1400);
     return function() { clearTimeout(timer); };
   }, [
-    inventory, workOrders, productionData, itemMaster, boms, edrData, dockData,
-    invFileName, woFileName, productionFileName, itemMasterFileName, bomFileName, edrFileName, dockFileName,
-    invTimestamp, woTimestamp, productionTimestamp, itemMasterTimestamp, bomTimestamp, edrTimestamp, dockTimestamp,
+    inventory, workOrders, productionData, evoconData, itemMaster, boms, edrData, dockData,
+    invFileName, woFileName, productionFileName, evoconFileName, itemMasterFileName, bomFileName, edrFileName, dockFileName,
+    invTimestamp, woTimestamp, productionTimestamp, evoconTimestamp, itemMasterTimestamp, bomTimestamp, edrTimestamp, dockTimestamp,
     mappingConfirmed
   ]);
 
@@ -384,16 +398,19 @@ export function useDataSources() {
     boms, setBoms,
     workOrders, setWorkOrders,
     productionData, setProductionData,
+    evoconData, setEvoconData,
     invFileName, setInvFileName,
     itemMasterFileName, setItemMasterFileName,
     bomFileName, setBomFileName,
     woFileName, setWoFileName,
     productionFileName, setProductionFileName,
+    evoconFileName, setEvoconFileName,
     invTimestamp, setInvTimestamp,
     itemMasterTimestamp, setItemMasterTimestamp,
     bomTimestamp, setBomTimestamp,
     woTimestamp, setWoTimestamp,
     productionTimestamp, setProductionTimestamp,
+    evoconTimestamp, setEvoconTimestamp,
     edrData, setEdrData,
     edrFileName, setEdrFileName,
     edrTimestamp, setEdrTimestamp,

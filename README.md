@@ -79,6 +79,9 @@ Go to **Vercel → your project → Settings → Environment Variables** and add
 | `NULOGY_PASS` | Your Nulogy integration user password | Yes |
 | `NULOGY_SITE_UUID` | Your site UUID (if multi-site) | Optional |
 | `NULOGY_URL` | Custom Nulogy URL (default: `https://app.nulogy.net`) | Optional |
+| `EVOCON_API_KEY` | Evocon API key (Basic Auth username) | Optional |
+| `EVOCON_SECRET_KEY` | Evocon secret key (Basic Auth password) | Optional |
+| `EVOCON_STATION_IDS` | Comma-separated station IDs (e.g. `1,2,3`) | Optional |
 
 **Finding your Site UUID:** In Nulogy, go to the bottom nav → click "Site" → UUID is listed near the top.
 
