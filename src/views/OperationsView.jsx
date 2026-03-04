@@ -1691,7 +1691,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
         )}
       </Card>
 
-      <div className="grid gap-3 lg:grid-cols-2">
+      <div className="grid gap-3 xl:grid-cols-3">
         <Card className="px-4 py-4">
           <div className="mb-2 text-sm font-semibold">Daily Production Yield</div>
           {dailyPlanVsActual.rows.length ? (
@@ -1816,10 +1816,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
             <span className="inline-flex items-center gap-1"><span className="h-px w-3 border-t-2 border-dashed border-[rgb(var(--muted))]" />Baseline daily plan</span>
           </div>
         </Card>
-      </div>
-
-      <div className="grid gap-3 lg:grid-cols-12">
-        <Card className="lg:col-span-12 px-4 py-4">
+        <Card className="px-4 py-4">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
             <div className="text-sm font-semibold">SKU Mix by Day</div>
             <div className="flex items-center gap-1.5">
@@ -1832,7 +1829,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
             </div>
           </div>
           {skuMixByDay.rows.length ? (
-            <ChartContainer config={skuMixChartConfig} className="h-60">
+            <ChartContainer config={skuMixChartConfig} className="h-56">
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart data={skuMixByDay.rows} margin={{ top: 8, right: 8, left: 4, bottom: 8 }}>
                   <CartesianGrid vertical={false} stroke="rgb(var(--border))" strokeOpacity={0.4} />
@@ -1876,7 +1873,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
               </ResponsiveContainer>
             </ChartContainer>
           ) : (
-            <div className="h-56 w-full self-center text-center text-sm text-[rgb(var(--muted))] leading-[14rem]">No SKU mix data in selected window.</div>
+            <div className="h-52 w-full self-center text-center text-sm text-[rgb(var(--muted))] leading-[13rem]">No SKU mix data in selected window.</div>
           )}
           <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-[rgb(var(--muted))]">
             {(skuMixByDay.series || []).map(function(s) {
@@ -1889,7 +1886,9 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
             })}
           </div>
         </Card>
+      </div>
 
+      <div className="grid gap-3 lg:grid-cols-12">
         <Card className="lg:col-span-12 px-4 py-4">
           <div className="mb-2 text-sm font-semibold">Line Performance (Latest Day vs Baseline)</div>
           {lineYieldChartData.length ? (
