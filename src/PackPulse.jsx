@@ -20,6 +20,7 @@ const SandboxView = lazy(() => import("./views/SandboxView"));
 
 export default function ProductionReadiness() {
   const { C, theme, setTheme, sans, mono } = useTheme();
+  const AUTO_SYNC_MS = 15 * 60 * 1000;
   const ds = useDataSources();
   const { analysis, summary, criticalItems, woStatuses, woCustomers, timelineData, deliveriesV2, inboundCoverage, recommendations, dispatchQueue, productionSegments } = useAnalysis({
     mappingConfirmed: ds.mappingConfirmed, allUploaded: ds.allUploaded,
@@ -36,9 +37,9 @@ export default function ProductionReadiness() {
   const [workOrdersPrefilterCustomer, setWorkOrdersPrefilterCustomer] = useState("");
   const [workOrdersPrefilterNonce, setWorkOrdersPrefilterNonce] = useState(0);
   const [autoBootstrapEnabled, setAutoBootstrapEnabled] = useState(true);
+  const [autoSyncArmed, setAutoSyncArmed] = useState(false);
   const [syncNonce, setSyncNonce] = useState(0);
   const [nulogySyncState, setNulogySyncState] = useState(null);
-  const [autoDockAttempted, setAutoDockAttempted] = useState(false);
   const [dockApiLoading, setDockApiLoading] = useState(false);
   const [dockApiError, setDockApiError] = useState("");
   const [dockApiInfo, setDockApiInfo] = useState("");
@@ -147,10 +148,16 @@ export default function ProductionReadiness() {
   }, []);
 
   useEffect(() => {
-    if (!showAutoBootstrap || autoDockAttempted) return;
-    setAutoDockAttempted(true);
-    fetchOpenDockApi();
-  }, [showAutoBootstrap, autoDockAttempted, fetchOpenDockApi]);
+    if (!showAutoBootstrap) return;
+    var intervalId = setInterval(function() {
+      if (dockApiLoading || evoconApiLoading || (nulogySyncState && nulogySyncState.syncing)) return;
+      setAutoSyncArmed(true);
+      setSyncNonce(function(n) { return n + 1; });
+      fetchOpenDockApi();
+      fetchEvoconApi();
+    }, AUTO_SYNC_MS);
+    return function() { clearInterval(intervalId); };
+  }, [showAutoBootstrap, dockApiLoading, evoconApiLoading, nulogySyncState, fetchOpenDockApi, fetchEvoconApi]);
 
   var handleNulogyData = useCallback(function(results) {
     var ts = new Date();
@@ -484,7 +491,7 @@ export default function ProductionReadiness() {
           key={"auto-sync-" + syncNonce}
           onDataLoaded={handleNulogyData}
           theme={C}
-          autoStart
+          autoStart={autoSyncArmed}
           hideToggle
           silent
           onSyncStateChange={setNulogySyncState}
@@ -518,7 +525,7 @@ export default function ProductionReadiness() {
             {dockApiError && <Badge variant="danger">OpenDock: {dockApiError}</Badge>}
             {nulogySyncState && nulogySyncState.errorCount > 0 && <Badge variant="danger">Nulogy sync has errors</Badge>}
             {!dockApiLoading && (!nulogySyncState || !nulogySyncState.syncing) && (
-              <Button onClick={() => { setDockApiInfo(""); setDockApiError(""); setAutoDockAttempted(false); setSyncNonce(n => n + 1); }} variant="outline" size="sm">
+              <Button onClick={() => { setDockApiInfo(""); setDockApiError(""); setAutoSyncArmed(true); setSyncNonce(n => n + 1); fetchOpenDockApi(); fetchEvoconApi(); }} variant="outline" size="sm">
                 Retry Sync
               </Button>
             )}
@@ -649,7 +656,7 @@ export default function ProductionReadiness() {
             {dockApiError && <Badge variant="danger">OpenDock: {dockApiError}</Badge>}
             {nulogySyncState && nulogySyncState.errorCount > 0 && <Badge variant="danger">Nulogy sync has errors</Badge>}
             {!dockApiLoading && (!nulogySyncState || !nulogySyncState.syncing) && !ds.mappingConfirmed && (
-              <Button variant="outline" size="sm" onClick={() => { setDockApiInfo(""); setDockApiError(""); setAutoDockAttempted(false); setSyncNonce(n => n + 1); }}>
+              <Button variant="outline" size="sm" onClick={() => { setDockApiInfo(""); setDockApiError(""); setAutoSyncArmed(true); setSyncNonce(n => n + 1); fetchOpenDockApi(); fetchEvoconApi(); }}>
                 Retry
               </Button>
             )}
