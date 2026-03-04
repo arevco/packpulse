@@ -894,22 +894,91 @@ export default function OperationsView({ productionSegments, evoconData, evoconT
     return Array.from(set).sort();
   }, [filteredBreakdown.byLine, inputs]);
 
+  var localNulogySeries = useMemo(function() {
+    var shiftRows = (productionSegments && Array.isArray(productionSegments.shiftRows)) ? productionSegments.shiftRows : [];
+    var jobRows = (productionSegments && Array.isArray(productionSegments.jobRows)) ? productionSegments.jobRows : [];
+    var byDayMap = {};
+    shiftRows.forEach(function(r) {
+      var date = String(r.date || "");
+      if (!date) return;
+      if (!byDayMap[date]) byDayMap[date] = { date: date, units: 0, rows: 0 };
+      byDayMap[date].units += safeNum(r.unitsProduced);
+      byDayMap[date].rows += safeNum(r.jobs);
+    });
+    var byLine = {};
+    var bySku = {};
+    var rowsLite = jobRows.map(function(r) {
+      var units = safeNum(r.unitsProduced);
+      var line = String(r.line || "Unknown");
+      var sku = String(r.itemCode || "").trim() || "UNKNOWN";
+      if (!byLine[line]) byLine[line] = { line: line, units: 0, rows: 0 };
+      byLine[line].units += units;
+      byLine[line].rows += 1;
+      if (!bySku[sku]) bySku[sku] = { item_code: sku, units: 0, rows: 0 };
+      bySku[sku].units += units;
+      bySku[sku].rows += 1;
+      return {
+        produced_date_et: String(r.date || ""),
+        shift_label: String(r.shift || "Unassigned"),
+        item_code: sku === "UNKNOWN" ? null : sku,
+        item_desc: String(r.itemDesc || "").trim() || null,
+        units_produced: units,
+        line: line,
+        work_order_code: String(r.workOrder || "").trim() || null
+      };
+    });
+    var latestDate = rowsLite.map(function(r) { return r.produced_date_et; }).filter(Boolean).sort().pop() || null;
+    var latestByLineMap = {};
+    rowsLite.forEach(function(r) {
+      if (!latestDate || r.produced_date_et !== latestDate) return;
+      var line = String(r.line || "Unknown");
+      if (!latestByLineMap[line]) latestByLineMap[line] = { line: line, units: 0, rows: 0 };
+      latestByLineMap[line].units += safeNum(r.units_produced);
+      latestByLineMap[line].rows += 1;
+    });
+    return {
+      trends: {
+        byDay: Object.values(byDayMap).sort(function(a, b) { return String(b.date || "").localeCompare(String(a.date || "")); }),
+        byShift: shiftRows.map(function(r) {
+          return {
+            date: String(r.date || ""),
+            shift: String(r.shift || "Unassigned"),
+            units: safeNum(r.unitsProduced),
+            rows: safeNum(r.jobs)
+          };
+        }).sort(function(a, b) {
+          if (a.date !== b.date) return String(b.date || "").localeCompare(String(a.date || ""));
+          return String(a.shift || "").localeCompare(String(b.shift || ""));
+        })
+      },
+      breakdown: {
+        rowsLite: rowsLite,
+        bySku: Object.values(bySku).sort(function(a, b) { return b.units - a.units; }),
+        byLine: Object.values(byLine).sort(function(a, b) { return b.units - a.units; }),
+        latestDate: latestDate,
+        latestByLine: Object.values(latestByLineMap).sort(function(a, b) { return b.units - a.units; }),
+        totalRows: rowsLite.length
+      }
+    };
+  }, [productionSegments]);
+
   var evoconSeries = useMemo(function() {
     return buildEvoconSeries(evoconData || []);
   }, [evoconData]);
 
   var effectiveTrends = useMemo(function() {
-    var nByDay = (trends && Array.isArray(trends.byDay)) ? trends.byDay : [];
-    var nByShift = (trends && Array.isArray(trends.byShift)) ? trends.byShift : [];
+    var nByDay = (trends && Array.isArray(trends.byDay) && trends.byDay.length) ? trends.byDay : ((localNulogySeries && localNulogySeries.trends && Array.isArray(localNulogySeries.trends.byDay)) ? localNulogySeries.trends.byDay : []);
+    var nByShift = (trends && Array.isArray(trends.byShift) && trends.byShift.length) ? trends.byShift : ((localNulogySeries && localNulogySeries.trends && Array.isArray(localNulogySeries.trends.byShift)) ? localNulogySeries.trends.byShift : []);
     var eByDay = (evoconSeries && evoconSeries.trends && Array.isArray(evoconSeries.trends.byDay)) ? evoconSeries.trends.byDay : [];
     var eByShift = (evoconSeries && evoconSeries.trends && Array.isArray(evoconSeries.trends.byShift)) ? evoconSeries.trends.byShift : [];
     if (dataSource === "evocon") return { byDay: eByDay, byShift: eByShift };
     if (dataSource === "blended") return { byDay: mergeDaySeries(nByDay, eByDay), byShift: mergeTrendSeries(nByShift, eByShift) };
     return { byDay: nByDay, byShift: nByShift };
-  }, [dataSource, trends, evoconSeries]);
+  }, [dataSource, trends, evoconSeries, localNulogySeries]);
 
   var effectiveBreakdown = useMemo(function() {
-    var n = breakdown || { rowsLite: [], bySku: [], byLine: [], latestByLine: [], latestDate: null, totalRows: 0 };
+    var fallbackN = (localNulogySeries && localNulogySeries.breakdown) ? localNulogySeries.breakdown : { rowsLite: [], bySku: [], byLine: [], latestByLine: [], latestDate: null, totalRows: 0 };
+    var n = (breakdown && Array.isArray(breakdown.rowsLite) && breakdown.rowsLite.length) ? breakdown : fallbackN;
     var e = evoconSeries && evoconSeries.breakdown ? evoconSeries.breakdown : { rowsLite: [], bySku: [], byLine: [], latestByLine: [], latestDate: null, totalRows: 0 };
     if (dataSource === "evocon") return e;
     if (dataSource === "blended") {
@@ -939,7 +1008,7 @@ export default function OperationsView({ productionSegments, evoconData, evoconT
       };
     }
     return n;
-  }, [dataSource, breakdown, evoconSeries]);
+  }, [dataSource, breakdown, evoconSeries, localNulogySeries]);
 
   var skuOptions = useMemo(function() {
     return (filteredBreakdown.bySku || []).map(function(r) { return String(r.item_code || "").trim(); }).filter(Boolean).slice(0, 500);
