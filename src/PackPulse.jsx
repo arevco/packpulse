@@ -147,17 +147,23 @@ export default function ProductionReadiness() {
     }
   }, []);
 
+  var shouldRunIntervalSync = ds.mappingConfirmed || showAutoBootstrap;
+
   useEffect(() => {
-    if (!showAutoBootstrap) return;
-    var intervalId = setInterval(function() {
-      if (dockApiLoading || evoconApiLoading || (nulogySyncState && nulogySyncState.syncing)) return;
-      setAutoSyncArmed(true);
-      setSyncNonce(function(n) { return n + 1; });
-      fetchOpenDockApi();
+    if (!shouldRunIntervalSync) return;
+    if (!evoconApiLoading && !ds.evoconTimestamp) {
       fetchEvoconApi();
+    }
+    var intervalId = setInterval(function() {
+      if (!dockApiLoading) fetchOpenDockApi();
+      if (!evoconApiLoading) fetchEvoconApi();
+      if (showAutoBootstrap && !(nulogySyncState && nulogySyncState.syncing)) {
+        setAutoSyncArmed(true);
+        setSyncNonce(function(n) { return n + 1; });
+      }
     }, AUTO_SYNC_MS);
     return function() { clearInterval(intervalId); };
-  }, [showAutoBootstrap, dockApiLoading, evoconApiLoading, nulogySyncState, fetchOpenDockApi, fetchEvoconApi]);
+  }, [shouldRunIntervalSync, showAutoBootstrap, dockApiLoading, evoconApiLoading, nulogySyncState, fetchOpenDockApi, fetchEvoconApi, ds.evoconTimestamp]);
 
   var handleNulogyData = useCallback(function(results) {
     var ts = new Date();
