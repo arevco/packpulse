@@ -219,6 +219,17 @@ function lineColor(index) {
   return palette[index % palette.length];
 }
 
+function secToMin(v) {
+  return Math.round(safeNum(v) / 60);
+}
+
+function pct(part, whole) {
+  var p = safeNum(part);
+  var w = safeNum(whole);
+  if (!(w > 0)) return 0;
+  return Math.round((p / w) * 100);
+}
+
 function normalizeEvoconShift(shiftRaw) {
   var s = String(shiftRaw || "").toLowerCase();
   if (s.includes("1") || s.includes("1st")) return "Shift 1 (7a-3p)";
@@ -349,6 +360,7 @@ export default function OperationsView({ productionSegments, evoconData, evoconT
   const [showEntryModal, setShowEntryModal] = useState(false);
   const [showRecentLaborInputs, setShowRecentLaborInputs] = useState(false);
   const [skuMixMode, setSkuMixMode] = useState("type");
+  const [evoconRole, setEvoconRole] = useState("manager");
   const [dataSource, setDataSource] = useState("nulogy");
 
   const [entry, setEntry] = useState({
@@ -821,6 +833,15 @@ export default function OperationsView({ productionSegments, evoconData, evoconT
     };
   }, []);
 
+  const evoconLossChartConfig = useMemo(function() {
+    return {
+      unplannedMin: { label: "Unplanned", color: "rgb(var(--danger))" },
+      slowMin: { label: "Speed loss", color: "rgb(var(--warning))" },
+      technicalMin: { label: "Technical", color: "color-mix(in oklab, rgb(var(--accent)) 70%, white)" },
+      plannedMin: { label: "Planned", color: "color-mix(in oklab, rgb(var(--muted)) 65%, white)" }
+    };
+  }, []);
+
   var skuMixByDay = useMemo(function() {
     var rowsLite = (filteredBreakdown && Array.isArray(filteredBreakdown.rowsLite)) ? filteredBreakdown.rowsLite : [];
     if (!rowsLite.length) return { rows: [], series: [] };
@@ -1013,6 +1034,206 @@ export default function OperationsView({ productionSegments, evoconData, evoconT
   var skuOptions = useMemo(function() {
     return (filteredBreakdown.bySku || []).map(function(r) { return String(r.item_code || "").trim(); }).filter(Boolean).slice(0, 500);
   }, [filteredBreakdown.bySku]);
+
+  var evoconInsights = useMemo(function() {
+    var rows = (Array.isArray(evoconData) ? evoconData : []).filter(function(r) {
+      return inRangeIso(String(r.date || ""), range);
+    });
+    if (!rows.length) {
+      return {
+        hasData: false,
+        rows: [],
+        summary: null,
+        byLine: [],
+        byShift: [],
+        chartRows: [],
+        actions: [],
+        latestDate: null
+      };
+    }
+
+    var byLineMap = {};
+    var byShiftMap = {};
+    var byDateMap = {};
+    var summary = {
+      unplannedMin: 0,
+      plannedMin: 0,
+      technicalMin: 0,
+      slowMin: 0,
+      downtimeMin: 0,
+      operatingMin: 0,
+      stopEvents: 0,
+      uncommentedMin: 0
+    };
+
+    rows.forEach(function(r) {
+      var line = String(r.station || r.line || "Unknown").trim() || "Unknown";
+      var shift = normalizeEvoconShift(r.shift);
+      var date = String(r.date || "");
+      var unplannedMin = secToMin(r.unplannedstops);
+      var plannedMin = secToMin(r.plannedstops);
+      var technicalMin = secToMin(r.technicalStopTimeSec);
+      var slowMin = secToMin(r.slowProduction);
+      var downtimeMin = secToMin(r.downtime);
+      var operatingMin = secToMin(r.operatingTimeSec);
+      var uncommentedMin = secToMin(r.uncommented);
+      var stopEvents = safeNum(r.perfLossCount);
+
+      summary.unplannedMin += unplannedMin;
+      summary.plannedMin += plannedMin;
+      summary.technicalMin += technicalMin;
+      summary.slowMin += slowMin;
+      summary.downtimeMin += downtimeMin;
+      summary.operatingMin += operatingMin;
+      summary.stopEvents += stopEvents;
+      summary.uncommentedMin += uncommentedMin;
+
+      if (!byLineMap[line]) {
+        byLineMap[line] = {
+          line: line,
+          unplannedMin: 0,
+          plannedMin: 0,
+          technicalMin: 0,
+          slowMin: 0,
+          downtimeMin: 0,
+          operatingMin: 0,
+          uncommentedMin: 0,
+          stopEvents: 0,
+          rows: 0
+        };
+      }
+      var lineRef = byLineMap[line];
+      lineRef.unplannedMin += unplannedMin;
+      lineRef.plannedMin += plannedMin;
+      lineRef.technicalMin += technicalMin;
+      lineRef.slowMin += slowMin;
+      lineRef.downtimeMin += downtimeMin;
+      lineRef.operatingMin += operatingMin;
+      lineRef.uncommentedMin += uncommentedMin;
+      lineRef.stopEvents += stopEvents;
+      lineRef.rows += 1;
+
+      if (!byShiftMap[shift]) {
+        byShiftMap[shift] = {
+          shift: shift,
+          unplannedMin: 0,
+          plannedMin: 0,
+          technicalMin: 0,
+          slowMin: 0,
+          downtimeMin: 0,
+          operatingMin: 0,
+          stopEvents: 0,
+          rows: 0
+        };
+      }
+      var shiftRef = byShiftMap[shift];
+      shiftRef.unplannedMin += unplannedMin;
+      shiftRef.plannedMin += plannedMin;
+      shiftRef.technicalMin += technicalMin;
+      shiftRef.slowMin += slowMin;
+      shiftRef.downtimeMin += downtimeMin;
+      shiftRef.operatingMin += operatingMin;
+      shiftRef.stopEvents += stopEvents;
+      shiftRef.rows += 1;
+
+      if (!byDateMap[date]) byDateMap[date] = true;
+    });
+
+    var byLine = Object.values(byLineMap).map(function(r) {
+      var lossMin = r.unplannedMin + r.slowMin + r.technicalMin;
+      var availabilityPct = pct(r.operatingMin, r.operatingMin + r.downtimeMin);
+      var commentCoveragePct = pct(Math.max(0, r.downtimeMin - r.uncommentedMin), r.downtimeMin);
+      var speedLossSharePct = pct(r.slowMin, Math.max(1, lossMin));
+      return Object.assign({}, r, {
+        lossMin: lossMin,
+        availabilityPct: availabilityPct,
+        commentCoveragePct: commentCoveragePct,
+        speedLossSharePct: speedLossSharePct
+      });
+    }).sort(function(a, b) { return b.lossMin - a.lossMin; });
+
+    var byShift = Object.values(byShiftMap).map(function(r) {
+      var lossMin = r.unplannedMin + r.slowMin + r.technicalMin;
+      var availabilityPct = pct(r.operatingMin, r.operatingMin + r.downtimeMin);
+      return Object.assign({}, r, {
+        lossMin: lossMin,
+        availabilityPct: availabilityPct
+      });
+    }).sort(function(a, b) { return String(a.shift || "").localeCompare(String(b.shift || "")); });
+
+    var worstLossLine = byLine[0] || null;
+    var worstCommentLine = byLine.slice().sort(function(a, b) { return a.commentCoveragePct - b.commentCoveragePct; })[0] || null;
+    var worstSpeedLossLine = byLine.slice().sort(function(a, b) { return b.slowMin - a.slowMin; })[0] || null;
+    var s1 = byShift.find(function(r) { return String(r.shift || "").indexOf("Shift 1") !== -1; });
+    var s2 = byShift.find(function(r) { return String(r.shift || "").indexOf("Shift 2") !== -1; });
+    var shiftGapMin = Math.abs(safeNum(s1 && s1.lossMin) - safeNum(s2 && s2.lossMin));
+
+    var actions = [];
+    if (worstLossLine && worstLossLine.lossMin > 0) {
+      actions.push({
+        severity: "high",
+        text: "Focus " + worstLossLine.line + " first: " + worstLossLine.lossMin.toLocaleString() + " loss min (" + worstLossLine.unplannedMin.toLocaleString() + " unplanned).",
+      });
+    }
+    if (worstSpeedLossLine && worstSpeedLossLine.slowMin > 0) {
+      actions.push({
+        severity: "med",
+        text: "Speed-loss hotspot: " + worstSpeedLossLine.line + " has " + worstSpeedLossLine.slowMin.toLocaleString() + " slow-run min.",
+      });
+    }
+    if (worstCommentLine && worstCommentLine.downtimeMin > 0 && worstCommentLine.commentCoveragePct < 80) {
+      actions.push({
+        severity: "med",
+        text: "Raise stop-reason discipline on " + worstCommentLine.line + " (comment coverage " + worstCommentLine.commentCoveragePct + "%).",
+      });
+    }
+    if (shiftGapMin >= 120) {
+      actions.push({
+        severity: "low",
+        text: "Shift imbalance detected: " + shiftGapMin.toLocaleString() + " min difference between Shift 1 and Shift 2 loss.",
+      });
+    }
+
+    var summaryLossMin = summary.unplannedMin + summary.slowMin + summary.technicalMin;
+    var summaryAvailabilityPct = pct(summary.operatingMin, summary.operatingMin + summary.downtimeMin);
+    var summaryCommentCoveragePct = pct(Math.max(0, summary.downtimeMin - summary.uncommentedMin), summary.downtimeMin);
+
+    var chartRows = byLine.slice(0, 8).map(function(r) {
+      return {
+        line: r.line,
+        unplannedMin: r.unplannedMin,
+        slowMin: r.slowMin,
+        technicalMin: r.technicalMin,
+        plannedMin: r.plannedMin,
+        lossMin: r.lossMin
+      };
+    });
+
+    var latestDate = Object.keys(byDateMap).sort().pop() || null;
+    var managerActions = actions.slice(0, 3);
+    var supervisorActions = byLine.slice(0, 4).map(function(r) {
+      var priority = r.unplannedMin >= r.slowMin ? "Unplanned stops" : "Speed loss";
+      return {
+        severity: r.lossMin > 300 ? "high" : r.lossMin > 120 ? "med" : "low",
+        text: r.line + ": " + priority + " | Loss " + r.lossMin.toLocaleString() + " min | Events " + r.stopEvents.toLocaleString()
+      };
+    });
+
+    return {
+      hasData: true,
+      rows: rows,
+      latestDate: latestDate,
+      summary: Object.assign({}, summary, {
+        lossMin: summaryLossMin,
+        availabilityPct: summaryAvailabilityPct,
+        commentCoveragePct: summaryCommentCoveragePct
+      }),
+      byLine: byLine,
+      byShift: byShift,
+      chartRows: chartRows,
+      actions: evoconRole === "supervisor" ? supervisorActions : managerActions
+    };
+  }, [evoconData, range, evoconRole]);
 
   async function saveShiftInput() {
     setSaving(true);
@@ -1227,6 +1448,135 @@ export default function OperationsView({ productionSegments, evoconData, evoconT
           </div>
         </Card>
       </div>
+
+      <Card className="px-4 py-4">
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <div className="text-sm font-semibold">Evocon Loss Intelligence</div>
+            <div className="text-xs text-[rgb(var(--muted))]">
+              Non-yield analysis for downtime, speed loss, stop discipline, and shift/line stability.
+              {evoconInsights.latestDate ? " Latest production day: " + evoconInsights.latestDate + "." : ""}
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Button size="sm" variant={evoconRole === "manager" ? "active" : "outline"} onClick={function() { setEvoconRole("manager"); }}>
+              Plant Manager
+            </Button>
+            <Button size="sm" variant={evoconRole === "supervisor" ? "active" : "outline"} onClick={function() { setEvoconRole("supervisor"); }}>
+              Supervisor
+            </Button>
+          </div>
+        </div>
+        {!evoconInsights.hasData ? (
+          <div className="rounded-md border border-[rgb(var(--border))] px-3 py-8 text-center text-sm text-[rgb(var(--muted))]">
+            No Evocon rows in selected window. Sync Evocon and/or adjust dates.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+              <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
+                <div className="text-lg font-bold text-[rgb(var(--danger))] [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{evoconInsights.summary.unplannedMin.toLocaleString()}</div>
+                <div className="text-xs text-[rgb(var(--muted))]">Unplanned Stop Min</div>
+              </div>
+              <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
+                <div className="text-lg font-bold text-[rgb(var(--warning))] [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{evoconInsights.summary.slowMin.toLocaleString()}</div>
+                <div className="text-xs text-[rgb(var(--muted))]">Speed Loss Min</div>
+              </div>
+              <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
+                <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{evoconInsights.summary.stopEvents.toLocaleString()}</div>
+                <div className="text-xs text-[rgb(var(--muted))]">Loss Events</div>
+              </div>
+              <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
+                <div className={"text-lg font-bold [font-variant-numeric:tabular-nums] " + (evoconInsights.summary.commentCoveragePct < 80 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")} style={{ fontFamily: mono }}>{evoconInsights.summary.commentCoveragePct}%</div>
+                <div className="text-xs text-[rgb(var(--muted))]">Comment Coverage</div>
+              </div>
+              <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
+                <div className={"text-lg font-bold [font-variant-numeric:tabular-nums] " + (evoconInsights.summary.availabilityPct < 85 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")} style={{ fontFamily: mono }}>{evoconInsights.summary.availabilityPct}%</div>
+                <div className="text-xs text-[rgb(var(--muted))]">Availability Proxy</div>
+              </div>
+            </div>
+
+            <div className="grid gap-3 lg:grid-cols-12">
+              <Card className="lg:col-span-7 px-3 py-3">
+                <div className="mb-2 text-sm font-semibold">Loss Stack by Line (minutes)</div>
+                {evoconInsights.chartRows.length ? (
+                  <ChartContainer config={evoconLossChartConfig} className="h-52">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <ComposedChart data={evoconInsights.chartRows} margin={{ top: 8, right: 8, left: 4, bottom: 8 }}>
+                        <CartesianGrid vertical={false} stroke="rgb(var(--border))" strokeOpacity={0.4} />
+                        <XAxis dataKey="line" tickLine={false} axisLine={false} tick={{ fill: "rgb(var(--muted))", fontSize: 11 }} />
+                        <YAxis width={62} tickLine={false} axisLine={false} tickFormatter={function(v) { return Math.round(safeNum(v)).toLocaleString(); }} tick={{ fill: "rgb(var(--muted))", fontSize: 11 }} />
+                        <ChartTooltip
+                          cursor={{ fill: "rgb(var(--surface))" }}
+                          content={<ChartTooltipContent formatter={function(value) { return Math.round(safeNum(value)); }} />}
+                        />
+                        <Bar stackId="loss" dataKey="unplannedMin" fill="var(--color-unplannedMin)" radius={[4, 4, 0, 0]} maxBarSize={28} />
+                        <Bar stackId="loss" dataKey="slowMin" fill="var(--color-slowMin)" maxBarSize={28} />
+                        <Bar stackId="loss" dataKey="technicalMin" fill="var(--color-technicalMin)" maxBarSize={28} />
+                        <Bar stackId="loss" dataKey="plannedMin" fill="var(--color-plannedMin)" maxBarSize={28} />
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                  </ChartContainer>
+                ) : (
+                  <div className="h-44 w-full self-center text-center text-sm text-[rgb(var(--muted))] leading-[11rem]">No line loss data.</div>
+                )}
+              </Card>
+              <Card className="lg:col-span-5 px-3 py-3">
+                <div className="mb-2 text-sm font-semibold">Ops Action Queue</div>
+                <div className="space-y-2">
+                  {(evoconInsights.actions || []).map(function(a, idx) {
+                    var cls = a.severity === "high"
+                      ? "border-[rgb(var(--danger-line))] bg-[rgb(var(--danger-soft))] text-[rgb(var(--danger))]"
+                      : a.severity === "med"
+                        ? "border-[rgb(var(--warning-line))] bg-[rgb(var(--warning-soft))] text-[rgb(var(--warning))]"
+                        : "border-[rgb(var(--border))] bg-[rgb(var(--surface))] text-[rgb(var(--foreground))]";
+                    return (
+                      <div key={idx} className={"rounded-md border px-2.5 py-2 text-xs " + cls}>
+                        {idx + 1}. {a.text}
+                      </div>
+                    );
+                  })}
+                  {!evoconInsights.actions.length && (
+                    <div className="rounded-md border border-[rgb(var(--border))] px-2.5 py-2 text-xs text-[rgb(var(--muted))]">No high-priority loss actions for this window.</div>
+                  )}
+                </div>
+              </Card>
+            </div>
+
+            <TableShell>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ background: C.raised }}>
+                    <th className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Line</th>
+                    <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Loss Min</th>
+                    <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Unplanned</th>
+                    <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Speed Loss</th>
+                    <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Events</th>
+                    <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Comment %</th>
+                    <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Avail %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {evoconInsights.byLine.slice(0, 8).map(function(r) {
+                    return (
+                      <tr key={r.line} style={{ borderBottom: "1px solid " + C.border }}>
+                        <td className="px-2 py-2 text-sm">{r.line}</td>
+                        <td className="px-2 py-2 text-right text-sm [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{r.lossMin.toLocaleString()}</td>
+                        <td className="px-2 py-2 text-right text-sm [font-variant-numeric:tabular-nums] text-[rgb(var(--danger))]" style={{ fontFamily: mono }}>{r.unplannedMin.toLocaleString()}</td>
+                        <td className="px-2 py-2 text-right text-sm [font-variant-numeric:tabular-nums] text-[rgb(var(--warning))]" style={{ fontFamily: mono }}>{r.slowMin.toLocaleString()}</td>
+                        <td className="px-2 py-2 text-right text-sm [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{r.stopEvents.toLocaleString()}</td>
+                        <td className={"px-2 py-2 text-right text-sm [font-variant-numeric:tabular-nums] " + (r.commentCoveragePct < 80 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")} style={{ fontFamily: mono }}>{r.commentCoveragePct}%</td>
+                        <td className={"px-2 py-2 text-right text-sm [font-variant-numeric:tabular-nums] " + (r.availabilityPct < 85 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")} style={{ fontFamily: mono }}>{r.availabilityPct}%</td>
+                      </tr>
+                    );
+                  })}
+                  {!evoconInsights.byLine.length && <tr><td colSpan={7} className="px-2 py-6 text-center text-sm text-[rgb(var(--muted))]">No line loss data in this window.</td></tr>}
+                </tbody>
+              </table>
+            </TableShell>
+          </div>
+        )}
+      </Card>
 
       <div className="grid gap-3 lg:grid-cols-2">
         <Card className="px-4 py-4">
