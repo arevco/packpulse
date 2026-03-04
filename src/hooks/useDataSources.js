@@ -77,15 +77,17 @@ export function useDataSources() {
     } catch (e) {
       return false;
     }
-    if (!parsed || !parsed.data || !parsed.data.length) return false;
-    setData(parsed.data);
+    if (!parsed || !Array.isArray(parsed.data)) return false;
+    if (!parsed.data.length && !parsed.timestamp) return false;
+    setData(parsed.data || []);
     setFileName(parsed.fileName || fallbackName || "Saved Data");
     setTimestamp(parsed.timestamp ? new Date(parsed.timestamp) : new Date());
     return true;
   }, []);
 
   const persistDataSet = useCallback(async function(key, data, fileName, timestamp) {
-    if (!data || !data.length) return;
+    if (data == null) return;
+    if (!Array.isArray(data)) return;
     try {
       var res = await window.storage.set(key, JSON.stringify({
         data: data,
@@ -107,11 +109,13 @@ export function useDataSources() {
 
     function applyData(dataKey, setData, setName, setTs, defaultLabel) {
       var rows = payload[dataKey];
-      if (!Array.isArray(rows) || !rows.length) return;
-      hasAny = true;
+      var tsVal = meta[dataKey + "Timestamp"] ? new Date(meta[dataKey + "Timestamp"]) : null;
+      if (!Array.isArray(rows)) return;
+      if (!rows.length && !tsVal) return;
+      hasAny = hasAny || rows.length > 0;
       setData(rows);
       setName(meta[dataKey + "FileName"] || defaultLabel + (labelSuffix ? " (" + labelSuffix + ")" : ""));
-      setTs(meta[dataKey + "Timestamp"] ? new Date(meta[dataKey + "Timestamp"]) : new Date());
+      setTs(tsVal || new Date());
     }
 
     applyData("inventory", setInventory, setInvFileName, setInvTimestamp, "Nulogy Sync");

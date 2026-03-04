@@ -103,7 +103,7 @@ export default function ProductionReadiness() {
     } finally {
       setDockApiLoading(false);
     }
-  }, []);
+  }, [ds]);
   var fetchEvoconApi = useCallback(async () => {
     setEvoconApiLoading(true);
     setEvoconApiError("");
@@ -124,7 +124,7 @@ export default function ProductionReadiness() {
     } finally {
       setEvoconApiLoading(false);
     }
-  }, []);
+  }, [ds]);
   var loadUserActivity = useCallback(async function() {
     setUserActivityLoading(true);
     setUserActivityError("");
