@@ -1429,137 +1429,6 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     };
   }, []);
 
-  var evoconLossSection = (
-    <Card className="px-4 py-4">
-      <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <div className="text-sm font-semibold">Evocon Loss Intelligence</div>
-          <div className="text-xs text-[rgb(var(--muted))]">
-            Non-yield analysis for downtime, speed loss, stop discipline, and shift/line stability.
-            {evoconInsights.latestDate ? " Latest production day: " + evoconInsights.latestDate + "." : ""}
-          </div>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <Button size="sm" variant={evoconRole === "manager" ? "active" : "outline"} onClick={function() { setEvoconRole("manager"); }}>
-            Plant Manager
-          </Button>
-          <Button size="sm" variant={evoconRole === "supervisor" ? "active" : "outline"} onClick={function() { setEvoconRole("supervisor"); }}>
-            Supervisor
-          </Button>
-        </div>
-      </div>
-      {!evoconInsights.hasData ? (
-        <div className="rounded-md border border-[rgb(var(--border))] px-3 py-8 text-center text-sm text-[rgb(var(--muted))]">
-          No Evocon rows in selected window. Sync Evocon and/or adjust dates.
-        </div>
-      ) : (
-        <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-            <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
-              <div className="text-lg font-bold text-[rgb(var(--danger))] [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{evoconInsights.summary.unplannedMin.toLocaleString()}</div>
-              <div className="text-xs text-[rgb(var(--muted))]">Unplanned Stop Min</div>
-            </div>
-            <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
-              <div className="text-lg font-bold text-[rgb(var(--warning))] [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{evoconInsights.summary.slowMin.toLocaleString()}</div>
-              <div className="text-xs text-[rgb(var(--muted))]">Speed Loss Min</div>
-            </div>
-            <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
-              <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{evoconInsights.summary.stopEvents.toLocaleString()}</div>
-              <div className="text-xs text-[rgb(var(--muted))]">Loss Events</div>
-            </div>
-            <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
-              <div className={"text-lg font-bold [font-variant-numeric:tabular-nums] " + (evoconInsights.summary.commentCoveragePct < 80 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")} style={{ fontFamily: mono }}>{evoconInsights.summary.commentCoveragePct}%</div>
-              <div className="text-xs text-[rgb(var(--muted))]">Comment Coverage</div>
-            </div>
-            <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
-              <div className={"text-lg font-bold [font-variant-numeric:tabular-nums] " + (evoconInsights.summary.availabilityPct < 85 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")} style={{ fontFamily: mono }}>{evoconInsights.summary.availabilityPct}%</div>
-              <div className="text-xs text-[rgb(var(--muted))]">Availability Proxy</div>
-            </div>
-          </div>
-
-          <div className="grid gap-3 lg:grid-cols-12">
-            <Card className="lg:col-span-7 px-3 py-3">
-              <div className="mb-2 text-sm font-semibold">Loss Stack by Line (minutes)</div>
-              {evoconInsights.chartRows.length ? (
-                <ChartContainer config={evoconLossChartConfig} className="h-52">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={evoconInsights.chartRows} margin={{ top: 8, right: 8, left: 4, bottom: 8 }}>
-                      <CartesianGrid vertical={false} stroke="rgb(var(--border))" strokeOpacity={0.4} />
-                      <XAxis dataKey="line" tickLine={false} axisLine={false} tick={{ fill: "rgb(var(--muted))", fontSize: 11 }} />
-                      <YAxis width={62} tickLine={false} axisLine={false} tickFormatter={function(v) { return Math.round(safeNum(v)).toLocaleString(); }} tick={{ fill: "rgb(var(--muted))", fontSize: 11 }} />
-                      <ChartTooltip
-                        cursor={{ fill: "rgb(var(--surface))" }}
-                        content={<ChartTooltipContent formatter={function(value) { return Math.round(safeNum(value)); }} />}
-                      />
-                      <Bar stackId="loss" dataKey="unplannedMin" fill="var(--color-unplannedMin)" radius={[4, 4, 0, 0]} maxBarSize={28} />
-                      <Bar stackId="loss" dataKey="slowMin" fill="var(--color-slowMin)" maxBarSize={28} />
-                      <Bar stackId="loss" dataKey="technicalMin" fill="var(--color-technicalMin)" maxBarSize={28} />
-                      <Bar stackId="loss" dataKey="plannedMin" fill="var(--color-plannedMin)" maxBarSize={28} />
-                    </ComposedChart>
-                  </ResponsiveContainer>
-                </ChartContainer>
-              ) : (
-                <div className="h-44 w-full self-center text-center text-sm text-[rgb(var(--muted))] leading-[11rem]">No line loss data.</div>
-              )}
-            </Card>
-            <Card className="lg:col-span-5 px-3 py-3">
-              <div className="mb-2 text-sm font-semibold">Ops Action Queue</div>
-              <div className="space-y-2">
-                {(evoconInsights.actions || []).map(function(a, idx) {
-                  var cls = a.severity === "high"
-                    ? "border-[rgb(var(--danger-line))] bg-[rgb(var(--danger-soft))] text-[rgb(var(--danger))]"
-                    : a.severity === "med"
-                      ? "border-[rgb(var(--warning-line))] bg-[rgb(var(--warning-soft))] text-[rgb(var(--warning))]"
-                      : "border-[rgb(var(--border))] bg-[rgb(var(--surface))] text-[rgb(var(--foreground))]";
-                  return (
-                    <div key={idx} className={"rounded-md border px-2.5 py-2 text-xs " + cls}>
-                      {idx + 1}. {a.text}
-                    </div>
-                  );
-                })}
-                {!evoconInsights.actions.length && (
-                  <div className="rounded-md border border-[rgb(var(--border))] px-2.5 py-2 text-xs text-[rgb(var(--muted))]">No high-priority loss actions for this window.</div>
-                )}
-              </div>
-            </Card>
-          </div>
-
-          <TableShell>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr style={{ background: C.raised }}>
-                  <th className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Line</th>
-                  <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Loss Min</th>
-                  <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Unplanned</th>
-                  <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Speed Loss</th>
-                  <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Events</th>
-                  <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Comment %</th>
-                  <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Avail %</th>
-                </tr>
-              </thead>
-              <tbody>
-                {evoconInsights.byLine.slice(0, 8).map(function(r) {
-                  return (
-                    <tr key={r.line} style={{ borderBottom: "1px solid " + C.border }}>
-                      <td className="px-2 py-2 text-sm">{r.line}</td>
-                      <td className="px-2 py-2 text-right text-sm [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{r.lossMin.toLocaleString()}</td>
-                      <td className="px-2 py-2 text-right text-sm [font-variant-numeric:tabular-nums] text-[rgb(var(--danger))]" style={{ fontFamily: mono }}>{r.unplannedMin.toLocaleString()}</td>
-                      <td className="px-2 py-2 text-right text-sm [font-variant-numeric:tabular-nums] text-[rgb(var(--warning))]" style={{ fontFamily: mono }}>{r.slowMin.toLocaleString()}</td>
-                      <td className="px-2 py-2 text-right text-sm [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{r.stopEvents.toLocaleString()}</td>
-                      <td className={"px-2 py-2 text-right text-sm [font-variant-numeric:tabular-nums] " + (r.commentCoveragePct < 80 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")} style={{ fontFamily: mono }}>{r.commentCoveragePct}%</td>
-                      <td className={"px-2 py-2 text-right text-sm [font-variant-numeric:tabular-nums] " + (r.availabilityPct < 85 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")} style={{ fontFamily: mono }}>{r.availabilityPct}%</td>
-                    </tr>
-                  );
-                })}
-                {!evoconInsights.byLine.length && <tr><td colSpan={7} className="px-2 py-6 text-center text-sm text-[rgb(var(--muted))]">No line loss data in this window.</td></tr>}
-              </tbody>
-            </table>
-          </TableShell>
-        </div>
-      )}
-    </Card>
-  );
-
   return (
     <div className="space-y-4">
       <Card className="px-3 py-2.5">
@@ -1698,6 +1567,135 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
           </div>
         </Card>
       </div>
+
+      <Card className="px-4 py-4">
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <div className="text-sm font-semibold">Evocon Loss Intelligence</div>
+            <div className="text-xs text-[rgb(var(--muted))]">
+              Non-yield analysis for downtime, speed loss, stop discipline, and shift/line stability.
+              {evoconInsights.latestDate ? " Latest production day: " + evoconInsights.latestDate + "." : ""}
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Button size="sm" variant={evoconRole === "manager" ? "active" : "outline"} onClick={function() { setEvoconRole("manager"); }}>
+              Plant Manager
+            </Button>
+            <Button size="sm" variant={evoconRole === "supervisor" ? "active" : "outline"} onClick={function() { setEvoconRole("supervisor"); }}>
+              Supervisor
+            </Button>
+          </div>
+        </div>
+        {!evoconInsights.hasData ? (
+          <div className="rounded-md border border-[rgb(var(--border))] px-3 py-8 text-center text-sm text-[rgb(var(--muted))]">
+            No Evocon rows in selected window. Sync Evocon and/or adjust dates.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+              <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
+                <div className="text-lg font-bold text-[rgb(var(--danger))] [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{evoconInsights.summary.unplannedMin.toLocaleString()}</div>
+                <div className="text-xs text-[rgb(var(--muted))]">Unplanned Stop Min</div>
+              </div>
+              <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
+                <div className="text-lg font-bold text-[rgb(var(--warning))] [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{evoconInsights.summary.slowMin.toLocaleString()}</div>
+                <div className="text-xs text-[rgb(var(--muted))]">Speed Loss Min</div>
+              </div>
+              <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
+                <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{evoconInsights.summary.stopEvents.toLocaleString()}</div>
+                <div className="text-xs text-[rgb(var(--muted))]">Loss Events</div>
+              </div>
+              <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
+                <div className={"text-lg font-bold [font-variant-numeric:tabular-nums] " + (evoconInsights.summary.commentCoveragePct < 80 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")} style={{ fontFamily: mono }}>{evoconInsights.summary.commentCoveragePct}%</div>
+                <div className="text-xs text-[rgb(var(--muted))]">Comment Coverage</div>
+              </div>
+              <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
+                <div className={"text-lg font-bold [font-variant-numeric:tabular-nums] " + (evoconInsights.summary.availabilityPct < 85 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")} style={{ fontFamily: mono }}>{evoconInsights.summary.availabilityPct}%</div>
+                <div className="text-xs text-[rgb(var(--muted))]">Availability Proxy</div>
+              </div>
+            </div>
+
+            <div className="grid gap-3 lg:grid-cols-12">
+              <Card className="lg:col-span-7 px-3 py-3">
+                <div className="mb-2 text-sm font-semibold">Loss Stack by Line (minutes)</div>
+                {evoconInsights.chartRows.length ? (
+                  <ChartContainer config={evoconLossChartConfig} className="h-52">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <ComposedChart data={evoconInsights.chartRows} margin={{ top: 8, right: 8, left: 4, bottom: 8 }}>
+                        <CartesianGrid vertical={false} stroke="rgb(var(--border))" strokeOpacity={0.4} />
+                        <XAxis dataKey="line" tickLine={false} axisLine={false} tick={{ fill: "rgb(var(--muted))", fontSize: 11 }} />
+                        <YAxis width={62} tickLine={false} axisLine={false} tickFormatter={function(v) { return Math.round(safeNum(v)).toLocaleString(); }} tick={{ fill: "rgb(var(--muted))", fontSize: 11 }} />
+                        <ChartTooltip
+                          cursor={{ fill: "rgb(var(--surface))" }}
+                          content={<ChartTooltipContent formatter={function(value) { return Math.round(safeNum(value)); }} />}
+                        />
+                        <Bar stackId="loss" dataKey="unplannedMin" fill="var(--color-unplannedMin)" radius={[4, 4, 0, 0]} maxBarSize={28} />
+                        <Bar stackId="loss" dataKey="slowMin" fill="var(--color-slowMin)" maxBarSize={28} />
+                        <Bar stackId="loss" dataKey="technicalMin" fill="var(--color-technicalMin)" maxBarSize={28} />
+                        <Bar stackId="loss" dataKey="plannedMin" fill="var(--color-plannedMin)" maxBarSize={28} />
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                  </ChartContainer>
+                ) : (
+                  <div className="h-44 w-full self-center text-center text-sm text-[rgb(var(--muted))] leading-[11rem]">No line loss data.</div>
+                )}
+              </Card>
+              <Card className="lg:col-span-5 px-3 py-3">
+                <div className="mb-2 text-sm font-semibold">Ops Action Queue</div>
+                <div className="space-y-2">
+                  {(evoconInsights.actions || []).map(function(a, idx) {
+                    var cls = a.severity === "high"
+                      ? "border-[rgb(var(--danger-line))] bg-[rgb(var(--danger-soft))] text-[rgb(var(--danger))]"
+                      : a.severity === "med"
+                        ? "border-[rgb(var(--warning-line))] bg-[rgb(var(--warning-soft))] text-[rgb(var(--warning))]"
+                        : "border-[rgb(var(--border))] bg-[rgb(var(--surface))] text-[rgb(var(--foreground))]";
+                    return (
+                      <div key={idx} className={"rounded-md border px-2.5 py-2 text-xs " + cls}>
+                        {idx + 1}. {a.text}
+                      </div>
+                    );
+                  })}
+                  {!evoconInsights.actions.length && (
+                    <div className="rounded-md border border-[rgb(var(--border))] px-2.5 py-2 text-xs text-[rgb(var(--muted))]">No high-priority loss actions for this window.</div>
+                  )}
+                </div>
+              </Card>
+            </div>
+
+            <TableShell>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ background: C.raised }}>
+                    <th className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Line</th>
+                    <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Loss Min</th>
+                    <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Unplanned</th>
+                    <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Speed Loss</th>
+                    <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Events</th>
+                    <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Comment %</th>
+                    <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Avail %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {evoconInsights.byLine.slice(0, 8).map(function(r) {
+                    return (
+                      <tr key={r.line} style={{ borderBottom: "1px solid " + C.border }}>
+                        <td className="px-2 py-2 text-sm">{r.line}</td>
+                        <td className="px-2 py-2 text-right text-sm [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{r.lossMin.toLocaleString()}</td>
+                        <td className="px-2 py-2 text-right text-sm [font-variant-numeric:tabular-nums] text-[rgb(var(--danger))]" style={{ fontFamily: mono }}>{r.unplannedMin.toLocaleString()}</td>
+                        <td className="px-2 py-2 text-right text-sm [font-variant-numeric:tabular-nums] text-[rgb(var(--warning))]" style={{ fontFamily: mono }}>{r.slowMin.toLocaleString()}</td>
+                        <td className="px-2 py-2 text-right text-sm [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{r.stopEvents.toLocaleString()}</td>
+                        <td className={"px-2 py-2 text-right text-sm [font-variant-numeric:tabular-nums] " + (r.commentCoveragePct < 80 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")} style={{ fontFamily: mono }}>{r.commentCoveragePct}%</td>
+                        <td className={"px-2 py-2 text-right text-sm [font-variant-numeric:tabular-nums] " + (r.availabilityPct < 85 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")} style={{ fontFamily: mono }}>{r.availabilityPct}%</td>
+                      </tr>
+                    );
+                  })}
+                  {!evoconInsights.byLine.length && <tr><td colSpan={7} className="px-2 py-6 text-center text-sm text-[rgb(var(--muted))]">No line loss data in this window.</td></tr>}
+                </tbody>
+              </table>
+            </TableShell>
+          </div>
+        )}
+      </Card>
 
       <div className="grid gap-3 xl:grid-cols-3">
         <Card className="px-4 py-4">
@@ -1895,8 +1893,6 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
           </div>
         </Card>
       </div>
-
-      {evoconLossSection}
 
       <div className="grid gap-3 lg:grid-cols-12">
         <Card className="lg:col-span-12 px-4 py-4">
