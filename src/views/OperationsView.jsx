@@ -1431,13 +1431,17 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="text-sm text-[rgb(var(--muted))]">Operations Window</div>
-        <div className="h-9 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm leading-9 text-[rgb(var(--foreground))]">Nulogy</div>
-        <div className="text-xs text-[rgb(var(--muted))]">
-          Evocon rows: {Array.isArray(evoconData) ? evoconData.length : 0}{evoconTimestamp ? " · synced " + toIsoDateET(evoconTimestamp) : ""}
+      <Card className="px-3 py-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-[rgb(var(--muted))]">Operations Window</span>
+            <Badge variant="secondary">Nulogy</Badge>
+          </div>
+          <div className="text-xs text-[rgb(var(--muted))]">
+            Evocon: {Array.isArray(evoconData) ? evoconData.length : 0} rows{evoconTimestamp ? " · synced " + toIsoDateET(evoconTimestamp) : ""}
+          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
           {[
             { key: "today", label: "Today" },
             { key: "yesterday", label: "Yesterday" },
@@ -1458,15 +1462,17 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
             );
           })}
         </div>
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
           <DatePicker value={range.start} onChange={setCustomStart} />
           <span className="text-xs text-[rgb(var(--muted))]">to</span>
           <DatePicker value={range.end} onChange={setCustomEnd} />
-          <span className="text-xs text-[rgb(var(--muted))]">{windowPreset === "custom" ? "Custom range" : (range.start + " to " + range.end)}</span>
+          <span className="text-xs text-[rgb(var(--muted))]">
+            {range.start + " to " + range.end}
+          </span>
+          <Button variant="outline" size="sm" onClick={loadAll} disabled={loading || saving}>Refresh</Button>
+          {loading && <span className="text-xs text-[rgb(var(--muted))]">Loading…</span>}
         </div>
-        <Button variant="outline" size="sm" onClick={loadAll} disabled={loading || saving}>Refresh</Button>
-        {loading && <span className="text-xs text-[rgb(var(--muted))]">Loading…</span>}
-      </div>
+      </Card>
 
       {err && <Card className="border-[rgb(var(--danger-line))] bg-[rgb(var(--danger-soft))] px-3 py-2 text-sm text-[rgb(var(--danger))]">{err}</Card>}
 
