@@ -1609,13 +1609,14 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                     }
                   />
                   {(dailyPlanVsActual.lineSeries || []).map(function(line, idx) {
+                    var isTopSegment = idx === (dailyPlanVsActual.lineSeries.length - 1);
                     return (
                       <Bar
                         key={line.key}
                         stackId="line"
                         dataKey={line.key}
                         fill={"var(--color-" + line.key + ")"}
-                        radius={idx === 0 ? [4, 4, 0, 0] : [0, 0, 0, 0]}
+                        radius={isTopSegment ? [4, 4, 0, 0] : [0, 0, 0, 0]}
                         maxBarSize={26}
                       />
                     );
@@ -1677,9 +1678,9 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                       />
                     }
                   />
-                  <Bar stackId="shift" dataKey="s1" fill="var(--color-s1)" radius={[4, 4, 0, 0]} maxBarSize={26} />
+                  <Bar stackId="shift" dataKey="s1" fill="var(--color-s1)" maxBarSize={26} />
                   <Bar stackId="shift" dataKey="s2" fill="var(--color-s2)" maxBarSize={26} />
-                  <Bar stackId="shift" dataKey="un" fill="var(--color-un)" maxBarSize={26} />
+                  <Bar stackId="shift" dataKey="un" fill="var(--color-un)" radius={[4, 4, 0, 0]} maxBarSize={26} />
                   <Line
                     type="monotone"
                     dataKey="plan"
@@ -1743,13 +1744,14 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                     }
                   />
                   {(skuMixByDay.series || []).map(function(s, idx) {
+                    var isTopSegment = idx === (skuMixByDay.series.length - 1);
                     return (
                       <Bar
                         key={s.key}
                         stackId="skuMix"
                         dataKey={s.key}
                         fill={"var(--color-" + s.key + ")"}
-                        radius={idx === 0 ? [4, 4, 0, 0] : [0, 0, 0, 0]}
+                        radius={isTopSegment ? [4, 4, 0, 0] : [0, 0, 0, 0]}
                         maxBarSize={30}
                       />
                     );
