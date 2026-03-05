@@ -1443,17 +1443,10 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
 
   return (
     <div className="space-y-4">
-      <Card className="px-3 py-2.5">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-[rgb(var(--muted))]">Operations Window</span>
-            <Badge variant="secondary">Nulogy</Badge>
-          </div>
-          <div className="text-xs text-[rgb(var(--muted))]">
-            Evocon: {Array.isArray(evoconData) ? evoconData.length : 0} rows{evoconTimestamp ? " · synced " + toIsoDateET(evoconTimestamp) : ""}
-          </div>
-        </div>
-        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+      <Card className="px-3 py-2">
+        <div className="flex flex-wrap lg:flex-nowrap items-center gap-1.5">
+          <span className="text-sm font-medium text-[rgb(var(--muted))] whitespace-nowrap">Operations Window</span>
+          <Badge variant="secondary">Nulogy</Badge>
           {[
             { key: "today", label: "Today" },
             { key: "yesterday", label: "Yesterday" },
@@ -1473,13 +1466,14 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
               </Button>
             );
           })}
-        </div>
-        <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          <DatePicker value={range.start} onChange={setCustomStart} />
-          <span className="text-xs text-[rgb(var(--muted))]">to</span>
-          <DatePicker value={range.end} onChange={setCustomEnd} />
+          <DatePicker value={range.start} onChange={setCustomStart} className="h-9 w-[132px]" />
+          <span className="text-xs text-[rgb(var(--muted))] whitespace-nowrap">to</span>
+          <DatePicker value={range.end} onChange={setCustomEnd} className="h-9 w-[132px]" />
           <Button variant="outline" size="sm" onClick={loadAll} disabled={loading || saving}>Refresh</Button>
-          {loading && <span className="text-xs text-[rgb(var(--muted))]">Loading…</span>}
+          {loading && <span className="text-xs text-[rgb(var(--muted))] whitespace-nowrap">Loading…</span>}
+          <div className="text-xs text-[rgb(var(--muted))] whitespace-nowrap lg:ml-auto">
+            Evocon: {Array.isArray(evoconData) ? evoconData.length : 0} rows{evoconTimestamp ? " · synced " + toIsoDateET(evoconTimestamp) : ""}
+          </div>
         </div>
       </Card>
 
