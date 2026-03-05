@@ -1970,48 +1970,21 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
         </Card>
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-12">
-        <Card className="lg:col-span-7 px-4 py-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <div className="text-sm font-semibold">Shift Inputs</div>
-              <div className="text-xs text-[rgb(var(--muted))]">Managers can add line-level labor entries without editing dashboard settings.</div>
-            </div>
-            <Button onClick={function() { setShowEntryModal(true); }} disabled={saving}>{saving ? "Saving..." : "Add Shift Entry"}</Button>
+      <Card className="px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="text-xs text-[rgb(var(--muted))]">
+            Labor inputs and rates are managed in a pop-up form to keep this view focused on operations analysis.
           </div>
-          <div className="mt-3 text-xs text-[rgb(var(--muted))]">
-            Labor rates are managed separately and usually remain constant.
-          </div>
-        </Card>
-
-        <Card className="lg:col-span-5 px-4 py-4">
-          <details>
-            <summary className="cursor-pointer text-sm font-semibold">Labor Rate Settings</summary>
-            <div className="mt-3 space-y-2">
-              {rates.map(function(r, idx) {
-                return (
-                  <div key={r.role + idx} className="grid grid-cols-[120px_1fr_1fr] gap-2">
-                    <div className="flex items-center text-sm capitalize">{r.role}</div>
-                    <Input type="number" step="0.01" value={r.hourly_rate} onChange={function(e){
-                      var next = rates.slice();
-                      next[idx] = Object.assign({}, next[idx], { hourly_rate: e.target.value });
-                      setRates(next);
-                    }} placeholder="Hourly rate" />
-                    <Input type="number" step="0.01" value={r.markup_pct} onChange={function(e){
-                      var next = rates.slice();
-                      next[idx] = Object.assign({}, next[idx], { markup_pct: e.target.value });
-                      setRates(next);
-                    }} placeholder="Markup (0.2 = 20%)" />
-                  </div>
-                );
-              })}
-              <div className="mt-3">
-                <Button variant="outline" onClick={saveRates} disabled={saving}>{saving ? "Saving..." : "Save Rates"}</Button>
-              </div>
-            </div>
-          </details>
-        </Card>
-      </div>
+          <button
+            type="button"
+            onClick={function() { setShowEntryModal(true); }}
+            className="text-sm font-medium text-[rgb(var(--accent))] underline underline-offset-2 hover:opacity-80"
+            disabled={saving}
+          >
+            Open Labor Input Form
+          </button>
+        </div>
+      </Card>
 
       <div className="grid gap-3 lg:grid-cols-2">
         <Card className="px-4 py-4">
@@ -2128,6 +2101,32 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
               <Button onClick={saveShiftInput} disabled={saving}>{saving ? "Saving..." : "Save Shift Entry"}</Button>
               <span className="text-xs text-[rgb(var(--muted))]">Wages use Labor Rate Settings and generally remain constant.</span>
             </div>
+
+            <details className="mt-4">
+              <summary className="cursor-pointer text-sm font-semibold">Labor Rate Settings</summary>
+              <div className="mt-3 space-y-2">
+                {rates.map(function(r, idx) {
+                  return (
+                    <div key={r.role + idx} className="grid grid-cols-[120px_1fr_1fr] gap-2">
+                      <div className="flex items-center text-sm capitalize">{r.role}</div>
+                      <Input type="number" step="0.01" value={r.hourly_rate} onChange={function(e){
+                        var next = rates.slice();
+                        next[idx] = Object.assign({}, next[idx], { hourly_rate: e.target.value });
+                        setRates(next);
+                      }} placeholder="Hourly rate" />
+                      <Input type="number" step="0.01" value={r.markup_pct} onChange={function(e){
+                        var next = rates.slice();
+                        next[idx] = Object.assign({}, next[idx], { markup_pct: e.target.value });
+                        setRates(next);
+                      }} placeholder="Markup (0.2 = 20%)" />
+                    </div>
+                  );
+                })}
+                <div className="mt-3">
+                  <Button variant="outline" onClick={saveRates} disabled={saving}>{saving ? "Saving..." : "Save Rates"}</Button>
+                </div>
+              </div>
+            </details>
           </Card>
         </div>
       )}
