@@ -461,6 +461,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   const [saving, setSaving] = useState(false);
   const [showEntryModal, setShowEntryModal] = useState(false);
   const [showRecentLaborInputs, setShowRecentLaborInputs] = useState(false);
+  const [showTopSkuMix, setShowTopSkuMix] = useState(false);
   const [skuMixMode, setSkuMixMode] = useState("type");
   const [evoconRole, setEvoconRole] = useState("manager");
 
@@ -1988,26 +1989,37 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
 
       <div className="grid gap-3 lg:grid-cols-2">
         <Card className="px-4 py-4">
-          <div className="mb-2 text-sm font-semibold">Top SKU Mix (Units)</div>
-          <TableShell>
-            <table style={{ width:"100%", borderCollapse:"collapse" }}>
-              <thead><tr style={{ background:C.raised }}>
-                <th className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">SKU</th>
-                <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Units</th>
-                <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Est Revenue</th>
-              </tr></thead>
-              <tbody>
-                {topSku.map(function(s, i) {
-                  return <tr key={s.item_code + i} style={{ borderBottom:"1px solid " + C.border }}>
-                    <td className="px-2 py-2 text-sm">{s.item_code}</td>
-                    <td className="px-2 py-2 text-right text-sm" style={{ fontFamily: mono }}>{s.units.toLocaleString()}</td>
-                    <td className="px-2 py-2 text-right text-sm" style={{ fontFamily: mono, color: s.estRev == null ? C.dim : C.ok }}>{s.estRev == null ? "--" : fmtMoney(s.estRev)}</td>
-                  </tr>;
-                })}
-              </tbody>
-            </table>
-          </TableShell>
-          <div className="mt-2 text-xs text-[rgb(var(--muted))]">SKU targets mapped: {metrics.mappedSkuCount} | unmapped: {metrics.unmappedSkuCount}</div>
+          <button
+            type="button"
+            onClick={function() { setShowTopSkuMix(function(v) { return !v; }); }}
+            className="mb-2 flex w-full items-center justify-between text-left"
+          >
+            <span className="text-sm font-semibold">Top SKU Mix (Units)</span>
+            <span className="text-xs text-[rgb(var(--muted))]">{showTopSkuMix ? "Hide" : "Show"}</span>
+          </button>
+          {showTopSkuMix && (
+            <>
+              <TableShell>
+                <table style={{ width:"100%", borderCollapse:"collapse" }}>
+                  <thead><tr style={{ background:C.raised }}>
+                    <th className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">SKU</th>
+                    <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Units</th>
+                    <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Est Revenue</th>
+                  </tr></thead>
+                  <tbody>
+                    {topSku.map(function(s, i) {
+                      return <tr key={s.item_code + i} style={{ borderBottom:"1px solid " + C.border }}>
+                        <td className="px-2 py-2 text-sm">{s.item_code}</td>
+                        <td className="px-2 py-2 text-right text-sm" style={{ fontFamily: mono }}>{s.units.toLocaleString()}</td>
+                        <td className="px-2 py-2 text-right text-sm" style={{ fontFamily: mono, color: s.estRev == null ? C.dim : C.ok }}>{s.estRev == null ? "--" : fmtMoney(s.estRev)}</td>
+                      </tr>;
+                    })}
+                  </tbody>
+                </table>
+              </TableShell>
+              <div className="mt-2 text-xs text-[rgb(var(--muted))]">SKU targets mapped: {metrics.mappedSkuCount} | unmapped: {metrics.unmappedSkuCount}</div>
+            </>
+          )}
         </Card>
 
         <Card className="px-4 py-4">
