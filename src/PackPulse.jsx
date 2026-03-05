@@ -1,15 +1,8 @@
-import { useState, useCallback, useEffect } from "react";
+import { Suspense, lazy, useState, useCallback, useEffect } from "react";
 import NulogySync from "./NulogySync";
 import { useTheme } from "./theme";
 import { useDataSources } from "./hooks/useDataSources";
 import { useAnalysis } from "./hooks/useAnalysis";
-import OverviewView from "./views/OverviewView";
-import OperationsView from "./views/OperationsView";
-import WorkOrdersView from "./views/WorkOrdersView";
-import SupplyRiskView from "./views/SupplyRiskView";
-import FlagsView from "./views/FlagsView";
-import SandboxView from "./views/SandboxView";
-import AICopilotView from "./views/AICopilotView";
 import ColumnMapper from "./components/ColumnMapper";
 import FileUploader from "./components/FileUploader";
 import { Button } from "./components/ui/button";
@@ -18,6 +11,14 @@ import { Progress } from "./components/ui/progress";
 import TabsNav from "./components/ui/tabs-nav";
 import { Card } from "./components/ui/card";
 import AskAiPanel from "./components/AskAiPanel";
+
+const OverviewView = lazy(() => import("./views/OverviewView"));
+const OperationsView = lazy(() => import("./views/OperationsView"));
+const WorkOrdersView = lazy(() => import("./views/WorkOrdersView"));
+const SupplyRiskView = lazy(() => import("./views/SupplyRiskView"));
+const FlagsView = lazy(() => import("./views/FlagsView"));
+const SandboxView = lazy(() => import("./views/SandboxView"));
+const AICopilotView = lazy(() => import("./views/AICopilotView"));
 
 export default function ProductionReadiness() {
   const { C, theme, setTheme, sans, mono } = useTheme();
@@ -809,13 +810,15 @@ export default function ProductionReadiness() {
             .concat([{key:"sandbox",label:"Sandbox",count:null,alert:false}])}
         />
 
-        {activeView === "overview" && <OverviewView analysis={analysisForUI} woStatuses={woStatusesForUI} onSelectCustomer={openWorkOrdersForCustomer} />}
-        {activeView === "aicopilot" && <AICopilotView summary={summaryForUI} criticalItems={criticalItemsForUI} dispatchQueue={dispatchQueue || []} productionSegments={productionSegmentsForUI} evoconData={ds.evoconData || []} onNavigate={setActiveView} />}
-        {activeView === "operations" && <OperationsView productionSegments={productionSegmentsForUI} productionDataRaw={ds.productionData || []} evoconData={ds.evoconData || []} evoconTimestamp={ds.evoconTimestamp || evoconLastSyncAt} />}
-        {activeView === "workorders" && <WorkOrdersView analysis={analysisForUI} woStatuses={woStatusesForUI} woCustomers={woCustomersForUI} recommendations={recommendationsForUI} dispatchQueue={dispatchQueue || []} prefilterCustomer={workOrdersPrefilterCustomer} prefilterNonce={workOrdersPrefilterNonce} />}
-        {activeView === "supplyrisk" && <SupplyRiskView rawCriticalItems={criticalItemsForUI} inboundCoverage={inboundCoverage} timelineData={timelineData} deliveriesV2={deliveriesV2} />}
-        {activeView === "sandbox" && <SandboxView />}
-        {activeView === "flags" && <FlagsView flags={analysisForUI.flags} />}
+        <Suspense fallback={<Card className="mt-3 p-4 text-sm text-[rgb(var(--muted))]">Loading view...</Card>}>
+          {activeView === "overview" && <OverviewView analysis={analysisForUI} woStatuses={woStatusesForUI} onSelectCustomer={openWorkOrdersForCustomer} />}
+          {activeView === "aicopilot" && <AICopilotView summary={summaryForUI} criticalItems={criticalItemsForUI} dispatchQueue={dispatchQueue || []} productionSegments={productionSegmentsForUI} evoconData={ds.evoconData || []} onNavigate={setActiveView} />}
+          {activeView === "operations" && <OperationsView productionSegments={productionSegmentsForUI} productionDataRaw={ds.productionData || []} evoconData={ds.evoconData || []} evoconTimestamp={ds.evoconTimestamp || evoconLastSyncAt} />}
+          {activeView === "workorders" && <WorkOrdersView analysis={analysisForUI} woStatuses={woStatusesForUI} woCustomers={woCustomersForUI} recommendations={recommendationsForUI} dispatchQueue={dispatchQueue || []} prefilterCustomer={workOrdersPrefilterCustomer} prefilterNonce={workOrdersPrefilterNonce} />}
+          {activeView === "supplyrisk" && <SupplyRiskView rawCriticalItems={criticalItemsForUI} inboundCoverage={inboundCoverage} timelineData={timelineData} deliveriesV2={deliveriesV2} />}
+          {activeView === "sandbox" && <SandboxView />}
+          {activeView === "flags" && <FlagsView flags={analysisForUI.flags} />}
+        </Suspense>
 
       </div>
       </main>
