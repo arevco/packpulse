@@ -1471,9 +1471,6 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
           <DatePicker value={range.end} onChange={setCustomEnd} className="h-9 w-[132px]" />
           <Button variant="outline" size="sm" onClick={loadAll} disabled={loading || saving}>Refresh</Button>
           {loading && <span className="text-xs text-[rgb(var(--muted))] whitespace-nowrap">Loading…</span>}
-          <div className="text-xs text-[rgb(var(--muted))] whitespace-nowrap lg:ml-auto">
-            Evocon: {Array.isArray(evoconData) ? evoconData.length : 0} rows{evoconTimestamp ? " · synced " + toIsoDateET(evoconTimestamp) : ""}
-          </div>
         </div>
       </Card>
 
