@@ -462,6 +462,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   const [showEntryModal, setShowEntryModal] = useState(false);
   const [showRecentLaborInputs, setShowRecentLaborInputs] = useState(false);
   const [showTopSkuMix, setShowTopSkuMix] = useState(false);
+  const [showWindowCompare, setShowWindowCompare] = useState(false);
   const [skuMixMode, setSkuMixMode] = useState("type");
   const [evoconRole, setEvoconRole] = useState("manager");
 
@@ -1476,9 +1477,9 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
 
       {err && <Card className="border-[rgb(var(--danger-line))] bg-[rgb(var(--danger-soft))] px-3 py-2 text-sm text-[rgb(var(--danger))]">{err}</Card>}
 
-      <div className="grid gap-3 lg:grid-cols-12">
-        <Card className="lg:col-span-8 px-4 py-4">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+      <div className="grid gap-2 lg:grid-cols-12">
+        <Card className="lg:col-span-8 px-3 py-3">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
             <div>
               <div className="text-sm font-semibold">Shift Command Board</div>
               <div className="text-xs text-[rgb(var(--muted))]">
@@ -1493,59 +1494,66 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
               {commandBoard.status}
             </span>
           </div>
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
-              <div className="text-xl font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{commandBoard.latestUnits.toLocaleString()}</div>
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+            <div className="rounded-md border border-[rgb(var(--border))] px-3 py-1.5">
+              <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{commandBoard.latestUnits.toLocaleString()}</div>
               <div className="text-xs text-[rgb(var(--muted))]">Actual Cases</div>
             </div>
-            <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
-              <div className="text-xl font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{commandBoard.planUnits.toLocaleString()}</div>
+            <div className="rounded-md border border-[rgb(var(--border))] px-3 py-1.5">
+              <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{commandBoard.planUnits.toLocaleString()}</div>
               <div className="text-xs text-[rgb(var(--muted))]">Baseline Plan</div>
             </div>
-            <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
-              <div className={"text-xl font-bold [font-variant-numeric:tabular-nums] " + (commandBoard.variance < 0 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")} style={{ fontFamily: mono }}>
+            <div className="rounded-md border border-[rgb(var(--border))] px-3 py-1.5">
+              <div className={"text-lg font-bold [font-variant-numeric:tabular-nums] " + (commandBoard.variance < 0 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")} style={{ fontFamily: mono }}>
                 {commandBoard.variance >= 0 ? "+" : ""}{commandBoard.variance.toLocaleString()}
               </div>
               <div className="text-xs text-[rgb(var(--muted))]">Variance ({commandBoard.variancePct >= 0 ? "+" : ""}{commandBoard.variancePct}%)</div>
             </div>
-            <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
-              <div className="text-xl font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{commandBoard.topLine ? commandBoard.topLine.line : "--"}</div>
+            <div className="rounded-md border border-[rgb(var(--border))] px-3 py-1.5">
+              <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{commandBoard.topLine ? commandBoard.topLine.line : "--"}</div>
               <div className="text-xs text-[rgb(var(--muted))]">Top Line ({commandBoard.topLine ? commandBoard.topLine.units.toLocaleString() : "--"} cases in window)</div>
             </div>
           </div>
-          <div className="mt-3 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-2.5">
-            <div className="mb-1.5 text-xs font-semibold text-[rgb(var(--muted))]">
-              Compare: {periodCompare.labelCurrent} vs {periodCompare.labelPrior}
-            </div>
-            <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-              <div className="text-xs text-[rgb(var(--muted))]">
-                <div className="font-semibold text-[rgb(var(--foreground))] [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{periodCompare.currentUnits.toLocaleString()}</div>
-                <div>{periodCompare.labelCurrent} cases</div>
-              </div>
-              <div className="text-xs text-[rgb(var(--muted))]">
-                <div className="font-semibold text-[rgb(var(--foreground))] [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{periodCompare.priorUnits.toLocaleString()}</div>
-                <div>{periodCompare.labelPrior} cases</div>
-              </div>
-              <div className="text-xs text-[rgb(var(--muted))]">
-                <div className={"font-semibold [font-variant-numeric:tabular-nums] " + (periodCompare.delta < 0 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")} style={{ fontFamily: mono }}>
-                  {periodCompare.delta >= 0 ? "+" : ""}{periodCompare.delta.toLocaleString()}
+          <button
+            type="button"
+            onClick={function() { setShowWindowCompare(function(v) { return !v; }); }}
+            className="mt-2 flex w-full items-center justify-between rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-1.5 text-left"
+          >
+            <span className="text-xs font-semibold text-[rgb(var(--muted))]">Compare: {periodCompare.labelCurrent} vs {periodCompare.labelPrior}</span>
+            <span className="text-xs text-[rgb(var(--muted))]">{showWindowCompare ? "Hide" : "Show"}</span>
+          </button>
+          {showWindowCompare && (
+            <div className="mt-1 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-2">
+              <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                <div className="text-xs text-[rgb(var(--muted))]">
+                  <div className="font-semibold text-[rgb(var(--foreground))] [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{periodCompare.currentUnits.toLocaleString()}</div>
+                  <div>{periodCompare.labelCurrent} cases</div>
                 </div>
-                <div>Case delta</div>
-              </div>
-              <div className="text-xs text-[rgb(var(--muted))]">
-                <div className={"font-semibold [font-variant-numeric:tabular-nums] " + (periodCompare.deltaPct < 0 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")} style={{ fontFamily: mono }}>
-                  {periodCompare.deltaPct >= 0 ? "+" : ""}{periodCompare.deltaPct}%
+                <div className="text-xs text-[rgb(var(--muted))]">
+                  <div className="font-semibold text-[rgb(var(--foreground))] [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{periodCompare.priorUnits.toLocaleString()}</div>
+                  <div>{periodCompare.labelPrior} cases</div>
                 </div>
-                <div>Percent delta</div>
+                <div className="text-xs text-[rgb(var(--muted))]">
+                  <div className={"font-semibold [font-variant-numeric:tabular-nums] " + (periodCompare.delta < 0 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")} style={{ fontFamily: mono }}>
+                    {periodCompare.delta >= 0 ? "+" : ""}{periodCompare.delta.toLocaleString()}
+                  </div>
+                  <div>Case delta</div>
+                </div>
+                <div className="text-xs text-[rgb(var(--muted))]">
+                  <div className={"font-semibold [font-variant-numeric:tabular-nums] " + (periodCompare.deltaPct < 0 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")} style={{ fontFamily: mono }}>
+                    {periodCompare.deltaPct >= 0 ? "+" : ""}{periodCompare.deltaPct}%
+                  </div>
+                  <div>Percent delta</div>
+                </div>
+              </div>
+              <div className="mt-1 text-[11px] text-[rgb(var(--muted))]">
+                Prior window: {periodCompare.priorRange}
               </div>
             </div>
-            <div className="mt-1 text-[11px] text-[rgb(var(--muted))]">
-              Prior window: {periodCompare.priorRange}
-            </div>
-          </div>
+          )}
         </Card>
 
-        <Card className="lg:col-span-4 px-4 py-4">
+        <Card className="lg:col-span-4 px-3 py-3">
           <div className="mb-2 text-sm font-semibold">Operations KPI</div>
           <div className="space-y-2">
             <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
