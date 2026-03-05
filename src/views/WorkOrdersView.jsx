@@ -664,9 +664,17 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
         <option value="all">All WO Status</option>
         {woStatuses.map(s => <option key={s} value={s}>{s}</option>)}
       </select>
-      {["all","ready","partial","blocked","nobom"].map(function(f) {
-        return <Button key={f} onClick={function() { setFilterStatus(function(curr) { return curr === f && f !== "all" ? "all" : f; }); }} variant={filterStatus===f ? "active" : "outline"} size="default" className="shrink-0">{f==="all"?"All":f==="ready"?"Ready":f==="partial"?"Partial":f==="blocked"?"Blocked":"No BOM"}</Button>;
-      })}
+      <select
+        value={filterStatus}
+        onChange={function(e) { setFilterStatus(e.target.value); }}
+        className="h-10 shrink-0 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]"
+      >
+        <option value="all">All Run Status</option>
+        <option value="ready">Ready</option>
+        <option value="partial">Partial</option>
+        <option value="blocked">Blocked</option>
+        <option value="nobom">No BOM</option>
+      </select>
       <Button onClick={function() {
         setFilterRunNext(function(v) {
           var next = !v;
