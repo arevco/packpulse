@@ -19,8 +19,9 @@ function toDate(value) {
 
 function DatePicker({ value, onChange, placeholder = "Pick a date", className }) {
   var selected = toDate(value);
+  var [open, setOpen] = React.useState(false);
   return (
-    <Popover.Root>
+    <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger asChild>
         <Button
           type="button"
@@ -43,6 +44,7 @@ function DatePicker({ value, onChange, placeholder = "Pick a date", className })
             onSelect={function(nextDate) {
               if (!nextDate) return;
               onChange(format(nextDate, "yyyy-MM-dd"));
+              setOpen(false);
             }}
             initialFocus
           />

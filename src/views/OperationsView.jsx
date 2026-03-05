@@ -499,12 +499,22 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   };
 
   var setCustomStart = function(v) {
+    if (!v) return;
     setWindowPreset("custom");
     setRangeStart(v);
+    setRangeEnd(function(prevEnd) {
+      var end = prevEnd || v;
+      return end < v ? v : end;
+    });
   };
   var setCustomEnd = function(v) {
+    if (!v) return;
     setWindowPreset("custom");
     setRangeEnd(v);
+    setRangeStart(function(prevStart) {
+      var start = prevStart || v;
+      return start > v ? v : start;
+    });
   };
 
   var loadAll = async function() {
@@ -1467,9 +1477,6 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
           <DatePicker value={range.start} onChange={setCustomStart} />
           <span className="text-xs text-[rgb(var(--muted))]">to</span>
           <DatePicker value={range.end} onChange={setCustomEnd} />
-          <span className="text-xs text-[rgb(var(--muted))]">
-            {range.start + " to " + range.end}
-          </span>
           <Button variant="outline" size="sm" onClick={loadAll} disabled={loading || saving}>Refresh</Button>
           {loading && <span className="text-xs text-[rgb(var(--muted))]">Loading…</span>}
         </div>
