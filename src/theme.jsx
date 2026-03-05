@@ -14,7 +14,7 @@ const THEMES = {
     hover:"rgba(255,255,255,0.03)",
   },
   light: {
-    bg:"#f3f4f6",surface:"#ffffff",raised:"#f8f9fb",border:"#e2e4ea",
+    bg:"#f7f8fb",surface:"#ffffff",raised:"#fbfcfe",border:"#e6e9f0",
     text:"#505868",dim:"#687287",bright:"#1c2030",
     accent:"#3b6fd8",accentSoft:"rgba(59,111,216,0.07)",accentLine:"rgba(59,111,216,0.22)",
     ok:"#1c9858",okSoft:"rgba(28,152,88,0.07)",okLine:"rgba(28,152,88,0.22)",
