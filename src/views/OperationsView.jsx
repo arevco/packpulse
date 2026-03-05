@@ -7,7 +7,7 @@ import { Badge } from "../components/ui/badge";
 import { DatePicker } from "../components/ui/date-picker";
 import TableShell from "../components/ui/table-shell";
 import ProductionView from "./ProductionView";
-import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, XAxis, YAxis } from "recharts";
+import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, XAxis, YAxis, Cell } from "recharts";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "../components/ui/chart";
 import { detectPackType } from "../utils";
 
@@ -76,6 +76,14 @@ function weekStart(dateIso) {
   var delta = dow === 0 ? -6 : 1 - dow; // monday start
   d.setDate(d.getDate() + delta);
   return toIsoDateLocal(d);
+}
+
+function topStackKey(row, keys) {
+  for (var i = keys.length - 1; i >= 0; i -= 1) {
+    var key = keys[i];
+    if (safeNum(row && row[key]) > 0) return key;
+  }
+  return null;
 }
 
 function monthStart(dateIso) {
@@ -1678,9 +1686,16 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                       />
                     }
                   />
-                  <Bar stackId="shift" dataKey="s1" fill="var(--color-s1)" maxBarSize={26} />
-                  <Bar stackId="shift" dataKey="s2" fill="var(--color-s2)" maxBarSize={26} />
-                  <Bar stackId="shift" dataKey="un" fill="var(--color-un)" radius={[4, 4, 0, 0]} maxBarSize={26} />
+                  {["s1", "s2", "un"].map(function(key) {
+                    return (
+                      <Bar key={key} stackId="shift" dataKey={key} fill={"var(--color-" + key + ")"} maxBarSize={26}>
+                        {shiftPlanVsActual.rows.map(function(row, idx) {
+                          var topKey = topStackKey(row, ["s1", "s2", "un"]);
+                          return <Cell key={key + "-" + idx} radius={topKey === key ? [4, 4, 0, 0] : [0, 0, 0, 0]} />;
+                        })}
+                      </Bar>
+                    );
+                  })}
                   <Line
                     type="monotone"
                     dataKey="plan"
@@ -1743,17 +1758,21 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                       />
                     }
                   />
-                  {(skuMixByDay.series || []).map(function(s, idx) {
-                    var isTopSegment = idx === (skuMixByDay.series.length - 1);
+                  {(skuMixByDay.series || []).map(function(s) {
                     return (
                       <Bar
                         key={s.key}
                         stackId="skuMix"
                         dataKey={s.key}
                         fill={"var(--color-" + s.key + ")"}
-                        radius={isTopSegment ? [4, 4, 0, 0] : [0, 0, 0, 0]}
                         maxBarSize={30}
-                      />
+                      >
+                        {skuMixByDay.rows.map(function(row, idx) {
+                          var keys = (skuMixByDay.series || []).map(function(x) { return x.key; });
+                          var topKey = topStackKey(row, keys);
+                          return <Cell key={s.key + "-" + idx} radius={topKey === s.key ? [4, 4, 0, 0] : [0, 0, 0, 0]} />;
+                        })}
+                      </Bar>
                     );
                   })}
                 </ComposedChart>
