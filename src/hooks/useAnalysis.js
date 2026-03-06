@@ -216,9 +216,14 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       var sku = normalizeStr(skuRaw);
       if (!sku) return;
       var masterDescRaw = firstValue(row, ["Description", "description", "Item Description", "item_description"]).toString().trim();
+      var costPerUnit = safeNum(firstValue(row, [
+        "Cost Per Unit", "cost_per_unit", "Unit Cost", "unit_cost",
+        "Standard Cost", "standard_cost", "Cost Per Base Unit", "cost_per_base_unit"
+      ]));
       if (!itemMasterBySku[sku]) itemMasterBySku[sku] = { sku:sku, skuRaw:skuRaw, desc:"" };
       itemMasterBySku[sku].desc = pickBetterDescription(itemMasterBySku[sku].desc || "", masterDescRaw, skuRaw);
       if (!itemMasterBySku[sku].skuRaw && skuRaw) itemMasterBySku[sku].skuRaw = skuRaw;
+      if (costPerUnit > 0) itemMasterBySku[sku].costPerUnit = costPerUnit;
     });
     var inferredInvStatusCol = "";
     if (!invMapping.status && inventory && inventory.length) {
@@ -324,7 +329,8 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       if (maxRun === Infinity) maxRun = demandUnits; if (couldMk === Infinity) couldMk = demandUnits;
       return Object.assign({ woNum:woNum, productSkuRaw:productSkuRaw, productDesc:resolveItemDescription(productSku, productSkuRaw, ""), qtyToProduce:qtyToProduce, dueDate:dueDate, status:status, readiness:readiness, runStatus:runStatus, components:components, maxRunnable:Math.min(maxRun, demandUnits), couldMake:Math.min(couldMk, demandUnits), zeroStockCount:zeroCount, normalizedSku:productSku }, extra);
     });
-    var diag = { invCount:inventory.length, invStatusColumn:invStatusCol || "", invRowsIncluded:invRowsIncluded, invRowsExcludedByStatus:invRowsExcludedByStatus, invUniqueSkus:Object.keys(invMap).length, itemMasterRows:(itemMaster||[]).length, itemMasterSkus:Object.keys(itemMasterBySku).length, invSampleQtys:Object.entries(invMap).slice(0,6).map(function(e){return{key:e[0],qty:e[1]}}), bomParentCount:Object.keys(bomMap).length, bomSampleParents:Object.keys(bomMap).slice(0,8), bomTotalLines:boms?boms.length:0, woCount:workOrders.length, woUniqueSkus:[...new Set(results.map(r=>r.normalizedSku))], woUnmatched:[...new Set(results.filter(r=>r.runStatus==="nobom").map(r=>({raw:r.productSkuRaw,norm:r.normalizedSku})))].slice(0,10), woMatchedCount:results.filter(r=>r.runStatus!=="nobom").length };
+    var costPerUnitCount = Object.values(itemMasterBySku).filter(function(it) { return safeNum(it && it.costPerUnit) > 0; }).length;
+    var diag = { invCount:inventory.length, invStatusColumn:invStatusCol || "", invRowsIncluded:invRowsIncluded, invRowsExcludedByStatus:invRowsExcludedByStatus, invUniqueSkus:Object.keys(invMap).length, itemMasterRows:(itemMaster||[]).length, itemMasterSkus:Object.keys(itemMasterBySku).length, itemMasterCostPerUnitSkus:costPerUnitCount, invSampleQtys:Object.entries(invMap).slice(0,6).map(function(e){return{key:e[0],qty:e[1]}}), bomParentCount:Object.keys(bomMap).length, bomSampleParents:Object.keys(bomMap).slice(0,8), bomTotalLines:boms?boms.length:0, woCount:workOrders.length, woUniqueSkus:[...new Set(results.map(r=>r.normalizedSku))], woUnmatched:[...new Set(results.filter(r=>r.runStatus==="nobom").map(r=>({raw:r.productSkuRaw,norm:r.normalizedSku})))].slice(0,10), woMatchedCount:results.filter(r=>r.runStatus!=="nobom").length };
 
     /* ====== DATA FLAGS ====== */
     var flags = [];
@@ -348,6 +354,23 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
     results.forEach(r => { if (r.runStatus === "nobom" && !seenNoBom.has(r.normalizedSku)) { seenNoBom.add(r.normalizedSku); var aws = results.filter(w => w.normalizedSku === r.normalizedSku).map(w => w.woNum);
       flags.push({ id:flagId++, type:"no-bom", severity:"bad", sku:r.productSkuRaw, skuNorm:r.normalizedSku, desc:r.productDesc, source:"Work Orders", detail:"Work order product has no BOM defined. Create BOM in ERP.", affectedWOs:aws });
     } });
+    // 3b. Work orders missing throughput inputs (no fallback: must be corrected in Nulogy)
+    results.forEach(function(r) {
+      if (isWorkOrderClosed(r)) return;
+      if (safeNum(r.unitsRemaining) <= 0) return;
+      if (safeNum(r.unitsPerHour) > 0) return;
+      flags.push({
+        id: flagId++,
+        type: "missing-throughput",
+        severity: "warn",
+        sku: r.productSkuRaw,
+        skuNorm: r.normalizedSku,
+        desc: r.productDesc,
+        source: "Work Orders",
+        detail: "Standard Units Per Hour is missing. Update throughput in Nulogy for deterministic forecasting.",
+        affectedWOs: [r.woNum]
+      });
+    });
     // 4. FG SKUs on work orders not in inventory
     var seenFgNoInv = new Set();
     results.forEach(r => { if (!invMap.hasOwnProperty(r.normalizedSku) && !seenFgNoInv.has(r.normalizedSku)) { seenFgNoInv.add(r.normalizedSku); var aws = results.filter(w => w.normalizedSku === r.normalizedSku).map(w => w.woNum);
@@ -1353,6 +1376,20 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
           owner: "Planner",
           action: "Create / Validate BOM",
           why: "WO " + wo.woNum + " is due soon with no BOM.",
+          impactUnits: safeNum(wo.unitsRemaining || wo.qtyToProduce || 0),
+          window: bucketByDate(wo.dueDate),
+          confidence: confidenceLabel,
+          source: "Work Orders",
+          targetView: "workorders"
+        });
+      }
+      if (!isWorkOrderClosed(wo) && safeNum(wo.unitsRemaining) > 0 && safeNum(wo.unitsPerHour) <= 0) {
+        recs.push({
+          id: "R" + (nextId++),
+          priorityScore: 90 + dueUrgency(wo.dueDate),
+          owner: "Planner",
+          action: "Update Throughput in Nulogy",
+          why: "WO " + wo.woNum + " is missing Standard Units Per Hour, so forecast throughput cannot be computed.",
           impactUnits: safeNum(wo.unitsRemaining || wo.qtyToProduce || 0),
           window: bucketByDate(wo.dueDate),
           confidence: confidenceLabel,

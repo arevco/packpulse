@@ -8,7 +8,14 @@ import { Badge } from "../components/ui/badge";
 import TableShell from "../components/ui/table-shell";
 import SortHeaderButton from "../components/ui/sort-header-button";
 
-var FLAG_LABELS = { "missing-desc":"Missing Description", "not-in-inventory":"Not in Inventory", "no-bom":"No BOM", "fg-not-in-inventory":"FG Not in Inventory", "zero-stock":"Zero Stock" };
+var FLAG_LABELS = {
+  "missing-desc":"Missing Description",
+  "not-in-inventory":"Not in Inventory",
+  "no-bom":"No BOM",
+  "missing-throughput":"Missing Throughput",
+  "fg-not-in-inventory":"FG Not in Inventory",
+  "zero-stock":"Zero Stock"
+};
 
 export default function FlagsView({ flags }) {
   const { C } = useTheme();
@@ -44,6 +51,7 @@ export default function FlagsView({ flags }) {
         <option value="missing-desc">Missing Description</option>
         <option value="not-in-inventory">Not in Inventory</option>
         <option value="no-bom">No BOM</option>
+        <option value="missing-throughput">Missing Throughput</option>
         <option value="fg-not-in-inventory">FG Not in Inventory</option>
         <option value="zero-stock">Zero Stock</option>
       </select>
