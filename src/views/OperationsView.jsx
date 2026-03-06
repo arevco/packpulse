@@ -1608,14 +1608,16 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                       />
                     }
                   />
-                  {(dailyPlanVsActual.lineSeries || []).map(function(line) {
+                  {(dailyPlanVsActual.lineSeries || []).map(function(line, idx) {
+                    var lastIdx = (dailyPlanVsActual.lineSeries || []).length - 1;
+                    var radius = idx === 0 ? [0, 0, 4, 4] : idx === lastIdx ? [4, 4, 0, 0] : [0, 0, 0, 0];
                     return (
                       <Bar
                         key={line.key}
                         stackId="line"
                         dataKey={line.key}
                         fill={"var(--color-" + line.key + ")"}
-                        radius={[4, 4, 0, 0]}
+                        radius={radius}
                         maxBarSize={26}
                       />
                     );
@@ -1677,14 +1679,16 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                       />
                     }
                   />
-                  {["s1", "s2", "un"].map(function(key) {
+                  {["s1", "s2", "un"].map(function(key, idx, arr) {
+                    var lastIdx = arr.length - 1;
+                    var radius = idx === 0 ? [0, 0, 4, 4] : idx === lastIdx ? [4, 4, 0, 0] : [0, 0, 0, 0];
                     return (
                       <Bar
                         key={key}
                         stackId="shift"
                         dataKey={key}
                         fill={"var(--color-" + key + ")"}
-                        radius={[4, 4, 0, 0]}
+                        radius={radius}
                         maxBarSize={26}
                       />
                     );
@@ -1751,14 +1755,16 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                       />
                     }
                   />
-                  {(skuMixByDay.series || []).map(function(s) {
+                  {(skuMixByDay.series || []).map(function(s, idx) {
+                    var lastIdx = (skuMixByDay.series || []).length - 1;
+                    var radius = idx === 0 ? [0, 0, 4, 4] : idx === lastIdx ? [4, 4, 0, 0] : [0, 0, 0, 0];
                     return (
                       <Bar
                         key={s.key}
                         stackId="skuMix"
                         dataKey={s.key}
                         fill={"var(--color-" + s.key + ")"}
-                        radius={[4, 4, 0, 0]}
+                        radius={radius}
                         maxBarSize={30}
                       />
                     );
@@ -1843,9 +1849,9 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                           cursor={{ fill: "rgb(var(--surface))" }}
                           content={<ChartTooltipContent formatter={function(value) { return Math.round(safeNum(value)); }} />}
                         />
-                        <Bar stackId="loss" dataKey="unplannedMin" fill="var(--color-unplannedMin)" radius={[4, 4, 0, 0]} maxBarSize={28} />
-                        <Bar stackId="loss" dataKey="slowMin" fill="var(--color-slowMin)" radius={[4, 4, 0, 0]} maxBarSize={28} />
-                        <Bar stackId="loss" dataKey="technicalMin" fill="var(--color-technicalMin)" radius={[4, 4, 0, 0]} maxBarSize={28} />
+                        <Bar stackId="loss" dataKey="unplannedMin" fill="var(--color-unplannedMin)" radius={[0, 0, 4, 4]} maxBarSize={28} />
+                        <Bar stackId="loss" dataKey="slowMin" fill="var(--color-slowMin)" maxBarSize={28} />
+                        <Bar stackId="loss" dataKey="technicalMin" fill="var(--color-technicalMin)" maxBarSize={28} />
                         <Bar stackId="loss" dataKey="plannedMin" fill="var(--color-plannedMin)" radius={[4, 4, 0, 0]} maxBarSize={28} />
                       </ComposedChart>
                     </ResponsiveContainer>
