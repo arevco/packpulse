@@ -51,6 +51,51 @@ function sanitizePayload(p) {
   return out;
 }
 
+function clonePlain(obj) {
+  return JSON.parse(JSON.stringify(obj || {}));
+}
+
+function compactRows(rows, opts) {
+  var maxRows = (opts && opts.maxRows) || 1200;
+  if (!Array.isArray(rows)) return [];
+  var sliced = rows.slice(0, maxRows);
+  return sliced.map(function(r) {
+    if (!r || typeof r !== "object") return r;
+    var copy = Object.assign({}, r);
+    // Large nested raw payloads are not needed for shared cache hydration.
+    if (Object.prototype.hasOwnProperty.call(copy, "raw")) delete copy.raw;
+    return copy;
+  });
+}
+
+function compactPayloadForCache(input) {
+  var payload = clonePlain(input);
+  var dropped = [];
+  var bytes = Buffer.byteLength(JSON.stringify(payload), "utf8");
+  var SOFT_LIMIT = 3_000_000; // Keep well below typical edge/serverless payload limits.
+
+  // First pass: trim known heavy arrays while preserving useful hydration data.
+  if (Array.isArray(payload.productionData)) payload.productionData = compactRows(payload.productionData, { maxRows: 1400 });
+  if (Array.isArray(payload.evoconData)) payload.evoconData = compactRows(payload.evoconData, { maxRows: 1400 });
+  bytes = Buffer.byteLength(JSON.stringify(payload), "utf8");
+
+  // Progressive drop of optional datasets if payload is still too large.
+  var optionalOrder = ["evoconData", "productionData", "edrData", "dockData", "boms"];
+  for (var i = 0; i < optionalOrder.length && bytes > SOFT_LIMIT; i++) {
+    var key = optionalOrder[i];
+    if (Array.isArray(payload[key]) && payload[key].length) {
+      dropped.push(key);
+      payload[key] = [];
+      bytes = Buffer.byteLength(JSON.stringify(payload), "utf8");
+    }
+  }
+
+  if (!payload.meta || typeof payload.meta !== "object") payload.meta = {};
+  payload.meta.cachePayloadBytes = bytes;
+  payload.meta.cacheDroppedDatasets = dropped;
+  return { payload: payload, bytes: bytes, dropped: dropped };
+}
+
 function rowCountsFromPayload(payload) {
   return {
     inventory: Array.isArray(payload.inventory) ? payload.inventory.length : 0,
@@ -289,11 +334,13 @@ export default async function handler(req, res) {
     }
 
     if (req.method === "POST") {
-      const payload = sanitizePayload((req.body && req.body.payload) || {});
-      const rowCounts = rowCountsFromPayload(payload);
-      const derivedMetrics = deriveMetrics(payload, rowCounts);
+      const incomingPayload = sanitizePayload((req.body && req.body.payload) || {});
+      const rowCounts = rowCountsFromPayload(incomingPayload);
+      const derivedMetrics = deriveMetrics(incomingPayload, rowCounts);
       const syncedAt = new Date().toISOString();
       var snapshotVersion = String(Date.now());
+      var compacted = compactPayloadForCache(incomingPayload);
+      const payload = compacted.payload;
       if (!payload.meta || typeof payload.meta !== "object") payload.meta = {};
       payload.meta.snapshotVersion = snapshotVersion;
       const up = await supabase
@@ -373,7 +420,9 @@ export default async function handler(req, res) {
           productionStatus: productionStatus,
           productionRowsSubmitted: productionEvents.length,
           productionRowsWritten: productionWritten,
-          snapshotVersion: snapshotVersion
+          snapshotVersion: snapshotVersion,
+          cachePayloadBytes: compacted.bytes,
+          cacheDroppedDatasets: compacted.dropped
         },
         started_at: syncedAt,
         finished_at: new Date().toISOString(),
@@ -388,7 +437,9 @@ export default async function handler(req, res) {
         productionStatus: productionStatus,
         productionRowsSubmitted: productionEvents.length,
         productionRowsWritten: productionWritten,
-        syncRunStatus: syncRun.status
+        syncRunStatus: syncRun.status,
+        cachePayloadBytes: compacted.bytes,
+        cacheDroppedDatasets: compacted.dropped
       });
     }
 
