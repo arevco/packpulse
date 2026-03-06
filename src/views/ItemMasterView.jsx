@@ -42,24 +42,41 @@ function pickCostValue(row) {
 
 export default function ItemMasterView(props) {
   var rows = Array.isArray(props.itemMaster) ? props.itemMaster : [];
+  var inventoryRows = Array.isArray(props.inventory) ? props.inventory : [];
   var C = useTheme().C;
   var [q, setQ] = useState("");
+
+  var inventoryCostBySku = useMemo(function() {
+    var out = {};
+    inventoryRows.forEach(function(r) {
+      var sku = pickValue(r, ["Item Code", "Code", "item_code", "code"]).toString().trim();
+      if (!sku) return;
+      var cost = pickCostValue(r);
+      var n = safeNum(cost);
+      if (!(n > 0)) return;
+      if (!out[sku] || n > out[sku]) out[sku] = n;
+    });
+    return out;
+  }, [inventoryRows]);
 
   var prepared = useMemo(function() {
     return rows.map(function(r, idx) {
       var sku = pickValue(r, ["Item Code", "Code", "item_code", "code"]).toString().trim();
       var description = pickValue(r, ["Description", "description", "Item Description"]).toString().trim();
       var cost = pickCostValue(r);
-      var costNum = safeNum(cost);
+      var itemMasterCost = safeNum(cost);
+      var inventoryCost = sku ? safeNum(inventoryCostBySku[sku]) : 0;
+      var costNum = itemMasterCost > 0 ? itemMasterCost : inventoryCost;
       return {
         id: sku || ("row-" + idx),
         sku: sku || "--",
         description: description || "--",
         costRaw: cost,
-        costNum: costNum
+        costNum: costNum,
+        costSource: itemMasterCost > 0 ? "itemmaster" : (inventoryCost > 0 ? "inventory" : "none")
       };
     });
-  }, [rows]);
+  }, [rows, inventoryCostBySku]);
 
   var filtered = useMemo(function() {
     var qq = String(q || "").toLowerCase().trim();
@@ -110,7 +127,7 @@ export default function ItemMasterView(props) {
                     <td style={{ padding: "8px 10px", fontSize: 13, fontWeight: 600, color: C.bright }}>{r.sku}</td>
                     <td style={{ padding: "8px 10px", fontSize: 13, color: C.text }}>{r.description}</td>
                     <td style={{ padding: "8px 10px", fontSize: 13, color: r.costNum > 0 ? C.ok : C.dim, textAlign: "right" }}>
-                      {r.costNum > 0 ? ("$" + r.costNum.toFixed(4)) : "--"}
+                      {r.costNum > 0 ? ("$" + r.costNum.toFixed(4) + (r.costSource === "inventory" ? " *" : "")) : "--"}
                     </td>
                   </tr>
                 );
@@ -119,6 +136,7 @@ export default function ItemMasterView(props) {
           </table>
         </div>
       </TableShell>
+      <div className="mt-1 text-xs text-[rgb(var(--muted))]">* cost sourced from inventory when item master cost is blank.</div>
     </div>
   );
 }

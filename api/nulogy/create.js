@@ -69,9 +69,14 @@ const REPORT_CONFIGS = {
     columnSets: [
       // Attempt 1: Full data fields (item_code is auto-included as fixed field)
       ["item_description", "base_quantity", "base_unit_of_measure",
+       "cost_per_base_unit", "cost_per_unit", "unit_cost", "standard_cost", "average_cost",
        "inventory_status", "lot_code", "expiry_date", "customer_name",
        "item_category_name", "item_type", "item_family_name", "is_finished_good",
        "pallet_number"],
+      // Attempt 1b: Core + cost fields
+      ["item_description", "base_quantity", "base_unit_of_measure",
+       "cost_per_base_unit", "cost_per_unit", "unit_cost", "standard_cost",
+       "inventory_status"],
       // Attempt 2: Core fields only
       ["item_description", "base_quantity", "base_unit_of_measure",
        "inventory_status"],
