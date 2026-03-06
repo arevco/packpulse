@@ -312,6 +312,22 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     });
     return Object.keys(set).sort();
   }, [analysis]);
+  var skuTypeOptions = useMemo(function() {
+    if (!analysis) return [];
+    var set = {};
+    (analysis.results || []).forEach(function(wo) {
+      var t = detectPackType(wo.productDesc || wo.productSkuRaw || "", wo.productSkuRaw || wo.productSku || "");
+      if (t) set[t] = true;
+    });
+    return Object.keys(set).sort(function(a, b) {
+      var an = parseInt(String(a || "").replace(/\D/g, ""), 10);
+      var bn = parseInt(String(b || "").replace(/\D/g, ""), 10);
+      var aNum = isNaN(an) ? Number.POSITIVE_INFINITY : an;
+      var bNum = isNaN(bn) ? Number.POSITIVE_INFINITY : bn;
+      if (aNum !== bNum) return aNum - bNum;
+      return String(a || "").localeCompare(String(b || ""));
+    });
+  }, [analysis]);
 
   var runNextSelection = useMemo(function() {
     var dispatchRows = (dispatchQueue || []).filter(function(r) {
@@ -383,6 +399,11 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       if (sortField==="woNum") c=a.woNum.localeCompare(b.woNum);
       else if (sortField==="product") c=a.productSkuRaw.localeCompare(b.productSkuRaw);
       else if (sortField==="desc") c=(a.productDesc||"").localeCompare(b.productDesc||"");
+      else if (sortField==="skuType") {
+        var at = detectPackType(a.productDesc || a.productSkuRaw || "", a.productSkuRaw || a.productSku || "");
+        var bt = detectPackType(b.productDesc || b.productSkuRaw || "", b.productSkuRaw || b.productSku || "");
+        c = at.localeCompare(bt, undefined, { numeric:true, sensitivity:"base" });
+      }
       else if (sortField==="customer") c=(a.customer||"").localeCompare(b.customer||"");
       else if (sortField==="qty") c=a.qtyToProduce-b.qtyToProduce;
       else if (sortField==="produced") c=a.unitsProduced-b.unitsProduced;
@@ -501,7 +522,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
   };
 
   var renderWORows = () => {
-    if (filteredResults.length === 0) return <tr><td colSpan={17} style={{ padding:36, textAlign:"center", color:C.dim, fontSize:14 }}>No work orders match filters.</td></tr>;
+    if (filteredResults.length === 0) return <tr><td colSpan={18} style={{ padding:36, textAlign:"center", color:C.dim, fontSize:14 }}>No work orders match filters.</td></tr>;
     var out = [];
     filteredResults.forEach((wo, idx) => {
       var rowKey = wo.woNum + "|" + idx;
@@ -509,6 +530,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       var commitment = commitmentMap[woCommitKey(wo)] || { committedCanMake:0, commitmentGap:0, sharedConstraint:false };
       var runMeta = runNextMetaMap[String(wo.woNum || "")] || null;
       var rs = runStatusMeta(wo.runStatus);
+      var skuType = detectPackType(wo.productDesc || wo.productSkuRaw || "", wo.productSkuRaw || wo.productSku || "");
       out.push(
         <tr key={"r"+idx} onClick={function() {
           setExpandedWOs(function(prev) {
@@ -521,6 +543,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
           onMouseEnter={e => { if (!isX) e.currentTarget.style.background = C.hover; }} onMouseLeave={e => { if (!isX) e.currentTarget.style.background = isX ? C.raised : "transparent"; }}>
           <td style={Object.assign({}, tdM, { fontWeight:600, color:C.bright })}>{wo.woNum}</td>
           <td style={tdM}>{wo.productSkuRaw}</td>
+          <td style={Object.assign({}, tdN, { whiteSpace:"nowrap" })}><Badge variant="secondary">{skuType}</Badge></td>
           <td style={Object.assign({}, tdN, { color:C.dim }, truncate(220))}>{formatDescriptionForDisplay(wo.productDesc) || "--"}</td>
           <td style={Object.assign({}, tdN, { color:C.dim }, truncate(140))}>{wo.customer || "--"}</td>
           <td style={Object.assign({}, tdN, { whiteSpace:"nowrap" })}>
@@ -640,7 +663,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
           </div>
         );
         out.push(
-          <tr key={"d"+idx}><td colSpan={17} style={{ padding:"0 12px 14px 36px", background:C.raised }}>
+          <tr key={"d"+idx}><td colSpan={18} style={{ padding:"0 12px 14px 36px", background:C.raised }}>
             {details}
           </td></tr>
         );
@@ -659,6 +682,10 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       <select value={filterDueMonth} onChange={e => setFilterDueMonth(e.target.value)} className="h-10 shrink-0 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]">
         <option value="all">All Months</option>
         {dueMonthOptions.map(function(m) { return <option key={m} value={m}>{dueMonthLabel(m)}</option>; })}
+      </select>
+      <select value={filterPackType} onChange={e => setFilterPackType(e.target.value)} className="h-10 shrink-0 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]">
+        <option value="all">All SKU Types</option>
+        {skuTypeOptions.map(function(t) { return <option key={t} value={t}>{t}</option>; })}
       </select>
       <select value={filterWoStatus} onChange={e => setFilterWoStatus(e.target.value)} className="h-10 shrink-0 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]">
         <option value="all">All WO Status</option>
@@ -751,6 +778,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
           <thead><tr style={{ background:C.raised }}>
             <SortTh field="woNum">WO#</SortTh>
             <SortTh field="product">Product</SortTh>
+            <SortTh field="skuType">SKU Type</SortTh>
             <SortTh field="desc">Product Description</SortTh>
             <SortTh field="customer">Customer</SortTh>
             <SortTh field="status">WO Status</SortTh>
