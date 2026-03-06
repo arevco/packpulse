@@ -258,18 +258,25 @@ function transformColumns(rows, reportType) {
     const newRow = {};
     Object.entries(row).forEach(([key, val]) => {
       let newKey = map[key] || key;
-      if (reportType === "itemmaster" && newKey === key) {
+      if ((reportType === "itemmaster" || reportType === "inventory") && newKey === key) {
         const nk = normalizeKey(key);
+        const hasCostToken = nk.includes("cost") || nk.includes("price");
+        const looksLikeUnitish =
+          nk.includes("unit") ||
+          nk.includes("base") ||
+          nk.includes("standard") ||
+          nk.includes("std") ||
+          nk.includes("default") ||
+          nk.includes("avg") ||
+          nk.includes("average") ||
+          nk === "cost" ||
+          nk === "price";
         const looksLikeUnitCost =
-          nk.includes("cost") &&
-          (
-            nk.includes("unit") ||
-            nk.includes("base") ||
-            nk.includes("standard") ||
-            nk.includes("std") ||
-            nk.includes("default")
-          ) &&
-          !nk.includes("total");
+          hasCostToken &&
+          looksLikeUnitish &&
+          !nk.includes("total") &&
+          !nk.includes("extended") &&
+          !nk.includes("amount");
         if (looksLikeUnitCost) newKey = "Cost Per Unit";
       }
       newRow[newKey] = val;

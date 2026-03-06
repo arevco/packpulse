@@ -109,13 +109,18 @@ function firstCostValue(row) {
   for (var i = 0; i < keys.length; i++) {
     var k = keys[i];
     var nk = normalizeStr(k || "");
-    var looksLikeUnitCost = nk.includes("cost") && (
+    var hasCostToken = nk.includes("cost") || nk.includes("price");
+    var looksLikeUnitish =
       nk.includes("unit") ||
       nk.includes("base") ||
       nk.includes("standard") ||
       nk.includes("std") ||
-      nk.includes("default")
-    ) && !nk.includes("total");
+      nk.includes("default") ||
+      nk.includes("avg") ||
+      nk.includes("average") ||
+      nk === "cost" ||
+      nk === "price";
+    var looksLikeUnitCost = hasCostToken && looksLikeUnitish && !nk.includes("total") && !nk.includes("extended") && !nk.includes("amount");
     if (looksLikeUnitCost) {
       var v = row[k];
       if (v != null && v !== "") return v;

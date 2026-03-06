@@ -28,13 +28,18 @@ function pickCostValue(row) {
   for (var i = 0; i < keys.length; i++) {
     var k = keys[i];
     var nk = normalizeKey(k);
-    var looksLikeUnitCost = nk.indexOf("cost") !== -1 && (
+    var hasCostToken = nk.indexOf("cost") !== -1 || nk.indexOf("price") !== -1;
+    var looksLikeUnitish =
       nk.indexOf("unit") !== -1 ||
       nk.indexOf("base") !== -1 ||
       nk.indexOf("standard") !== -1 ||
       nk.indexOf("std") !== -1 ||
-      nk.indexOf("default") !== -1
-    ) && nk.indexOf("total") === -1;
+      nk.indexOf("default") !== -1 ||
+      nk.indexOf("avg") !== -1 ||
+      nk.indexOf("average") !== -1 ||
+      nk === "cost" ||
+      nk === "price";
+    var looksLikeUnitCost = hasCostToken && looksLikeUnitish && nk.indexOf("total") === -1 && nk.indexOf("extended") === -1 && nk.indexOf("amount") === -1;
     if (looksLikeUnitCost && row[k] != null && row[k] !== "") return row[k];
   }
   return "";
