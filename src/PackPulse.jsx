@@ -16,6 +16,7 @@ const OverviewView = lazy(() => import("./views/OverviewView"));
 const OperationsView = lazy(() => import("./views/OperationsView"));
 const WorkOrdersView = lazy(() => import("./views/WorkOrdersView"));
 const SupplyRiskView = lazy(() => import("./views/SupplyRiskView"));
+const ItemMasterView = lazy(() => import("./views/ItemMasterView"));
 const FlagsView = lazy(() => import("./views/FlagsView"));
 const SandboxView = lazy(() => import("./views/SandboxView"));
 const AICopilotView = lazy(() => import("./views/AICopilotView"));
@@ -842,7 +843,7 @@ export default function ProductionReadiness() {
         <TabsNav
           activeKey={activeView}
           onChange={setActiveView}
-          items={[{key:"overview",label:"Overview",count:null,alert:false},{key:"aicopilot",label:"AI Copilot",count:null,alert:false},{key:"operations",label:"Operations",count:(productionSegmentsForUI.jobRows || []).length,alert:false},{key:"workorders",label:"Work Orders",count:summaryForUI.total},{key:"supplyrisk",label:"Supply Risk",count:criticalItemsForUI.length,alert:false}]
+          items={[{key:"overview",label:"Overview",count:null,alert:false},{key:"aicopilot",label:"AI Copilot",count:null,alert:false},{key:"operations",label:"Operations",count:(productionSegmentsForUI.jobRows || []).length,alert:false},{key:"workorders",label:"Work Orders",count:summaryForUI.total},{key:"itemmaster",label:"Item Master",count:(ds.itemMaster || []).length,alert:false},{key:"supplyrisk",label:"Supply Risk",count:criticalItemsForUI.length,alert:false}]
             .concat([{key:"sandbox",label:"Sandbox",count:null,alert:false}])}
         />
 
@@ -851,6 +852,7 @@ export default function ProductionReadiness() {
           {activeView === "aicopilot" && <AICopilotView summary={summaryForUI} criticalItems={criticalItemsForUI} dispatchQueue={dispatchQueue || []} productionSegments={productionSegmentsForUI} evoconData={ds.evoconData || []} onNavigate={setActiveView} />}
           {activeView === "operations" && <OperationsView productionSegments={productionSegmentsForUI} productionDataRaw={ds.productionData || []} evoconData={ds.evoconData || []} evoconTimestamp={ds.evoconTimestamp || evoconLastSyncAt} />}
           {activeView === "workorders" && <WorkOrdersView analysis={analysisForUI} woStatuses={woStatusesForUI} woCustomers={woCustomersForUI} recommendations={recommendationsForUI} dispatchQueue={dispatchQueue || []} prefilterCustomer={workOrdersPrefilterCustomer} prefilterNonce={workOrdersPrefilterNonce} />}
+          {activeView === "itemmaster" && <ItemMasterView itemMaster={ds.itemMaster || []} />}
           {activeView === "supplyrisk" && <SupplyRiskView rawCriticalItems={criticalItemsForUI} inboundCoverage={inboundCoverage} timelineData={timelineData} deliveriesV2={deliveriesV2} />}
           {activeView === "sandbox" && <SandboxView />}
           {activeView === "flags" && <FlagsView flags={analysisForUI.flags} />}
