@@ -61,6 +61,13 @@ export function useDataSources() {
   const [mappingConfirmed, setMappingConfirmed] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [sharedSnapshotMeta, setSharedSnapshotMeta] = useState({ source: "unknown", syncedAt: null, updatedBy: "" });
+  const [sharedSnapshotWrite, setSharedSnapshotWrite] = useState({
+    status: "idle", // idle | writing | ok | error
+    attemptedAt: null,
+    succeededAt: null,
+    error: "",
+    snapshotVersion: ""
+  });
   const hydrateDoneRef = useRef(false);
 
   const invRefreshRef = useCallback(n => { if (n) window.__invR = n; }, []);
@@ -282,6 +289,15 @@ export function useDataSources() {
       }
     };
     var timer = setTimeout(function() {
+      setSharedSnapshotWrite(function(prev) {
+        return {
+          status: "writing",
+          attemptedAt: new Date(),
+          succeededAt: prev.succeededAt,
+          error: "",
+          snapshotVersion: prev.snapshotVersion || ""
+        };
+      });
       fetch("/api/cache/snapshot", {
         method: "POST",
         credentials: "include",
@@ -291,14 +307,41 @@ export function useDataSources() {
         if (!resp.ok) return null;
         return resp.json();
       }).then(function(body) {
-        if (!body || !body.snapshot) return;
+        if (!body || !body.snapshot) {
+          setSharedSnapshotWrite(function(prev) {
+            return {
+              status: "error",
+              attemptedAt: prev.attemptedAt || new Date(),
+              succeededAt: prev.succeededAt,
+              error: "Snapshot write returned no payload.",
+              snapshotVersion: prev.snapshotVersion || ""
+            };
+          });
+          return;
+        }
         setSharedSnapshotMeta({
           source: "shared",
           syncedAt: body.snapshot.synced_at ? new Date(body.snapshot.synced_at) : new Date(),
           updatedBy: body.snapshot.updated_by || ""
         });
+        setSharedSnapshotWrite({
+          status: "ok",
+          attemptedAt: new Date(),
+          succeededAt: body.snapshot.synced_at ? new Date(body.snapshot.synced_at) : new Date(),
+          error: "",
+          snapshotVersion: body.snapshot.snapshot_version || ""
+        });
       }).catch(function() {
         // Local cache still works; shared cache sync is best effort.
+        setSharedSnapshotWrite(function(prev) {
+          return {
+            status: "error",
+            attemptedAt: prev.attemptedAt || new Date(),
+            succeededAt: prev.succeededAt,
+            error: "Shared snapshot write failed.",
+            snapshotVersion: prev.snapshotVersion || ""
+          };
+        });
       });
     }, 1400);
     return function() { clearTimeout(timer); };
@@ -431,6 +474,7 @@ export function useDataSources() {
     woMapping, setWoMapping,
     mappingConfirmed, setMappingConfirmed,
     sharedSnapshotMeta,
+    sharedSnapshotWrite,
     analyzing, setAnalyzing,
     invRefreshRef, bomRefreshRef, woRefreshRef, edrRefreshRef, dockRefreshRef,
     parseXlsxFile, parseEdrWorkbook, handleRefreshFile,

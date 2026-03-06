@@ -83,9 +83,12 @@ export default function ProductionReadiness() {
   }, 0);
   var summaryStamp = newestTs ? fmtTs(new Date(newestTs)) : "--";
   var sharedMeta = ds.sharedSnapshotMeta || { source: "unknown", syncedAt: null, updatedBy: "" };
+  var sharedWrite = ds.sharedSnapshotWrite || { status:"idle", attemptedAt:null, succeededAt:null, error:"", snapshotVersion:"" };
   var sharedSourceLabel = sharedMeta.source === "shared" ? "Shared cache" : sharedMeta.source === "local" ? "Local cache" : sharedMeta.source === "empty" ? "Shared cache empty" : "Shared cache unavailable";
   var sharedStamp = sharedMeta.syncedAt ? fmtTs(sharedMeta.syncedAt) : "--";
   var sharedBy = sharedMeta.updatedBy ? sharedMeta.updatedBy : "--";
+  var sharedAgeMins = sharedMeta.syncedAt ? Math.max(0, Math.floor((Date.now() - new Date(sharedMeta.syncedAt).getTime()) / 60000)) : null;
+  var sharedSeemsStale = !!(sharedAgeMins != null && sharedAgeMins > 30 && freshCount >= 3);
 
   var fetchOpenDockApi = useCallback(async () => {
     setDockApiLoading(true);
@@ -150,6 +153,13 @@ export default function ProductionReadiness() {
   }, []);
 
   var shouldRunIntervalSync = ds.mappingConfirmed || showAutoBootstrap;
+
+  useEffect(() => {
+    if (!showAutoBootstrap) return;
+    // Kick off one initial Nulogy sync on page load so freshness reflects current data.
+    setAutoSyncArmed(true);
+    setSyncNonce(function(n) { return n + 1; });
+  }, [showAutoBootstrap]);
 
   useEffect(() => {
     if (!shouldRunIntervalSync) return;
@@ -689,6 +699,10 @@ export default function ProductionReadiness() {
               <span className="text-xs text-[rgb(var(--muted))]">
                 · {sharedSourceLabel}: {sharedStamp}{sharedMeta.source === "shared" ? " · " + sharedBy : ""}
               </span>
+              {sharedWrite.status === "writing" && <Badge variant="secondary">Saving shared snapshot…</Badge>}
+              {sharedWrite.status === "ok" && <Badge variant="success">Shared snapshot saved</Badge>}
+              {sharedWrite.status === "error" && <Badge variant="danger">Shared snapshot save failed</Badge>}
+              {sharedWrite.snapshotVersion && <span className="text-xs text-[rgb(var(--muted))]">v{sharedWrite.snapshotVersion}</span>}
             </div>
           </div>
         )}
@@ -704,11 +718,31 @@ export default function ProductionReadiness() {
           <span className="text-xs text-[rgb(var(--muted))]">
             · {sharedSourceLabel}: {sharedStamp}{sharedMeta.source === "shared" ? " · " + sharedBy : ""}
           </span>
+          {sharedWrite.status === "writing" && <Badge variant="secondary">Saving shared snapshot…</Badge>}
+          {sharedWrite.status === "ok" && <Badge variant="success">Shared snapshot saved</Badge>}
+          {sharedWrite.status === "error" && <Badge variant="danger">Shared snapshot save failed</Badge>}
+          {sharedWrite.snapshotVersion && <span className="text-xs text-[rgb(var(--muted))]">v{sharedWrite.snapshotVersion}</span>}
         </div>
+        )}
+        {sharedSeemsStale && (
+          <div
+            className="mb-2 rounded-md px-3 py-2 text-xs"
+            style={{ border: "1px solid " + C.warnLine, background: C.warnSoft, color: C.warn }}
+          >
+            Shared cache looks stale ({sharedAgeMins}m old) while local feeds are fresh. Local data is current; shared snapshot may have failed to write.
+          </div>
         )}
         {showDataControlsPanel && (!syncHealthy || showQuickControls) && (
           <div className="mb-2 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-2">
             <div className="mb-2 flex flex-wrap items-center gap-1.5">
+            <Button
+              onClick={() => { setAutoSyncArmed(true); setSyncNonce(n => n + 1); }}
+              disabled={!!(nulogySyncState && nulogySyncState.syncing)}
+              variant={nulogySyncState && nulogySyncState.syncing ? "soft" : "outline"}
+              size="sm"
+            >
+              {nulogySyncState && nulogySyncState.syncing ? "Syncing Nulogy..." : "Sync Nulogy"}
+            </Button>
             <Button onClick={fetchOpenDockApi} disabled={dockApiLoading} variant={dockApiLoading ? "soft" : "active"} size="sm">
               {dockApiLoading ? "Syncing OpenDock..." : "Sync OpenDock API"}
             </Button>

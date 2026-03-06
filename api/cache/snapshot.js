@@ -244,6 +244,24 @@ function buildProductionEvents(payload, siteId, syncedAt, updatedBy) {
   return Object.values(dedup);
 }
 
+async function logSyncRun(supabase, row) {
+  try {
+    const run = await supabase.from("sync_runs").insert(row);
+    if (run.error) {
+      var msg = String(run.error.message || "").toLowerCase();
+      if (msg.includes("sync_runs") && msg.includes("schema cache")) {
+        return { ok: false, status: "missing_sync_runs_table" };
+      }
+      Sentry.captureException(run.error);
+      return { ok: false, status: "sync_runs_insert_failed" };
+    }
+    return { ok: true, status: "ok" };
+  } catch (e) {
+    Sentry.captureException(e);
+    return { ok: false, status: "sync_runs_insert_failed" };
+  }
+}
+
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", req.headers.origin || "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -275,6 +293,9 @@ export default async function handler(req, res) {
       const rowCounts = rowCountsFromPayload(payload);
       const derivedMetrics = deriveMetrics(payload, rowCounts);
       const syncedAt = new Date().toISOString();
+      var snapshotVersion = String(Date.now());
+      if (!payload.meta || typeof payload.meta !== "object") payload.meta = {};
+      payload.meta.snapshotVersion = snapshotVersion;
       const up = await supabase
         .from("cache_snapshots")
         .upsert({
@@ -284,7 +305,7 @@ export default async function handler(req, res) {
           synced_at: syncedAt,
           updated_by: user.email,
         }, { onConflict: "site_id" })
-        .select("site_id,row_counts,synced_at,updated_by")
+        .select("site_id,row_counts,synced_at,updated_by,payload")
         .single();
       if (up.error) throw up.error;
       const hist = await supabase
@@ -342,13 +363,32 @@ export default async function handler(req, res) {
           productionWritten += chunk.length;
         }
       }
+      var syncRun = await logSyncRun(supabase, {
+        site_id: CACHE_SITE_ID,
+        source: "snapshot",
+        status: historyStatus === "ok" && (productionStatus === "ok" || productionStatus === "missing_production_events_table") ? "ok" : "partial",
+        row_counts: rowCounts,
+        details: {
+          historyStatus: historyStatus,
+          productionStatus: productionStatus,
+          productionRowsSubmitted: productionEvents.length,
+          productionRowsWritten: productionWritten,
+          snapshotVersion: snapshotVersion
+        },
+        started_at: syncedAt,
+        finished_at: new Date().toISOString(),
+        updated_by: user.email
+      });
       return res.status(200).json({
         ok: true,
-        snapshot: up.data,
+        snapshot: Object.assign({}, up.data, {
+          snapshot_version: (up.data && up.data.payload && up.data.payload.meta && up.data.payload.meta.snapshotVersion) || snapshotVersion
+        }),
         historyStatus: historyStatus,
         productionStatus: productionStatus,
         productionRowsSubmitted: productionEvents.length,
-        productionRowsWritten: productionWritten
+        productionRowsWritten: productionWritten,
+        syncRunStatus: syncRun.status
       });
     }
 
