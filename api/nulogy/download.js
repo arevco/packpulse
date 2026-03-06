@@ -238,11 +238,28 @@ function parseCSVLine(line) {
 function transformColumns(rows, reportType) {
   const map = COLUMN_MAPS[reportType] || {};
   if (!rows.length) return rows;
+  const normalizeKey = function(v) {
+    return String(v || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  };
 
   return rows.map(row => {
     const newRow = {};
     Object.entries(row).forEach(([key, val]) => {
-      const newKey = map[key] || key;
+      let newKey = map[key] || key;
+      if (reportType === "itemmaster" && newKey === key) {
+        const nk = normalizeKey(key);
+        const looksLikeUnitCost =
+          nk.includes("cost") &&
+          (
+            nk.includes("unit") ||
+            nk.includes("base") ||
+            nk.includes("standard") ||
+            nk.includes("std") ||
+            nk.includes("default")
+          ) &&
+          !nk.includes("total");
+        if (looksLikeUnitCost) newKey = "Cost Per Unit";
+      }
       newRow[newKey] = val;
     });
     return newRow;

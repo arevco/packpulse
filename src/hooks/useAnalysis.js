@@ -99,6 +99,31 @@ function firstValue(row, keys) {
   return "";
 }
 
+function firstCostValue(row) {
+  var direct = firstValue(row, [
+    "Cost Per Unit", "cost_per_unit", "Unit Cost", "unit_cost",
+    "Standard Cost", "standard_cost", "Cost Per Base Unit", "cost_per_base_unit"
+  ]);
+  if (direct != null && direct !== "") return direct;
+  var keys = Object.keys(row || {});
+  for (var i = 0; i < keys.length; i++) {
+    var k = keys[i];
+    var nk = normalizeStr(k || "");
+    var looksLikeUnitCost = nk.includes("cost") && (
+      nk.includes("unit") ||
+      nk.includes("base") ||
+      nk.includes("standard") ||
+      nk.includes("std") ||
+      nk.includes("default")
+    ) && !nk.includes("total");
+    if (looksLikeUnitCost) {
+      var v = row[k];
+      if (v != null && v !== "") return v;
+    }
+  }
+  return "";
+}
+
 function toEasternParts(value) {
   if (!value) return null;
   var d = value instanceof Date ? value : new Date(value);
@@ -216,10 +241,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       var sku = normalizeStr(skuRaw);
       if (!sku) return;
       var masterDescRaw = firstValue(row, ["Description", "description", "Item Description", "item_description"]).toString().trim();
-      var costPerUnit = safeNum(firstValue(row, [
-        "Cost Per Unit", "cost_per_unit", "Unit Cost", "unit_cost",
-        "Standard Cost", "standard_cost", "Cost Per Base Unit", "cost_per_base_unit"
-      ]));
+      var costPerUnit = safeNum(firstCostValue(row));
       if (!itemMasterBySku[sku]) itemMasterBySku[sku] = { sku:sku, skuRaw:skuRaw, desc:"" };
       itemMasterBySku[sku].desc = pickBetterDescription(itemMasterBySku[sku].desc || "", masterDescRaw, skuRaw);
       if (!itemMasterBySku[sku].skuRaw && skuRaw) itemMasterBySku[sku].skuRaw = skuRaw;

@@ -14,6 +14,32 @@ function pickValue(row, keys) {
   return "";
 }
 
+function normalizeKey(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function pickCostValue(row) {
+  var direct = pickValue(row, [
+    "Cost Per Unit", "cost_per_unit", "Unit Cost", "unit_cost",
+    "Standard Cost", "standard_cost", "Cost Per Base Unit", "cost_per_base_unit"
+  ]);
+  if (direct != null && direct !== "") return direct;
+  var keys = Object.keys(row || {});
+  for (var i = 0; i < keys.length; i++) {
+    var k = keys[i];
+    var nk = normalizeKey(k);
+    var looksLikeUnitCost = nk.indexOf("cost") !== -1 && (
+      nk.indexOf("unit") !== -1 ||
+      nk.indexOf("base") !== -1 ||
+      nk.indexOf("standard") !== -1 ||
+      nk.indexOf("std") !== -1 ||
+      nk.indexOf("default") !== -1
+    ) && nk.indexOf("total") === -1;
+    if (looksLikeUnitCost && row[k] != null && row[k] !== "") return row[k];
+  }
+  return "";
+}
+
 export default function ItemMasterView(props) {
   var rows = Array.isArray(props.itemMaster) ? props.itemMaster : [];
   var C = useTheme().C;
@@ -23,10 +49,7 @@ export default function ItemMasterView(props) {
     return rows.map(function(r, idx) {
       var sku = pickValue(r, ["Item Code", "Code", "item_code", "code"]).toString().trim();
       var description = pickValue(r, ["Description", "description", "Item Description"]).toString().trim();
-      var cost = pickValue(r, [
-        "Cost Per Unit", "cost_per_unit", "Unit Cost", "unit_cost",
-        "Standard Cost", "standard_cost", "Cost Per Base Unit", "cost_per_base_unit"
-      ]);
+      var cost = pickCostValue(r);
       var costNum = safeNum(cost);
       return {
         id: sku || ("row-" + idx),
