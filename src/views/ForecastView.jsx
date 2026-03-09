@@ -35,6 +35,9 @@ export default function ForecastView(props) {
   var [showAdvanced, setShowAdvanced] = useState(false);
   var [laborTemplates, setLaborTemplates] = useState([]);
   var [overrides, setOverrides] = useState([]);
+  var [assumptionsLoading, setAssumptionsLoading] = useState(false);
+  var [assumptionsSaving, setAssumptionsSaving] = useState(false);
+  var [assumptionsMsg, setAssumptionsMsg] = useState("");
 
   useEffect(function() {
     if (initial.month) setMonthKey(String(initial.month));
@@ -54,6 +57,71 @@ export default function ForecastView(props) {
       equipment: String(equipmentRental || "")
     });
   }, [onPermalinkChange, monthKey, overheadGlobal, cogsNonLabor, equipmentRental]);
+
+  var applySavedAssumptions = useCallback(function(row) {
+    if (!row) return;
+    var ga = row.global_assumptions || {};
+    var lt = Array.isArray(row.labor_templates) ? row.labor_templates : [];
+    var ov = Array.isArray(row.overrides) ? row.overrides : [];
+    if (ga && typeof ga === "object") {
+      if (ga.overhead_global != null) setOverheadGlobal(String(ga.overhead_global));
+      if (ga.cogs_non_labor != null) setCogsNonLabor(String(ga.cogs_non_labor));
+      if (ga.equipment_rental != null) setEquipmentRental(String(ga.equipment_rental));
+    }
+    if (lt.length) setLaborTemplates(lt);
+    if (ov.length) setOverrides(ov);
+  }, []);
+
+  var loadAssumptions = useCallback(async function(targetMonthKey) {
+    var mk = String(targetMonthKey || monthKey || "").trim();
+    if (!mk) return;
+    setAssumptionsLoading(true);
+    setAssumptionsMsg("");
+    try {
+      var res = await fetch("/api/ops/forecast-assumptions?monthKey=" + encodeURIComponent(mk), { credentials: "include" });
+      var body = await res.json();
+      if (!res.ok) throw new Error((body && body.error) || "Could not load assumptions");
+      if (body && body.row) {
+        applySavedAssumptions(body.row);
+        setAssumptionsMsg("Loaded saved assumptions for " + mk + ".");
+      } else {
+        setAssumptionsMsg("No saved assumptions for " + mk + ".");
+      }
+    } catch (err) {
+      setAssumptionsMsg(err && err.message ? err.message : "Could not load assumptions.");
+    } finally {
+      setAssumptionsLoading(false);
+    }
+  }, [monthKey, applySavedAssumptions]);
+
+  var saveAssumptions = useCallback(async function() {
+    setAssumptionsSaving(true);
+    setAssumptionsMsg("");
+    try {
+      var res = await fetch("/api/ops/forecast-assumptions", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          monthKey: monthKey,
+          globalAssumptions: {
+            overhead_global: safeNum(overheadGlobal),
+            cogs_non_labor: safeNum(cogsNonLabor),
+            equipment_rental: safeNum(equipmentRental)
+          },
+          laborTemplates: laborTemplates,
+          overrides: overrides
+        })
+      });
+      var body = await res.json();
+      if (!res.ok) throw new Error((body && body.error) || "Could not save assumptions");
+      setAssumptionsMsg("Saved assumptions for " + monthKey + ".");
+    } catch (err) {
+      setAssumptionsMsg(err && err.message ? err.message : "Could not save assumptions.");
+    } finally {
+      setAssumptionsSaving(false);
+    }
+  }, [monthKey, overheadGlobal, cogsNonLabor, equipmentRental, laborTemplates, overrides]);
 
   useEffect(function() {
     var cancelled = false;
@@ -118,6 +186,11 @@ export default function ForecastView(props) {
     if (!workOrders.length) return;
     runForecast();
   }, [runForecast, workOrders.length]);
+
+  useEffect(function() {
+    if (!monthKey) return;
+    loadAssumptions(monthKey);
+  }, [monthKey, loadAssumptions]);
 
   var forecast = payload && payload.forecast ? payload.forecast : null;
   var summary = forecast && forecast.summary ? forecast.summary : null;
@@ -212,7 +285,14 @@ export default function ForecastView(props) {
         <Button onClick={function() { setShowAdvanced(function(v) { return !v; }); }} variant={showAdvanced ? "active" : "outline"}>
           {showAdvanced ? "Hide Assumptions" : "Advanced Assumptions"}
         </Button>
+        <Button onClick={saveAssumptions} disabled={assumptionsSaving} variant="outline">
+          {assumptionsSaving ? "Saving..." : "Save Assumptions"}
+        </Button>
+        <Button onClick={function() { loadAssumptions(monthKey); }} disabled={assumptionsLoading} variant="outline">
+          {assumptionsLoading ? "Loading..." : "Load Assumptions"}
+        </Button>
       </div>
+      {!!assumptionsMsg && <div className="mb-2 text-xs text-[rgb(var(--muted))]">{assumptionsMsg}</div>}
 
       {showAdvanced && (
         <div className="mb-3 space-y-3 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-3">
