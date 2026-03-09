@@ -104,3 +104,33 @@ Monthly P&L layer:
 - Mapping rule from Nulogy SKU/work order to `Mar 26` labor template lanes.
 - Rule for converting `Units Expected` to `cases` when UOM differs.
 - Handling for missing/invalid `Standard Units Per Hour` on work orders.
+
+## Implementation Status (March 9, 2026)
+- Deterministic forecast engine implemented in [src/lib/laborForecast.js](/Users/aj/Documents/New project/src/lib/laborForecast.js).
+- API endpoint implemented in [api/ops/labor-forecast.js](/Users/aj/Documents/New project/api/ops/labor-forecast.js).
+- Missing throughput handling implemented as strict flagging with exclusion from calculated rows (no fallback throughput).
+
+## Current API Contract
+`GET /api/ops/labor-forecast?monthKey=YYYY-MM`
+- Uses authenticated user context.
+- Pulls work orders + item master from shared snapshot payload.
+- Pulls pricing from `ops_sku_targets` when request body does not provide pricing.
+- Pulls labor rates from `ops_rates` and converts them to default role templates when request body does not provide labor templates.
+
+`POST /api/ops/labor-forecast`
+- Accepts optional overrides:
+  - `monthKey`
+  - `workOrders`
+  - `itemMaster`
+  - `pricing`
+  - `laborTemplates`
+  - `globalAssumptions` (`overhead_global`, `cogs_non_labor`, `equipment_rental`)
+  - `overrides` (SKU/line throughput + role overrides)
+  - `headcountByRole` (used when deriving templates from `ops_rates`)
+
+### Response Shape
+- `forecast.summary`: monthly required outputs (labor cost/case, labor % sales, gross margin, NOI, headcount hours, totals)
+- `forecast.byWorkOrder`: deterministic row-level calculations
+- `forecast.bySku`: SKU rollups
+- `forecast.daily`: daily split/targets
+- `forecast.flags`: blocking data-quality flags (missing throughput, missing labor template, missing revenue)
