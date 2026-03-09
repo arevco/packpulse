@@ -3,7 +3,7 @@ import { useTheme } from "../theme";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import TableShell from "../components/ui/table-shell";
-import { safeNum } from "../utils";
+import { detectPackType, safeNum } from "../utils";
 
 function fmtMoney(n) {
   var v = safeNum(n);
@@ -211,6 +211,52 @@ export default function ForecastView(props) {
     });
     return out;
   }, [itemMaster]);
+  var optionLists = useMemo(function() {
+    var skuSet = {};
+    var familySet = {};
+    var packTypeSet = {};
+    var lineSet = {};
+
+    itemMaster.forEach(function(r) {
+      var sku = String((r && (r["Item Code"] || r.Code || r.item_code || r.code)) || "").trim();
+      var desc = String((r && (r["Description"] || r.description || r["Item Description"])) || "").trim();
+      var fam = String((r && (r["Item Family"] || r.item_family || r.item_family_name || r["Family"] || r.family || r["Item Category"] || r.item_category)) || "").trim();
+      if (sku) skuSet[sku] = true;
+      if (fam) familySet[fam] = true;
+      var p = detectPackType(desc || sku, sku);
+      if (p) packTypeSet[p] = true;
+    });
+
+    workOrders.forEach(function(w) {
+      var sku = String((w && (w["Item Code"] || w.item_code || w.productSkuRaw || w.productSku || w["Product SKU"])) || "").trim();
+      var desc = String((w && (w["Description"] || w.description || w.productDesc || w.item_description || w["Item Description"])) || "").trim();
+      var fam = String((w && (w["Product Family"] || w.product_family || w["Item Family"] || w.item_family || w.family)) || "").trim();
+      var line = String((w && (w["Line"] || w.line || w["Line Name"] || w.line_name)) || "").trim();
+      if (sku) skuSet[sku] = true;
+      if (fam) familySet[fam] = true;
+      if (line) lineSet[line] = true;
+      var p = detectPackType(desc || sku, sku);
+      if (p) packTypeSet[p] = true;
+    });
+
+    laborTemplates.forEach(function(t) {
+      var line = String(t && t.line_name || "").trim();
+      var fam = String(t && t.product_family || "").trim();
+      var pack = String(t && t.pack_type || "").trim();
+      var sku = String(t && t.sku || "").trim();
+      if (line) lineSet[line] = true;
+      if (fam) familySet[fam] = true;
+      if (pack) packTypeSet[pack] = true;
+      if (sku) skuSet[sku] = true;
+    });
+
+    return {
+      skus: Object.keys(skuSet).sort(),
+      families: Object.keys(familySet).sort(),
+      packTypes: Object.keys(packTypeSet).sort(),
+      lines: Object.keys(lineSet).sort()
+    };
+  }, [itemMaster, workOrders, laborTemplates]);
   var actualByDay = useMemo(function() {
     var pick = function(row, keys) {
       var rowKeys = Object.keys(row || {});
@@ -296,6 +342,18 @@ export default function ForecastView(props) {
 
       {showAdvanced && (
         <div className="mb-3 space-y-3 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-3">
+          <datalist id="forecast-sku-options">
+            {optionLists.skus.map(function(v) { return <option key={v} value={v} />; })}
+          </datalist>
+          <datalist id="forecast-family-options">
+            {optionLists.families.map(function(v) { return <option key={v} value={v} />; })}
+          </datalist>
+          <datalist id="forecast-pack-options">
+            {optionLists.packTypes.map(function(v) { return <option key={v} value={v} />; })}
+          </datalist>
+          <datalist id="forecast-line-options">
+            {optionLists.lines.map(function(v) { return <option key={v} value={v} />; })}
+          </datalist>
           <div className="text-sm font-semibold text-[rgb(var(--foreground))]">Labor Template Rules (fewest edits: use pack type + line)</div>
           <div className="text-xs text-[rgb(var(--muted))]">Resolution order uses SKU/line first, then pack type/family, then line/global defaults.</div>
           <div style={{ overflowX: "auto" }}>
@@ -321,10 +379,10 @@ export default function ForecastView(props) {
                   };
                   return (
                     <tr key={idx} style={{ borderBottom: "1px solid " + C.border }}>
-                      <td style={{ padding: 6 }}><Input value={r.sku || ""} onChange={function(e) { setRow("sku", e.target.value); }} className="h-8 w-28 text-xs" /></td>
-                      <td style={{ padding: 6 }}><Input value={r.product_family || ""} onChange={function(e) { setRow("product_family", e.target.value); }} className="h-8 w-28 text-xs" /></td>
-                      <td style={{ padding: 6 }}><Input value={r.pack_type || ""} onChange={function(e) { setRow("pack_type", e.target.value); }} className="h-8 w-28 text-xs" placeholder="e.g. 15 PACK" /></td>
-                      <td style={{ padding: 6 }}><Input value={r.line_name || ""} onChange={function(e) { setRow("line_name", e.target.value); }} className="h-8 w-24 text-xs" placeholder="DMM" /></td>
+                      <td style={{ padding: 6 }}><Input list="forecast-sku-options" value={r.sku || ""} onChange={function(e) { setRow("sku", e.target.value); }} className="h-8 w-28 text-xs" /></td>
+                      <td style={{ padding: 6 }}><Input list="forecast-family-options" value={r.product_family || ""} onChange={function(e) { setRow("product_family", e.target.value); }} className="h-8 w-28 text-xs" /></td>
+                      <td style={{ padding: 6 }}><Input list="forecast-pack-options" value={r.pack_type || ""} onChange={function(e) { setRow("pack_type", e.target.value); }} className="h-8 w-28 text-xs" placeholder="e.g. 15 PACK" /></td>
+                      <td style={{ padding: 6 }}><Input list="forecast-line-options" value={r.line_name || ""} onChange={function(e) { setRow("line_name", e.target.value); }} className="h-8 w-24 text-xs" placeholder="DMM" /></td>
                       <td style={{ padding: 6 }}><Input value={r.role || ""} onChange={function(e) { setRow("role", e.target.value); }} className="h-8 w-24 text-xs" /></td>
                       <td style={{ padding: 6 }}><Input type="number" step="0.1" value={r.headcount_assumed || ""} onChange={function(e) { setRow("headcount_assumed", e.target.value); }} className="h-8 w-24 text-xs" /></td>
                       <td style={{ padding: 6 }}><Input type="number" step="0.01" value={r.hourly_rate || ""} onChange={function(e) { setRow("hourly_rate", e.target.value); }} className="h-8 w-24 text-xs" /></td>
@@ -371,11 +429,11 @@ export default function ForecastView(props) {
                   };
                   return (
                     <tr key={idx} style={{ borderBottom: "1px solid " + C.border }}>
-                      <td style={{ padding: 6 }}><Input value={r.sku || ""} onChange={function(e) { setRow("sku", e.target.value); }} className="h-8 w-28 text-xs" /></td>
-                      <td style={{ padding: 6 }}><Input value={r.line_name || ""} onChange={function(e) { setRow("line_name", e.target.value); }} className="h-8 w-24 text-xs" /></td>
+                      <td style={{ padding: 6 }}><Input list="forecast-sku-options" value={r.sku || ""} onChange={function(e) { setRow("sku", e.target.value); }} className="h-8 w-28 text-xs" /></td>
+                      <td style={{ padding: 6 }}><Input list="forecast-line-options" value={r.line_name || ""} onChange={function(e) { setRow("line_name", e.target.value); }} className="h-8 w-24 text-xs" /></td>
                       <td style={{ padding: 6 }}><Input type="number" step="0.01" value={r.override_cases_per_min || ""} onChange={function(e) { setRow("override_cases_per_min", e.target.value); }} className="h-8 w-24 text-xs" /></td>
-                      <td style={{ padding: 6 }}><Input value={r.override_line_name || ""} onChange={function(e) { setRow("override_line_name", e.target.value); }} className="h-8 w-24 text-xs" /></td>
-                      <td style={{ padding: 6 }}><Input value={r.override_pack_type || ""} onChange={function(e) { setRow("override_pack_type", e.target.value); }} className="h-8 w-32 text-xs" /></td>
+                      <td style={{ padding: 6 }}><Input list="forecast-line-options" value={r.override_line_name || ""} onChange={function(e) { setRow("override_line_name", e.target.value); }} className="h-8 w-24 text-xs" /></td>
+                      <td style={{ padding: 6 }}><Input list="forecast-pack-options" value={r.override_pack_type || ""} onChange={function(e) { setRow("override_pack_type", e.target.value); }} className="h-8 w-32 text-xs" /></td>
                       <td style={{ padding: 6 }}>
                         <Button size="sm" variant="outline" onClick={function() {
                           setOverrides(function(prev) { return prev.filter(function(_, i) { return i !== idx; }); });
