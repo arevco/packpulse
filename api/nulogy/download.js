@@ -114,6 +114,10 @@ const COLUMN_MAPS = {
     "Unit Of Measure": "Unit of Measure"
   },
   itemmaster: {
+    "id": "Item ID",
+    "ID": "Item ID",
+    "item_id": "Item ID",
+    "Item ID": "Item ID",
     "code": "Item Code",
     "Code": "Item Code",
     "description": "Description",

@@ -50,6 +50,9 @@ export default function ItemMasterView(props) {
   var inventoryRows = Array.isArray(props.inventory) ? props.inventory : [];
   var C = useTheme().C;
   var [q, setQ] = useState("");
+  var [costByItemId, setCostByItemId] = useState({});
+  var [loadingBackfill, setLoadingBackfill] = useState(false);
+  var [backfillMsg, setBackfillMsg] = useState("");
 
   var inventoryCostBySku = useMemo(function() {
     var out = {};
@@ -66,22 +69,25 @@ export default function ItemMasterView(props) {
 
   var prepared = useMemo(function() {
     return rows.map(function(r, idx) {
+      var itemId = pickValue(r, ["Item ID", "item_id", "id", "ID"]).toString().trim();
       var sku = pickValue(r, ["Item Code", "Code", "item_code", "code"]).toString().trim();
       var description = pickValue(r, ["Description", "description", "Item Description"]).toString().trim();
       var cost = pickCostValue(r);
       var itemMasterCost = safeNum(cost);
+      var htmlCost = itemId ? safeNum(costByItemId[itemId]) : 0;
       var inventoryCost = sku ? safeNum(inventoryCostBySku[sku]) : 0;
-      var costNum = itemMasterCost > 0 ? itemMasterCost : inventoryCost;
+      var costNum = itemMasterCost > 0 ? itemMasterCost : (htmlCost > 0 ? htmlCost : inventoryCost);
       return {
         id: sku || ("row-" + idx),
+        itemId: itemId || "",
         sku: sku || "--",
         description: description || "--",
         costRaw: cost,
         costNum: costNum,
-        costSource: itemMasterCost > 0 ? "itemmaster" : (inventoryCost > 0 ? "inventory" : "none")
+        costSource: itemMasterCost > 0 ? "itemmaster" : (htmlCost > 0 ? "item-page" : (inventoryCost > 0 ? "inventory" : "none"))
       };
     });
-  }, [rows, inventoryCostBySku]);
+  }, [rows, inventoryCostBySku, costByItemId]);
 
   var filtered = useMemo(function() {
     var qq = String(q || "").toLowerCase().trim();
@@ -92,6 +98,37 @@ export default function ItemMasterView(props) {
   }, [prepared, q]);
 
   var withCost = filtered.filter(function(r) { return r.costNum > 0; }).length;
+  var backfillableIds = useMemo(function() {
+    var set = {};
+    prepared.forEach(function(r) {
+      if (!r.itemId) return;
+      if (r.costNum > 0) return;
+      set[r.itemId] = true;
+    });
+    return Object.keys(set);
+  }, [prepared]);
+
+  var runBackfill = async function() {
+    if (!backfillableIds.length || loadingBackfill) return;
+    setLoadingBackfill(true);
+    setBackfillMsg("");
+    try {
+      var resp = await fetch("/api/nulogy/item-cost", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itemIds: backfillableIds.slice(0, 250) })
+      });
+      var body = await resp.json();
+      if (!resp.ok) throw new Error((body && body.error) || "Backfill request failed");
+      var map = body && body.costsByItemId ? body.costsByItemId : {};
+      setCostByItemId(function(prev) { return Object.assign({}, prev, map); });
+      setBackfillMsg("Backfill found " + (body && body.found ? body.found : 0) + " item costs.");
+    } catch (err) {
+      setBackfillMsg(err && err.message ? err.message : "Could not backfill costs.");
+    } finally {
+      setLoadingBackfill(false);
+    }
+  };
 
   return (
     <div>
@@ -107,7 +144,26 @@ export default function ItemMasterView(props) {
         <Badge variant={withCost ? "success" : "warning"}>
           {withCost} with cost
         </Badge>
+        <button
+          type="button"
+          onClick={runBackfill}
+          disabled={loadingBackfill || !backfillableIds.length}
+          style={{
+            height: 34,
+            padding: "0 10px",
+            borderRadius: 8,
+            border: "1px solid " + C.border,
+            background: (loadingBackfill || !backfillableIds.length) ? C.raised : C.surface,
+            color: C.text,
+            fontSize: 12,
+            cursor: (loadingBackfill || !backfillableIds.length) ? "not-allowed" : "pointer"
+          }}
+          title="Pull Cost per unit from Nulogy item page fallback"
+        >
+          {loadingBackfill ? "Backfilling..." : ("Backfill Cost (" + backfillableIds.length + ")")}
+        </button>
       </div>
+      {!!backfillMsg && <div className="mb-2 text-xs text-[rgb(var(--muted))]">{backfillMsg}</div>}
       <TableShell>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -142,6 +198,7 @@ export default function ItemMasterView(props) {
         </div>
       </TableShell>
       <div className="mt-1 text-xs text-[rgb(var(--muted))]">* cost sourced from inventory when item master cost is blank.</div>
+      <div className="mt-0.5 text-xs text-[rgb(var(--muted))]">Item-page fallback uses Nulogy item detail HTML (`Cost per unit`) by Item ID.</div>
     </div>
   );
 }

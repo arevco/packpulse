@@ -110,8 +110,10 @@ const REPORT_CONFIGS = {
   itemmaster: {
     report: "item_master",
     columnSets: [
-      ["code", "description", "cost_per_unit", "unit_cost", "standard_cost", "is_subcomponent", "is_finished_good", "item_type", "item_category", "inactive", "customer"],
-      ["code", "description", "cost_per_unit", "unit_cost", "is_subcomponent", "is_finished_good", "inactive", "customer"],
+      ["id", "item_id", "code", "description", "cost_per_unit", "unit_cost", "standard_cost", "is_subcomponent", "is_finished_good", "item_type", "item_category", "inactive", "customer"],
+      ["id", "item_id", "code", "description", "cost_per_unit", "unit_cost", "is_subcomponent", "is_finished_good", "inactive", "customer"],
+      ["id", "item_id", "code", "description", "standard_cost", "is_subcomponent", "is_finished_good", "inactive"],
+      ["id", "item_id", "code", "description", "unit_cost", "is_subcomponent", "is_finished_good", "inactive"],
       ["code", "description", "standard_cost", "is_subcomponent", "is_finished_good", "inactive"],
       ["code", "description", "unit_cost", "is_subcomponent", "is_finished_good", "inactive"],
       ["code", "description", "is_subcomponent", "is_finished_good", "inactive"],
