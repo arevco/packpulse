@@ -278,6 +278,7 @@ function transformColumns(rows, reportType) {
         const looksLikeUnitCost =
           hasCostToken &&
           looksLikeUnitish &&
+          !nk.includes("purchase") &&
           !nk.includes("total") &&
           !nk.includes("extended") &&
           !nk.includes("amount");
