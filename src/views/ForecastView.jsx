@@ -184,6 +184,8 @@ export default function ForecastView(props) {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 10, marginBottom: 14 }}>
           {[
             { label: "Total Cases", value: safeNum(summary.total_cases).toLocaleString() },
+            { label: "Rollover Cases", value: safeNum(summary.rollover_cases).toLocaleString() },
+            { label: "Rollover WOs", value: safeNum(summary.rollover_wo_count).toLocaleString() },
             { label: "Total Revenue", value: fmtMoney(summary.total_revenue) },
             { label: "Actual Revenue", value: fmtMoney(Object.values(actualByDay).reduce(function(sum, d) { return sum + safeNum(d.actual_revenue); }, 0)) },
             { label: "Total Labor Cost", value: fmtMoney(summary.total_labor_cost) },

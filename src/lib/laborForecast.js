@@ -32,6 +32,12 @@ function inMonth(isoDay, monthKey) {
   return String(isoDay || "").slice(0, 7) === String(monthKey);
 }
 
+function statusLooksClosed(status) {
+  var s = normalizeStr(status || "");
+  if (!s) return false;
+  return s.indexOf("close") !== -1 || s.indexOf("complete") !== -1 || s.indexOf("cancel") !== -1 || s.indexOf("archive") !== -1 || s.indexOf("done") !== -1;
+}
+
 function getWoDateIso(wo) {
   var start = pickValue(wo, ["Planned Start", "planned_start_at", "planned_start", "plannedStart"]);
   var due = pickValue(wo, ["Due Date", "due_date_at", "due_date", "dueDate"]);
@@ -203,9 +209,19 @@ export function runLaborForecast(input) {
     var sku = String(pickValue(wo, ["Item Code", "item_code", "Code", "code"])).trim();
     var lineName = resolveLineName(wo);
     var dateIso = getWoDateIso(wo);
-    if (monthKey && dateIso && !inMonth(dateIso, monthKey)) continue;
+    var woMonth = String(dateIso || "").slice(0, 7);
+    var status = String(pickValue(wo, ["Work Order Status", "project_status", "status"])).trim();
+    var isClosed = statusLooksClosed(status);
+    var unitsExpected = safeNum(pickValue(wo, ["Units Expected", "units_expected", "Order Qty", "qtyToProduce", "quantity"]));
+    var unitsProduced = safeNum(pickValue(wo, ["Units Produced", "units_produced", "produced"]));
+    var explicitRemaining = safeNum(pickValue(wo, ["Units Remaining", "units_remaining", "remaining"]));
+    var remainingCases = explicitRemaining > 0 ? explicitRemaining : Math.max(0, unitsExpected - unitsProduced);
+    var isPriorOpenRollover = !!(monthKey && woMonth && woMonth < monthKey && !isClosed && remainingCases > 0);
+    var isCurrentMonth = !!(monthKey && woMonth === monthKey);
+    var isUndatedOpen = !!(monthKey && !woMonth && !isClosed && remainingCases > 0);
+    if (monthKey && !isCurrentMonth && !isPriorOpenRollover && !isUndatedOpen) continue;
 
-    var plannedCases = safeNum(pickValue(wo, ["Units Expected", "units_expected", "Order Qty", "qtyToProduce", "quantity"]));
+    var plannedCases = monthKey ? (remainingCases > 0 ? remainingCases : unitsExpected) : unitsExpected;
     if (!(plannedCases > 0)) continue;
 
     var overrideKey = normalizeStr(sku) + "::" + normalizeStr(lineName);
@@ -252,10 +268,12 @@ export function runLaborForecast(input) {
 
     var row = {
       month_key: monthKey || (dateIso ? String(dateIso).slice(0, 7) : ""),
-      day_key: dateIso || "",
+      day_key: dateIso || (monthKey ? monthKey + "-01" : ""),
       wo_code: woCode,
       sku: sku || "--",
       line_name: lineName,
+      wo_status: status || "",
+      rollover_source: isPriorOpenRollover ? "prior_open_balance" : (isUndatedOpen ? "undated_open_balance" : "none"),
       planned_cases: plannedCases,
       cases_per_min: throughput.value,
       throughput_source: throughput.source,
@@ -271,8 +289,8 @@ export function runLaborForecast(input) {
     };
     rows.push(row);
 
-    var startIso = toIsoDay(pickValue(wo, ["Planned Start", "planned_start_at", "planned_start", "plannedStart"]));
-    var endIso = toIsoDay(pickValue(wo, ["Planned End", "planned_end_at", "planned_end", "plannedEnd"]));
+    var startIso = isPriorOpenRollover ? "" : toIsoDay(pickValue(wo, ["Planned Start", "planned_start_at", "planned_start", "plannedStart"]));
+    var endIso = isPriorOpenRollover ? "" : toIsoDay(pickValue(wo, ["Planned End", "planned_end_at", "planned_end", "plannedEnd"]));
     var dailyDays = eachDayInclusive(startIso, endIso);
     if (!dailyDays.length) dailyDays = [dateIso || (monthKey ? (monthKey + "-01") : "")].filter(Boolean);
     var perDayCases = plannedCases / Math.max(1, dailyDays.length);
@@ -344,6 +362,8 @@ export function runLaborForecast(input) {
     total_prod_hours: 0,
     total_headcount_hours: 0
   });
+  var rolloverRows = rows.filter(function(r) { return r.rollover_source && r.rollover_source !== "none"; });
+  var rolloverCases = rolloverRows.reduce(function(sum, r) { return sum + safeNum(r.planned_cases); }, 0);
 
   var grossProfitAfterProdLabor = totals.total_revenue - totals.total_labor_cost;
   var grossProfitAfterCogs = grossProfitAfterProdLabor - cogsNonLabor - equipmentRental;
@@ -367,6 +387,8 @@ export function runLaborForecast(input) {
     equipment_rental: equipmentRental,
     total_prod_hours: totals.total_prod_hours,
     total_headcount_hours: totals.total_headcount_hours,
+    rollover_wo_count: rolloverRows.length,
+    rollover_cases: rolloverCases,
     missing_throughput_wo_count: flags.filter(function(f) { return f.type === "missing_throughput"; }).length,
     missing_revenue_wo_count: flags.filter(function(f) { return f.type === "missing_revenue"; }).length
   };
