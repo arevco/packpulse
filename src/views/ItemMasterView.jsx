@@ -51,6 +51,7 @@ export default function ItemMasterView(props) {
   var C = useTheme().C;
   var [q, setQ] = useState("");
   var [costByItemId, setCostByItemId] = useState({});
+  var [costBySkuExport, setCostBySkuExport] = useState({});
   var [loadingBackfill, setLoadingBackfill] = useState(false);
   var [backfillMsg, setBackfillMsg] = useState("");
   var [exportingFull, setExportingFull] = useState(false);
@@ -60,10 +61,12 @@ export default function ItemMasterView(props) {
     inventoryRows.forEach(function(r) {
       var sku = pickValue(r, ["Item Code", "Code", "item_code", "code"]).toString().trim();
       if (!sku) return;
+      var skuNorm = normalizeKey(sku);
       var cost = pickCostValue(r);
       var n = safeNum(cost);
       if (!(n > 0)) return;
       if (!out[sku] || n > out[sku]) out[sku] = n;
+      if (skuNorm && (!out[skuNorm] || n > out[skuNorm])) out[skuNorm] = n;
     });
     return out;
   }, [inventoryRows]);
@@ -76,8 +79,10 @@ export default function ItemMasterView(props) {
       var cost = pickCostValue(r);
       var itemMasterCost = safeNum(cost);
       var htmlCost = itemId ? safeNum(costByItemId[itemId]) : 0;
-      var inventoryCost = sku ? safeNum(inventoryCostBySku[sku]) : 0;
-      var costNum = itemMasterCost > 0 ? itemMasterCost : (htmlCost > 0 ? htmlCost : inventoryCost);
+      var skuNorm = normalizeKey(sku);
+      var exportCost = sku ? safeNum(costBySkuExport[sku] || (skuNorm ? costBySkuExport[skuNorm] : 0)) : 0;
+      var inventoryCost = sku ? safeNum(inventoryCostBySku[sku] || (skuNorm ? inventoryCostBySku[skuNorm] : 0)) : 0;
+      var costNum = itemMasterCost > 0 ? itemMasterCost : (htmlCost > 0 ? htmlCost : (exportCost > 0 ? exportCost : inventoryCost));
       return {
         id: sku || ("row-" + idx),
         itemId: itemId || "",
@@ -85,10 +90,10 @@ export default function ItemMasterView(props) {
         description: description || "--",
         costRaw: cost,
         costNum: costNum,
-        costSource: itemMasterCost > 0 ? "itemmaster" : (htmlCost > 0 ? "item-page" : (inventoryCost > 0 ? "inventory" : "none"))
+        costSource: itemMasterCost > 0 ? "itemmaster" : (htmlCost > 0 ? "item-page" : (exportCost > 0 ? "full-export" : (inventoryCost > 0 ? "inventory" : "none")))
       };
     });
-  }, [rows, inventoryCostBySku, costByItemId]);
+  }, [rows, inventoryCostBySku, costByItemId, costBySkuExport]);
 
   var filtered = useMemo(function() {
     var qq = String(q || "").toLowerCase().trim();
@@ -177,6 +182,23 @@ export default function ItemMasterView(props) {
         : (data.length ? Object.keys(data[0]) : []);
       if (!headers.length) throw new Error("No headers returned from Nulogy item master download.");
 
+      var exportMap = {};
+      data.forEach(function(row) {
+        var sku = String((row && (row.Code || row.code || row["Item Code"] || row["item_code"])) || "").trim();
+        if (!sku) return;
+        var skuNorm = normalizeKey(sku);
+        var c = safeNum(
+          (row && (row["Cost Per Unit"] || row.cost_per_unit || row["Unit Cost"] || row.unit_cost || row["Standard Cost"] || row.standard_cost)) || 0
+        );
+        if (c > 0) {
+          exportMap[sku] = c;
+          if (skuNorm) exportMap[skuNorm] = c;
+        }
+      });
+      if (Object.keys(exportMap).length) {
+        setCostBySkuExport(function(prev) { return Object.assign({}, prev, exportMap); });
+      }
+
       var lines = [];
       lines.push(headers.map(escapeCsv).join(","));
       data.forEach(function(row) {
@@ -184,7 +206,7 @@ export default function ItemMasterView(props) {
       });
       var stamp = new Date().toISOString().slice(0, 10);
       triggerDownload(lines.join("\n"), "nulogy_item_master_full_" + stamp + ".csv", "text/csv");
-      setBackfillMsg("Downloaded full item master CSV (" + data.length + " rows).");
+      setBackfillMsg("Downloaded full item master CSV (" + data.length + " rows). Loaded " + Object.keys(exportMap).length + " cost values into the table.");
     } catch (err) {
       setBackfillMsg(err && err.message ? err.message : "Could not export full item master CSV.");
     } finally {
