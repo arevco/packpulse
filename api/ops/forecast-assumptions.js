@@ -6,6 +6,11 @@ function sanitizeMonthKey(v) {
   return /^\d{4}-\d{2}$/.test(s) ? s : "";
 }
 
+function isMissingTableError(err) {
+  var msg = String((err && (err.message || err.details || err.hint)) || "").toLowerCase();
+  return msg.indexOf("forecast_assumptions") !== -1 && (msg.indexOf("schema cache") !== -1 || msg.indexOf("could not find the table") !== -1 || msg.indexOf("relation") !== -1);
+}
+
 export default async function handler(req, res) {
   withCors(req, res, ["GET", "POST", "OPTIONS"]);
   if (req.method === "OPTIONS") return res.status(200).end();
@@ -25,7 +30,16 @@ export default async function handler(req, res) {
         .eq("site_id", CACHE_SITE_ID)
         .eq("month_key", monthKey)
         .maybeSingle();
-      if (q.error) throw q.error;
+      if (q.error) {
+        if (isMissingTableError(q.error)) {
+          return res.status(200).json({
+            row: null,
+            status: "missing_forecast_assumptions_table",
+            message: "Forecast assumptions table is not set up yet."
+          });
+        }
+        throw q.error;
+      }
       return res.status(200).json({ row: q.data || null });
     }
 
@@ -45,11 +59,19 @@ export default async function handler(req, res) {
       .upsert(row, { onConflict: "site_id,month_key" })
       .select("site_id,month_key,global_assumptions,labor_templates,overrides,updated_by,updated_at")
       .single();
-    if (up.error) throw up.error;
+    if (up.error) {
+      if (isMissingTableError(up.error)) {
+        return res.status(200).json({
+          ok: false,
+          status: "missing_forecast_assumptions_table",
+          message: "Forecast assumptions table is not set up yet."
+        });
+      }
+      throw up.error;
+    }
     return res.status(200).json({ ok: true, row: up.data });
   } catch (err) {
     Sentry.captureException(err);
     return res.status(500).json({ error: "Forecast assumptions request failed", details: err && err.message ? err.message : "unknown" });
   }
 }
-

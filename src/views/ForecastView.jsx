@@ -87,6 +87,10 @@ export default function ForecastView(props) {
       var res = await fetch("/api/ops/forecast-assumptions?monthKey=" + encodeURIComponent(mk), { credentials: "include" });
       var body = await res.json();
       if (!res.ok) throw new Error((body && body.error) || "Could not load assumptions");
+      if (body && body.status === "missing_forecast_assumptions_table") {
+        setAssumptionsMsg("Assumptions table not set up yet. Run docs/supabase-forecast-assumptions.sql in Supabase.");
+        return;
+      }
       if (body && body.row) {
         applySavedAssumptions(body.row);
         setAssumptionsMsg("Loaded saved assumptions for " + mk + ".");
@@ -121,6 +125,10 @@ export default function ForecastView(props) {
       });
       var body = await res.json();
       if (!res.ok) throw new Error((body && body.error) || "Could not save assumptions");
+      if (body && body.status === "missing_forecast_assumptions_table") {
+        setAssumptionsMsg("Assumptions table not set up yet. Run docs/supabase-forecast-assumptions.sql in Supabase.");
+        return;
+      }
       setAssumptionsMsg("Saved assumptions for " + monthKey + ".");
     } catch (err) {
       setAssumptionsMsg(err && err.message ? err.message : "Could not save assumptions.");
