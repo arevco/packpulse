@@ -22,6 +22,7 @@ export default function ForecastView(props) {
   var C = useTheme().C;
   var workOrders = Array.isArray(props.workOrders) ? props.workOrders : [];
   var itemMaster = Array.isArray(props.itemMaster) ? props.itemMaster : [];
+  var productionData = Array.isArray(props.productionData) ? props.productionData : [];
   var [monthKey, setMonthKey] = useState(currentMonthKey());
   var [overheadGlobal, setOverheadGlobal] = useState(0);
   var [cogsNonLabor, setCogsNonLabor] = useState(0);
@@ -70,6 +71,56 @@ export default function ForecastView(props) {
   var daily = forecast && Array.isArray(forecast.daily) ? forecast.daily : [];
   var flags = forecast && Array.isArray(forecast.flags) ? forecast.flags : [];
   var topSku = useMemo(function() { return bySku.slice(0, 20); }, [bySku]);
+  var actualByDay = useMemo(function() {
+    var pick = function(row, keys) {
+      var rowKeys = Object.keys(row || {});
+      for (var i = 0; i < keys.length; i++) {
+        var target = String(keys[i] || "").toLowerCase();
+        for (var j = 0; j < rowKeys.length; j++) {
+          var key = rowKeys[j];
+          if (String(key).toLowerCase() === target) return row[key];
+        }
+      }
+      return "";
+    };
+    var dayIso = function(value) {
+      if (!value) return "";
+      var d = new Date(value);
+      if (isNaN(d)) return "";
+      return d.toISOString().slice(0, 10);
+    };
+    var skuRate = {};
+    bySku.forEach(function(s) {
+      var sku = String(s.sku || "").trim();
+      var key = sku.toLowerCase();
+      if (!key) return;
+      var rate = safeNum(s.revenue) / Math.max(1, safeNum(s.planned_cases));
+      if (rate > 0) skuRate[key] = rate;
+    });
+    itemMaster.forEach(function(r) {
+      var sku = String((r && (r["Item Code"] || r.Code || r.item_code || r.code)) || "").trim();
+      if (!sku) return;
+      var key = sku.toLowerCase();
+      if (skuRate[key] > 0) return;
+      var cost = safeNum((r && (r["Cost Per Unit"] || r.cost_per_unit || r["Unit Cost"] || r.unit_cost)) || 0);
+      if (cost > 0) skuRate[key] = cost;
+    });
+
+    var out = {};
+    productionData.forEach(function(r) {
+      var sku = String(pick(r, ["Item Code", "item_code", "Code", "code"])).trim();
+      if (!sku) return;
+      var dt = dayIso(pick(r, ["Actual Job End", "actual_job_end_at", "Produced At", "produced_at", "Actual Job Start", "actual_job_start_at"]));
+      if (!dt || dt.slice(0, 7) !== monthKey) return;
+      var units = safeNum(pick(r, ["Units Produced", "units_produced", "Produced", "produced"]));
+      if (!(units > 0)) return;
+      var rate = safeNum(skuRate[sku.toLowerCase()]);
+      if (!out[dt]) out[dt] = { day_key: dt, actual_cases: 0, actual_revenue: 0 };
+      out[dt].actual_cases += units;
+      out[dt].actual_revenue += units * rate;
+    });
+    return out;
+  }, [productionData, bySku, itemMaster, monthKey]);
 
   return (
     <div>
@@ -100,6 +151,7 @@ export default function ForecastView(props) {
           {[
             { label: "Total Cases", value: safeNum(summary.total_cases).toLocaleString() },
             { label: "Total Revenue", value: fmtMoney(summary.total_revenue) },
+            { label: "Actual Revenue", value: fmtMoney(Object.values(actualByDay).reduce(function(sum, d) { return sum + safeNum(d.actual_revenue); }, 0)) },
             { label: "Total Labor Cost", value: fmtMoney(summary.total_labor_cost) },
             { label: "Labor Cost / Case", value: fmtMoney(summary.labor_cost_per_case) },
             { label: "Labor % Sales", value: fmtPct(summary.labor_pct_sales) },
@@ -168,18 +220,24 @@ export default function ForecastView(props) {
                 <th style={{ textAlign: "left", padding: "8px 10px", fontSize: 12, color: C.dim }}>Day</th>
                 <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Cases</th>
                 <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Revenue</th>
+                <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Actual Revenue</th>
+                <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Revenue Var</th>
                 <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Labor Cost</th>
                 <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Headcount Hours</th>
               </tr>
             </thead>
             <tbody>
-              {!daily.length && <tr><td colSpan={5} style={{ padding: 16, textAlign: "center", color: C.dim }}>No daily targets available.</td></tr>}
+              {!daily.length && <tr><td colSpan={7} style={{ padding: 16, textAlign: "center", color: C.dim }}>No daily targets available.</td></tr>}
               {daily.slice(0, 31).map(function(d) {
+                var act = actualByDay[d.day_key] || { actual_cases: 0, actual_revenue: 0 };
+                var revVar = safeNum(act.actual_revenue) - safeNum(d.revenue);
                 return (
                   <tr key={d.day_key} style={{ borderBottom: "1px solid " + C.border }}>
                     <td style={{ padding: "8px 10px", fontSize: 13, color: C.bright }}>{d.day_key}</td>
                     <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{safeNum(d.planned_cases).toLocaleString(undefined, { maximumFractionDigits: 1 })}</td>
                     <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{fmtMoney(d.revenue)}</td>
+                    <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{fmtMoney(act.actual_revenue)}</td>
+                    <td style={{ padding: "8px 10px", fontSize: 13, color: revVar >= 0 ? C.ok : C.bad, textAlign: "right" }}>{fmtMoney(revVar)}</td>
                     <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{fmtMoney(d.labor_cost)}</td>
                     <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{safeNum(d.headcount_hours).toFixed(1)}</td>
                   </tr>
@@ -192,4 +250,3 @@ export default function ForecastView(props) {
     </div>
   );
 }
-
