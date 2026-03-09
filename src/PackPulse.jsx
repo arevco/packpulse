@@ -12,15 +12,36 @@ import TabsNav from "./components/ui/tabs-nav";
 import { Card } from "./components/ui/card";
 import AskAiPanel from "./components/AskAiPanel";
 
-const OverviewView = lazy(() => import("./views/OverviewView"));
-const OperationsView = lazy(() => import("./views/OperationsView"));
-const ForecastView = lazy(() => import("./views/ForecastView"));
-const WorkOrdersView = lazy(() => import("./views/WorkOrdersView"));
-const SupplyRiskView = lazy(() => import("./views/SupplyRiskView"));
-const ItemMasterView = lazy(() => import("./views/ItemMasterView"));
-const FlagsView = lazy(() => import("./views/FlagsView"));
-const SandboxView = lazy(() => import("./views/SandboxView"));
-const AICopilotView = lazy(() => import("./views/AICopilotView"));
+function lazySafe(importer, name) {
+  return lazy(function() {
+    return importer()
+      .then(function(mod) {
+        if (mod && mod.default) return mod;
+        return {
+          default: function MissingView() {
+            return <Card className="mt-3 p-4 text-sm text-[rgb(var(--danger))]">Could not load {name} view.</Card>;
+          }
+        };
+      })
+      .catch(function() {
+        return {
+          default: function FailedView() {
+            return <Card className="mt-3 p-4 text-sm text-[rgb(var(--danger))]">Failed to load {name} view.</Card>;
+          }
+        };
+      });
+  });
+}
+
+const OverviewView = lazySafe(function() { return import("./views/OverviewView"); }, "Overview");
+const OperationsView = lazySafe(function() { return import("./views/OperationsView"); }, "Operations");
+const ForecastView = lazySafe(function() { return import("./views/ForecastView"); }, "Forecast");
+const WorkOrdersView = lazySafe(function() { return import("./views/WorkOrdersView"); }, "Work Orders");
+const SupplyRiskView = lazySafe(function() { return import("./views/SupplyRiskView"); }, "Supply Risk");
+const ItemMasterView = lazySafe(function() { return import("./views/ItemMasterView"); }, "Item Master");
+const FlagsView = lazySafe(function() { return import("./views/FlagsView"); }, "Data Flags");
+const SandboxView = lazySafe(function() { return import("./views/SandboxView"); }, "Sandbox");
+const AICopilotView = lazySafe(function() { return import("./views/AICopilotView"); }, "AI Copilot");
 
 export default function ProductionReadiness() {
   const { C, theme, setTheme, sans, mono } = useTheme();
