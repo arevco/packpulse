@@ -92,6 +92,19 @@ export default function ForecastView(props) {
   var daily = forecast && Array.isArray(forecast.daily) ? forecast.daily : [];
   var flags = forecast && Array.isArray(forecast.flags) ? forecast.flags : [];
   var topSku = useMemo(function() { return bySku.slice(0, 20); }, [bySku]);
+  var descriptionBySku = useMemo(function() {
+    var out = {};
+    itemMaster.forEach(function(r) {
+      var sku = String((r && (r["Item Code"] || r.Code || r.item_code || r.code)) || "").trim();
+      if (!sku) return;
+      var desc = String((r && (r["Description"] || r.description || r["Item Description"])) || "").trim();
+      if (!desc) return;
+      if (!out[sku]) out[sku] = desc;
+      var key = sku.toLowerCase();
+      if (!out[key]) out[key] = desc;
+    });
+    return out;
+  }, [itemMaster]);
   var actualByDay = useMemo(function() {
     var pick = function(row, keys) {
       var rowKeys = Object.keys(row || {});
@@ -206,6 +219,7 @@ export default function ForecastView(props) {
             <thead>
               <tr style={{ background: C.raised }}>
                 <th style={{ textAlign: "left", padding: "8px 10px", fontSize: 12, color: C.dim }}>SKU</th>
+                <th style={{ textAlign: "left", padding: "8px 10px", fontSize: 12, color: C.dim }}>Description</th>
                 <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Cases</th>
                 <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Revenue</th>
                 <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Labor Cost</th>
@@ -214,11 +228,13 @@ export default function ForecastView(props) {
               </tr>
             </thead>
             <tbody>
-              {!topSku.length && <tr><td colSpan={6} style={{ padding: 16, textAlign: "center", color: C.dim }}>No forecast rows yet.</td></tr>}
+              {!topSku.length && <tr><td colSpan={7} style={{ padding: 16, textAlign: "center", color: C.dim }}>No forecast rows yet.</td></tr>}
               {topSku.map(function(r, idx) {
+                var desc = descriptionBySku[r.sku] || descriptionBySku[String(r.sku || "").toLowerCase()] || "--";
                 return (
                   <tr key={r.sku + "-" + idx} style={{ borderBottom: "1px solid " + C.border }}>
                     <td style={{ padding: "8px 10px", fontSize: 13, color: C.bright, fontWeight: 600 }}>{r.sku}</td>
+                    <td style={{ padding: "8px 10px", fontSize: 13, color: C.text }}>{desc}</td>
                     <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{safeNum(r.planned_cases).toLocaleString()}</td>
                     <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{fmtMoney(r.revenue)}</td>
                     <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{fmtMoney(r.labor_cost)}</td>
