@@ -34,7 +34,44 @@ export default function ProductionReadiness() {
     edrData: ds.edrData, dockData: ds.dockData,
   });
 
-  const [activeView, setActiveView] = useState("overview");
+  var parseInitialPermalink = function() {
+    if (typeof window === "undefined") return { view: "overview", wo: {} };
+    var qs = new URLSearchParams(window.location.search || "");
+    var allowedViews = { overview:true, aicopilot:true, operations:true, forecast:true, workorders:true, supplyrisk:true, sandbox:true, flags:true, itemmaster:true };
+    var rawView = String(qs.get("view") || "overview");
+    var view = allowedViews[rawView] ? rawView : "overview";
+    var preset = String(qs.get("preset") || "").trim().toLowerCase();
+    var wo = {
+      q: String(qs.get("wo_q") || ""),
+      runStatus: String(qs.get("wo_run_status") || "all"),
+      woStatus: String(qs.get("wo_wo_status") || "Booked"),
+      customer: String(qs.get("wo_customer") || "all"),
+      month: String(qs.get("wo_month") || "all"),
+      packType: String(qs.get("wo_pack") || "all"),
+      shared: qs.get("wo_shared") === "1",
+      runNext: qs.get("wo_run_next") === "1",
+      runNextLimit: String(qs.get("wo_run_next_limit") || "12"),
+      sortField: String(qs.get("wo_sort_field") || "readiness"),
+      sortDir: String(qs.get("wo_sort_dir") || "desc"),
+      preset: preset
+    };
+    if (preset === "run-next") {
+      wo.runNext = true;
+      wo.woStatus = "all";
+      wo.runStatus = "all";
+      wo.sortField = "dispatchScore";
+      wo.sortDir = "desc";
+    } else if (preset === "shared") {
+      wo.shared = true;
+    } else if (preset === "blocked") {
+      wo.runStatus = "blocked";
+    } else if (preset === "ready") {
+      wo.runStatus = "ready";
+    }
+    return { view: view, wo: wo };
+  };
+  const [activeView, setActiveView] = useState(function() { return parseInitialPermalink().view; });
+  const [workOrdersPermalinkState, setWorkOrdersPermalinkState] = useState(function() { return parseInitialPermalink().wo; });
   const [showSettings, setShowSettings] = useState(false);
   const [showDataSetup, setShowDataSetup] = useState(false);
   const [showDataControlsPanel, setShowDataControlsPanel] = useState(false);
@@ -58,6 +95,43 @@ export default function ProductionReadiness() {
   const [userActivityError, setUserActivityError] = useState("");
   const [userActivityRows, setUserActivityRows] = useState([]);
   const [showAskAi, setShowAskAi] = useState(false);
+
+  var updatePermalink = useCallback(function(next) {
+    if (typeof window === "undefined") return;
+    var params = new URLSearchParams(window.location.search || "");
+    var view = String(next && next.view ? next.view : activeView || "overview");
+    params.set("view", view);
+    var wo = Object.assign({}, workOrdersPermalinkState || {}, (next && next.wo) ? next.wo : {});
+    var setOrDelete = function(key, value, defaultValue) {
+      var val = value == null ? "" : String(value);
+      if (val === "" || val === String(defaultValue)) params.delete(key);
+      else params.set(key, val);
+    };
+    setOrDelete("wo_q", wo.q || "", "");
+    setOrDelete("wo_run_status", wo.runStatus || "all", "all");
+    setOrDelete("wo_wo_status", wo.woStatus || "Booked", "Booked");
+    setOrDelete("wo_customer", wo.customer || "all", "all");
+    setOrDelete("wo_month", wo.month || "all", "all");
+    setOrDelete("wo_pack", wo.packType || "all", "all");
+    setOrDelete("wo_run_next_limit", wo.runNextLimit || "12", "12");
+    setOrDelete("wo_sort_field", wo.sortField || "readiness", "readiness");
+    setOrDelete("wo_sort_dir", wo.sortDir || "desc", "desc");
+    if (wo.shared) params.set("wo_shared", "1"); else params.delete("wo_shared");
+    if (wo.runNext) params.set("wo_run_next", "1"); else params.delete("wo_run_next");
+    var preset = String(wo.preset || "");
+    if (preset) params.set("preset", preset); else params.delete("preset");
+    var nextUrl = window.location.pathname + "?" + params.toString();
+    window.history.replaceState(null, "", nextUrl);
+  }, [activeView, workOrdersPermalinkState]);
+
+  useEffect(function() {
+    updatePermalink({ view: activeView });
+  }, [activeView, updatePermalink]);
+
+  var handleWorkOrdersPermalinkChange = useCallback(function(woState) {
+    setWorkOrdersPermalinkState(woState || {});
+    updatePermalink({ view: "workorders", wo: woState || {} });
+  }, [updatePermalink]);
 
   var showAutoBootstrap = autoBootstrapEnabled;
 
@@ -862,7 +936,7 @@ export default function ProductionReadiness() {
           {activeView === "aicopilot" && <AICopilotView summary={summaryForUI} criticalItems={criticalItemsForUI} dispatchQueue={dispatchQueue || []} productionSegments={productionSegmentsForUI} evoconData={ds.evoconData || []} onNavigate={setActiveView} />}
           {activeView === "operations" && <OperationsView productionSegments={productionSegmentsForUI} productionDataRaw={ds.productionData || []} evoconData={ds.evoconData || []} evoconTimestamp={ds.evoconTimestamp || evoconLastSyncAt} itemMaster={ds.itemMaster || []} />}
           {activeView === "forecast" && <ForecastView workOrders={ds.workOrders || []} itemMaster={ds.itemMaster || []} productionData={ds.productionData || []} />}
-          {activeView === "workorders" && <WorkOrdersView analysis={analysisForUI} woStatuses={woStatusesForUI} woCustomers={woCustomersForUI} recommendations={recommendationsForUI} dispatchQueue={dispatchQueue || []} prefilterCustomer={workOrdersPrefilterCustomer} prefilterNonce={workOrdersPrefilterNonce} />}
+          {activeView === "workorders" && <WorkOrdersView analysis={analysisForUI} woStatuses={woStatusesForUI} woCustomers={woCustomersForUI} recommendations={recommendationsForUI} dispatchQueue={dispatchQueue || []} prefilterCustomer={workOrdersPrefilterCustomer} prefilterNonce={workOrdersPrefilterNonce} initialFilters={workOrdersPermalinkState} onPermalinkChange={handleWorkOrdersPermalinkChange} />}
           {activeView === "itemmaster" && <ItemMasterView itemMaster={ds.itemMaster || []} inventory={ds.inventory || []} />}
           {activeView === "supplyrisk" && <SupplyRiskView rawCriticalItems={criticalItemsForUI} inboundCoverage={inboundCoverage} timelineData={timelineData} deliveriesV2={deliveriesV2} />}
           {activeView === "sandbox" && <SandboxView />}

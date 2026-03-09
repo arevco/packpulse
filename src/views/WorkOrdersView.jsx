@@ -29,21 +29,22 @@ function parseDateValue(value) {
   return isNaN(parsed) ? null : parsed;
 }
 
-export default function WorkOrdersView({ analysis, woStatuses, woCustomers, recommendations, dispatchQueue, prefilterCustomer, prefilterNonce }) {
+export default function WorkOrdersView({ analysis, woStatuses, woCustomers, recommendations, dispatchQueue, prefilterCustomer, prefilterNonce, initialFilters, onPermalinkChange }) {
   const { C, sans, mono } = useTheme();
   const { thC, tdN, tdM, thDS, tdDN, tdDM, truncate } = useStyles();
+  var initial = initialFilters || {};
 
-  const [searchTerm, setSearchTerm] = useState("");
-  const [filterStatus, setFilterStatus] = useState("all");
-  const [filterWoStatus, setFilterWoStatus] = useState("Booked");
-  const [filterCustomer, setFilterCustomer] = useState("all");
-  const [filterDueMonth, setFilterDueMonth] = useState("all");
-  const [filterPackType, setFilterPackType] = useState("all");
-  const [filterShared, setFilterShared] = useState(false);
-  const [filterRunNext, setFilterRunNext] = useState(false);
-  const [runNextLimit, setRunNextLimit] = useState("12");
-  const [sortField, setSortField] = useState("readiness");
-  const [sortDir, setSortDir] = useState("desc");
+  const [searchTerm, setSearchTerm] = useState(String(initial.q || ""));
+  const [filterStatus, setFilterStatus] = useState(String(initial.runStatus || "all"));
+  const [filterWoStatus, setFilterWoStatus] = useState(String(initial.woStatus || "Booked"));
+  const [filterCustomer, setFilterCustomer] = useState(String(initial.customer || "all"));
+  const [filterDueMonth, setFilterDueMonth] = useState(String(initial.month || "all"));
+  const [filterPackType, setFilterPackType] = useState(String(initial.packType || "all"));
+  const [filterShared, setFilterShared] = useState(!!initial.shared);
+  const [filterRunNext, setFilterRunNext] = useState(!!initial.runNext);
+  const [runNextLimit, setRunNextLimit] = useState(String(initial.runNextLimit || "12"));
+  const [sortField, setSortField] = useState(String(initial.sortField || "readiness"));
+  const [sortDir, setSortDir] = useState(String(initial.sortDir || "desc"));
   const [expandedWOs, setExpandedWOs] = useState({});
 
   var runStatusMeta = function(s) {
@@ -124,6 +125,23 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     setFilterRunNext(false);
     setSearchTerm("");
   }, [prefilterCustomer, prefilterNonce]);
+
+  useEffect(function() {
+    if (!onPermalinkChange) return;
+    onPermalinkChange({
+      q: searchTerm || "",
+      runStatus: filterStatus,
+      woStatus: filterWoStatus,
+      customer: filterCustomer,
+      month: filterDueMonth,
+      packType: filterPackType,
+      shared: !!filterShared,
+      runNext: !!filterRunNext,
+      runNextLimit: runNextLimit,
+      sortField: sortField,
+      sortDir: sortDir
+    });
+  }, [onPermalinkChange, searchTerm, filterStatus, filterWoStatus, filterCustomer, filterDueMonth, filterPackType, filterShared, filterRunNext, runNextLimit, sortField, sortDir]);
 
   var handleSort = f => { if (sortField === f) setSortDir(d => d==="asc"?"desc":"asc"); else { setSortField(f); setSortDir("desc"); } };
   var woCommitKey = function(wo) { return [wo.woNum || "", wo.productSkuRaw || "", wo.dueDate || ""].join("|"); };
@@ -711,6 +729,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
         </select>
       )}
       <Button onClick={function() { setFilterShared(function(v) { return !v; }); }} variant={filterShared ? "active" : "outline"} size="default" className="shrink-0">Shared</Button>
+      <Button onClick={function() { if (typeof navigator !== "undefined" && navigator.clipboard) navigator.clipboard.writeText(window.location.href); }} variant="outline" size="default" className="shrink-0">Copy Link</Button>
       <Button onClick={exportCSV} variant="outline" size="default" className="shrink-0">CSV</Button>
       <Button onClick={exportPDF} variant="outline" size="default" className="shrink-0">PDF</Button>
     </div>
