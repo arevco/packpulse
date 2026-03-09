@@ -181,36 +181,42 @@ export default function ProductionReadiness() {
 
   var handleNulogyData = useCallback(function(results) {
     var ts = new Date();
+    var getRows = function(payload) {
+      if (!payload) return [];
+      if (Array.isArray(payload)) return payload;
+      if (Array.isArray(payload.data)) return payload.data;
+      return [];
+    };
     if (results.inventory) {
-      ds.setInventory(results.inventory.data);
+      ds.setInventory(getRows(results.inventory));
       ds.setInvFileName("Nulogy Sync");
       ds.setInvTimestamp(ts);
     }
     if (results.workorders) {
-      ds.setWorkOrders(results.workorders.data);
+      ds.setWorkOrders(getRows(results.workorders));
       ds.setWoFileName("Nulogy Sync");
       ds.setWoTimestamp(ts);
     }
     if (results.itemmaster) {
-      ds.setItemMaster(results.itemmaster.data);
+      ds.setItemMaster(getRows(results.itemmaster));
       ds.setItemMasterFileName("Nulogy Sync");
       ds.setItemMasterTimestamp(ts);
     }
     if (results.production) {
-      ds.setProductionData(results.production.data);
+      ds.setProductionData(getRows(results.production));
       ds.setProductionFileName("Nulogy Sync");
       ds.setProductionTimestamp(ts);
       fetch("/api/cache/production-events", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows: results.production.data || [], syncedAt: ts.toISOString() })
+        body: JSON.stringify({ rows: getRows(results.production), syncedAt: ts.toISOString() })
       }).catch(function() {
         // Non-blocking: local dashboard still works even if trend ingest fails.
       });
     }
     if (results.bom) {
-      ds.setBoms(results.bom.data);
+      ds.setBoms(getRows(results.bom));
       ds.setBomFileName("Nulogy Sync");
       ds.setBomTimestamp(ts);
     }
@@ -850,7 +856,7 @@ export default function ProductionReadiness() {
         <Suspense fallback={<Card className="mt-3 p-4 text-sm text-[rgb(var(--muted))]">Loading view...</Card>}>
           {activeView === "overview" && <OverviewView analysis={analysisForUI} woStatuses={woStatusesForUI} onSelectCustomer={openWorkOrdersForCustomer} />}
           {activeView === "aicopilot" && <AICopilotView summary={summaryForUI} criticalItems={criticalItemsForUI} dispatchQueue={dispatchQueue || []} productionSegments={productionSegmentsForUI} evoconData={ds.evoconData || []} onNavigate={setActiveView} />}
-          {activeView === "operations" && <OperationsView productionSegments={productionSegmentsForUI} productionDataRaw={ds.productionData || []} evoconData={ds.evoconData || []} evoconTimestamp={ds.evoconTimestamp || evoconLastSyncAt} />}
+          {activeView === "operations" && <OperationsView productionSegments={productionSegmentsForUI} productionDataRaw={ds.productionData || []} evoconData={ds.evoconData || []} evoconTimestamp={ds.evoconTimestamp || evoconLastSyncAt} itemMaster={ds.itemMaster || []} />}
           {activeView === "workorders" && <WorkOrdersView analysis={analysisForUI} woStatuses={woStatusesForUI} woCustomers={woCustomersForUI} recommendations={recommendationsForUI} dispatchQueue={dispatchQueue || []} prefilterCustomer={workOrdersPrefilterCustomer} prefilterNonce={workOrdersPrefilterNonce} />}
           {activeView === "itemmaster" && <ItemMasterView itemMaster={ds.itemMaster || []} inventory={ds.inventory || []} />}
           {activeView === "supplyrisk" && <SupplyRiskView rawCriticalItems={criticalItemsForUI} inboundCoverage={inboundCoverage} timelineData={timelineData} deliveriesV2={deliveriesV2} />}

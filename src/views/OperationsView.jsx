@@ -439,7 +439,7 @@ function mergeDaySeries(baseRows, extraRows) {
   return Object.values(map).sort(function(a, b) { return String(b.date || "").localeCompare(String(a.date || "")); });
 }
 
-export default function OperationsView({ productionSegments, productionDataRaw, evoconData, evoconTimestamp }) {
+export default function OperationsView({ productionSegments, productionDataRaw, evoconData, evoconTimestamp, itemMaster }) {
   const { C, mono } = useTheme();
   const [windowPreset, setWindowPreset] = useState("last_14");
   const initialRange = presetRange("last_14");
@@ -558,15 +558,62 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     loadAll();
   }, [windowPreset, rangeStart, rangeEnd]);
 
+  var normalizeSkuKey = function(v) {
+    return String(v || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  };
+
   var targetBySku = useMemo(function() {
     var map = {};
     targets.forEach(function(t) {
-      var k = String(t.item_code || "").trim();
-      if (!k) return;
-      if (!map[k]) map[k] = t;
+      var raw = String(t.item_code || "").trim();
+      if (!raw) return;
+      var rev = safeNum(t.revenue_per_case);
+      if (!(rev > 0)) return;
+      var norm = normalizeSkuKey(raw);
+      var payload = {
+        revenue_per_case: rev,
+        target_cases_per_hour: safeNum(t.target_cases_per_hour),
+        source: "ops_target"
+      };
+      if (!map[raw]) map[raw] = payload;
+      if (norm && !map[norm]) map[norm] = payload;
     });
     return map;
   }, [targets]);
+
+  var itemMasterPriceBySku = useMemo(function() {
+    var rows = Array.isArray(itemMaster) ? itemMaster : [];
+    var map = {};
+    rows.forEach(function(r) {
+      var rawSku = pickFieldLooseLocal(r, ["Item Code", "Code", "item_code", "code"]);
+      var raw = String(rawSku || "").trim();
+      if (!raw) return;
+      var fgRaw = String(pickFieldLooseLocal(r, ["Is Finished Good", "is_finished_good"]) || "").trim().toLowerCase();
+      if (fgRaw && !(fgRaw === "true" || fgRaw === "1" || fgRaw === "yes" || fgRaw === "y")) return;
+      var cost = safeNum(pickFieldLooseLocal(r, [
+        "Cost Per Unit", "cost_per_unit", "Unit Cost", "unit_cost",
+        "Standard Cost", "standard_cost", "Cost Per Base Unit", "cost_per_base_unit"
+      ]));
+      if (!(cost > 0)) return;
+      var norm = normalizeSkuKey(raw);
+      if (!map[raw]) map[raw] = cost;
+      if (norm && !map[norm]) map[norm] = cost;
+    });
+    return map;
+  }, [itemMaster]);
+
+  var revenueTargetForSku = function(itemCode) {
+    var raw = String(itemCode || "").trim();
+    if (!raw) return null;
+    var norm = normalizeSkuKey(raw);
+    var manual = targetBySku[raw] || (norm ? targetBySku[norm] : null);
+    if (manual && safeNum(manual.revenue_per_case) > 0) return manual;
+    var imCost = itemMasterPriceBySku[raw] || (norm ? itemMasterPriceBySku[norm] : 0);
+    if (safeNum(imCost) > 0) {
+      return { revenue_per_case: safeNum(imCost), target_cases_per_hour: 0, source: "item_master_cost" };
+    }
+    return null;
+  };
 
   var localNulogySeries = useMemo(function() {
     var shiftRows = (productionSegments && Array.isArray(productionSegments.shiftRows)) ? productionSegments.shiftRows : [];
@@ -856,11 +903,11 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
 
     var estimatedRevenue = filteredBreakdown.bySku.reduce(function(sum, s) {
       var k = String(s.item_code || "").trim();
-      var t = targetBySku[k];
+      var t = revenueTargetForSku(k);
       if (!t) return sum;
       return sum + safeNum(s.units) * safeNum(t.revenue_per_case);
     }, 0);
-    var mappedSkuCount = filteredBreakdown.bySku.filter(function(s) { return !!targetBySku[String(s.item_code || "").trim()]; }).length;
+    var mappedSkuCount = filteredBreakdown.bySku.filter(function(s) { return !!revenueTargetForSku(String(s.item_code || "").trim()); }).length;
     var unmappedSkuCount = Math.max(0, filteredBreakdown.bySku.length - mappedSkuCount);
 
     return {
@@ -875,18 +922,19 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       unmappedSkuCount: unmappedSkuCount,
       byShift: byShift,
     };
-  }, [filteredTrends, filteredInputs, rates, filteredBreakdown, targetBySku, effectiveRange.end]);
+  }, [filteredTrends, filteredInputs, rates, filteredBreakdown, targetBySku, itemMasterPriceBySku, effectiveRange.end]);
 
   var topSku = useMemo(function() {
     return filteredBreakdown.bySku.slice(0, 10).map(function(s) {
-      var t = targetBySku[String(s.item_code || "").trim()];
+      var t = revenueTargetForSku(String(s.item_code || "").trim());
       return {
         item_code: s.item_code,
         units: safeNum(s.units),
         estRev: t ? safeNum(t.revenue_per_case) * safeNum(s.units) : null,
+        revSource: t && t.source ? t.source : null,
       };
     });
-  }, [filteredBreakdown, targetBySku]);
+  }, [filteredBreakdown, targetBySku, itemMasterPriceBySku]);
 
   var commandBoard = useMemo(function() {
     var byDay = filteredTrends.byDay || [];
@@ -2031,7 +2079,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                   </tbody>
                 </table>
               </TableShell>
-              <div className="mt-2 text-xs text-[rgb(var(--muted))]">SKU targets mapped: {metrics.mappedSkuCount} | unmapped: {metrics.unmappedSkuCount}</div>
+              <div className="mt-2 text-xs text-[rgb(var(--muted))]">Revenue mapped (SKU target or Item Master Cost): {metrics.mappedSkuCount} | unmapped: {metrics.unmappedSkuCount}</div>
             </>
           )}
         </Card>
