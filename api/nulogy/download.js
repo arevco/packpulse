@@ -299,6 +299,7 @@ export default async function handler(req, res) {
 
   const downloadUrl = req.query.url;
   const reportType = req.query.type;
+  const rawMode = String(req.query.raw || "") === "1";
 
   if (!downloadUrl) {
     return res.status(400).json({ error: "Missing url parameter" });
@@ -323,8 +324,8 @@ export default async function handler(req, res) {
     // Capture original headers before transformation
     const originalHeaders = rows.length > 0 ? Object.keys(rows[0]) : [];
 
-    // Transform column names for PackPulse compatibility
-    const transformed = transformColumns(rows, reportType);
+    // Transform column names for PackPulse compatibility unless raw mode requested.
+    const transformed = rawMode ? rows : transformColumns(rows, reportType);
 
     return res.status(200).json({
       data: transformed,

@@ -3,7 +3,7 @@ import { useTheme } from "../theme";
 import { Input } from "../components/ui/input";
 import { Badge } from "../components/ui/badge";
 import TableShell from "../components/ui/table-shell";
-import { safeNum } from "../utils";
+import { safeNum, triggerDownload } from "../utils";
 
 function pickValue(row, keys) {
   if (!row || !keys || !keys.length) return "";
@@ -53,6 +53,7 @@ export default function ItemMasterView(props) {
   var [costByItemId, setCostByItemId] = useState({});
   var [loadingBackfill, setLoadingBackfill] = useState(false);
   var [backfillMsg, setBackfillMsg] = useState("");
+  var [exportingFull, setExportingFull] = useState(false);
 
   var inventoryCostBySku = useMemo(function() {
     var out = {};
@@ -130,6 +131,67 @@ export default function ItemMasterView(props) {
     }
   };
 
+  var escapeCsv = function(value) {
+    var s = String(value == null ? "" : value);
+    if (/[",\n]/.test(s)) return "\"" + s.replace(/"/g, "\"\"") + "\"";
+    return s;
+  };
+
+  var exportFullItemMaster = async function() {
+    if (exportingFull) return;
+    setExportingFull(true);
+    setBackfillMsg("");
+    try {
+      var createRes = await fetch("/api/nulogy/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reportType: "itemmaster" })
+      });
+      var createBody = await createRes.json();
+      if (!createRes.ok) throw new Error((createBody && createBody.error) || "Could not start item master report");
+      var statusUrl = createBody.statusUrl;
+      if (!statusUrl) throw new Error("No status URL returned from create.");
+
+      var downloadUrl = "";
+      for (var i = 0; i < 90; i++) {
+        await new Promise(function(resolve) { setTimeout(resolve, 2500); });
+        var stRes = await fetch("/api/nulogy/status?url=" + encodeURIComponent(statusUrl));
+        var stBody = await stRes.json();
+        if (!stRes.ok) throw new Error((stBody && stBody.error) || "Status check failed");
+        if (stBody.status === "COMPLETED" && stBody.downloadUrl) {
+          downloadUrl = stBody.downloadUrl;
+          break;
+        }
+        if (stBody.status === "FAILED" || stBody.status === "ERROR") {
+          throw new Error("Nulogy report generation failed.");
+        }
+      }
+      if (!downloadUrl) throw new Error("Timed out waiting for report completion.");
+
+      var dlRes = await fetch("/api/nulogy/download?url=" + encodeURIComponent(downloadUrl) + "&type=itemmaster&raw=1");
+      var dlBody = await dlRes.json();
+      if (!dlRes.ok) throw new Error((dlBody && dlBody.error) || "Could not download item master data");
+      var data = Array.isArray(dlBody && dlBody.data) ? dlBody.data : [];
+      var headers = Array.isArray(dlBody && dlBody.originalHeaders) && dlBody.originalHeaders.length
+        ? dlBody.originalHeaders
+        : (data.length ? Object.keys(data[0]) : []);
+      if (!headers.length) throw new Error("No headers returned from Nulogy item master download.");
+
+      var lines = [];
+      lines.push(headers.map(escapeCsv).join(","));
+      data.forEach(function(row) {
+        lines.push(headers.map(function(h) { return escapeCsv(row[h]); }).join(","));
+      });
+      var stamp = new Date().toISOString().slice(0, 10);
+      triggerDownload(lines.join("\n"), "nulogy_item_master_full_" + stamp + ".csv", "text/csv");
+      setBackfillMsg("Downloaded full item master CSV (" + data.length + " rows).");
+    } catch (err) {
+      setBackfillMsg(err && err.message ? err.message : "Could not export full item master CSV.");
+    } finally {
+      setExportingFull(false);
+    }
+  };
+
   return (
     <div>
       <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -162,23 +224,24 @@ export default function ItemMasterView(props) {
         >
           {loadingBackfill ? "Backfilling..." : ("Backfill Cost (" + backfillableIds.length + ")")}
         </button>
-        <a
-          href="/api/nulogy/itemmaster-full"
+        <button
+          type="button"
+          onClick={exportFullItemMaster}
+          disabled={exportingFull}
           style={{
             height: 34,
-            lineHeight: "34px",
             padding: "0 10px",
             borderRadius: 8,
             border: "1px solid " + C.border,
-            background: C.surface,
+            background: exportingFull ? C.raised : C.surface,
             color: C.text,
             fontSize: 12,
-            textDecoration: "none"
+            cursor: exportingFull ? "not-allowed" : "pointer"
           }}
           title="Run a full item_master API export and download raw CSV"
         >
-          Download Full Item Master CSV
-        </a>
+          {exportingFull ? "Exporting..." : "Download Full Item Master CSV"}
+        </button>
       </div>
       {!!backfillMsg && <div className="mb-2 text-xs text-[rgb(var(--muted))]">{backfillMsg}</div>}
       <TableShell>
