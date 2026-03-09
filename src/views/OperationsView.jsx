@@ -439,12 +439,14 @@ function mergeDaySeries(baseRows, extraRows) {
   return Object.values(map).sort(function(a, b) { return String(b.date || "").localeCompare(String(a.date || "")); });
 }
 
-export default function OperationsView({ productionSegments, productionDataRaw, evoconData, evoconTimestamp, itemMaster }) {
+export default function OperationsView({ productionSegments, productionDataRaw, evoconData, evoconTimestamp, itemMaster, initialFilters, onPermalinkChange }) {
   const { C, mono } = useTheme();
-  const [windowPreset, setWindowPreset] = useState("last_14");
+  var initial = initialFilters || {};
+  var initialPreset = String(initial.preset || "last_14");
+  const [windowPreset, setWindowPreset] = useState(initialPreset);
   const initialRange = presetRange("last_14");
-  const [rangeStart, setRangeStart] = useState(initialRange.start);
-  const [rangeEnd, setRangeEnd] = useState(initialRange.end);
+  const [rangeStart, setRangeStart] = useState(String(initial.start || initialRange.start));
+  const [rangeEnd, setRangeEnd] = useState(String(initial.end || initialRange.end));
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [trends, setTrends] = useState(null);
@@ -492,6 +494,15 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     }
     return presetRange(windowPreset);
   }, [windowPreset, rangeStart, rangeEnd, initialRange.start, initialRange.end]);
+
+  useEffect(function() {
+    if (!onPermalinkChange) return;
+    onPermalinkChange({
+      preset: windowPreset,
+      start: rangeStart,
+      end: rangeEnd
+    });
+  }, [onPermalinkChange, windowPreset, rangeStart, rangeEnd]);
 
   var applyPreset = function(nextPreset) {
     var cfg = presetRange(nextPreset);
