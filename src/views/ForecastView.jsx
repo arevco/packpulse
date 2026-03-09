@@ -32,6 +32,9 @@ export default function ForecastView(props) {
   var [loading, setLoading] = useState(false);
   var [error, setError] = useState("");
   var [payload, setPayload] = useState(null);
+  var [showAdvanced, setShowAdvanced] = useState(false);
+  var [laborTemplates, setLaborTemplates] = useState([]);
+  var [overrides, setOverrides] = useState([]);
 
   useEffect(function() {
     if (initial.month) setMonthKey(String(initial.month));
@@ -52,6 +55,34 @@ export default function ForecastView(props) {
     });
   }, [onPermalinkChange, monthKey, overheadGlobal, cogsNonLabor, equipmentRental]);
 
+  useEffect(function() {
+    var cancelled = false;
+    (async function() {
+      try {
+        var res = await fetch("/api/ops/config", { credentials: "include" });
+        var body = await res.json();
+        if (!res.ok || cancelled) return;
+        var rates = Array.isArray(body && body.rates) ? body.rates : [];
+        if (!rates.length) return;
+        var seeded = rates.map(function(r) {
+          return {
+            sku: "",
+            product_family: "",
+            pack_type: "",
+            line_name: "",
+            role: String(r.role || "").trim().toLowerCase(),
+            headcount_assumed: 1,
+            hourly_rate: (safeNum(r.hourly_rate) * (1 + safeNum(r.markup_pct))).toFixed(2)
+          };
+        }).filter(function(r) { return !!r.role; });
+        setLaborTemplates(seeded);
+      } catch (e) {
+        // noop
+      }
+    })();
+    return function() { cancelled = true; };
+  }, []);
+
   var runForecast = useCallback(async function() {
     setLoading(true);
     setError("");
@@ -64,6 +95,8 @@ export default function ForecastView(props) {
           monthKey: monthKey,
           workOrders: workOrders,
           itemMaster: itemMaster,
+          laborTemplates: laborTemplates,
+          overrides: overrides,
           globalAssumptions: {
             overhead_global: safeNum(overheadGlobal),
             cogs_non_labor: safeNum(cogsNonLabor),
@@ -79,7 +112,7 @@ export default function ForecastView(props) {
     } finally {
       setLoading(false);
     }
-  }, [monthKey, overheadGlobal, cogsNonLabor, equipmentRental, workOrders, itemMaster]);
+  }, [monthKey, overheadGlobal, cogsNonLabor, equipmentRental, workOrders, itemMaster, laborTemplates, overrides]);
 
   useEffect(function() {
     if (!workOrders.length) return;
@@ -176,7 +209,109 @@ export default function ForecastView(props) {
           <Input type="number" value={equipmentRental} onChange={function(e) { setEquipmentRental(e.target.value); }} className="h-10 w-36 text-sm" />
         </div>
         <Button onClick={runForecast} disabled={loading}>{loading ? "Running..." : "Run Forecast"}</Button>
+        <Button onClick={function() { setShowAdvanced(function(v) { return !v; }); }} variant={showAdvanced ? "active" : "outline"}>
+          {showAdvanced ? "Hide Assumptions" : "Advanced Assumptions"}
+        </Button>
       </div>
+
+      {showAdvanced && (
+        <div className="mb-3 space-y-3 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-3">
+          <div className="text-sm font-semibold text-[rgb(var(--foreground))]">Labor Template Rules (fewest edits: use pack type + line)</div>
+          <div className="text-xs text-[rgb(var(--muted))]">Resolution order uses SKU/line first, then pack type/family, then line/global defaults.</div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ background: C.raised }}>
+                  {["SKU", "Family", "Pack Type", "Line", "Role", "Headcount", "Hourly Rate", ""].map(function(h) {
+                    return <th key={h} style={{ textAlign: "left", padding: "6px 8px", fontSize: 12, color: C.dim }}>{h}</th>;
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {!laborTemplates.length && (
+                  <tr><td colSpan={8} style={{ padding: 10, color: C.dim }}>No template rows. Add one below.</td></tr>
+                )}
+                {laborTemplates.map(function(r, idx) {
+                  var setRow = function(key, val) {
+                    setLaborTemplates(function(prev) {
+                      var next = prev.slice();
+                      next[idx] = Object.assign({}, next[idx], { [key]: val });
+                      return next;
+                    });
+                  };
+                  return (
+                    <tr key={idx} style={{ borderBottom: "1px solid " + C.border }}>
+                      <td style={{ padding: 6 }}><Input value={r.sku || ""} onChange={function(e) { setRow("sku", e.target.value); }} className="h-8 w-28 text-xs" /></td>
+                      <td style={{ padding: 6 }}><Input value={r.product_family || ""} onChange={function(e) { setRow("product_family", e.target.value); }} className="h-8 w-28 text-xs" /></td>
+                      <td style={{ padding: 6 }}><Input value={r.pack_type || ""} onChange={function(e) { setRow("pack_type", e.target.value); }} className="h-8 w-28 text-xs" placeholder="e.g. 15 PACK" /></td>
+                      <td style={{ padding: 6 }}><Input value={r.line_name || ""} onChange={function(e) { setRow("line_name", e.target.value); }} className="h-8 w-24 text-xs" placeholder="DMM" /></td>
+                      <td style={{ padding: 6 }}><Input value={r.role || ""} onChange={function(e) { setRow("role", e.target.value); }} className="h-8 w-24 text-xs" /></td>
+                      <td style={{ padding: 6 }}><Input type="number" step="0.1" value={r.headcount_assumed || ""} onChange={function(e) { setRow("headcount_assumed", e.target.value); }} className="h-8 w-24 text-xs" /></td>
+                      <td style={{ padding: 6 }}><Input type="number" step="0.01" value={r.hourly_rate || ""} onChange={function(e) { setRow("hourly_rate", e.target.value); }} className="h-8 w-24 text-xs" /></td>
+                      <td style={{ padding: 6 }}>
+                        <Button size="sm" variant="outline" onClick={function() {
+                          setLaborTemplates(function(prev) { return prev.filter(function(_, i) { return i !== idx; }); });
+                        }}>Remove</Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" onClick={function() {
+              setLaborTemplates(function(prev) {
+                return prev.concat([{ sku: "", product_family: "", pack_type: "", line_name: "", role: "labor", headcount_assumed: 1, hourly_rate: 20 }]);
+              });
+            }}>Add Template Row</Button>
+          </div>
+
+          <div className="mt-2 text-sm font-semibold text-[rgb(var(--foreground))]">Throughput / Line Overrides (WO/SKU-level)</div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ background: C.raised }}>
+                  {["SKU", "Line", "Cases/Min", "Override Line", "Override Pack Type", ""].map(function(h) {
+                    return <th key={h} style={{ textAlign: "left", padding: "6px 8px", fontSize: 12, color: C.dim }}>{h}</th>;
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {!overrides.length && (
+                  <tr><td colSpan={6} style={{ padding: 10, color: C.dim }}>No overrides configured.</td></tr>
+                )}
+                {overrides.map(function(r, idx) {
+                  var setRow = function(key, val) {
+                    setOverrides(function(prev) {
+                      var next = prev.slice();
+                      next[idx] = Object.assign({}, next[idx], { [key]: val });
+                      return next;
+                    });
+                  };
+                  return (
+                    <tr key={idx} style={{ borderBottom: "1px solid " + C.border }}>
+                      <td style={{ padding: 6 }}><Input value={r.sku || ""} onChange={function(e) { setRow("sku", e.target.value); }} className="h-8 w-28 text-xs" /></td>
+                      <td style={{ padding: 6 }}><Input value={r.line_name || ""} onChange={function(e) { setRow("line_name", e.target.value); }} className="h-8 w-24 text-xs" /></td>
+                      <td style={{ padding: 6 }}><Input type="number" step="0.01" value={r.override_cases_per_min || ""} onChange={function(e) { setRow("override_cases_per_min", e.target.value); }} className="h-8 w-24 text-xs" /></td>
+                      <td style={{ padding: 6 }}><Input value={r.override_line_name || ""} onChange={function(e) { setRow("override_line_name", e.target.value); }} className="h-8 w-24 text-xs" /></td>
+                      <td style={{ padding: 6 }}><Input value={r.override_pack_type || ""} onChange={function(e) { setRow("override_pack_type", e.target.value); }} className="h-8 w-32 text-xs" /></td>
+                      <td style={{ padding: 6 }}>
+                        <Button size="sm" variant="outline" onClick={function() {
+                          setOverrides(function(prev) { return prev.filter(function(_, i) { return i !== idx; }); });
+                        }}>Remove</Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <Button size="sm" variant="outline" onClick={function() {
+            setOverrides(function(prev) { return prev.concat([{ sku: "", line_name: "", override_cases_per_min: "", override_line_name: "", override_pack_type: "" }]); });
+          }}>Add Override Row</Button>
+        </div>
+      )}
 
       {!!error && <div className="mb-2 text-sm text-[rgb(var(--danger))]">{error}</div>}
 
