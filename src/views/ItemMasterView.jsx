@@ -162,6 +162,23 @@ export default function ItemMasterView(props) {
         >
           {loadingBackfill ? "Backfilling..." : ("Backfill Cost (" + backfillableIds.length + ")")}
         </button>
+        <a
+          href="/api/nulogy/itemmaster-full"
+          style={{
+            height: 34,
+            lineHeight: "34px",
+            padding: "0 10px",
+            borderRadius: 8,
+            border: "1px solid " + C.border,
+            background: C.surface,
+            color: C.text,
+            fontSize: 12,
+            textDecoration: "none"
+          }}
+          title="Run a full item_master API export and download raw CSV"
+        >
+          Download Full Item Master CSV
+        </a>
       </div>
       {!!backfillMsg && <div className="mb-2 text-xs text-[rgb(var(--muted))]">{backfillMsg}</div>}
       <TableShell>
