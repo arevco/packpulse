@@ -110,12 +110,8 @@ const REPORT_CONFIGS = {
   itemmaster: {
     report: "item_master",
     columnSets: [
-      ["id", "item_id", "code", "description", "cost_per_unit", "unit_cost", "standard_cost", "is_subcomponent", "is_finished_good", "item_type", "item_category", "inactive", "customer"],
-      ["id", "item_id", "code", "description", "cost_per_unit", "unit_cost", "is_subcomponent", "is_finished_good", "inactive", "customer"],
-      ["id", "item_id", "code", "description", "standard_cost", "is_subcomponent", "is_finished_good", "inactive"],
-      ["id", "item_id", "code", "description", "unit_cost", "is_subcomponent", "is_finished_good", "inactive"],
-      ["code", "description", "standard_cost", "is_subcomponent", "is_finished_good", "inactive"],
-      ["code", "description", "unit_cost", "is_subcomponent", "is_finished_good", "inactive"],
+      ["code", "description", "customer", "is_subcomponent", "is_finished_good", "item_type", "item_category", "inactive", "cost_per_unit", "unit_purchase_price", "upc", "gtin", "alternate_code_1", "alternate_code_2"],
+      ["code", "description", "customer", "is_subcomponent", "is_finished_good", "item_type", "item_category", "inactive", "cost_per_unit"],
       ["code", "description", "is_subcomponent", "is_finished_good", "inactive"],
       ["code", "description", "inactive"],
       ["code", "description"],

@@ -42,6 +42,16 @@ async function createReportRun(auth, siteUuid, columnsMaybe) {
   return { ok: res.ok || res.status === 201, status: res.status, payload: payload, text: text, headers: res.headers };
 }
 
+function parseMissingColumns(errorText) {
+  var text = String(errorText || "");
+  var m = text.match(/The following columns do not exist:\s*([^.\]]+)/i);
+  if (!m || !m[1]) return [];
+  return m[1]
+    .split(",")
+    .map(function(s) { return s.replace(/[\[\]"]/g, "").trim(); })
+    .filter(Boolean);
+}
+
 async function pollToCompleted(auth, statusUrl) {
   for (var i = 0; i < MAX_POLLS; i++) {
     await sleep(POLL_INTERVAL_MS);
@@ -79,10 +89,10 @@ export default async function handler(req, res) {
     var auth = "Basic " + Buffer.from(user + ":" + pass).toString("base64");
 
     // Attempt order:
-    // 1) Omit columns to request the default/full dataset supported by tenant.
-    // 2) Fallback to broad explicit columns list.
+    // 1) Broad explicit columns list.
+    // 2) Automatically remove unsupported columns and retry.
+    // 3) Fallback to minimal known-safe list.
     var columnSets = [
-      null,
       [
         "id", "item_id", "code", "description", "customer", "customer_name",
         "is_subcomponent", "is_finished_good", "item_type", "item_category",
@@ -90,7 +100,8 @@ export default async function handler(req, res) {
         "unit_cost", "standard_cost", "average_cost", "unit_purchase_price",
         "upc", "gtin", "alternate_code_1", "alternate_code_2"
       ],
-      ["code", "description", "cost_per_unit", "unit_cost", "standard_cost", "inactive"]
+      ["code", "description", "customer", "is_subcomponent", "is_finished_good", "item_type", "item_category", "inactive", "cost_per_unit", "unit_purchase_price", "upc", "gtin", "alternate_code_1", "alternate_code_2"],
+      ["code", "description", "cost_per_unit", "inactive"]
     ];
 
     var createAttempts = [];
@@ -104,7 +115,31 @@ export default async function handler(req, res) {
         usedColumns: cols && cols.length ? cols : "(omitted)",
         error: created.ok ? "" : created.text.slice(0, 300)
       });
-      if (!created.ok) continue;
+      if (!created.ok) {
+        // Auto-prune unsupported columns and retry this attempt once before moving on.
+        if (created.status === 400 && Array.isArray(cols) && cols.length) {
+          var missing = parseMissingColumns(created.text);
+          if (missing.length) {
+            var reduced = cols.filter(function(c) { return missing.indexOf(c) === -1; });
+            if (reduced.length && reduced.length < cols.length) {
+              var createdReduced = await createReportRun(auth, siteUuid, reduced);
+              createAttempts.push({
+                attempt: i + 1,
+                status: createdReduced.status,
+                usedColumns: reduced,
+                error: createdReduced.ok ? "" : createdReduced.text.slice(0, 300)
+              });
+              if (createdReduced.ok) {
+                var locReduced = createdReduced.headers.get("location") || createdReduced.headers.get("Location");
+                var taskIdReduced = createdReduced.payload && createdReduced.payload.task_id ? createdReduced.payload.task_id : "";
+                statusUrl = locReduced || (taskIdReduced ? (NULOGY_URL + "/api/reports/report_runs/" + taskIdReduced) : "");
+                if (statusUrl) break;
+              }
+            }
+          }
+        }
+        continue;
+      }
       var loc = created.headers.get("location") || created.headers.get("Location");
       var taskId = created.payload && created.payload.task_id ? created.payload.task_id : "";
       statusUrl = loc || (taskId ? (NULOGY_URL + "/api/reports/report_runs/" + taskId) : "");
@@ -141,4 +176,3 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: err && err.message ? err.message : "Unexpected error" });
   }
 }
-
