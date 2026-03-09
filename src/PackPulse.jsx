@@ -68,10 +68,17 @@ export default function ProductionReadiness() {
     } else if (preset === "ready") {
       wo.runStatus = "ready";
     }
-    return { view: view, wo: wo };
+    var forecast = {
+      month: String(qs.get("fc_month") || ""),
+      overhead: String(qs.get("fc_overhead") || ""),
+      cogs: String(qs.get("fc_cogs") || ""),
+      equipment: String(qs.get("fc_equipment") || "")
+    };
+    return { view: view, wo: wo, forecast: forecast };
   };
   const [activeView, setActiveView] = useState(function() { return parseInitialPermalink().view; });
   const [workOrdersPermalinkState, setWorkOrdersPermalinkState] = useState(function() { return parseInitialPermalink().wo; });
+  const [forecastPermalinkState, setForecastPermalinkState] = useState(function() { return parseInitialPermalink().forecast || {}; });
   const [showSettings, setShowSettings] = useState(false);
   const [showDataSetup, setShowDataSetup] = useState(false);
   const [showDataControlsPanel, setShowDataControlsPanel] = useState(false);
@@ -96,12 +103,12 @@ export default function ProductionReadiness() {
   const [userActivityRows, setUserActivityRows] = useState([]);
   const [showAskAi, setShowAskAi] = useState(false);
 
-  var updatePermalink = useCallback(function(next) {
+  var updatePermalink = useCallback(function(nextView, woState, fcState) {
     if (typeof window === "undefined") return;
     var params = new URLSearchParams(window.location.search || "");
-    var view = String(next && next.view ? next.view : activeView || "overview");
+    var view = String(nextView || "overview");
     params.set("view", view);
-    var wo = Object.assign({}, workOrdersPermalinkState || {}, (next && next.wo) ? next.wo : {});
+    var wo = Object.assign({}, woState || {});
     var setOrDelete = function(key, value, defaultValue) {
       var val = value == null ? "" : String(value);
       if (val === "" || val === String(defaultValue)) params.delete(key);
@@ -120,18 +127,25 @@ export default function ProductionReadiness() {
     if (wo.runNext) params.set("wo_run_next", "1"); else params.delete("wo_run_next");
     var preset = String(wo.preset || "");
     if (preset) params.set("preset", preset); else params.delete("preset");
+    var fc = Object.assign({}, fcState || {});
+    setOrDelete("fc_month", fc.month || "", "");
+    setOrDelete("fc_overhead", fc.overhead || "", "");
+    setOrDelete("fc_cogs", fc.cogs || "", "");
+    setOrDelete("fc_equipment", fc.equipment || "", "");
     var nextUrl = window.location.pathname + "?" + params.toString();
     window.history.replaceState(null, "", nextUrl);
-  }, [activeView, workOrdersPermalinkState]);
+  }, []);
 
   useEffect(function() {
-    updatePermalink({ view: activeView });
-  }, [activeView, updatePermalink]);
+    updatePermalink(activeView, workOrdersPermalinkState, forecastPermalinkState);
+  }, [activeView, workOrdersPermalinkState, forecastPermalinkState, updatePermalink]);
 
   var handleWorkOrdersPermalinkChange = useCallback(function(woState) {
     setWorkOrdersPermalinkState(woState || {});
-    updatePermalink({ view: "workorders", wo: woState || {} });
-  }, [updatePermalink]);
+  }, []);
+  var handleForecastPermalinkChange = useCallback(function(fcState) {
+    setForecastPermalinkState(fcState || {});
+  }, []);
 
   var showAutoBootstrap = autoBootstrapEnabled;
 
@@ -935,7 +949,7 @@ export default function ProductionReadiness() {
           {activeView === "overview" && <OverviewView analysis={analysisForUI} woStatuses={woStatusesForUI} onSelectCustomer={openWorkOrdersForCustomer} />}
           {activeView === "aicopilot" && <AICopilotView summary={summaryForUI} criticalItems={criticalItemsForUI} dispatchQueue={dispatchQueue || []} productionSegments={productionSegmentsForUI} evoconData={ds.evoconData || []} onNavigate={setActiveView} />}
           {activeView === "operations" && <OperationsView productionSegments={productionSegmentsForUI} productionDataRaw={ds.productionData || []} evoconData={ds.evoconData || []} evoconTimestamp={ds.evoconTimestamp || evoconLastSyncAt} itemMaster={ds.itemMaster || []} />}
-          {activeView === "forecast" && <ForecastView workOrders={ds.workOrders || []} itemMaster={ds.itemMaster || []} productionData={ds.productionData || []} />}
+          {activeView === "forecast" && <ForecastView workOrders={ds.workOrders || []} itemMaster={ds.itemMaster || []} productionData={ds.productionData || []} initialFilters={forecastPermalinkState} onPermalinkChange={handleForecastPermalinkChange} />}
           {activeView === "workorders" && <WorkOrdersView analysis={analysisForUI} woStatuses={woStatusesForUI} woCustomers={woCustomersForUI} recommendations={recommendationsForUI} dispatchQueue={dispatchQueue || []} prefilterCustomer={workOrdersPrefilterCustomer} prefilterNonce={workOrdersPrefilterNonce} initialFilters={workOrdersPermalinkState} onPermalinkChange={handleWorkOrdersPermalinkChange} />}
           {activeView === "itemmaster" && <ItemMasterView itemMaster={ds.itemMaster || []} inventory={ds.inventory || []} />}
           {activeView === "supplyrisk" && <SupplyRiskView rawCriticalItems={criticalItemsForUI} inboundCoverage={inboundCoverage} timelineData={timelineData} deliveriesV2={deliveriesV2} />}

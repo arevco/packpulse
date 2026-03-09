@@ -23,6 +23,8 @@ export default function ForecastView(props) {
   var workOrders = Array.isArray(props.workOrders) ? props.workOrders : [];
   var itemMaster = Array.isArray(props.itemMaster) ? props.itemMaster : [];
   var productionData = Array.isArray(props.productionData) ? props.productionData : [];
+  var initial = props.initialFilters || {};
+  var onPermalinkChange = props.onPermalinkChange;
   var [monthKey, setMonthKey] = useState(currentMonthKey());
   var [overheadGlobal, setOverheadGlobal] = useState(0);
   var [cogsNonLabor, setCogsNonLabor] = useState(0);
@@ -30,6 +32,25 @@ export default function ForecastView(props) {
   var [loading, setLoading] = useState(false);
   var [error, setError] = useState("");
   var [payload, setPayload] = useState(null);
+
+  useEffect(function() {
+    if (initial.month) setMonthKey(String(initial.month));
+    if (initial.overhead !== "") setOverheadGlobal(String(initial.overhead));
+    if (initial.cogs !== "") setCogsNonLabor(String(initial.cogs));
+    if (initial.equipment !== "") setEquipmentRental(String(initial.equipment));
+    // Only apply once on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(function() {
+    if (!onPermalinkChange) return;
+    onPermalinkChange({
+      month: monthKey,
+      overhead: String(overheadGlobal || ""),
+      cogs: String(cogsNonLabor || ""),
+      equipment: String(equipmentRental || "")
+    });
+  }, [onPermalinkChange, monthKey, overheadGlobal, cogsNonLabor, equipmentRental]);
 
   var runForecast = useCallback(async function() {
     setLoading(true);
