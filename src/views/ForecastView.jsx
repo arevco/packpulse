@@ -18,6 +18,12 @@ function currentMonthKey() {
   return new Date().toISOString().slice(0, 7);
 }
 
+function statusLooksClosed(status) {
+  var s = String(status || "").toLowerCase();
+  if (!s) return false;
+  return s.indexOf("close") !== -1 || s.indexOf("complete") !== -1 || s.indexOf("cancel") !== -1 || s.indexOf("archive") !== -1 || s.indexOf("done") !== -1;
+}
+
 export default function ForecastView(props) {
   var C = useTheme().C;
   var workOrders = Array.isArray(props.workOrders) ? props.workOrders : [];
@@ -228,6 +234,14 @@ export default function ForecastView(props) {
     });
 
     workOrders.forEach(function(w) {
+      var status = String((w && (w["Work Order Status"] || w.project_status || w.status)) || "").trim();
+      var unitsExpected = safeNum((w && (w["Units Expected"] || w.units_expected || w["Order Qty"] || w.qtyToProduce || w.quantity)) || 0);
+      var unitsProduced = safeNum((w && (w["Units Produced"] || w.units_produced || w.produced)) || 0);
+      var unitsRemaining = safeNum((w && (w["Units Remaining"] || w.units_remaining || w.remaining)) || 0);
+      var remaining = unitsRemaining > 0 ? unitsRemaining : Math.max(0, unitsExpected - unitsProduced);
+      var isOpen = !statusLooksClosed(status) && remaining > 0;
+      if (!isOpen) return;
+
       var sku = String((w && (w["Item Code"] || w.item_code || w.productSkuRaw || w.productSku || w["Product SKU"])) || "").trim();
       var desc = String((w && (w["Description"] || w.description || w.productDesc || w.item_description || w["Item Description"])) || "").trim();
       var fam = String((w && (w["Product Family"] || w.product_family || w["Item Family"] || w.item_family || w.family)) || "").trim();
