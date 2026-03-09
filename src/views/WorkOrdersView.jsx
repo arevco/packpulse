@@ -144,15 +144,6 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     var m = String(d.getMonth() + 1).padStart(2, "0");
     return y + "-" + m;
   };
-  var dueMonthLabel = function(key) {
-    var parts = String(key || "").split("-");
-    if (parts.length !== 2) return key || "--";
-    var y = Number(parts[0]);
-    var m = Number(parts[1]) - 1;
-    var d = new Date(y, m, 1);
-    if (isNaN(d)) return key || "--";
-    return d.toLocaleDateString(undefined, { month:"short", year:"numeric" });
-  };
 
   var commitmentMap = useMemo(() => {
     if (!analysis) return {};
@@ -303,15 +294,6 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     return usage;
   }, [analysis]);
 
-  var dueMonthOptions = useMemo(function() {
-    if (!analysis) return [];
-    var set = {};
-    (analysis.results || []).forEach(function(wo) {
-      var k = dueMonthKey(wo.dueDate);
-      if (k) set[k] = true;
-    });
-    return Object.keys(set).sort();
-  }, [analysis]);
   var skuTypeOptions = useMemo(function() {
     if (!analysis) return [];
     var set = {};
@@ -679,10 +661,18 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
         <option value="all">All Customers</option>
         {woCustomers.map(s => <option key={s} value={s}>{s}</option>)}
       </select>
-      <select value={filterDueMonth} onChange={e => setFilterDueMonth(e.target.value)} className="h-10 shrink-0 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]">
-        <option value="all">All Months</option>
-        {dueMonthOptions.map(function(m) { return <option key={m} value={m}>{dueMonthLabel(m)}</option>; })}
-      </select>
+      <Input
+        type="month"
+        value={filterDueMonth === "all" ? "" : filterDueMonth}
+        onChange={function(e) { setFilterDueMonth(e.target.value || "all"); }}
+        className="h-10 w-40 shrink-0 text-sm"
+        title="Filter by due month (any month, including months not present in current data)."
+      />
+      {filterDueMonth !== "all" && (
+        <Button onClick={function() { setFilterDueMonth("all"); }} variant="outline" size="default" className="shrink-0">
+          All Months
+        </Button>
+      )}
       <select value={filterPackType} onChange={e => setFilterPackType(e.target.value)} className="h-10 shrink-0 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]">
         <option value="all">All SKU Types</option>
         {skuTypeOptions.map(function(t) { return <option key={t} value={t}>{t}</option>; })}
