@@ -1,4 +1,4 @@
-import { normalizeStr, safeNum } from "../utils.js";
+import { detectPackType, normalizeStr, safeNum } from "../utils.js";
 
 function pickValue(row, keys) {
   if (!row || typeof row !== "object") return "";
@@ -126,11 +126,23 @@ function resolveLineName(wo) {
   return String(pickValue(wo, ["Line", "line", "Line Name", "line_name"])).trim() || "Unassigned";
 }
 
+function resolvePackType(wo, override) {
+  var direct = String((override && (override.override_pack_type || override.pack_type)) || "").trim();
+  if (direct) return direct;
+  var fromWo = String(pickValue(wo, ["Pack Type", "pack_type", "Item Type", "item_type"])).trim();
+  if (fromWo) return fromWo;
+  var desc = String(pickValue(wo, ["Description", "description", "Item Description", "item_description"])).trim();
+  var sku = String(pickValue(wo, ["Item Code", "item_code", "Code", "code"])).trim();
+  return detectPackType(desc || sku, sku);
+}
+
 function normalizeTemplateRows(templateRows) {
   return (Array.isArray(templateRows) ? templateRows : [])
     .map(function(t) {
       return {
         sku: String(t.sku || t.item_code || "").trim(),
+        product_family: String(t.product_family || t.item_family || t.sku_type || "").trim(),
+        pack_type: String(t.pack_type || t.product_type || "").trim(),
         line_name: String(t.line_name || "").trim(),
         role: String(t.role || "").trim().toLowerCase(),
         headcount_assumed: safeNum(t.headcount_assumed),
@@ -140,15 +152,42 @@ function normalizeTemplateRows(templateRows) {
     .filter(function(t) { return t.role && t.hourly_rate > 0; });
 }
 
-function pickTemplateForSkuLine(templates, sku, lineName) {
+function pickTemplateForSkuLine(templates, sku, lineName, packType, productFamily) {
   var skuNorm = normalizeStr(sku);
   var lineNorm = normalizeStr(lineName);
+  var packNorm = normalizeStr(packType);
+  var familyNorm = normalizeStr(productFamily);
   var exact = templates.filter(function(t) {
     return normalizeStr(t.sku) === skuNorm && normalizeStr(t.line_name) === lineNorm;
   });
   if (exact.length) return exact;
+  var skuPackLine = templates.filter(function(t) {
+    return normalizeStr(t.sku) === skuNorm &&
+      (!packNorm || !normalizeStr(t.pack_type) || normalizeStr(t.pack_type) === packNorm) &&
+      (!lineNorm || !normalizeStr(t.line_name) || normalizeStr(t.line_name) === lineNorm);
+  });
+  if (skuPackLine.length) return skuPackLine;
   var skuOnly = templates.filter(function(t) { return normalizeStr(t.sku) === skuNorm; });
   if (skuOnly.length) return skuOnly;
+  var familyLine = templates.filter(function(t) {
+    return (
+      (familyNorm && normalizeStr(t.product_family) === familyNorm) ||
+      (packNorm && normalizeStr(t.pack_type) === packNorm)
+    ) && normalizeStr(t.line_name) === lineNorm;
+  });
+  if (familyLine.length) return familyLine;
+  var familyOnly = templates.filter(function(t) {
+    return (familyNorm && normalizeStr(t.product_family) === familyNorm) ||
+      (packNorm && normalizeStr(t.pack_type) === packNorm);
+  });
+  if (familyOnly.length) return familyOnly;
+  var lineOnly = templates.filter(function(t) {
+    return !String(t.sku || "").trim() &&
+      !String(t.product_family || "").trim() &&
+      !String(t.pack_type || "").trim() &&
+      normalizeStr(t.line_name) === lineNorm;
+  });
+  if (lineOnly.length) return lineOnly;
   var global = templates.filter(function(t) { return !String(t.sku || "").trim(); });
   return global;
 }
@@ -226,6 +265,9 @@ export function runLaborForecast(input) {
 
     var overrideKey = normalizeStr(sku) + "::" + normalizeStr(lineName);
     var override = overridesMap[overrideKey] || overridesMap[normalizeStr(sku) + "::"];
+    var packType = resolvePackType(wo, override);
+    var productFamily = String(pickValue(wo, ["Product Family", "product_family", "Item Family", "item_family"])).trim();
+    if (override && override.override_line_name) lineName = String(override.override_line_name || lineName).trim() || lineName;
     var throughput = resolveCasesPerMin(wo, override);
     if (!(throughput.value > 0)) {
       flags.push({
@@ -237,7 +279,7 @@ export function runLaborForecast(input) {
       continue;
     }
 
-    var templates = pickTemplateForSkuLine(templateRows, sku, lineName);
+    var templates = pickTemplateForSkuLine(templateRows, sku, lineName, packType, productFamily);
     if (!templates.length) {
       flags.push({
         type: "missing_labor_template",
@@ -271,6 +313,7 @@ export function runLaborForecast(input) {
       day_key: dateIso || (monthKey ? monthKey + "-01" : ""),
       wo_code: woCode,
       sku: sku || "--",
+      pack_type: packType || "",
       line_name: lineName,
       wo_status: status || "",
       rollover_source: isPriorOpenRollover ? "prior_open_balance" : (isUndatedOpen ? "undated_open_balance" : "none"),

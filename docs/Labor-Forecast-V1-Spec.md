@@ -46,6 +46,20 @@ Monthly P&L layer:
 - `gross_profit_after_cogs = gross_profit_after_prod_labor - cogs_non_labor - equipment_rental`
 - `net_operating_income = gross_profit_after_cogs - overhead_global`
 
+## Labor Template Resolution Order (Min-Input UX)
+To reduce manual edits, forecast labor assumptions resolve in this order:
+1. Work-order override (`forecast_overrides`) for SKU + line
+2. SKU + line template
+3. SKU template (any line)
+4. Product family / pack type + line template
+5. Product family / pack type template (any line)
+6. Line-only default template
+7. Global default template
+
+Notes:
+- `pack_type` can be inferred from SKU/description when not explicitly provided.
+- Throughput override (`override_cases_per_min`) still takes priority over WO throughput fields.
+
 ## Data Contracts (V1)
 ### Work Order Input (Nulogy normalized)
 - `Work Order Code`
