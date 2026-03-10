@@ -853,9 +853,7 @@ export default function ForecastView(props) {
                       <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{fmtMoney(r.line_run_labor_cost)}</td>
                       <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{fmtMoney(r.revenue)}</td>
                       <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right" }}>{isDirty ? <span style={{ color: C.warning || C.dim }}>Dirty</span> : "Saved"}</td>
-                      <td style={{ padding: "8px 10px", fontSize: 13, textAlign: "right", whiteSpace: "nowrap" }}>
-                        <Button size="sm" variant="outline" onClick={saveRow} disabled={loading || !isDirty}>Save</Button>
-                      </td>
+                      <td style={{ padding: "8px 10px", fontSize: 13, textAlign: "right", whiteSpace: "nowrap" }} />
                     </tr>,
                     isExpanded ? (
                       <tr key={rowKey + "-edit"} style={{ borderBottom: "1px solid " + C.border, background: C.surface }}>
@@ -918,7 +916,10 @@ export default function ForecastView(props) {
                             </div>
                             <div>
                               <div className="mb-1 text-[11px] text-[rgb(var(--muted))]">&nbsp;</div>
-                              <Button size="sm" variant="outline" onClick={resetRow}>Reset</Button>
+                              <div className="flex items-center gap-1">
+                                <Button size="sm" variant="outline" onClick={saveRow} disabled={loading || !isDirty}>Save</Button>
+                                <Button size="sm" variant="outline" onClick={resetRow}>Reset</Button>
+                              </div>
                             </div>
                           </div>
                         </td>
