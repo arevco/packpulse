@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "../theme";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -79,12 +79,12 @@ export default function ForecastView(props) {
   var [loading, setLoading] = useState(false);
   var [error, setError] = useState("");
   var [payload, setPayload] = useState(null);
-  var [showAdvanced, setShowAdvanced] = useState(false);
   var [laborTemplates, setLaborTemplates] = useState([]);
   var [overrides, setOverrides] = useState([]);
   var [assumptionsLoading, setAssumptionsLoading] = useState(false);
-  var [assumptionsSaving, setAssumptionsSaving] = useState(false);
-  var [assumptionsMsg, setAssumptionsMsg] = useState("");
+  var [autosaveStatus, setAutosaveStatus] = useState("idle");
+  var [autosaveError, setAutosaveError] = useState("");
+  var didLoadMonthRef = useRef({});
 
   useEffect(function() {
     if (initial.month) setMonthKey(String(initial.month));
@@ -128,32 +128,36 @@ export default function ForecastView(props) {
     var mk = String(targetMonthKey || monthKey || "").trim();
     if (!mk) return;
     setAssumptionsLoading(true);
-    setAssumptionsMsg("");
+    setAutosaveError("");
+    setAutosaveStatus("loading");
     try {
       var res = await fetch("/api/ops/forecast-assumptions?monthKey=" + encodeURIComponent(mk), { credentials: "include" });
       var body = await res.json();
       if (!res.ok) throw new Error((body && body.error) || "Could not load assumptions");
       if (body && body.status === "missing_forecast_assumptions_table") {
-        setAssumptionsMsg("Assumptions table not set up yet. Run docs/supabase-forecast-assumptions.sql in Supabase.");
+        setAutosaveStatus("error");
+        setAutosaveError("Assumptions table not set up yet.");
+        didLoadMonthRef.current[mk] = true;
         return;
       }
       if (body && body.row) {
         applySavedAssumptions(body.row);
-        setAssumptionsMsg("Loaded saved assumptions for " + mk + ".");
-      } else {
-        setAssumptionsMsg("No saved assumptions for " + mk + ".");
       }
+      didLoadMonthRef.current[mk] = true;
+      setAutosaveStatus("idle");
     } catch (err) {
-      setAssumptionsMsg(err && err.message ? err.message : "Could not load assumptions.");
+      setAutosaveStatus("error");
+      setAutosaveError(err && err.message ? err.message : "Could not load assumptions.");
+      didLoadMonthRef.current[mk] = true;
     } finally {
       setAssumptionsLoading(false);
     }
   }, [monthKey, applySavedAssumptions]);
 
   var saveAssumptions = useCallback(async function() {
-    setAssumptionsSaving(true);
-    setAssumptionsMsg("");
     try {
+      setAutosaveStatus("saving");
+      setAutosaveError("");
       var res = await fetch("/api/ops/forecast-assumptions", {
         method: "POST",
         credentials: "include",
@@ -172,14 +176,14 @@ export default function ForecastView(props) {
       var body = await res.json();
       if (!res.ok) throw new Error((body && body.error) || "Could not save assumptions");
       if (body && body.status === "missing_forecast_assumptions_table") {
-        setAssumptionsMsg("Assumptions table not set up yet. Run docs/supabase-forecast-assumptions.sql in Supabase.");
+        setAutosaveStatus("error");
+        setAutosaveError("Assumptions table not set up yet.");
         return;
       }
-      setAssumptionsMsg("Saved assumptions for " + monthKey + ".");
+      setAutosaveStatus("saved");
     } catch (err) {
-      setAssumptionsMsg(err && err.message ? err.message : "Could not save assumptions.");
-    } finally {
-      setAssumptionsSaving(false);
+      setAutosaveStatus("error");
+      setAutosaveError(err && err.message ? err.message : "Could not save assumptions.");
     }
   }, [monthKey, overheadGlobal, cogsNonLabor, equipmentRental, laborTemplates, overrides]);
 
@@ -298,6 +302,16 @@ export default function ForecastView(props) {
     loadAssumptions(monthKey);
   }, [monthKey, loadAssumptions]);
 
+  useEffect(function() {
+    if (!monthKey) return;
+    if (assumptionsLoading) return;
+    if (!didLoadMonthRef.current[monthKey]) return;
+    var id = setTimeout(function() {
+      saveAssumptions();
+    }, 900);
+    return function() { clearTimeout(id); };
+  }, [monthKey, overheadGlobal, cogsNonLabor, equipmentRental, laborTemplates, overrides, assumptionsLoading, saveAssumptions]);
+
   var forecast = payload && payload.forecast ? payload.forecast : null;
   var summary = forecast && forecast.summary ? forecast.summary : null;
   var bySku = forecast && Array.isArray(forecast.bySku) ? forecast.bySku : [];
@@ -323,64 +337,6 @@ export default function ForecastView(props) {
     });
     return out;
   }, [itemMaster]);
-  var optionLists = useMemo(function() {
-    var skuSet = {};
-    var familySet = {};
-    var packTypeSet = {};
-    var lineSet = {};
-    var woCodeSet = {};
-
-    itemMaster.forEach(function(r) {
-      var sku = String((r && (r["Item Code"] || r.Code || r.item_code || r.code)) || "").trim();
-      var desc = String((r && (r["Description"] || r.description || r["Item Description"])) || "").trim();
-      var fam = String((r && (r["Item Family"] || r.item_family || r.item_family_name || r["Family"] || r.family || r["Item Category"] || r.item_category)) || "").trim();
-      if (sku) skuSet[sku] = true;
-      if (fam) familySet[fam] = true;
-      var p = detectPackType(desc || sku, sku);
-      if (p) packTypeSet[p] = true;
-    });
-
-    workOrders.forEach(function(w) {
-      var status = String((w && (w["Work Order Status"] || w.project_status || w.status)) || "").trim();
-      var unitsExpected = safeNum((w && (w["Units Expected"] || w.units_expected || w["Order Qty"] || w.qtyToProduce || w.quantity)) || 0);
-      var unitsProduced = safeNum((w && (w["Units Produced"] || w.units_produced || w.produced)) || 0);
-      var unitsRemaining = safeNum((w && (w["Units Remaining"] || w.units_remaining || w.remaining)) || 0);
-      var remaining = unitsRemaining > 0 ? unitsRemaining : Math.max(0, unitsExpected - unitsProduced);
-      var isOpen = !statusLooksClosed(status) && remaining > 0;
-      if (!isOpen) return;
-
-      var sku = String((w && (w["Item Code"] || w.item_code || w.productSkuRaw || w.productSku || w["Product SKU"])) || "").trim();
-      var desc = String((w && (w["Description"] || w.description || w.productDesc || w.item_description || w["Item Description"])) || "").trim();
-      var fam = String((w && (w["Product Family"] || w.product_family || w["Item Family"] || w.item_family || w.family)) || "").trim();
-      var line = String((w && (w["Line"] || w.line || w["Line Name"] || w.line_name)) || "").trim();
-      var woCode = String((w && (w["Work Order Code"] || w.project_code || w["Project Code"] || w.wo_number || w.wo)) || "").trim();
-      if (sku) skuSet[sku] = true;
-      if (fam) familySet[fam] = true;
-      if (line) lineSet[line] = true;
-      if (woCode) woCodeSet[woCode] = true;
-      var p = detectPackType(desc || sku, sku);
-      if (p) packTypeSet[p] = true;
-    });
-
-    laborTemplates.forEach(function(t) {
-      var line = String(t && t.line_name || "").trim();
-      var fam = String(t && t.product_family || "").trim();
-      var pack = String(t && t.pack_type || "").trim();
-      var sku = String(t && t.sku || "").trim();
-      if (line) lineSet[line] = true;
-      if (fam) familySet[fam] = true;
-      if (pack) packTypeSet[pack] = true;
-      if (sku) skuSet[sku] = true;
-    });
-
-    return {
-      skus: Object.keys(skuSet).sort(),
-      woCodes: Object.keys(woCodeSet).sort(),
-      families: Object.keys(familySet).sort(),
-      packTypes: Object.keys(packTypeSet).sort(),
-      lines: Object.keys(lineSet).sort()
-    };
-  }, [itemMaster, workOrders, laborTemplates]);
   var actualByDay = useMemo(function() {
     var pick = function(row, keys) {
       var rowKeys = Object.keys(row || {});
@@ -575,151 +531,13 @@ export default function ForecastView(props) {
           <Input type="number" value={equipmentRental} onChange={function(e) { setEquipmentRental(e.target.value); }} className="h-10 w-36 text-sm" />
         </div>
         <Button onClick={runForecast} disabled={loading}>{loading ? "Running..." : "Run Forecast"}</Button>
-        <Button onClick={function() { setShowAdvanced(function(v) { return !v; }); }} variant={showAdvanced ? "active" : "outline"}>
-          {showAdvanced ? "Hide Assumptions" : "Advanced Assumptions"}
-        </Button>
-        <Button onClick={saveAssumptions} disabled={assumptionsSaving} variant="outline">
-          {assumptionsSaving ? "Saving..." : "Save Assumptions"}
-        </Button>
-        <Button onClick={function() { loadAssumptions(monthKey); }} disabled={assumptionsLoading} variant="outline">
-          {assumptionsLoading ? "Loading..." : "Load Assumptions"}
-        </Button>
       </div>
-      {!!assumptionsMsg && <div className="mb-2 text-xs text-[rgb(var(--muted))]">{assumptionsMsg}</div>}
-
-      {showAdvanced && (
-        <div className="mb-3 space-y-3 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-3">
-          <datalist id="forecast-sku-options">
-            {optionLists.skus.map(function(v) { return <option key={v} value={v} />; })}
-          </datalist>
-          <datalist id="forecast-wo-options">
-            {optionLists.woCodes.map(function(v) { return <option key={v} value={v} />; })}
-          </datalist>
-          <datalist id="forecast-family-options">
-            {optionLists.families.map(function(v) { return <option key={v} value={v} />; })}
-          </datalist>
-          <datalist id="forecast-pack-options">
-            {optionLists.packTypes.map(function(v) { return <option key={v} value={v} />; })}
-          </datalist>
-          <datalist id="forecast-line-options">
-            {optionLists.lines.map(function(v) { return <option key={v} value={v} />; })}
-          </datalist>
-          <div className="text-sm font-semibold text-[rgb(var(--foreground))]">Labor Template Rules (fewest edits: use pack type + line)</div>
-          <div className="text-xs text-[rgb(var(--muted))]">Resolution order uses SKU/line first, then pack type/family, then line/global defaults.</div>
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr style={{ background: C.raised }}>
-                  {["SKU", "Family", "Pack Type", "Line", "Role", "Bucket", "Headcount", "Hourly Rate", ""].map(function(h) {
-                    return <th key={h} style={{ textAlign: "left", padding: "6px 8px", fontSize: 12, color: C.dim }}>{h}</th>;
-                  })}
-                </tr>
-              </thead>
-              <tbody>
-                {!laborTemplates.length && (
-                  <tr><td colSpan={9} style={{ padding: 10, color: C.dim }}>No template rows. Add one below.</td></tr>
-                )}
-                {laborTemplates.map(function(r, idx) {
-                  var setRow = function(key, val) {
-                    setLaborTemplates(function(prev) {
-                      var next = prev.slice();
-                      next[idx] = Object.assign({}, next[idx], { [key]: val });
-                      return next;
-                    });
-                  };
-                  return (
-                    <tr key={idx} style={{ borderBottom: "1px solid " + C.border }}>
-                      <td style={{ padding: 6 }}><Input list="forecast-sku-options" value={r.sku || ""} onChange={function(e) { setRow("sku", e.target.value); }} className="h-8 w-28 text-xs" /></td>
-                      <td style={{ padding: 6 }}><Input list="forecast-family-options" value={r.product_family || ""} onChange={function(e) { setRow("product_family", e.target.value); }} className="h-8 w-28 text-xs" /></td>
-                      <td style={{ padding: 6 }}><Input list="forecast-pack-options" value={r.pack_type || ""} onChange={function(e) { setRow("pack_type", e.target.value); }} className="h-8 w-28 text-xs" placeholder="e.g. 15 PACK" /></td>
-                      <td style={{ padding: 6 }}><Input list="forecast-line-options" value={r.line_name || ""} onChange={function(e) { setRow("line_name", e.target.value); }} className="h-8 w-24 text-xs" placeholder="DMM" /></td>
-                      <td style={{ padding: 6 }}><Input value={r.role || ""} onChange={function(e) { setRow("role", e.target.value); }} className="h-8 w-24 text-xs" /></td>
-                      <td style={{ padding: 6 }}><Input value={r.labor_bucket || ""} onChange={function(e) { setRow("labor_bucket", e.target.value); }} className="h-8 w-24 text-xs" placeholder="variable/fixed" /></td>
-                      <td style={{ padding: 6 }}><Input type="number" step="0.1" value={r.headcount_assumed || ""} onChange={function(e) { setRow("headcount_assumed", e.target.value); }} className="h-8 w-24 text-xs" /></td>
-                      <td style={{ padding: 6 }}><Input type="number" step="0.01" value={r.hourly_rate || ""} onChange={function(e) { setRow("hourly_rate", e.target.value); }} className="h-8 w-24 text-xs" /></td>
-                      <td style={{ padding: 6 }}>
-                        <Button size="sm" variant="outline" onClick={function() {
-                          setLaborTemplates(function(prev) { return prev.filter(function(_, i) { return i !== idx; }); });
-                        }}>Remove</Button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" onClick={function() {
-              setLaborTemplates(function(prev) {
-                return prev.concat([{ sku: "", product_family: "", pack_type: "", line_name: "", role: "labor", labor_bucket: "variable", headcount_assumed: 1, hourly_rate: 20 }]);
-              });
-            }}>Add Template Row</Button>
-          </div>
-
-          <div className="mt-2 text-sm font-semibold text-[rgb(var(--foreground))]">Throughput / Line Overrides (WO/SKU-level)</div>
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr style={{ background: C.raised }}>
-                  {["WO", "SKU", "Line", "Cases/Min", "Override Line", "Override Pack Type", "HC Labor", "HC Operator", "HC Fork", "HC QA", "HC Maint", "HC Recycle", ""].map(function(h) {
-                    return <th key={h} style={{ textAlign: "left", padding: "6px 8px", fontSize: 12, color: C.dim }}>{h}</th>;
-                  })}
-                </tr>
-              </thead>
-              <tbody>
-                {!overrides.length && (
-                  <tr><td colSpan={13} style={{ padding: 10, color: C.dim }}>No overrides configured.</td></tr>
-                )}
-                {overrides.map(function(r, idx) {
-                  var setRow = function(key, val) {
-                    setOverrides(function(prev) {
-                      var next = prev.slice();
-                      next[idx] = Object.assign({}, next[idx], { [key]: val });
-                      return next;
-                    });
-                  };
-                  var setRoleHeadcount = function(role, val) {
-                    setOverrides(function(prev) {
-                      var next = prev.slice();
-                      var row = Object.assign({}, next[idx]);
-                      var hc = Object.assign({}, row.override_headcount_by_role || {});
-                      hc[role] = val;
-                      row.override_headcount_by_role = hc;
-                      next[idx] = row;
-                      return next;
-                    });
-                  };
-                  var roleHc = Object.assign({ labor: "", operator: "", fork: "", qa: "", maint: "", recycling: "" }, r.override_headcount_by_role || {});
-                  return (
-                    <tr key={idx} style={{ borderBottom: "1px solid " + C.border }}>
-                      <td style={{ padding: 6 }}><Input list="forecast-wo-options" value={r.wo_code || ""} onChange={function(e) { setRow("wo_code", e.target.value); }} className="h-8 w-28 text-xs" /></td>
-                      <td style={{ padding: 6 }}><Input list="forecast-sku-options" value={r.sku || ""} onChange={function(e) { setRow("sku", e.target.value); }} className="h-8 w-28 text-xs" /></td>
-                      <td style={{ padding: 6 }}><Input list="forecast-line-options" value={r.line_name || ""} onChange={function(e) { setRow("line_name", e.target.value); }} className="h-8 w-24 text-xs" /></td>
-                      <td style={{ padding: 6 }}><Input type="number" step="0.01" value={r.override_cases_per_min || ""} onChange={function(e) { setRow("override_cases_per_min", e.target.value); }} className="h-8 w-24 text-xs" /></td>
-                      <td style={{ padding: 6 }}><Input list="forecast-line-options" value={r.override_line_name || ""} onChange={function(e) { setRow("override_line_name", e.target.value); }} className="h-8 w-24 text-xs" /></td>
-                      <td style={{ padding: 6 }}><Input list="forecast-pack-options" value={r.override_pack_type || ""} onChange={function(e) { setRow("override_pack_type", e.target.value); }} className="h-8 w-32 text-xs" /></td>
-                      <td style={{ padding: 6 }}><Input type="number" step="0.1" value={roleHc.labor} onChange={function(e) { setRoleHeadcount("labor", e.target.value); }} className="h-8 w-20 text-xs" /></td>
-                      <td style={{ padding: 6 }}><Input type="number" step="0.1" value={roleHc.operator} onChange={function(e) { setRoleHeadcount("operator", e.target.value); }} className="h-8 w-20 text-xs" /></td>
-                      <td style={{ padding: 6 }}><Input type="number" step="0.1" value={roleHc.fork} onChange={function(e) { setRoleHeadcount("fork", e.target.value); }} className="h-8 w-20 text-xs" /></td>
-                      <td style={{ padding: 6 }}><Input type="number" step="0.1" value={roleHc.qa} onChange={function(e) { setRoleHeadcount("qa", e.target.value); }} className="h-8 w-20 text-xs" /></td>
-                      <td style={{ padding: 6 }}><Input type="number" step="0.1" value={roleHc.maint} onChange={function(e) { setRoleHeadcount("maint", e.target.value); }} className="h-8 w-20 text-xs" /></td>
-                      <td style={{ padding: 6 }}><Input type="number" step="0.1" value={roleHc.recycling} onChange={function(e) { setRoleHeadcount("recycling", e.target.value); }} className="h-8 w-20 text-xs" /></td>
-                      <td style={{ padding: 6 }}>
-                        <Button size="sm" variant="outline" onClick={function() {
-                          setOverrides(function(prev) { return prev.filter(function(_, i) { return i !== idx; }); });
-                        }}>Remove</Button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          <Button size="sm" variant="outline" onClick={function() {
-            setOverrides(function(prev) { return prev.concat([{ month_key: monthKey, wo_code: "", sku: "", line_name: "", override_cases_per_min: "", override_line_name: "", override_pack_type: "", override_headcount_by_role: {}, override_bucket_multiplier: { variable: 1, step_fixed: 1, fixed: 1 } }]); });
-          }}>Add Override Row</Button>
-        </div>
-      )}
+      <div className="mb-2 text-xs text-[rgb(var(--muted))]">
+        {assumptionsLoading ? "Loading monthly assumptions..." : ""}
+        {!assumptionsLoading && autosaveStatus === "saving" ? "Saving monthly assumptions..." : ""}
+        {!assumptionsLoading && autosaveStatus === "saved" ? "Saved monthly assumptions." : ""}
+        {!assumptionsLoading && autosaveStatus === "error" ? ("Autosave issue: " + (autosaveError || "Could not save assumptions.")) : ""}
+      </div>
 
       {!!error && <div className="mb-2 text-sm text-[rgb(var(--danger))]">{error}</div>}
 
