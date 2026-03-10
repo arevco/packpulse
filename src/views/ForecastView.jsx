@@ -802,7 +802,7 @@ export default function ForecastView(props) {
                         className="h-8 w-16 text-xs text-right"
                       />
                     </td>
-                    <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{fmtMoney(r.labor_cost)}</td>
+                    <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{fmtMoney(r.line_run_labor_cost)}</td>
                     <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{fmtMoney(r.revenue)}</td>
                   </tr>
                 );
