@@ -444,6 +444,7 @@ export default function ForecastView(props) {
         if (!woKey && skuKey && lineKey && normKey(o.sku) === skuKey && normKey(o.line_name) === lineKey) { idx = i; break; }
       }
       var base = idx >= 0 ? Object.assign({}, prev[idx]) : {
+        month_key: monthKey,
         wo_code: row.wo_code || "",
         sku: row.sku || "",
         line_name: row.line_name || "",
@@ -454,6 +455,7 @@ export default function ForecastView(props) {
         override_bucket_multiplier: {}
       };
       var nextRow = apply(base) || base;
+      nextRow = Object.assign({}, nextRow, { month_key: monthKey });
       if (idx >= 0) {
         var next = prev.slice();
         next[idx] = nextRow;
@@ -646,7 +648,7 @@ export default function ForecastView(props) {
             </table>
           </div>
           <Button size="sm" variant="outline" onClick={function() {
-            setOverrides(function(prev) { return prev.concat([{ wo_code: "", sku: "", line_name: "", override_cases_per_min: "", override_line_name: "", override_pack_type: "", override_headcount_by_role: {}, override_bucket_multiplier: { variable: 1, step_fixed: 1, fixed: 1 } }]); });
+            setOverrides(function(prev) { return prev.concat([{ month_key: monthKey, wo_code: "", sku: "", line_name: "", override_cases_per_min: "", override_line_name: "", override_pack_type: "", override_headcount_by_role: {}, override_bucket_multiplier: { variable: 1, step_fixed: 1, fixed: 1 } }]); });
           }}>Add Override Row</Button>
         </div>
       )}
