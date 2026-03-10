@@ -419,9 +419,12 @@ export default function ForecastView(props) {
     var woKey = normKey(row && row.wo_code);
     var skuKey = normKey(row && row.sku);
     var lineKey = normKey(row && row.line_name);
+    var month = String(monthKey || "");
     var found = null;
     overrides.forEach(function(o) {
       if (found) return;
+      var oMonth = String((o && o.month_key) || "");
+      if (month && oMonth && oMonth !== month) return;
       if (woKey && normKey(o.wo_code) === woKey) {
         found = o;
         return;
@@ -437,9 +440,12 @@ export default function ForecastView(props) {
       var woKey = normKey(row && row.wo_code);
       var skuKey = normKey(row && row.sku);
       var lineKey = normKey(row && row.line_name);
+      var month = String(monthKey || "");
       var idx = -1;
       for (var i = 0; i < prev.length; i++) {
         var o = prev[i] || {};
+        var oMonth = String(o.month_key || "");
+        if (month && oMonth && oMonth !== month) continue;
         if (woKey && normKey(o.wo_code) === woKey) { idx = i; break; }
         if (!woKey && skuKey && lineKey && normKey(o.sku) === skuKey && normKey(o.line_name) === lineKey) { idx = i; break; }
       }
@@ -486,6 +492,38 @@ export default function ForecastView(props) {
     });
     return out;
   };
+  useEffect(function() {
+    if (!microRows.length) return;
+    var month = String(monthKey || "");
+    setOverrides(function(prev) {
+      var next = prev.slice();
+      var changed = false;
+      microRows.forEach(function(r) {
+        var woKey = normKey(r && r.wo_code);
+        if (!woKey) return;
+        var exists = next.some(function(o) {
+          var oMonth = String((o && o.month_key) || "");
+          if (month && oMonth && oMonth !== month) return false;
+          return normKey(o && o.wo_code) === woKey;
+        });
+        if (exists) return;
+        var hc = baselineHeadcountByRole(r);
+        next.push({
+          month_key: monthKey,
+          wo_code: r.wo_code || "",
+          sku: r.sku || "",
+          line_name: r.line_name || "",
+          override_cases_per_min: "",
+          override_line_name: "",
+          override_pack_type: "",
+          override_headcount_by_role: hc,
+          override_bucket_multiplier: { variable: 1, step_fixed: 1, fixed: 1 }
+        });
+        changed = true;
+      });
+      return changed ? next : prev;
+    });
+  }, [monthKey, microRows]);
 
   return (
     <div>
