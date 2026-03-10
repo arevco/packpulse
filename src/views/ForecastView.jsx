@@ -857,8 +857,8 @@ export default function ForecastView(props) {
                     </tr>,
                     isExpanded ? (
                       <tr key={rowKey + "-edit"} style={{ borderBottom: "1px solid " + C.border, background: C.surface }}>
-                        <td colSpan={12} style={{ padding: "8px 10px" }}>
-                          <div className="flex flex-wrap items-end gap-2 rounded border border-[rgb(var(--border))] bg-[rgb(var(--raised))] p-2">
+                        <td colSpan={12} style={{ padding: "4px 10px 8px" }}>
+                          <div className="flex flex-wrap items-end gap-2">
                             <div className="text-xs font-medium text-[rgb(var(--muted))] pr-2">Headcount Inputs</div>
                             <div>
                               <div className="mb-1 text-[11px] text-[rgb(var(--muted))]">Gen</div>
