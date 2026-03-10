@@ -241,6 +241,11 @@ export function runLaborForecast(input) {
   var flags = [];
   var rows = [];
   var daily = {};
+  var scopedTotalCases = 0;
+  var excludedMissingThroughputCases = 0;
+  var excludedMissingTemplateCases = 0;
+  var excludedMissingThroughputWos = 0;
+  var excludedMissingTemplateWos = 0;
 
   for (var i = 0; i < workOrders.length; i++) {
     var wo = workOrders[i] || {};
@@ -262,6 +267,7 @@ export function runLaborForecast(input) {
 
     var plannedCases = monthKey ? (remainingCases > 0 ? remainingCases : unitsExpected) : unitsExpected;
     if (!(plannedCases > 0)) continue;
+    scopedTotalCases += plannedCases;
 
     var overrideKey = normalizeStr(sku) + "::" + normalizeStr(lineName);
     var override = overridesMap[overrideKey] || overridesMap[normalizeStr(sku) + "::"];
@@ -270,6 +276,8 @@ export function runLaborForecast(input) {
     if (override && override.override_line_name) lineName = String(override.override_line_name || lineName).trim() || lineName;
     var throughput = resolveCasesPerMin(wo, override);
     if (!(throughput.value > 0)) {
+      excludedMissingThroughputCases += plannedCases;
+      excludedMissingThroughputWos += 1;
       flags.push({
         type: "missing_throughput",
         woCode: woCode,
@@ -281,6 +289,8 @@ export function runLaborForecast(input) {
 
     var templates = pickTemplateForSkuLine(templateRows, sku, lineName, packType, productFamily);
     if (!templates.length) {
+      excludedMissingTemplateCases += plannedCases;
+      excludedMissingTemplateWos += 1;
       flags.push({
         type: "missing_labor_template",
         woCode: woCode,
@@ -416,6 +426,10 @@ export function runLaborForecast(input) {
   var summary = {
     month_key: monthKey,
     total_cases: totals.total_cases,
+    scoped_total_cases: scopedTotalCases,
+    excluded_cases_total: Math.max(0, scopedTotalCases - totals.total_cases),
+    excluded_missing_throughput_cases: excludedMissingThroughputCases,
+    excluded_missing_labor_template_cases: excludedMissingTemplateCases,
     total_revenue: totals.total_revenue,
     total_labor_cost: totals.total_labor_cost,
     labor_cost_per_case: totals.total_cases > 0 ? totals.total_labor_cost / totals.total_cases : 0,
@@ -433,7 +447,10 @@ export function runLaborForecast(input) {
     rollover_wo_count: rolloverRows.length,
     rollover_cases: rolloverCases,
     missing_throughput_wo_count: flags.filter(function(f) { return f.type === "missing_throughput"; }).length,
-    missing_revenue_wo_count: flags.filter(function(f) { return f.type === "missing_revenue"; }).length
+    missing_labor_template_wo_count: flags.filter(function(f) { return f.type === "missing_labor_template"; }).length,
+    missing_revenue_wo_count: flags.filter(function(f) { return f.type === "missing_revenue"; }).length,
+    excluded_missing_throughput_wo_count: excludedMissingThroughputWos,
+    excluded_missing_labor_template_wo_count: excludedMissingTemplateWos
   };
 
   var dailyRows = Object.keys(daily).sort().map(function(day) {
