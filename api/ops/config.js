@@ -45,6 +45,38 @@ function buildHeadcountDefaults(rows) {
   return { defaults: defaults, rowsUsed: count };
 }
 
+function buildLineHeadcountDefaults(rows) {
+  var out = {};
+  (Array.isArray(rows) ? rows : []).forEach(function(r) {
+    var line = String(r && r.line_name || "").trim();
+    if (!line) return;
+    if (!out[line]) {
+      out[line] = {
+        labor_sum: 0, fork_sum: 0, qa_sum: 0, maint_sum: 0, recycling_sum: 0, count: 0
+      };
+    }
+    out[line].labor_sum += toNum(r.labor_count);
+    out[line].fork_sum += toNum(r.fork_count);
+    out[line].qa_sum += toNum(r.qa_count);
+    out[line].maint_sum += toNum(r.maint_count);
+    out[line].recycling_sum += toNum(r.recycling_count);
+    out[line].count += 1;
+  });
+  var result = {};
+  Object.keys(out).forEach(function(line) {
+    var r = out[line];
+    var c = Math.max(1, r.count);
+    result[line] = {
+      labor: Math.round((r.labor_sum / c) * 10) / 10,
+      fork: Math.round((r.fork_sum / c) * 10) / 10,
+      qa: Math.round((r.qa_sum / c) * 10) / 10,
+      maint: Math.round((r.maint_sum / c) * 10) / 10,
+      recycling: Math.round((r.recycling_sum / c) * 10) / 10
+    };
+  });
+  return result;
+}
+
 export default async function handler(req, res) {
   withCors(req, res, ["GET", "POST", "OPTIONS"]);
   if (req.method === "OPTIONS") return res.status(200).end();
@@ -85,7 +117,7 @@ export default async function handler(req, res) {
           shiftTo = toDateIso(dt);
           var monthQ = await supabase
             .from("ops_shift_inputs")
-            .select("labor_count,fork_count,qa_count,maint_count,recycling_count")
+            .select("line_name,labor_count,fork_count,qa_count,maint_count,recycling_count")
             .eq("site_id", CACHE_SITE_ID)
             .gte("date_et", shiftFrom)
             .lte("date_et", shiftTo)
@@ -97,7 +129,7 @@ export default async function handler(req, res) {
           var trailingFrom = toDateIso(new Date(Date.now() - (90 * 86400000)));
           var trailingQ = await supabase
             .from("ops_shift_inputs")
-            .select("labor_count,fork_count,qa_count,maint_count,recycling_count")
+            .select("line_name,labor_count,fork_count,qa_count,maint_count,recycling_count")
             .eq("site_id", CACHE_SITE_ID)
             .gte("date_et", trailingFrom)
             .order("date_et", { ascending: false })
@@ -115,6 +147,7 @@ export default async function handler(req, res) {
         shiftSource = "missing_table";
       }
       var hc = buildHeadcountDefaults(shiftRows);
+      var lineHc = buildLineHeadcountDefaults(shiftRows);
 
       let rates = Array.isArray(ratesQ.data) ? ratesQ.data : [];
       if (!rates.length) rates = DEFAULT_RATES.map(function(r) { return Object.assign({ effective_from: "2000-01-01", effective_to: null }, r); });
@@ -123,6 +156,7 @@ export default async function handler(req, res) {
         rates: rates,
         skuTargets: Array.isArray(targetsQ.data) ? targetsQ.data : [],
         headcountDefaults: hc.defaults,
+        lineHeadcountDefaults: lineHc,
         headcountDefaultsMeta: {
           source: shiftSource,
           rowsUsed: hc.rowsUsed,

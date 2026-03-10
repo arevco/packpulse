@@ -64,19 +64,25 @@ function eachDayInclusive(startIso, endIso) {
   return out;
 }
 
-function parseOverridesBySkuLine(overrides, monthKey) {
-  var map = {};
+function parseOverrides(overrides, monthKey) {
+  var byWo = {};
+  var bySkuLine = {};
+  var bySku = {};
   (Array.isArray(overrides) ? overrides : []).forEach(function(o) {
     if (!o || typeof o !== "object") return;
     var mk = String(o.month_key || "");
     if (monthKey && mk && mk !== monthKey) return;
+    var woCode = String(o.wo_code || o.work_order_code || "").trim();
     var sku = String(o.sku || "").trim();
     var line = String(o.line_name || "").trim();
-    if (!sku) return;
-    var key = normalizeStr(sku) + "::" + normalizeStr(line);
-    map[key] = o;
+    if (woCode) byWo[normalizeStr(woCode)] = o;
+    if (sku) {
+      var key = normalizeStr(sku) + "::" + normalizeStr(line);
+      bySkuLine[key] = o;
+      bySku[normalizeStr(sku)] = o;
+    }
   });
-  return map;
+  return { byWo: byWo, bySkuLine: bySkuLine, bySku: bySku };
 }
 
 function resolveRevenuePerCase(sku, woDateIso, pricingRows, itemMasterCostMap) {
@@ -144,6 +150,12 @@ function resolvePackType(wo, override) {
 }
 
 function normalizeTemplateRows(templateRows) {
+  var normBucket = function(v) {
+    var s = normalizeStr(v || "");
+    if (s === "fixed") return "fixed";
+    if (s === "stepfixed" || s === "step_fixed" || s === "semifixed" || s === "semi_fixed") return "step_fixed";
+    return "variable";
+  };
   return (Array.isArray(templateRows) ? templateRows : [])
     .map(function(t) {
       return {
@@ -153,7 +165,8 @@ function normalizeTemplateRows(templateRows) {
         line_name: String(t.line_name || "").trim(),
         role: String(t.role || "").trim().toLowerCase(),
         headcount_assumed: safeNum(t.headcount_assumed),
-        hourly_rate: safeNum(t.hourly_rate)
+        hourly_rate: safeNum(t.hourly_rate),
+        labor_bucket: normBucket(t.labor_bucket || t.cost_bucket || t.bucket)
       };
     })
     .filter(function(t) { return t.role && t.hourly_rate > 0; });
@@ -220,6 +233,17 @@ function sumRoleHourlyCost(templateRows) {
   }, 0);
 }
 
+function bucketHourlyCosts(templateRows) {
+  return (Array.isArray(templateRows) ? templateRows : []).reduce(function(acc, r) {
+    var bucket = String(r.labor_bucket || "variable");
+    var hourly = safeNum(r.headcount_assumed) * safeNum(r.hourly_rate);
+    if (bucket === "fixed") acc.fixed += hourly;
+    else if (bucket === "step_fixed") acc.step_fixed += hourly;
+    else acc.variable += hourly;
+    return acc;
+  }, { variable: 0, step_fixed: 0, fixed: 0 });
+}
+
 function sumRoleHeadcount(templateRows) {
   return (Array.isArray(templateRows) ? templateRows : []).reduce(function(sum, r) {
     return sum + safeNum(r.headcount_assumed);
@@ -238,7 +262,7 @@ export function runLaborForecast(input) {
   var itemMaster = Array.isArray(payload.itemMaster) ? payload.itemMaster : [];
   var pricing = Array.isArray(payload.pricing) ? payload.pricing : [];
   var templateRows = normalizeTemplateRows(payload.laborTemplates);
-  var overridesMap = parseOverridesBySkuLine(payload.overrides, monthKey);
+  var overridesMaps = parseOverrides(payload.overrides, monthKey);
   var globalAssumptions = payload.globalAssumptions || {};
   var overheadGlobal = safeNum(globalAssumptions.overhead_global);
   var cogsNonLabor = safeNum(globalAssumptions.cogs_non_labor);
@@ -281,7 +305,11 @@ export function runLaborForecast(input) {
     scopedTotalCases += plannedCases;
 
     var overrideKey = normalizeStr(sku) + "::" + normalizeStr(lineName);
-    var override = overridesMap[overrideKey] || overridesMap[normalizeStr(sku) + "::"];
+    var override =
+      overridesMaps.byWo[normalizeStr(woCode)] ||
+      overridesMaps.bySkuLine[overrideKey] ||
+      overridesMaps.bySkuLine[normalizeStr(sku) + "::"] ||
+      overridesMaps.bySku[normalizeStr(sku)];
     var packType = resolvePackType(wo, override);
     var productFamily = String(pickValue(wo, ["Product Family", "product_family", "Item Family", "item_family"])).trim();
     if (override && override.override_line_name) lineName = String(override.override_line_name || lineName).trim() || lineName;
@@ -312,9 +340,13 @@ export function runLaborForecast(input) {
     }
     var effectiveTemplate = withOverrideTemplateRows(templates, override);
     var lineHourlyLaborCost = sumRoleHourlyCost(effectiveTemplate);
+    var bucketHourly = bucketHourlyCosts(effectiveTemplate);
     var lineHeadcount = sumRoleHeadcount(effectiveTemplate);
     var productionHours = plannedCases / (throughput.value * 60);
     var runLaborCost = lineHourlyLaborCost * productionHours;
+    var variableLaborCost = bucketHourly.variable * productionHours;
+    var stepFixedLaborCost = bucketHourly.step_fixed * productionHours;
+    var fixedLaborCost = bucketHourly.fixed * productionHours;
     var headcountHours = lineHeadcount * productionHours;
 
     var rev = resolveRevenuePerCase(sku, dateIso, pricing, itemMasterCostMap);
@@ -344,6 +376,9 @@ export function runLaborForecast(input) {
       production_hours: productionHours,
       line_hourly_labor_cost: lineHourlyLaborCost,
       line_run_labor_cost: runLaborCost,
+      variable_labor_cost: variableLaborCost,
+      step_fixed_labor_cost: stepFixedLaborCost,
+      fixed_labor_cost: fixedLaborCost,
       headcount_hours: headcountHours,
       revenue_per_case: rev.value,
       revenue_source: rev.source,
@@ -369,6 +404,9 @@ export function runLaborForecast(input) {
           planned_cases: 0,
           revenue: 0,
           labor_cost: 0,
+          variable_labor_cost: 0,
+          step_fixed_labor_cost: 0,
+          fixed_labor_cost: 0,
           production_hours: 0,
           headcount_hours: 0
         };
@@ -376,6 +414,9 @@ export function runLaborForecast(input) {
       daily[day].planned_cases += perDayCases;
       daily[day].revenue += perDayRevenue;
       daily[day].labor_cost += perDayLabor;
+      daily[day].variable_labor_cost += variableLaborCost / Math.max(1, dailyDays.length);
+      daily[day].step_fixed_labor_cost += stepFixedLaborCost / Math.max(1, dailyDays.length);
+      daily[day].fixed_labor_cost += fixedLaborCost / Math.max(1, dailyDays.length);
       daily[day].production_hours += perDayHours;
       daily[day].headcount_hours += perDayHeadcountHours;
     });
@@ -390,6 +431,9 @@ export function runLaborForecast(input) {
         planned_cases: 0,
         revenue: 0,
         labor_cost: 0,
+        variable_labor_cost: 0,
+        step_fixed_labor_cost: 0,
+        fixed_labor_cost: 0,
         production_hours: 0,
         headcount_hours: 0
       };
@@ -397,6 +441,9 @@ export function runLaborForecast(input) {
     addToBucket(skuAgg[k], "planned_cases", r.planned_cases);
     addToBucket(skuAgg[k], "revenue", r.revenue);
     addToBucket(skuAgg[k], "labor_cost", r.line_run_labor_cost);
+    addToBucket(skuAgg[k], "variable_labor_cost", r.variable_labor_cost);
+    addToBucket(skuAgg[k], "step_fixed_labor_cost", r.step_fixed_labor_cost);
+    addToBucket(skuAgg[k], "fixed_labor_cost", r.fixed_labor_cost);
     addToBucket(skuAgg[k], "production_hours", r.production_hours);
     addToBucket(skuAgg[k], "headcount_hours", r.headcount_hours);
   });
@@ -416,6 +463,9 @@ export function runLaborForecast(input) {
     acc.total_cases += safeNum(r.planned_cases);
     acc.total_revenue += safeNum(r.revenue);
     acc.total_labor_cost += safeNum(r.line_run_labor_cost);
+    acc.total_variable_labor_cost += safeNum(r.variable_labor_cost);
+    acc.total_step_fixed_labor_cost += safeNum(r.step_fixed_labor_cost);
+    acc.total_fixed_labor_cost += safeNum(r.fixed_labor_cost);
     acc.total_prod_hours += safeNum(r.production_hours);
     acc.total_headcount_hours += safeNum(r.headcount_hours);
     return acc;
@@ -423,6 +473,9 @@ export function runLaborForecast(input) {
     total_cases: 0,
     total_revenue: 0,
     total_labor_cost: 0,
+    total_variable_labor_cost: 0,
+    total_step_fixed_labor_cost: 0,
+    total_fixed_labor_cost: 0,
     total_prod_hours: 0,
     total_headcount_hours: 0
   });
@@ -443,6 +496,9 @@ export function runLaborForecast(input) {
     excluded_missing_labor_template_cases: excludedMissingTemplateCases,
     total_revenue: totals.total_revenue,
     total_labor_cost: totals.total_labor_cost,
+    total_variable_labor_cost: totals.total_variable_labor_cost,
+    total_step_fixed_labor_cost: totals.total_step_fixed_labor_cost,
+    total_fixed_labor_cost: totals.total_fixed_labor_cost,
     labor_cost_per_case: totals.total_cases > 0 ? totals.total_labor_cost / totals.total_cases : 0,
     labor_pct_sales: totals.total_revenue > 0 ? totals.total_labor_cost / totals.total_revenue : 0,
     gross_margin: grossMargin,

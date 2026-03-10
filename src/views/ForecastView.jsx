@@ -24,6 +24,13 @@ function statusLooksClosed(status) {
   return s.indexOf("close") !== -1 || s.indexOf("complete") !== -1 || s.indexOf("cancel") !== -1 || s.indexOf("archive") !== -1 || s.indexOf("done") !== -1;
 }
 
+function defaultLaborBucketForRole(role) {
+  var r = String(role || "").toLowerCase().trim();
+  if (r === "maint" || r === "maintenance" || r === "qa") return "fixed";
+  if (r === "fork" || r === "forklift" || r === "recycling") return "step_fixed";
+  return "variable";
+}
+
 export default function ForecastView(props) {
   var C = useTheme().C;
   var workOrders = Array.isArray(props.workOrders) ? props.workOrders : [];
@@ -148,20 +155,48 @@ export default function ForecastView(props) {
         var headcountDefaults = body && body.headcountDefaults && typeof body.headcountDefaults === "object"
           ? body.headcountDefaults
           : {};
+        var lineHeadcountDefaults = body && body.lineHeadcountDefaults && typeof body.lineHeadcountDefaults === "object"
+          ? body.lineHeadcountDefaults
+          : {};
         if (!rates.length) return;
-        var seeded = rates.map(function(r) {
+        var roles = rates.map(function(r) { return String(r.role || "").trim().toLowerCase(); }).filter(Boolean);
+        var rateByRole = {};
+        rates.forEach(function(r) {
           var role = String(r.role || "").trim().toLowerCase();
-          var hc = safeNum(headcountDefaults[role]);
-          return {
-            sku: "",
-            product_family: "",
-            pack_type: "",
-            line_name: "",
-            role: role,
-            headcount_assumed: hc > 0 ? hc : 1,
-            hourly_rate: (safeNum(r.hourly_rate) * (1 + safeNum(r.markup_pct))).toFixed(2)
-          };
-        }).filter(function(r) { return !!r.role; });
+          if (!role) return;
+          rateByRole[role] = (safeNum(r.hourly_rate) * (1 + safeNum(r.markup_pct))).toFixed(2);
+        });
+        var combos = {};
+        workOrders.forEach(function(w) {
+          var status = String((w && (w["Work Order Status"] || w.project_status || w.status)) || "").trim();
+          if (statusLooksClosed(status)) return;
+          var line = String((w && (w["Line"] || w.line || w["Line Name"] || w.line_name)) || "").trim();
+          var sku = String((w && (w["Item Code"] || w.item_code || w.code || w["Code"])) || "").trim();
+          var desc = String((w && (w["Description"] || w.description || w.item_description || w["Item Description"])) || "").trim();
+          var pack = detectPackType(desc || sku, sku);
+          if (!line) return;
+          combos[line + "::" + pack] = { line_name: line, pack_type: pack || "" };
+        });
+        var comboList = Object.keys(combos).map(function(k) { return combos[k]; });
+        if (!comboList.length) comboList = [{ line_name: "", pack_type: "" }];
+        var seeded = [];
+        comboList.forEach(function(c) {
+          roles.forEach(function(role) {
+            var lineDefaults = lineHeadcountDefaults[c.line_name] || {};
+            var hc = safeNum(lineDefaults[role]);
+            if (!(hc > 0)) hc = safeNum(headcountDefaults[role]);
+            seeded.push({
+              sku: "",
+              product_family: "",
+              pack_type: c.pack_type || "",
+              line_name: c.line_name || "",
+              role: role,
+              labor_bucket: defaultLaborBucketForRole(role),
+              headcount_assumed: hc > 0 ? hc : 1,
+              hourly_rate: rateByRole[role] || "0.00"
+            });
+          });
+        });
         setLaborTemplates(function(prev) {
           return Array.isArray(prev) && prev.length ? prev : seeded;
         });
@@ -170,7 +205,7 @@ export default function ForecastView(props) {
       }
     })();
     return function() { cancelled = true; };
-  }, [monthKey]);
+  }, [monthKey, workOrders]);
 
   var runForecast = useCallback(async function() {
     setLoading(true);
@@ -237,6 +272,7 @@ export default function ForecastView(props) {
     var familySet = {};
     var packTypeSet = {};
     var lineSet = {};
+    var woCodeSet = {};
 
     itemMaster.forEach(function(r) {
       var sku = String((r && (r["Item Code"] || r.Code || r.item_code || r.code)) || "").trim();
@@ -261,9 +297,11 @@ export default function ForecastView(props) {
       var desc = String((w && (w["Description"] || w.description || w.productDesc || w.item_description || w["Item Description"])) || "").trim();
       var fam = String((w && (w["Product Family"] || w.product_family || w["Item Family"] || w.item_family || w.family)) || "").trim();
       var line = String((w && (w["Line"] || w.line || w["Line Name"] || w.line_name)) || "").trim();
+      var woCode = String((w && (w["Work Order Code"] || w.project_code || w["Project Code"] || w.wo_number || w.wo)) || "").trim();
       if (sku) skuSet[sku] = true;
       if (fam) familySet[fam] = true;
       if (line) lineSet[line] = true;
+      if (woCode) woCodeSet[woCode] = true;
       var p = detectPackType(desc || sku, sku);
       if (p) packTypeSet[p] = true;
     });
@@ -281,6 +319,7 @@ export default function ForecastView(props) {
 
     return {
       skus: Object.keys(skuSet).sort(),
+      woCodes: Object.keys(woCodeSet).sort(),
       families: Object.keys(familySet).sort(),
       packTypes: Object.keys(packTypeSet).sort(),
       lines: Object.keys(lineSet).sort()
@@ -374,6 +413,9 @@ export default function ForecastView(props) {
           <datalist id="forecast-sku-options">
             {optionLists.skus.map(function(v) { return <option key={v} value={v} />; })}
           </datalist>
+          <datalist id="forecast-wo-options">
+            {optionLists.woCodes.map(function(v) { return <option key={v} value={v} />; })}
+          </datalist>
           <datalist id="forecast-family-options">
             {optionLists.families.map(function(v) { return <option key={v} value={v} />; })}
           </datalist>
@@ -389,14 +431,14 @@ export default function ForecastView(props) {
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ background: C.raised }}>
-                  {["SKU", "Family", "Pack Type", "Line", "Role", "Headcount", "Hourly Rate", ""].map(function(h) {
+                  {["SKU", "Family", "Pack Type", "Line", "Role", "Bucket", "Headcount", "Hourly Rate", ""].map(function(h) {
                     return <th key={h} style={{ textAlign: "left", padding: "6px 8px", fontSize: 12, color: C.dim }}>{h}</th>;
                   })}
                 </tr>
               </thead>
               <tbody>
                 {!laborTemplates.length && (
-                  <tr><td colSpan={8} style={{ padding: 10, color: C.dim }}>No template rows. Add one below.</td></tr>
+                  <tr><td colSpan={9} style={{ padding: 10, color: C.dim }}>No template rows. Add one below.</td></tr>
                 )}
                 {laborTemplates.map(function(r, idx) {
                   var setRow = function(key, val) {
@@ -413,6 +455,7 @@ export default function ForecastView(props) {
                       <td style={{ padding: 6 }}><Input list="forecast-pack-options" value={r.pack_type || ""} onChange={function(e) { setRow("pack_type", e.target.value); }} className="h-8 w-28 text-xs" placeholder="e.g. 15 PACK" /></td>
                       <td style={{ padding: 6 }}><Input list="forecast-line-options" value={r.line_name || ""} onChange={function(e) { setRow("line_name", e.target.value); }} className="h-8 w-24 text-xs" placeholder="DMM" /></td>
                       <td style={{ padding: 6 }}><Input value={r.role || ""} onChange={function(e) { setRow("role", e.target.value); }} className="h-8 w-24 text-xs" /></td>
+                      <td style={{ padding: 6 }}><Input value={r.labor_bucket || ""} onChange={function(e) { setRow("labor_bucket", e.target.value); }} className="h-8 w-24 text-xs" placeholder="variable/fixed" /></td>
                       <td style={{ padding: 6 }}><Input type="number" step="0.1" value={r.headcount_assumed || ""} onChange={function(e) { setRow("headcount_assumed", e.target.value); }} className="h-8 w-24 text-xs" /></td>
                       <td style={{ padding: 6 }}><Input type="number" step="0.01" value={r.hourly_rate || ""} onChange={function(e) { setRow("hourly_rate", e.target.value); }} className="h-8 w-24 text-xs" /></td>
                       <td style={{ padding: 6 }}>
@@ -429,7 +472,7 @@ export default function ForecastView(props) {
           <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="outline" onClick={function() {
               setLaborTemplates(function(prev) {
-                return prev.concat([{ sku: "", product_family: "", pack_type: "", line_name: "", role: "labor", headcount_assumed: 1, hourly_rate: 20 }]);
+                return prev.concat([{ sku: "", product_family: "", pack_type: "", line_name: "", role: "labor", labor_bucket: "variable", headcount_assumed: 1, hourly_rate: 20 }]);
               });
             }}>Add Template Row</Button>
           </div>
@@ -439,14 +482,14 @@ export default function ForecastView(props) {
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ background: C.raised }}>
-                  {["SKU", "Line", "Cases/Min", "Override Line", "Override Pack Type", ""].map(function(h) {
+                  {["WO", "SKU", "Line", "Cases/Min", "Override Line", "Override Pack Type", "HC Labor", "HC Fork", "HC QA", "HC Maint", "HC Recycle", ""].map(function(h) {
                     return <th key={h} style={{ textAlign: "left", padding: "6px 8px", fontSize: 12, color: C.dim }}>{h}</th>;
                   })}
                 </tr>
               </thead>
               <tbody>
                 {!overrides.length && (
-                  <tr><td colSpan={6} style={{ padding: 10, color: C.dim }}>No overrides configured.</td></tr>
+                  <tr><td colSpan={12} style={{ padding: 10, color: C.dim }}>No overrides configured.</td></tr>
                 )}
                 {overrides.map(function(r, idx) {
                   var setRow = function(key, val) {
@@ -456,13 +499,31 @@ export default function ForecastView(props) {
                       return next;
                     });
                   };
+                  var setRoleHeadcount = function(role, val) {
+                    setOverrides(function(prev) {
+                      var next = prev.slice();
+                      var row = Object.assign({}, next[idx]);
+                      var hc = Object.assign({}, row.override_headcount_by_role || {});
+                      hc[role] = val;
+                      row.override_headcount_by_role = hc;
+                      next[idx] = row;
+                      return next;
+                    });
+                  };
+                  var roleHc = Object.assign({ labor: "", fork: "", qa: "", maint: "", recycling: "" }, r.override_headcount_by_role || {});
                   return (
                     <tr key={idx} style={{ borderBottom: "1px solid " + C.border }}>
+                      <td style={{ padding: 6 }}><Input list="forecast-wo-options" value={r.wo_code || ""} onChange={function(e) { setRow("wo_code", e.target.value); }} className="h-8 w-28 text-xs" /></td>
                       <td style={{ padding: 6 }}><Input list="forecast-sku-options" value={r.sku || ""} onChange={function(e) { setRow("sku", e.target.value); }} className="h-8 w-28 text-xs" /></td>
                       <td style={{ padding: 6 }}><Input list="forecast-line-options" value={r.line_name || ""} onChange={function(e) { setRow("line_name", e.target.value); }} className="h-8 w-24 text-xs" /></td>
                       <td style={{ padding: 6 }}><Input type="number" step="0.01" value={r.override_cases_per_min || ""} onChange={function(e) { setRow("override_cases_per_min", e.target.value); }} className="h-8 w-24 text-xs" /></td>
                       <td style={{ padding: 6 }}><Input list="forecast-line-options" value={r.override_line_name || ""} onChange={function(e) { setRow("override_line_name", e.target.value); }} className="h-8 w-24 text-xs" /></td>
                       <td style={{ padding: 6 }}><Input list="forecast-pack-options" value={r.override_pack_type || ""} onChange={function(e) { setRow("override_pack_type", e.target.value); }} className="h-8 w-32 text-xs" /></td>
+                      <td style={{ padding: 6 }}><Input type="number" step="0.1" value={roleHc.labor} onChange={function(e) { setRoleHeadcount("labor", e.target.value); }} className="h-8 w-20 text-xs" /></td>
+                      <td style={{ padding: 6 }}><Input type="number" step="0.1" value={roleHc.fork} onChange={function(e) { setRoleHeadcount("fork", e.target.value); }} className="h-8 w-20 text-xs" /></td>
+                      <td style={{ padding: 6 }}><Input type="number" step="0.1" value={roleHc.qa} onChange={function(e) { setRoleHeadcount("qa", e.target.value); }} className="h-8 w-20 text-xs" /></td>
+                      <td style={{ padding: 6 }}><Input type="number" step="0.1" value={roleHc.maint} onChange={function(e) { setRoleHeadcount("maint", e.target.value); }} className="h-8 w-20 text-xs" /></td>
+                      <td style={{ padding: 6 }}><Input type="number" step="0.1" value={roleHc.recycling} onChange={function(e) { setRoleHeadcount("recycling", e.target.value); }} className="h-8 w-20 text-xs" /></td>
                       <td style={{ padding: 6 }}>
                         <Button size="sm" variant="outline" onClick={function() {
                           setOverrides(function(prev) { return prev.filter(function(_, i) { return i !== idx; }); });
@@ -475,7 +536,7 @@ export default function ForecastView(props) {
             </table>
           </div>
           <Button size="sm" variant="outline" onClick={function() {
-            setOverrides(function(prev) { return prev.concat([{ sku: "", line_name: "", override_cases_per_min: "", override_line_name: "", override_pack_type: "" }]); });
+            setOverrides(function(prev) { return prev.concat([{ wo_code: "", sku: "", line_name: "", override_cases_per_min: "", override_line_name: "", override_pack_type: "", override_headcount_by_role: {} }]); });
           }}>Add Override Row</Button>
         </div>
       )}
@@ -490,6 +551,9 @@ export default function ForecastView(props) {
             { label: "Rollover WOs", value: safeNum(summary.rollover_wo_count).toLocaleString() },
             { label: "Total Revenue", value: fmtMoney(summary.total_revenue) },
             { label: "Total Labor Cost", value: fmtMoney(summary.total_labor_cost) },
+            { label: "Variable Labor", value: fmtMoney(summary.total_variable_labor_cost) },
+            { label: "Step-Fixed Labor", value: fmtMoney(summary.total_step_fixed_labor_cost) },
+            { label: "Fixed Labor", value: fmtMoney(summary.total_fixed_labor_cost) },
             { label: "Labor Cost / Case", value: fmtMoney(summary.labor_cost_per_case) },
             { label: "Labor % Sales", value: fmtPct(summary.labor_pct_sales) },
             { label: "Gross Margin", value: fmtMoney(summary.gross_margin) },
