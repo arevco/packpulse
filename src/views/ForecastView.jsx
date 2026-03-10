@@ -943,14 +943,13 @@ export default function ForecastView(props) {
                 <th style={{ textAlign: "left", padding: "8px 10px", fontSize: 12, color: C.dim }}>Description</th>
                 <th style={{ textAlign: "left", padding: "8px 10px", fontSize: 12, color: C.dim }}>KPIs</th>
                 <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Cases</th>
+                <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Price Per Unit</th>
                 <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Labor Cost</th>
                 <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Revenue</th>
-                <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>State</th>
-                <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {!visibleMicroRows.length && <tr><td colSpan={12} style={{ padding: 16, textAlign: "center", color: C.dim }}>No forecast rows yet.</td></tr>}
+              {!visibleMicroRows.length && <tr><td colSpan={11} style={{ padding: 16, textAlign: "center", color: C.dim }}>No forecast rows yet.</td></tr>}
               {visibleMicroRows.map(function(r, idx) {
                 var rowKey = getRowKey(r, idx);
                 var desc = descriptionBySku[r.sku] || descriptionBySku[String(r.sku || "").toLowerCase()] || "--";
@@ -1032,14 +1031,13 @@ export default function ForecastView(props) {
                         </div>
                       </td>
                       <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{safeNum(r.planned_cases).toLocaleString()}</td>
+                      <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{fmtMoney(safeNum(r.revenue_per_case || 0))}</td>
                       <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{fmtMoney(r.line_run_labor_cost)}</td>
                       <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{fmtMoney(r.revenue)}</td>
-                      <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right" }}>{isDirty ? <span style={{ color: C.warning || C.dim }}>Dirty</span> : "Saved"}</td>
-                      <td style={{ padding: "8px 10px", fontSize: 13, textAlign: "right", whiteSpace: "nowrap" }} />
                     </tr>,
                     isExpanded ? (
                       <tr key={rowKey + "-edit"} style={{ borderBottom: "1px solid " + C.border, background: C.surface }}>
-                        <td colSpan={12} style={{ padding: "4px 10px 8px" }}>
+                        <td colSpan={11} style={{ padding: "4px 10px 8px" }}>
                           <div className="flex flex-wrap items-end gap-2">
                             <div className="text-xs font-medium text-[rgb(var(--muted))] pr-2">Headcount Inputs</div>
                             <div>
