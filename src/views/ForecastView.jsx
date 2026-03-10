@@ -661,6 +661,7 @@ export default function ForecastView(props) {
             { label: "Labor % Sales", value: fmtPct(summary.labor_pct_sales) },
             { label: "Gross Margin", value: fmtMoney(summary.gross_margin) },
             { label: "Net Operating Income", value: fmtMoney(summary.net_operating_income) },
+            { label: "Production Hours", value: safeNum(summary.total_prod_hours).toFixed(1) },
             { label: "Headcount Hours", value: safeNum(summary.total_headcount_hours).toFixed(1) }
           ].map(function(card) {
             return (
