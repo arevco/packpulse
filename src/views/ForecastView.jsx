@@ -50,6 +50,14 @@ var DEFAULT_MICRO_HEADCOUNT = {
   recycling: 0.5
 };
 var LINE_OPTIONS = ["DMM", "MPAC", "RSC", "Hand Pack", "Climax"];
+var DEFAULT_ROLE_RATE = {
+  labor: 20.17,
+  operator: 27.22,
+  fork: 27.73,
+  qa: 22.20,
+  maint: 37.06,
+  recycling: 20.17
+};
 
 function normalizeLegacyHeadcountMap(map) {
   var out = Object.assign({}, map || {});
@@ -86,6 +94,10 @@ export default function ForecastView(props) {
   var [autosaveStatus, setAutosaveStatus] = useState("idle");
   var [autosaveError, setAutosaveError] = useState("");
   var didLoadMonthRef = useRef({});
+  var [expandedRows, setExpandedRows] = useState({});
+  var [dirtyRows, setDirtyRows] = useState({});
+  var [selectedRows, setSelectedRows] = useState({});
+  var [bulkOperatorHeadcount, setBulkOperatorHeadcount] = useState("");
 
   useEffect(function() {
     if (initial.month) setMonthKey(String(initial.month));
@@ -286,6 +298,7 @@ export default function ForecastView(props) {
       var body = await res.json();
       if (!res.ok) throw new Error((body && body.error) || "Forecast request failed");
       setPayload(body);
+      clearAllDirty();
     } catch (err) {
       setError(err && err.message ? err.message : "Could not run forecast.");
     } finally {
@@ -325,6 +338,16 @@ export default function ForecastView(props) {
       return safeNum(b.planned_cases) - safeNum(a.planned_cases);
     });
   }, [byWorkOrder]);
+  var visibleMicroRows = useMemo(function() { return microRows.slice(0, 200); }, [microRows]);
+  var dirtyCount = useMemo(function() { return Object.keys(dirtyRows || {}).length; }, [dirtyRows]);
+  var selectedCount = useMemo(function() {
+    var count = 0;
+    visibleMicroRows.forEach(function(r, idx) {
+      var key = r && r.wo_code ? ("wo:" + String(r.wo_code).trim().toLowerCase()) : ("sku:" + String(r && r.sku || "").trim().toLowerCase() + "::" + idx);
+      if (selectedRows[key]) count += 1;
+    });
+    return count;
+  }, [visibleMicroRows, selectedRows]);
   var descriptionBySku = useMemo(function() {
     var out = {};
     itemMaster.forEach(function(r) {
@@ -391,6 +414,29 @@ export default function ForecastView(props) {
 
   var normKey = function(v) {
     return String(v || "").trim().toLowerCase();
+  };
+  var getRowKey = function(row, idx) {
+    var woKey = normKey(row && row.wo_code);
+    if (woKey) return "wo:" + woKey;
+    return "sku:" + normKey(row && row.sku) + "::" + idx;
+  };
+  var markRowDirty = function(key) {
+    if (!key) return;
+    setDirtyRows(function(prev) {
+      return Object.assign({}, prev, { [key]: true });
+    });
+  };
+  var clearRowDirty = function(key) {
+    if (!key) return;
+    setDirtyRows(function(prev) {
+      if (!prev[key]) return prev;
+      var next = Object.assign({}, prev);
+      delete next[key];
+      return next;
+    });
+  };
+  var clearAllDirty = function() {
+    setDirtyRows({});
   };
   var pickOverrideForWo = function(row) {
     var woKey = normKey(row && row.wo_code);
@@ -469,6 +515,64 @@ export default function ForecastView(props) {
     });
     return out;
   };
+  var workOrderByCode = useMemo(function() {
+    var out = {};
+    workOrders.forEach(function(w) {
+      var wo = String((w && (w["Work Order Code"] || w.project_code || w["Project Code"] || w.wo_number || w.wo)) || "").trim();
+      if (!wo) return;
+      out[normKey(wo)] = w;
+    });
+    return out;
+  }, [workOrders]);
+  var workOrderCasesPerMin = function(wo) {
+    if (!wo) return 0;
+    var uph = safeNum((wo["Standard Units Per Hour"] || wo.standard_units_per_hour || wo.units_per_hour || wo["Units Per Hour"] || wo.rate_per_hour || wo["Rate Per Hour"]) || 0);
+    if (uph > 0) return uph / 60;
+    return 0;
+  };
+  var roleRatesForRow = function(row, lineName, packType) {
+    var out = Object.assign({}, DEFAULT_ROLE_RATE);
+    var lineKey = normKey(lineName || (row && row.line_name));
+    var packKey = normKey(packType || (row && row.pack_type));
+    var skuKey = normKey(row && row.sku);
+    laborTemplates.forEach(function(t) {
+      var role = normalizeRoleKey(t && t.role);
+      if (!role) return;
+      var tSku = normKey(t && t.sku);
+      var tLine = normKey(t && t.line_name);
+      var tPack = normKey(t && t.pack_type);
+      var match = false;
+      if (tSku && skuKey && tSku === skuKey && (!tLine || tLine === lineKey)) match = true;
+      else if (!tSku && tLine && tLine === lineKey && (!tPack || tPack === packKey)) match = true;
+      else if (!tSku && !tLine && tPack && tPack === packKey) match = true;
+      else if (!tSku && !tLine && !tPack) match = true;
+      if (!match) return;
+      var rate = safeNum(t && t.hourly_rate);
+      if (rate > 0) out[role] = rate;
+    });
+    return out;
+  };
+  var baselineLaborCostByRowKey = useMemo(function() {
+    var out = {};
+    microRows.forEach(function(r, idx) {
+      var key = getRowKey(r, idx);
+      var wo = workOrderByCode[normKey(r && r.wo_code)];
+      var baseLine = String((wo && (wo["Line"] || wo.line || wo["Line Name"] || wo.line_name)) || r.line_name || "Unassigned");
+      var basePack = String((wo && (wo["Pack Type"] || wo.pack_type || wo["Item Type"] || wo.item_type)) || r.pack_type || "");
+      var baseCpm = workOrderCasesPerMin(wo);
+      if (!(baseCpm > 0)) baseCpm = safeNum(r.cases_per_min);
+      if (!(baseCpm > 0)) baseCpm = 1;
+      var baseHc = baselineHeadcountByRole(Object.assign({}, r, { line_name: baseLine, pack_type: basePack }));
+      var rateByRole = roleRatesForRow(r, baseLine, basePack);
+      var hourly = 0;
+      Object.keys(baseHc).forEach(function(role) {
+        hourly += safeNum(baseHc[role]) * safeNum(rateByRole[role] || DEFAULT_ROLE_RATE[role] || 0);
+      });
+      var hours = safeNum(r.planned_cases) / (baseCpm * 60);
+      out[key] = hourly * hours;
+    });
+    return out;
+  }, [microRows, workOrderByCode, laborTemplates]);
   useEffect(function() {
     if (!microRows.length) return;
     var month = String(monthKey || "");
@@ -579,45 +683,112 @@ export default function ForecastView(props) {
       )}
 
       <div className="mb-1 text-sm font-semibold text-[rgb(var(--foreground))]">Work Order Micro-Forecasts</div>
-      <div className="mb-2 text-xs text-[rgb(var(--muted))]">Adjust throughput and labor buckets per work order. Click `Run Forecast` to recalculate totals.</div>
+      <div className="mb-2 text-xs text-[rgb(var(--muted))]">Compact rows show outcome KPIs. Expand a row to edit headcount buckets and advanced settings.</div>
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <div className="rounded border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2 py-1 text-xs text-[rgb(var(--muted))]">Dirty rows: {dirtyCount}</div>
+        <Button size="sm" onClick={runForecast} disabled={loading || dirtyCount === 0}>Save All</Button>
+        <div className="h-5 w-px bg-[rgb(var(--border))]" />
+        <div className="text-xs text-[rgb(var(--muted))]">Bulk for selected ({selectedCount})</div>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!selectedCount}
+          onClick={function() {
+            visibleMicroRows.forEach(function(r, idx) {
+              var key = getRowKey(r, idx);
+              if (!selectedRows[key]) return;
+              upsertOverrideForWo(r, function(base) { return Object.assign({}, base, { override_line_name: "" }); });
+              markRowDirty(key);
+            });
+          }}
+        >
+          Apply Line Defaults
+        </Button>
+        <Input
+          type="number"
+          step="0.1"
+          placeholder="HC Op"
+          value={bulkOperatorHeadcount}
+          onChange={function(e) { setBulkOperatorHeadcount(e.target.value); }}
+          className="h-8 w-20 text-xs"
+        />
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!selectedCount}
+          onClick={function() {
+            visibleMicroRows.forEach(function(r, idx) {
+              var key = getRowKey(r, idx);
+              if (!selectedRows[key]) return;
+              upsertOverrideForWo(r, function(base) {
+                var nextHc = Object.assign({}, base.override_headcount_by_role || {});
+                nextHc.operator = bulkOperatorHeadcount;
+                return Object.assign({}, base, { override_headcount_by_role: nextHc });
+              });
+              markRowDirty(key);
+            });
+          }}
+        >
+          Set HC Op
+        </Button>
+      </div>
       <TableShell>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ background: C.raised }}>
+                <th style={{ textAlign: "center", padding: "8px 6px", fontSize: 12, color: C.dim, width: 38 }}>
+                  <input
+                    type="checkbox"
+                    checked={visibleMicroRows.length > 0 && selectedCount === visibleMicroRows.length}
+                    onChange={function(e) {
+                      var checked = !!e.target.checked;
+                      setSelectedRows(function(prev) {
+                        var next = Object.assign({}, prev);
+                        visibleMicroRows.forEach(function(r, idx) {
+                          var key = getRowKey(r, idx);
+                          if (checked) next[key] = true;
+                          else delete next[key];
+                        });
+                        return next;
+                      });
+                    }}
+                  />
+                </th>
+                <th style={{ textAlign: "center", padding: "8px 6px", fontSize: 12, color: C.dim, width: 38 }} />
                 <th style={{ textAlign: "left", padding: "8px 10px", fontSize: 12, color: C.dim }}>WO</th>
                 <th style={{ textAlign: "left", padding: "8px 10px", fontSize: 12, color: C.dim }}>SKU</th>
                 <th style={{ textAlign: "left", padding: "8px 10px", fontSize: 12, color: C.dim }}>Description</th>
-                <th style={{ textAlign: "left", padding: "8px 10px", fontSize: 12, color: C.dim }}>Line</th>
+                <th style={{ textAlign: "left", padding: "8px 10px", fontSize: 12, color: C.dim }}>KPIs</th>
                 <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Cases</th>
-                <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Cases/Min</th>
-                <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>HC Gen</th>
-                <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>HC Op</th>
-                <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>HC Fork</th>
-                <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>HC QA</th>
-                <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>HC Maint</th>
-                <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>HC Rec</th>
                 <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Labor Cost</th>
                 <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Revenue</th>
+                <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>State</th>
                 <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {!microRows.length && <tr><td colSpan={15} style={{ padding: 16, textAlign: "center", color: C.dim }}>No forecast rows yet.</td></tr>}
-              {microRows.slice(0, 200).map(function(r, idx) {
+              {!visibleMicroRows.length && <tr><td colSpan={12} style={{ padding: 16, textAlign: "center", color: C.dim }}>No forecast rows yet.</td></tr>}
+              {visibleMicroRows.map(function(r, idx) {
+                var rowKey = getRowKey(r, idx);
                 var desc = descriptionBySku[r.sku] || descriptionBySku[String(r.sku || "").toLowerCase()] || "--";
                 var ov = pickOverrideForWo(r);
                 var baseHc = baselineHeadcountByRole(r);
                 var hc = Object.assign({}, baseHc, (ov && ov.override_headcount_by_role) || {});
-                var lineValue = String((ov && ov.override_line_name) || r.line_name || "");
+                var lineValue = String((ov && ov.override_line_name) || r.line_name || "Unassigned");
                 var rowLines = LINE_OPTIONS.slice();
                 if (lineValue && rowLines.indexOf(lineValue) === -1) rowLines.unshift(lineValue);
+                var isExpanded = !!expandedRows[rowKey];
+                var isDirty = !!dirtyRows[rowKey];
+                var baseLaborCost = safeNum(baselineLaborCostByRowKey[rowKey]);
+                var deltaVsBase = safeNum(r.line_run_labor_cost) - baseLaborCost;
                 var setRoleHeadcount = function(role, val) {
                   upsertOverrideForWo(r, function(base) {
                     var nextHc = Object.assign({}, base.override_headcount_by_role || {});
                     nextHc[role] = val;
                     return Object.assign({}, base, { override_headcount_by_role: nextHc });
                   });
+                  markRowDirty(rowKey);
                 };
                 var saveRow = function() {
                   runForecast();
@@ -633,107 +804,110 @@ export default function ForecastView(props) {
                       override_bucket_multiplier: { variable: 1, step_fixed: 1, fixed: 1 }
                     });
                   });
-                  setTimeout(function() { runForecast(); }, 0);
+                  markRowDirty(rowKey);
                 };
-                return (
-                  <tr key={r.wo_code + "-" + r.sku + "-" + idx} style={{ borderBottom: "1px solid " + C.border }}>
-                    <td style={{ padding: "8px 10px", fontSize: 13, color: C.bright, fontWeight: 600 }}>{r.wo_code || "--"}</td>
-                    <td style={{ padding: "8px 10px", fontSize: 13, color: C.bright, fontWeight: 600 }}>{r.sku}</td>
-                    <td style={{ padding: "8px 10px", fontSize: 13, color: C.text }}>{desc}</td>
-                    <td style={{ padding: "8px 10px", fontSize: 13, color: C.text }}>
-                      <select
-                        value={lineValue}
-                        onChange={function(e) {
-                          var v = e.target.value;
-                          upsertOverrideForWo(r, function(base) {
-                            return Object.assign({}, base, { override_line_name: v });
-                          });
-                        }}
-                        className="h-8 w-28 rounded border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2 text-xs"
-                      >
-                        {rowLines.map(function(line) {
-                          return <option key={line} value={line}>{line}</option>;
-                        })}
-                      </select>
-                    </td>
-                    <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{safeNum(r.planned_cases).toLocaleString()}</td>
-                    <td style={{ padding: "8px 10px", fontSize: 13, textAlign: "right" }}>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        value={(ov && ov.override_cases_per_min) || ""}
-                        onChange={function(e) {
-                          var v = e.target.value;
-                          upsertOverrideForWo(r, function(base) {
-                            return Object.assign({}, base, { override_cases_per_min: v });
-                          });
-                        }}
-                        className="h-8 w-20 text-xs text-right"
-                        placeholder={safeNum(r.cases_per_min).toFixed(2)}
-                      />
-                    </td>
-                    <td style={{ padding: "8px 10px", fontSize: 13, textAlign: "right" }}>
-                      <Input
-                        type="number"
-                        step="0.1"
-                        value={hc.labor}
-                        onChange={function(e) { setRoleHeadcount("labor", e.target.value); }}
-                        className="h-8 w-16 text-xs text-right"
-                      />
-                    </td>
-                    <td style={{ padding: "8px 10px", fontSize: 13, textAlign: "right" }}>
-                      <Input
-                        type="number"
-                        step="0.1"
-                        value={hc.operator}
-                        onChange={function(e) { setRoleHeadcount("operator", e.target.value); }}
-                        className="h-8 w-16 text-xs text-right"
-                      />
-                    </td>
-                    <td style={{ padding: "8px 10px", fontSize: 13, textAlign: "right" }}>
-                      <Input
-                        type="number"
-                        step="0.1"
-                        value={hc.fork}
-                        onChange={function(e) { setRoleHeadcount("fork", e.target.value); }}
-                        className="h-8 w-16 text-xs text-right"
-                      />
-                    </td>
-                    <td style={{ padding: "8px 10px", fontSize: 13, textAlign: "right" }}>
-                      <Input
-                        type="number"
-                        step="0.1"
-                        value={hc.qa}
-                        onChange={function(e) { setRoleHeadcount("qa", e.target.value); }}
-                        className="h-8 w-16 text-xs text-right"
-                      />
-                    </td>
-                    <td style={{ padding: "8px 10px", fontSize: 13, textAlign: "right" }}>
-                      <Input
-                        type="number"
-                        step="0.1"
-                        value={hc.maint}
-                        onChange={function(e) { setRoleHeadcount("maint", e.target.value); }}
-                        className="h-8 w-16 text-xs text-right"
-                      />
-                    </td>
-                    <td style={{ padding: "8px 10px", fontSize: 13, textAlign: "right" }}>
-                      <Input
-                        type="number"
-                        step="0.1"
-                        value={hc.recycling}
-                        onChange={function(e) { setRoleHeadcount("recycling", e.target.value); }}
-                        className="h-8 w-16 text-xs text-right"
-                      />
-                    </td>
-                    <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{fmtMoney(r.line_run_labor_cost)}</td>
-                    <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{fmtMoney(r.revenue)}</td>
-                    <td style={{ padding: "8px 10px", fontSize: 13, textAlign: "right", whiteSpace: "nowrap" }}>
-                      <Button size="sm" variant="outline" onClick={saveRow} disabled={loading}>Save</Button>
-                      <Button size="sm" variant="outline" onClick={resetRow} disabled={loading} className="ml-1">Reset</Button>
-                    </td>
-                  </tr>
-                );
+                return [
+                    <tr key={rowKey + "-main"} style={{ borderBottom: "1px solid " + C.border }}>
+                      <td style={{ padding: "8px 6px", textAlign: "center" }}>
+                        <input
+                          type="checkbox"
+                          checked={!!selectedRows[rowKey]}
+                          onChange={function(e) {
+                            var checked = !!e.target.checked;
+                            setSelectedRows(function(prev) {
+                              var next = Object.assign({}, prev);
+                              if (checked) next[rowKey] = true;
+                              else delete next[rowKey];
+                              return next;
+                            });
+                          }}
+                        />
+                      </td>
+                      <td style={{ padding: "8px 6px", textAlign: "center" }}>
+                        <button
+                          type="button"
+                          onClick={function() {
+                            setExpandedRows(function(prev) {
+                              var next = Object.assign({}, prev);
+                              next[rowKey] = !prev[rowKey];
+                              return next;
+                            });
+                          }}
+                          className="rounded border border-[rgb(var(--border))] px-1 text-xs"
+                        >
+                          {isExpanded ? "-" : "+"}
+                        </button>
+                      </td>
+                      <td style={{ padding: "8px 10px", fontSize: 13, color: C.bright, fontWeight: 600, position: "sticky", left: 0, zIndex: 3, background: C.surface, minWidth: 160 }}>{r.wo_code || "--"}</td>
+                      <td style={{ padding: "8px 10px", fontSize: 13, color: C.bright, fontWeight: 600, position: "sticky", left: 160, zIndex: 3, background: C.surface, minWidth: 120 }}>{r.sku}</td>
+                      <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, position: "sticky", left: 280, zIndex: 3, background: C.surface, minWidth: 320, maxWidth: 420 }}>{desc}</td>
+                      <td style={{ padding: "8px 10px" }}>
+                        <div className="flex flex-wrap gap-1">
+                          <span className="rounded border border-[rgb(var(--border))] px-2 py-0.5 text-[11px]">Hours {safeNum(r.production_hours).toFixed(1)}</span>
+                          <span className="rounded border border-[rgb(var(--border))] px-2 py-0.5 text-[11px]">$/Case {fmtMoney(safeNum(r.line_run_labor_cost) / Math.max(1, safeNum(r.planned_cases)))}</span>
+                          <span className="rounded border border-[rgb(var(--border))] px-2 py-0.5 text-[11px]">Labor% {fmtPct(safeNum(r.line_run_labor_cost) / Math.max(1, safeNum(r.revenue)))}</span>
+                          <span className="rounded border border-[rgb(var(--border))] px-2 py-0.5 text-[11px]" style={{ color: deltaVsBase >= 0 ? C.bad : C.ok }}>Delta {fmtMoney(deltaVsBase)}</span>
+                        </div>
+                      </td>
+                      <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{safeNum(r.planned_cases).toLocaleString()}</td>
+                      <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{fmtMoney(r.line_run_labor_cost)}</td>
+                      <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{fmtMoney(r.revenue)}</td>
+                      <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right" }}>{isDirty ? <span style={{ color: C.warning || C.dim }}>Dirty</span> : "Saved"}</td>
+                      <td style={{ padding: "8px 10px", fontSize: 13, textAlign: "right", whiteSpace: "nowrap" }}>
+                        <Button size="sm" variant="outline" onClick={saveRow} disabled={loading || !isDirty}>Save</Button>
+                      </td>
+                    </tr>,
+                    isExpanded ? (
+                      <tr key={rowKey + "-edit"} style={{ borderBottom: "1px solid " + C.border, background: C.surface }}>
+                        <td colSpan={12} style={{ padding: "8px 10px" }}>
+                          <div className="flex flex-wrap items-end gap-2">
+                            <div className="text-xs text-[rgb(var(--muted))]">Headcount</div>
+                            <Input type="number" step="0.1" value={hc.labor} onChange={function(e) { setRoleHeadcount("labor", e.target.value); }} className="h-8 w-16 text-xs text-right" />
+                            <Input type="number" step="0.1" value={hc.operator} onChange={function(e) { setRoleHeadcount("operator", e.target.value); }} className="h-8 w-16 text-xs text-right" />
+                            <Input type="number" step="0.1" value={hc.fork} onChange={function(e) { setRoleHeadcount("fork", e.target.value); }} className="h-8 w-16 text-xs text-right" />
+                            <Input type="number" step="0.1" value={hc.qa} onChange={function(e) { setRoleHeadcount("qa", e.target.value); }} className="h-8 w-16 text-xs text-right" />
+                            <Input type="number" step="0.1" value={hc.maint} onChange={function(e) { setRoleHeadcount("maint", e.target.value); }} className="h-8 w-16 text-xs text-right" />
+                            <Input type="number" step="0.1" value={hc.recycling} onChange={function(e) { setRoleHeadcount("recycling", e.target.value); }} className="h-8 w-16 text-xs text-right" />
+                            <details className="ml-2">
+                              <summary className="cursor-pointer text-xs text-[rgb(var(--muted))]">Advanced</summary>
+                              <div className="mt-2 flex flex-wrap items-end gap-2 rounded border border-[rgb(var(--border))] bg-[rgb(var(--raised))] p-2">
+                                <div>
+                                  <div className="mb-1 text-[11px] text-[rgb(var(--muted))]">Line</div>
+                                  <select
+                                    value={lineValue}
+                                    onChange={function(e) {
+                                      var v = e.target.value;
+                                      upsertOverrideForWo(r, function(base) { return Object.assign({}, base, { override_line_name: v }); });
+                                      markRowDirty(rowKey);
+                                    }}
+                                    className="h-8 w-28 rounded border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2 text-xs"
+                                  >
+                                    {rowLines.map(function(line) { return <option key={line} value={line}>{line}</option>; })}
+                                  </select>
+                                </div>
+                                <div>
+                                  <div className="mb-1 text-[11px] text-[rgb(var(--muted))]">Cases/Min</div>
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    value={(ov && ov.override_cases_per_min) || ""}
+                                    onChange={function(e) {
+                                      var v = e.target.value;
+                                      upsertOverrideForWo(r, function(base) { return Object.assign({}, base, { override_cases_per_min: v }); });
+                                      markRowDirty(rowKey);
+                                    }}
+                                    className="h-8 w-20 text-xs text-right"
+                                    placeholder={safeNum(r.cases_per_min).toFixed(2)}
+                                  />
+                                </div>
+                                <Button size="sm" variant="outline" onClick={resetRow}>Reset</Button>
+                              </div>
+                            </details>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : null
+                ];
               })}
             </tbody>
           </table>
