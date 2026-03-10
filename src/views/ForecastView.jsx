@@ -49,6 +49,7 @@ var DEFAULT_MICRO_HEADCOUNT = {
   maint: 0.5,
   recycling: 0.5
 };
+var LINE_OPTIONS = ["DMM", "MPAC", "RSC", "Hand Pack", "Climax"];
 
 function normalizeLegacyHeadcountMap(map) {
   var out = Object.assign({}, map || {});
@@ -598,15 +599,19 @@ export default function ForecastView(props) {
                 <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>HC Rec</th>
                 <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Labor Cost</th>
                 <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Revenue</th>
+                <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {!microRows.length && <tr><td colSpan={14} style={{ padding: 16, textAlign: "center", color: C.dim }}>No forecast rows yet.</td></tr>}
+              {!microRows.length && <tr><td colSpan={15} style={{ padding: 16, textAlign: "center", color: C.dim }}>No forecast rows yet.</td></tr>}
               {microRows.slice(0, 200).map(function(r, idx) {
                 var desc = descriptionBySku[r.sku] || descriptionBySku[String(r.sku || "").toLowerCase()] || "--";
                 var ov = pickOverrideForWo(r);
                 var baseHc = baselineHeadcountByRole(r);
                 var hc = Object.assign({}, baseHc, (ov && ov.override_headcount_by_role) || {});
+                var lineValue = String((ov && ov.override_line_name) || r.line_name || "");
+                var rowLines = LINE_OPTIONS.slice();
+                if (lineValue && rowLines.indexOf(lineValue) === -1) rowLines.unshift(lineValue);
                 var setRoleHeadcount = function(role, val) {
                   upsertOverrideForWo(r, function(base) {
                     var nextHc = Object.assign({}, base.override_headcount_by_role || {});
@@ -614,12 +619,43 @@ export default function ForecastView(props) {
                     return Object.assign({}, base, { override_headcount_by_role: nextHc });
                   });
                 };
+                var saveRow = function() {
+                  runForecast();
+                };
+                var resetRow = function() {
+                  var resetHc = normalizeLegacyHeadcountMap(baseHc);
+                  upsertOverrideForWo(r, function(base) {
+                    return Object.assign({}, base, {
+                      override_cases_per_min: "",
+                      override_line_name: "",
+                      override_pack_type: "",
+                      override_headcount_by_role: resetHc,
+                      override_bucket_multiplier: { variable: 1, step_fixed: 1, fixed: 1 }
+                    });
+                  });
+                  setTimeout(function() { runForecast(); }, 0);
+                };
                 return (
                   <tr key={r.wo_code + "-" + r.sku + "-" + idx} style={{ borderBottom: "1px solid " + C.border }}>
                     <td style={{ padding: "8px 10px", fontSize: 13, color: C.bright, fontWeight: 600 }}>{r.wo_code || "--"}</td>
                     <td style={{ padding: "8px 10px", fontSize: 13, color: C.bright, fontWeight: 600 }}>{r.sku}</td>
                     <td style={{ padding: "8px 10px", fontSize: 13, color: C.text }}>{desc}</td>
-                    <td style={{ padding: "8px 10px", fontSize: 13, color: C.text }}>{r.line_name || "--"}</td>
+                    <td style={{ padding: "8px 10px", fontSize: 13, color: C.text }}>
+                      <select
+                        value={lineValue}
+                        onChange={function(e) {
+                          var v = e.target.value;
+                          upsertOverrideForWo(r, function(base) {
+                            return Object.assign({}, base, { override_line_name: v });
+                          });
+                        }}
+                        className="h-8 w-28 rounded border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2 text-xs"
+                      >
+                        {rowLines.map(function(line) {
+                          return <option key={line} value={line}>{line}</option>;
+                        })}
+                      </select>
+                    </td>
                     <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{safeNum(r.planned_cases).toLocaleString()}</td>
                     <td style={{ padding: "8px 10px", fontSize: 13, textAlign: "right" }}>
                       <Input
@@ -692,6 +728,10 @@ export default function ForecastView(props) {
                     </td>
                     <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{fmtMoney(r.line_run_labor_cost)}</td>
                     <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{fmtMoney(r.revenue)}</td>
+                    <td style={{ padding: "8px 10px", fontSize: 13, textAlign: "right", whiteSpace: "nowrap" }}>
+                      <Button size="sm" variant="outline" onClick={saveRow} disabled={loading}>Save</Button>
+                      <Button size="sm" variant="outline" onClick={resetRow} disabled={loading} className="ml-1">Reset</Button>
+                    </td>
                   </tr>
                 );
               })}

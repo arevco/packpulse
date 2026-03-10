@@ -30,6 +30,22 @@ function normalizeRoleKey(role) {
   return r;
 }
 
+var DEFAULT_ROLE_RATE_BY_KEY = {
+  labor: 20.17,
+  operator: 27.22,
+  fork: 27.73,
+  qa: 22.20,
+  maint: 37.06,
+  recycling: 20.17
+};
+
+function defaultLaborBucketForRole(role) {
+  var r = normalizeRoleKey(role);
+  if (r === "maint" || r === "qa") return "fixed";
+  if (r === "fork" || r === "recycling") return "step_fixed";
+  return "variable";
+}
+
 function toIsoDay(value) {
   if (!value) return "";
   var d = value instanceof Date ? value : new Date(value);
@@ -230,7 +246,14 @@ function withOverrideTemplateRows(baseRows, override) {
   var hr = {};
   Object.keys(hcRaw).forEach(function(k) { hc[normalizeRoleKey(k)] = hcRaw[k]; });
   Object.keys(hrRaw).forEach(function(k) { hr[normalizeRoleKey(k)] = hrRaw[k]; });
-  return baseRows.map(function(r) {
+  var rateByRole = {};
+  baseRows.forEach(function(r) {
+    var role = normalizeRoleKey(r && r.role);
+    if (!role) return;
+    var rate = safeNum(r && r.hourly_rate);
+    if (rate > 0) rateByRole[role] = rate;
+  });
+  var out = baseRows.map(function(r) {
     var role = normalizeRoleKey(r.role);
     var roleHc = safeNum(hc[role]);
     var roleHr = safeNum(hr[role]);
@@ -239,6 +262,31 @@ function withOverrideTemplateRows(baseRows, override) {
       hourly_rate: roleHr > 0 ? roleHr : r.hourly_rate
     });
   });
+  var present = {};
+  out.forEach(function(r) {
+    var role = normalizeRoleKey(r && r.role);
+    if (!role) return;
+    present[role] = true;
+  });
+  Object.keys(hc).forEach(function(roleKey) {
+    var role = normalizeRoleKey(roleKey);
+    if (!role || present[role]) return;
+    var roleHc = safeNum(hc[role]);
+    if (!(roleHc > 0)) return;
+    var roleHr = safeNum(hr[role]) || safeNum(rateByRole[role]) || safeNum(DEFAULT_ROLE_RATE_BY_KEY[role]);
+    if (!(roleHr > 0)) return;
+    out.push({
+      sku: "",
+      product_family: "",
+      pack_type: "",
+      line_name: "",
+      role: role,
+      headcount_assumed: roleHc,
+      hourly_rate: roleHr,
+      labor_bucket: defaultLaborBucketForRole(role)
+    });
+  });
+  return out;
 }
 
 function resolveBucketMultipliers(override) {
