@@ -251,9 +251,15 @@ export default function ForecastView(props) {
   var forecast = payload && payload.forecast ? payload.forecast : null;
   var summary = forecast && forecast.summary ? forecast.summary : null;
   var bySku = forecast && Array.isArray(forecast.bySku) ? forecast.bySku : [];
+  var byWorkOrder = forecast && Array.isArray(forecast.byWorkOrder) ? forecast.byWorkOrder : [];
   var daily = forecast && Array.isArray(forecast.daily) ? forecast.daily : [];
   var flags = forecast && Array.isArray(forecast.flags) ? forecast.flags : [];
   var topSku = useMemo(function() { return bySku.slice(0, 20); }, [bySku]);
+  var microRows = useMemo(function() {
+    return byWorkOrder.slice().sort(function(a, b) {
+      return safeNum(b.planned_cases) - safeNum(a.planned_cases);
+    });
+  }, [byWorkOrder]);
   var descriptionBySku = useMemo(function() {
     var out = {};
     itemMaster.forEach(function(r) {
@@ -375,6 +381,57 @@ export default function ForecastView(props) {
     });
     return out;
   }, [productionData, bySku, itemMaster, monthKey]);
+
+  var normKey = function(v) {
+    return String(v || "").trim().toLowerCase();
+  };
+  var pickOverrideForWo = function(row) {
+    var woKey = normKey(row && row.wo_code);
+    var skuKey = normKey(row && row.sku);
+    var lineKey = normKey(row && row.line_name);
+    var found = null;
+    overrides.forEach(function(o) {
+      if (found) return;
+      if (woKey && normKey(o.wo_code) === woKey) {
+        found = o;
+        return;
+      }
+      if (skuKey && normKey(o.sku) === skuKey && lineKey && normKey(o.line_name) === lineKey) {
+        found = o;
+      }
+    });
+    return found || {};
+  };
+  var upsertOverrideForWo = function(row, apply) {
+    setOverrides(function(prev) {
+      var woKey = normKey(row && row.wo_code);
+      var skuKey = normKey(row && row.sku);
+      var lineKey = normKey(row && row.line_name);
+      var idx = -1;
+      for (var i = 0; i < prev.length; i++) {
+        var o = prev[i] || {};
+        if (woKey && normKey(o.wo_code) === woKey) { idx = i; break; }
+        if (!woKey && skuKey && lineKey && normKey(o.sku) === skuKey && normKey(o.line_name) === lineKey) { idx = i; break; }
+      }
+      var base = idx >= 0 ? Object.assign({}, prev[idx]) : {
+        wo_code: row.wo_code || "",
+        sku: row.sku || "",
+        line_name: row.line_name || "",
+        override_cases_per_min: "",
+        override_line_name: "",
+        override_pack_type: "",
+        override_headcount_by_role: {},
+        override_bucket_multiplier: {}
+      };
+      var nextRow = apply(base) || base;
+      if (idx >= 0) {
+        var next = prev.slice();
+        next[idx] = nextRow;
+        return next;
+      }
+      return prev.concat([nextRow]);
+    });
+  };
 
   return (
     <div>
@@ -536,7 +593,7 @@ export default function ForecastView(props) {
             </table>
           </div>
           <Button size="sm" variant="outline" onClick={function() {
-            setOverrides(function(prev) { return prev.concat([{ wo_code: "", sku: "", line_name: "", override_cases_per_min: "", override_line_name: "", override_pack_type: "", override_headcount_by_role: {} }]); });
+            setOverrides(function(prev) { return prev.concat([{ wo_code: "", sku: "", line_name: "", override_cases_per_min: "", override_line_name: "", override_pack_type: "", override_headcount_by_role: {}, override_bucket_multiplier: { variable: 1, step_fixed: 1, fixed: 1 } }]); });
           }}>Add Override Row</Button>
         </div>
       )}
@@ -579,34 +636,104 @@ export default function ForecastView(props) {
         </div>
       )}
 
-      <div className="mb-3 text-sm font-semibold text-[rgb(var(--foreground))]">Top SKU Forecast</div>
+      <div className="mb-1 text-sm font-semibold text-[rgb(var(--foreground))]">Work Order Micro-Forecasts</div>
+      <div className="mb-2 text-xs text-[rgb(var(--muted))]">Adjust throughput and labor buckets per work order. Click `Run Forecast` to recalculate totals.</div>
       <TableShell>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ background: C.raised }}>
+                <th style={{ textAlign: "left", padding: "8px 10px", fontSize: 12, color: C.dim }}>WO</th>
                 <th style={{ textAlign: "left", padding: "8px 10px", fontSize: 12, color: C.dim }}>SKU</th>
                 <th style={{ textAlign: "left", padding: "8px 10px", fontSize: 12, color: C.dim }}>Description</th>
+                <th style={{ textAlign: "left", padding: "8px 10px", fontSize: 12, color: C.dim }}>Line</th>
                 <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Cases</th>
-                <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Revenue</th>
+                <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Cases/Min</th>
+                <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Var x</th>
+                <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Step x</th>
+                <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Fixed x</th>
                 <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Labor Cost</th>
-                <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Labor $/Case</th>
-                <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Labor % Sales</th>
+                <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Revenue</th>
               </tr>
             </thead>
             <tbody>
-              {!topSku.length && <tr><td colSpan={7} style={{ padding: 16, textAlign: "center", color: C.dim }}>No forecast rows yet.</td></tr>}
-              {topSku.map(function(r, idx) {
+              {!microRows.length && <tr><td colSpan={11} style={{ padding: 16, textAlign: "center", color: C.dim }}>No forecast rows yet.</td></tr>}
+              {microRows.slice(0, 200).map(function(r, idx) {
                 var desc = descriptionBySku[r.sku] || descriptionBySku[String(r.sku || "").toLowerCase()] || "--";
+                var ov = pickOverrideForWo(r);
+                var mult = Object.assign({ variable: 1, step_fixed: 1, fixed: 1 }, (ov && ov.override_bucket_multiplier) || {});
                 return (
-                  <tr key={r.sku + "-" + idx} style={{ borderBottom: "1px solid " + C.border }}>
+                  <tr key={r.wo_code + "-" + r.sku + "-" + idx} style={{ borderBottom: "1px solid " + C.border }}>
+                    <td style={{ padding: "8px 10px", fontSize: 13, color: C.bright, fontWeight: 600 }}>{r.wo_code || "--"}</td>
                     <td style={{ padding: "8px 10px", fontSize: 13, color: C.bright, fontWeight: 600 }}>{r.sku}</td>
                     <td style={{ padding: "8px 10px", fontSize: 13, color: C.text }}>{desc}</td>
+                    <td style={{ padding: "8px 10px", fontSize: 13, color: C.text }}>{r.line_name || "--"}</td>
                     <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{safeNum(r.planned_cases).toLocaleString()}</td>
-                    <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{fmtMoney(r.revenue)}</td>
+                    <td style={{ padding: "8px 10px", fontSize: 13, textAlign: "right" }}>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={(ov && ov.override_cases_per_min) || ""}
+                        onChange={function(e) {
+                          var v = e.target.value;
+                          upsertOverrideForWo(r, function(base) {
+                            return Object.assign({}, base, { override_cases_per_min: v });
+                          });
+                        }}
+                        className="h-8 w-20 text-xs text-right"
+                        placeholder={safeNum(r.cases_per_min).toFixed(2)}
+                      />
+                    </td>
+                    <td style={{ padding: "8px 10px", fontSize: 13, textAlign: "right" }}>
+                      <Input
+                        type="number"
+                        step="0.05"
+                        value={mult.variable}
+                        onChange={function(e) {
+                          var v = e.target.value;
+                          upsertOverrideForWo(r, function(base) {
+                            var m = Object.assign({ variable: 1, step_fixed: 1, fixed: 1 }, base.override_bucket_multiplier || {});
+                            m.variable = v;
+                            return Object.assign({}, base, { override_bucket_multiplier: m });
+                          });
+                        }}
+                        className="h-8 w-16 text-xs text-right"
+                      />
+                    </td>
+                    <td style={{ padding: "8px 10px", fontSize: 13, textAlign: "right" }}>
+                      <Input
+                        type="number"
+                        step="0.05"
+                        value={mult.step_fixed}
+                        onChange={function(e) {
+                          var v = e.target.value;
+                          upsertOverrideForWo(r, function(base) {
+                            var m = Object.assign({ variable: 1, step_fixed: 1, fixed: 1 }, base.override_bucket_multiplier || {});
+                            m.step_fixed = v;
+                            return Object.assign({}, base, { override_bucket_multiplier: m });
+                          });
+                        }}
+                        className="h-8 w-16 text-xs text-right"
+                      />
+                    </td>
+                    <td style={{ padding: "8px 10px", fontSize: 13, textAlign: "right" }}>
+                      <Input
+                        type="number"
+                        step="0.05"
+                        value={mult.fixed}
+                        onChange={function(e) {
+                          var v = e.target.value;
+                          upsertOverrideForWo(r, function(base) {
+                            var m = Object.assign({ variable: 1, step_fixed: 1, fixed: 1 }, base.override_bucket_multiplier || {});
+                            m.fixed = v;
+                            return Object.assign({}, base, { override_bucket_multiplier: m });
+                          });
+                        }}
+                        className="h-8 w-16 text-xs text-right"
+                      />
+                    </td>
                     <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{fmtMoney(r.labor_cost)}</td>
-                    <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{fmtMoney(r.labor_cost_per_case)}</td>
-                    <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{fmtPct(r.labor_pct_sales)}</td>
+                    <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{fmtMoney(r.revenue)}</td>
                   </tr>
                 );
               })}

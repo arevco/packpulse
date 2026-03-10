@@ -227,6 +227,20 @@ function withOverrideTemplateRows(baseRows, override) {
   });
 }
 
+function resolveBucketMultipliers(override) {
+  var mult = (override && override.override_bucket_multiplier && typeof override.override_bucket_multiplier === "object")
+    ? override.override_bucket_multiplier
+    : {};
+  var variable = safeNum(mult.variable);
+  var stepFixed = safeNum(mult.step_fixed);
+  var fixed = safeNum(mult.fixed);
+  return {
+    variable: variable > 0 ? variable : 1,
+    step_fixed: stepFixed > 0 ? stepFixed : 1,
+    fixed: fixed > 0 ? fixed : 1
+  };
+}
+
 function sumRoleHourlyCost(templateRows) {
   return (Array.isArray(templateRows) ? templateRows : []).reduce(function(sum, r) {
     return sum + safeNum(r.headcount_assumed) * safeNum(r.hourly_rate);
@@ -341,12 +355,13 @@ export function runLaborForecast(input) {
     var effectiveTemplate = withOverrideTemplateRows(templates, override);
     var lineHourlyLaborCost = sumRoleHourlyCost(effectiveTemplate);
     var bucketHourly = bucketHourlyCosts(effectiveTemplate);
+    var bucketMult = resolveBucketMultipliers(override);
     var lineHeadcount = sumRoleHeadcount(effectiveTemplate);
     var productionHours = plannedCases / (throughput.value * 60);
-    var runLaborCost = lineHourlyLaborCost * productionHours;
-    var variableLaborCost = bucketHourly.variable * productionHours;
-    var stepFixedLaborCost = bucketHourly.step_fixed * productionHours;
-    var fixedLaborCost = bucketHourly.fixed * productionHours;
+    var variableLaborCost = bucketHourly.variable * productionHours * bucketMult.variable;
+    var stepFixedLaborCost = bucketHourly.step_fixed * productionHours * bucketMult.step_fixed;
+    var fixedLaborCost = bucketHourly.fixed * productionHours * bucketMult.fixed;
+    var runLaborCost = variableLaborCost + stepFixedLaborCost + fixedLaborCost;
     var headcountHours = lineHeadcount * productionHours;
 
     var rev = resolveRevenuePerCase(sku, dateIso, pricing, itemMasterCostMap);
@@ -379,6 +394,9 @@ export function runLaborForecast(input) {
       variable_labor_cost: variableLaborCost,
       step_fixed_labor_cost: stepFixedLaborCost,
       fixed_labor_cost: fixedLaborCost,
+      variable_labor_multiplier: bucketMult.variable,
+      step_fixed_labor_multiplier: bucketMult.step_fixed,
+      fixed_labor_multiplier: bucketMult.fixed,
       headcount_hours: headcountHours,
       revenue_per_case: rev.value,
       revenue_source: rev.source,
