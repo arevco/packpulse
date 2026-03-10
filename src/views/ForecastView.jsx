@@ -478,14 +478,10 @@ export default function ForecastView(props) {
       {!!summary && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 10, marginBottom: 14 }}>
           {[
-            { label: "Total Cases", value: safeNum(summary.total_cases).toLocaleString() },
-            { label: "Scoped Cases", value: safeNum(summary.scoped_total_cases).toLocaleString() },
-            { label: "Excluded Cases", value: safeNum(summary.excluded_cases_total).toLocaleString() },
-            { label: "Missing Throughput Cases", value: safeNum(summary.excluded_missing_throughput_cases).toLocaleString() },
+            { label: "Total Case Forecast", value: safeNum(summary.total_cases).toLocaleString() },
             { label: "Rollover Cases", value: safeNum(summary.rollover_cases).toLocaleString() },
             { label: "Rollover WOs", value: safeNum(summary.rollover_wo_count).toLocaleString() },
             { label: "Total Revenue", value: fmtMoney(summary.total_revenue) },
-            { label: "Actual Revenue", value: fmtMoney(Object.values(actualByDay).reduce(function(sum, d) { return sum + safeNum(d.actual_revenue); }, 0)) },
             { label: "Total Labor Cost", value: fmtMoney(summary.total_labor_cost) },
             { label: "Labor Cost / Case", value: fmtMoney(summary.labor_cost_per_case) },
             { label: "Labor % Sales", value: fmtPct(summary.labor_pct_sales) },
