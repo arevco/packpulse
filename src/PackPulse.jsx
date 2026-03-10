@@ -17,6 +17,16 @@ function lazySafe(importer, name) {
     return importer()
       .then(function(mod) {
         if (mod && mod.default) return mod;
+        if (mod && typeof mod === "object") {
+          var keys = Object.keys(mod);
+          for (var i = 0; i < keys.length; i++) {
+            var k = keys[i];
+            var candidate = mod[k];
+            if (typeof candidate === "function") {
+              return { default: candidate };
+            }
+          }
+        }
         return {
           default: function MissingView() {
             return <Card className="mt-3 p-4 text-sm text-[rgb(var(--danger))]">Could not load {name} view.</Card>;
