@@ -439,6 +439,43 @@ function mergeDaySeries(baseRows, extraRows) {
   return Object.values(map).sort(function(a, b) { return String(b.date || "").localeCompare(String(a.date || "")); });
 }
 
+function preferHigherDaySeries(primaryRows, fallbackRows) {
+  var map = {};
+  var add = function(row) {
+    var key = String((row && row.date) || "");
+    if (!key) return;
+    var units = safeNum(row.units);
+    var rows = safeNum(row.rows);
+    if (!map[key] || units > safeNum(map[key].units)) {
+      map[key] = { date: key, units: units, rows: rows };
+    }
+  };
+  (Array.isArray(primaryRows) ? primaryRows : []).forEach(add);
+  (Array.isArray(fallbackRows) ? fallbackRows : []).forEach(add);
+  return Object.values(map).sort(function(a, b) { return String(b.date || "").localeCompare(String(a.date || "")); });
+}
+
+function preferHigherShiftSeries(primaryRows, fallbackRows) {
+  var map = {};
+  var add = function(row) {
+    var date = String((row && row.date) || "");
+    var shift = String((row && row.shift) || "");
+    if (!date) return;
+    var key = date + "|" + shift;
+    var units = safeNum(row.units);
+    var rows = safeNum(row.rows);
+    if (!map[key] || units > safeNum(map[key].units)) {
+      map[key] = { date: date, shift: shift, units: units, rows: rows };
+    }
+  };
+  (Array.isArray(primaryRows) ? primaryRows : []).forEach(add);
+  (Array.isArray(fallbackRows) ? fallbackRows : []).forEach(add);
+  return Object.values(map).sort(function(a, b) {
+    if (a.date !== b.date) return String(b.date || "").localeCompare(String(a.date || ""));
+    return String(a.shift || "").localeCompare(String(b.shift || ""));
+  });
+}
+
 export default function OperationsView({ productionSegments, productionDataRaw, evoconData, evoconTimestamp, itemMaster, initialFilters, onPermalinkChange }) {
   const { C, mono } = useTheme();
   var initial = initialFilters || {};
@@ -737,8 +774,12 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   }, [evoconData]);
 
   var effectiveTrends = useMemo(function() {
-    var nByDay = (trends && Array.isArray(trends.byDay) && trends.byDay.length) ? trends.byDay : ((localNulogySeries && localNulogySeries.trends && Array.isArray(localNulogySeries.trends.byDay)) ? localNulogySeries.trends.byDay : []);
-    var nByShift = (trends && Array.isArray(trends.byShift) && trends.byShift.length) ? trends.byShift : ((localNulogySeries && localNulogySeries.trends && Array.isArray(localNulogySeries.trends.byShift)) ? localNulogySeries.trends.byShift : []);
+    var cacheByDay = (trends && Array.isArray(trends.byDay)) ? trends.byDay : [];
+    var cacheByShift = (trends && Array.isArray(trends.byShift)) ? trends.byShift : [];
+    var rawByDay = (localNulogySeries && localNulogySeries.trends && Array.isArray(localNulogySeries.trends.byDay)) ? localNulogySeries.trends.byDay : [];
+    var rawByShift = (localNulogySeries && localNulogySeries.trends && Array.isArray(localNulogySeries.trends.byShift)) ? localNulogySeries.trends.byShift : [];
+    var nByDay = preferHigherDaySeries(cacheByDay, rawByDay);
+    var nByShift = preferHigherShiftSeries(cacheByShift, rawByShift);
     return { byDay: nByDay, byShift: nByShift };
   }, [trends, localNulogySeries]);
 
