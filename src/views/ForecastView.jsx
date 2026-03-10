@@ -25,11 +25,22 @@ function statusLooksClosed(status) {
 }
 
 function defaultLaborBucketForRole(role) {
-  var r = String(role || "").toLowerCase().trim();
-  if (r === "maint" || r === "maintenance" || r === "qa") return "fixed";
-  if (r === "fork" || r === "forklift" || r === "recycling") return "step_fixed";
+  var r = normalizeRoleKey(role);
+  if (r === "maint" || r === "qa") return "fixed";
+  if (r === "fork" || r === "recycling") return "step_fixed";
   return "variable";
 }
+
+function normalizeRoleKey(role) {
+  var r = String(role || "").toLowerCase().trim();
+  if (r === "forklift" || r === "fork lift") return "fork";
+  if (r === "maintenance") return "maint";
+  if (r === "qa tech" || r === "qa_tech") return "qa";
+  if (r === "gen labor" || r === "general labor") return "labor";
+  return r;
+}
+
+var FORECAST_ROLE_ORDER = ["labor", "operator", "fork", "qa", "maint", "recycling"];
 
 export default function ForecastView(props) {
   var C = useTheme().C;
@@ -159,12 +170,22 @@ export default function ForecastView(props) {
           ? body.lineHeadcountDefaults
           : {};
         if (!rates.length) return;
-        var roles = rates.map(function(r) { return String(r.role || "").trim().toLowerCase(); }).filter(Boolean);
+        var seenRoles = {};
+        var roles = [];
         var rateByRole = {};
         rates.forEach(function(r) {
-          var role = String(r.role || "").trim().toLowerCase();
+          var role = normalizeRoleKey(r.role);
           if (!role) return;
+          if (!seenRoles[role]) {
+            seenRoles[role] = true;
+            roles.push(role);
+          }
           rateByRole[role] = (safeNum(r.hourly_rate) * (1 + safeNum(r.markup_pct))).toFixed(2);
+        });
+        FORECAST_ROLE_ORDER.forEach(function(role) {
+          if (seenRoles[role]) return;
+          roles.push(role);
+          if (!rateByRole[role]) rateByRole[role] = "0.00";
         });
         var combos = {};
         workOrders.forEach(function(w) {
@@ -185,6 +206,7 @@ export default function ForecastView(props) {
             var lineDefaults = lineHeadcountDefaults[c.line_name] || {};
             var hc = safeNum(lineDefaults[role]);
             if (!(hc > 0)) hc = safeNum(headcountDefaults[role]);
+            if (role === "operator" && !(hc > 0)) hc = 0;
             seeded.push({
               sku: "",
               product_family: "",
@@ -432,6 +454,28 @@ export default function ForecastView(props) {
       return prev.concat([nextRow]);
     });
   };
+  var baselineHeadcountByRole = function(row) {
+    var out = { labor: 0, operator: 0, fork: 0, qa: 0, maint: 0, recycling: 0 };
+    var lineKey = normKey(row && row.line_name);
+    var packKey = normKey(row && row.pack_type);
+    var skuKey = normKey(row && row.sku);
+    var matches = laborTemplates.filter(function(t) {
+      var tRole = normalizeRoleKey(t && t.role);
+      if (!tRole) return false;
+      var tSku = normKey(t && t.sku);
+      var tLine = normKey(t && t.line_name);
+      var tPack = normKey(t && t.pack_type);
+      if (tSku && skuKey && tSku === skuKey && (!tLine || tLine === lineKey)) return true;
+      if (tLine && tLine === lineKey && (!tPack || tPack === packKey)) return true;
+      return false;
+    });
+    matches.forEach(function(t) {
+      var role = normalizeRoleKey(t && t.role);
+      if (!Object.prototype.hasOwnProperty.call(out, role)) return;
+      out[role] = safeNum(t.headcount_assumed);
+    });
+    return out;
+  };
 
   return (
     <div>
@@ -539,14 +583,14 @@ export default function ForecastView(props) {
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ background: C.raised }}>
-                  {["WO", "SKU", "Line", "Cases/Min", "Override Line", "Override Pack Type", "HC Labor", "HC Fork", "HC QA", "HC Maint", "HC Recycle", ""].map(function(h) {
+                  {["WO", "SKU", "Line", "Cases/Min", "Override Line", "Override Pack Type", "HC Labor", "HC Operator", "HC Fork", "HC QA", "HC Maint", "HC Recycle", ""].map(function(h) {
                     return <th key={h} style={{ textAlign: "left", padding: "6px 8px", fontSize: 12, color: C.dim }}>{h}</th>;
                   })}
                 </tr>
               </thead>
               <tbody>
                 {!overrides.length && (
-                  <tr><td colSpan={12} style={{ padding: 10, color: C.dim }}>No overrides configured.</td></tr>
+                  <tr><td colSpan={13} style={{ padding: 10, color: C.dim }}>No overrides configured.</td></tr>
                 )}
                 {overrides.map(function(r, idx) {
                   var setRow = function(key, val) {
@@ -567,7 +611,7 @@ export default function ForecastView(props) {
                       return next;
                     });
                   };
-                  var roleHc = Object.assign({ labor: "", fork: "", qa: "", maint: "", recycling: "" }, r.override_headcount_by_role || {});
+                  var roleHc = Object.assign({ labor: "", operator: "", fork: "", qa: "", maint: "", recycling: "" }, r.override_headcount_by_role || {});
                   return (
                     <tr key={idx} style={{ borderBottom: "1px solid " + C.border }}>
                       <td style={{ padding: 6 }}><Input list="forecast-wo-options" value={r.wo_code || ""} onChange={function(e) { setRow("wo_code", e.target.value); }} className="h-8 w-28 text-xs" /></td>
@@ -577,6 +621,7 @@ export default function ForecastView(props) {
                       <td style={{ padding: 6 }}><Input list="forecast-line-options" value={r.override_line_name || ""} onChange={function(e) { setRow("override_line_name", e.target.value); }} className="h-8 w-24 text-xs" /></td>
                       <td style={{ padding: 6 }}><Input list="forecast-pack-options" value={r.override_pack_type || ""} onChange={function(e) { setRow("override_pack_type", e.target.value); }} className="h-8 w-32 text-xs" /></td>
                       <td style={{ padding: 6 }}><Input type="number" step="0.1" value={roleHc.labor} onChange={function(e) { setRoleHeadcount("labor", e.target.value); }} className="h-8 w-20 text-xs" /></td>
+                      <td style={{ padding: 6 }}><Input type="number" step="0.1" value={roleHc.operator} onChange={function(e) { setRoleHeadcount("operator", e.target.value); }} className="h-8 w-20 text-xs" /></td>
                       <td style={{ padding: 6 }}><Input type="number" step="0.1" value={roleHc.fork} onChange={function(e) { setRoleHeadcount("fork", e.target.value); }} className="h-8 w-20 text-xs" /></td>
                       <td style={{ padding: 6 }}><Input type="number" step="0.1" value={roleHc.qa} onChange={function(e) { setRoleHeadcount("qa", e.target.value); }} className="h-8 w-20 text-xs" /></td>
                       <td style={{ padding: 6 }}><Input type="number" step="0.1" value={roleHc.maint} onChange={function(e) { setRoleHeadcount("maint", e.target.value); }} className="h-8 w-20 text-xs" /></td>
@@ -649,19 +694,30 @@ export default function ForecastView(props) {
                 <th style={{ textAlign: "left", padding: "8px 10px", fontSize: 12, color: C.dim }}>Line</th>
                 <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Cases</th>
                 <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Cases/Min</th>
-                <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Var x</th>
-                <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Step x</th>
-                <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Fixed x</th>
+                <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>HC Gen</th>
+                <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>HC Op</th>
+                <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>HC Fork</th>
+                <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>HC QA</th>
+                <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>HC Maint</th>
+                <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>HC Rec</th>
                 <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Labor Cost</th>
                 <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Revenue</th>
               </tr>
             </thead>
             <tbody>
-              {!microRows.length && <tr><td colSpan={11} style={{ padding: 16, textAlign: "center", color: C.dim }}>No forecast rows yet.</td></tr>}
+              {!microRows.length && <tr><td colSpan={14} style={{ padding: 16, textAlign: "center", color: C.dim }}>No forecast rows yet.</td></tr>}
               {microRows.slice(0, 200).map(function(r, idx) {
                 var desc = descriptionBySku[r.sku] || descriptionBySku[String(r.sku || "").toLowerCase()] || "--";
                 var ov = pickOverrideForWo(r);
-                var mult = Object.assign({ variable: 1, step_fixed: 1, fixed: 1 }, (ov && ov.override_bucket_multiplier) || {});
+                var baseHc = baselineHeadcountByRole(r);
+                var hc = Object.assign({}, baseHc, (ov && ov.override_headcount_by_role) || {});
+                var setRoleHeadcount = function(role, val) {
+                  upsertOverrideForWo(r, function(base) {
+                    var nextHc = Object.assign({}, base.override_headcount_by_role || {});
+                    nextHc[role] = val;
+                    return Object.assign({}, base, { override_headcount_by_role: nextHc });
+                  });
+                };
                 return (
                   <tr key={r.wo_code + "-" + r.sku + "-" + idx} style={{ borderBottom: "1px solid " + C.border }}>
                     <td style={{ padding: "8px 10px", fontSize: 13, color: C.bright, fontWeight: 600 }}>{r.wo_code || "--"}</td>
@@ -687,48 +743,54 @@ export default function ForecastView(props) {
                     <td style={{ padding: "8px 10px", fontSize: 13, textAlign: "right" }}>
                       <Input
                         type="number"
-                        step="0.05"
-                        value={mult.variable}
-                        onChange={function(e) {
-                          var v = e.target.value;
-                          upsertOverrideForWo(r, function(base) {
-                            var m = Object.assign({ variable: 1, step_fixed: 1, fixed: 1 }, base.override_bucket_multiplier || {});
-                            m.variable = v;
-                            return Object.assign({}, base, { override_bucket_multiplier: m });
-                          });
-                        }}
+                        step="0.1"
+                        value={hc.labor}
+                        onChange={function(e) { setRoleHeadcount("labor", e.target.value); }}
                         className="h-8 w-16 text-xs text-right"
                       />
                     </td>
                     <td style={{ padding: "8px 10px", fontSize: 13, textAlign: "right" }}>
                       <Input
                         type="number"
-                        step="0.05"
-                        value={mult.step_fixed}
-                        onChange={function(e) {
-                          var v = e.target.value;
-                          upsertOverrideForWo(r, function(base) {
-                            var m = Object.assign({ variable: 1, step_fixed: 1, fixed: 1 }, base.override_bucket_multiplier || {});
-                            m.step_fixed = v;
-                            return Object.assign({}, base, { override_bucket_multiplier: m });
-                          });
-                        }}
+                        step="0.1"
+                        value={hc.operator}
+                        onChange={function(e) { setRoleHeadcount("operator", e.target.value); }}
                         className="h-8 w-16 text-xs text-right"
                       />
                     </td>
                     <td style={{ padding: "8px 10px", fontSize: 13, textAlign: "right" }}>
                       <Input
                         type="number"
-                        step="0.05"
-                        value={mult.fixed}
-                        onChange={function(e) {
-                          var v = e.target.value;
-                          upsertOverrideForWo(r, function(base) {
-                            var m = Object.assign({ variable: 1, step_fixed: 1, fixed: 1 }, base.override_bucket_multiplier || {});
-                            m.fixed = v;
-                            return Object.assign({}, base, { override_bucket_multiplier: m });
-                          });
-                        }}
+                        step="0.1"
+                        value={hc.fork}
+                        onChange={function(e) { setRoleHeadcount("fork", e.target.value); }}
+                        className="h-8 w-16 text-xs text-right"
+                      />
+                    </td>
+                    <td style={{ padding: "8px 10px", fontSize: 13, textAlign: "right" }}>
+                      <Input
+                        type="number"
+                        step="0.1"
+                        value={hc.qa}
+                        onChange={function(e) { setRoleHeadcount("qa", e.target.value); }}
+                        className="h-8 w-16 text-xs text-right"
+                      />
+                    </td>
+                    <td style={{ padding: "8px 10px", fontSize: 13, textAlign: "right" }}>
+                      <Input
+                        type="number"
+                        step="0.1"
+                        value={hc.maint}
+                        onChange={function(e) { setRoleHeadcount("maint", e.target.value); }}
+                        className="h-8 w-16 text-xs text-right"
+                      />
+                    </td>
+                    <td style={{ padding: "8px 10px", fontSize: 13, textAlign: "right" }}>
+                      <Input
+                        type="number"
+                        step="0.1"
+                        value={hc.recycling}
+                        onChange={function(e) { setRoleHeadcount("recycling", e.target.value); }}
                         className="h-8 w-16 text-xs text-right"
                       />
                     </td>

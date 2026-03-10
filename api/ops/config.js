@@ -2,11 +2,12 @@ import Sentry from "../_sentry.js";
 import { CACHE_SITE_ID, getAuthenticatedUser, getSupabaseAdmin, toNum, withCors } from "./_common.js";
 
 const DEFAULT_RATES = [
-  { role: "labor", hourly_rate: 20.1, markup_pct: 0.2 },
-  { role: "fork", hourly_rate: 20.1, markup_pct: 0.2 },
-  { role: "qa", hourly_rate: 20.1, markup_pct: 0.2 },
-  { role: "maint", hourly_rate: 20.1, markup_pct: 0.2 },
-  { role: "recycling", hourly_rate: 20.1, markup_pct: 0.2 }
+  { role: "labor", hourly_rate: 20.17, markup_pct: 0 },
+  { role: "operator", hourly_rate: 27.22, markup_pct: 0 },
+  { role: "fork", hourly_rate: 27.73, markup_pct: 0 },
+  { role: "qa", hourly_rate: 22.20, markup_pct: 0 },
+  { role: "maint", hourly_rate: 37.06, markup_pct: 0 },
+  { role: "recycling", hourly_rate: 20.17, markup_pct: 0 }
 ];
 
 function clampMonthKey(v) {
@@ -75,6 +76,28 @@ function buildLineHeadcountDefaults(rows) {
     };
   });
   return result;
+}
+
+function mergeWithDefaultRates(rates) {
+  var out = Array.isArray(rates) ? rates.slice() : [];
+  var seen = {};
+  out.forEach(function(r) {
+    var role = String(r && r.role || "").trim().toLowerCase();
+    if (!role) return;
+    seen[role] = true;
+  });
+  DEFAULT_RATES.forEach(function(d) {
+    var role = String(d.role || "").trim().toLowerCase();
+    if (!role || seen[role]) return;
+    out.push({
+      role: role,
+      hourly_rate: d.hourly_rate,
+      markup_pct: d.markup_pct,
+      effective_from: "2000-01-01",
+      effective_to: null
+    });
+  });
+  return out;
 }
 
 export default async function handler(req, res) {
@@ -151,6 +174,7 @@ export default async function handler(req, res) {
 
       let rates = Array.isArray(ratesQ.data) ? ratesQ.data : [];
       if (!rates.length) rates = DEFAULT_RATES.map(function(r) { return Object.assign({ effective_from: "2000-01-01", effective_to: null }, r); });
+      rates = mergeWithDefaultRates(rates);
 
       return res.status(200).json({
         rates: rates,
