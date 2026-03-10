@@ -39,10 +39,11 @@ function statusLooksClosed(status) {
 }
 
 function getWoDateIso(wo) {
-  var start = pickValue(wo, ["Planned Start", "planned_start_at", "planned_start", "plannedStart"]);
   var due = pickValue(wo, ["Due Date", "due_date_at", "due_date", "dueDate"]);
+  var start = pickValue(wo, ["Planned Start", "planned_start_at", "planned_start", "plannedStart"]);
   var end = pickValue(wo, ["Planned End", "planned_end_at", "planned_end", "plannedEnd"]);
-  return toIsoDay(start) || toIsoDay(due) || toIsoDay(end) || "";
+  // Align month bucketing with Work Orders view behavior: use due date first.
+  return toIsoDay(due) || toIsoDay(start) || toIsoDay(end) || "";
 }
 
 function eachDayInclusive(startIso, endIso) {
