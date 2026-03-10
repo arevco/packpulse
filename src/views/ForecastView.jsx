@@ -10,8 +10,17 @@ function fmtMoney(n) {
   return "$" + v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function fmtMoneyWhole(n) {
+  var v = safeNum(n);
+  return "$" + Math.round(v).toLocaleString();
+}
+
 function fmtPct(n) {
   return (safeNum(n) * 100).toFixed(1) + "%";
+}
+
+function fmtPctWhole(n) {
+  return Math.round(safeNum(n) * 100).toLocaleString() + "%";
 }
 
 function currentMonthKey() {
@@ -652,17 +661,17 @@ export default function ForecastView(props) {
             { label: "Total Case Forecast", value: safeNum(summary.total_cases).toLocaleString() },
             { label: "Rollover Cases", value: safeNum(summary.rollover_cases).toLocaleString() },
             { label: "Rollover WOs", value: safeNum(summary.rollover_wo_count).toLocaleString() },
-            { label: "Total Revenue", value: fmtMoney(summary.total_revenue) },
-            { label: "Total Labor Cost", value: fmtMoney(summary.total_labor_cost) },
-            { label: "Variable Labor", value: fmtMoney(summary.total_variable_labor_cost) },
-            { label: "Step-Fixed Labor", value: fmtMoney(summary.total_step_fixed_labor_cost) },
-            { label: "Fixed Labor", value: fmtMoney(summary.total_fixed_labor_cost) },
+            { label: "Total Revenue", value: fmtMoneyWhole(summary.total_revenue) },
+            { label: "Total Labor Cost", value: fmtMoneyWhole(summary.total_labor_cost) },
+            { label: "Variable Labor", value: fmtMoneyWhole(summary.total_variable_labor_cost) },
+            { label: "Step-Fixed Labor", value: fmtMoneyWhole(summary.total_step_fixed_labor_cost) },
+            { label: "Fixed Labor", value: fmtMoneyWhole(summary.total_fixed_labor_cost) },
             { label: "Labor Cost / Case", value: fmtMoney(summary.labor_cost_per_case) },
-            { label: "Labor % Sales", value: fmtPct(summary.labor_pct_sales) },
-            { label: "Gross Margin", value: fmtMoney(summary.gross_margin) },
-            { label: "Net Operating Income", value: fmtMoney(summary.net_operating_income) },
-            { label: "Production Hours", value: safeNum(summary.total_prod_hours).toFixed(1) },
-            { label: "Headcount Hours", value: safeNum(summary.total_headcount_hours).toFixed(1) }
+            { label: "Labor % Sales", value: fmtPctWhole(summary.labor_pct_sales) },
+            { label: "Gross Margin", value: fmtMoneyWhole(summary.gross_margin) },
+            { label: "Net Operating Income", value: fmtMoneyWhole(summary.net_operating_income) },
+            { label: "Production Hours", value: Math.round(safeNum(summary.total_prod_hours)).toLocaleString() },
+            { label: "Headcount Hours", value: Math.round(safeNum(summary.total_headcount_hours)).toLocaleString() }
           ].map(function(card) {
             return (
               <div key={card.label} style={{ background: C.surface, border: "1px solid " + C.border, borderRadius: 10, padding: "10px 12px" }}>
