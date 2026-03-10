@@ -50,6 +50,21 @@ var DEFAULT_MICRO_HEADCOUNT = {
   recycling: 0.5
 };
 
+function normalizeLegacyHeadcountMap(map) {
+  var out = Object.assign({}, map || {});
+  var labor = safeNum(out.labor);
+  var operator = safeNum(out.operator);
+  var fork = safeNum(out.fork);
+  var qa = safeNum(out.qa);
+  var maint = safeNum(out.maint);
+  var recycling = safeNum(out.recycling);
+  // Legacy bootstrap used labor=1 with otherwise current defaults; upgrade to current preset.
+  if (labor === 1 && operator === 1 && fork === 1.5 && qa === 0.5 && maint === 0.5 && recycling === 0.5) {
+    out.labor = DEFAULT_MICRO_HEADCOUNT.labor;
+  }
+  return out;
+}
+
 export default function ForecastView(props) {
   var C = useTheme().C;
   var workOrders = Array.isArray(props.workOrders) ? props.workOrders : [];
@@ -101,7 +116,12 @@ export default function ForecastView(props) {
       if (ga.equipment_rental != null) setEquipmentRental(String(ga.equipment_rental));
     }
     if (lt.length) setLaborTemplates(lt);
-    if (ov.length) setOverrides(ov);
+    if (ov.length) {
+      setOverrides(ov.map(function(r) {
+        var hc = normalizeLegacyHeadcountMap(r && r.override_headcount_by_role);
+        return Object.assign({}, r, { override_headcount_by_role: hc });
+      }));
+    }
   }, []);
 
   var loadAssumptions = useCallback(async function(targetMonthKey) {
@@ -498,6 +518,15 @@ export default function ForecastView(props) {
     setOverrides(function(prev) {
       var next = prev.slice();
       var changed = false;
+      for (var i = 0; i < next.length; i++) {
+        var row = next[i] || {};
+        var hcCurrent = row.override_headcount_by_role || {};
+        var hcNext = normalizeLegacyHeadcountMap(hcCurrent);
+        if (safeNum(hcNext.labor) !== safeNum(hcCurrent.labor)) {
+          next[i] = Object.assign({}, row, { override_headcount_by_role: hcNext });
+          changed = true;
+        }
+      }
       microRows.forEach(function(r) {
         var woKey = normKey(r && r.wo_code);
         if (!woKey) return;
@@ -508,6 +537,7 @@ export default function ForecastView(props) {
         });
         if (exists) return;
         var hc = baselineHeadcountByRole(r);
+        hc = normalizeLegacyHeadcountMap(hc);
         next.push({
           month_key: monthKey,
           wo_code: r.wo_code || "",

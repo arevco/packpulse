@@ -20,6 +20,16 @@ function pickValue(row, keys) {
   return "";
 }
 
+function normalizeRoleKey(role) {
+  var r = String(role || "").toLowerCase().trim();
+  if (r === "forklift" || r === "fork lift") return "fork";
+  if (r === "maintenance") return "maint";
+  if (r === "qa tech" || r === "qa_tech") return "qa";
+  if (r === "gen labor" || r === "general labor") return "labor";
+  if (r === "operations" || r === "op") return "operator";
+  return r;
+}
+
 function toIsoDay(value) {
   if (!value) return "";
   var d = value instanceof Date ? value : new Date(value);
@@ -163,7 +173,7 @@ function normalizeTemplateRows(templateRows) {
         product_family: String(t.product_family || t.item_family || t.sku_type || "").trim(),
         pack_type: String(t.pack_type || t.product_type || "").trim(),
         line_name: String(t.line_name || "").trim(),
-        role: String(t.role || "").trim().toLowerCase(),
+        role: normalizeRoleKey(t.role),
         headcount_assumed: safeNum(t.headcount_assumed),
         hourly_rate: safeNum(t.hourly_rate),
         labor_bucket: normBucket(t.labor_bucket || t.cost_bucket || t.bucket)
@@ -214,10 +224,14 @@ function pickTemplateForSkuLine(templates, sku, lineName, packType, productFamil
 
 function withOverrideTemplateRows(baseRows, override) {
   if (!override || typeof override !== "object") return baseRows;
-  var hc = override.override_headcount_by_role || {};
-  var hr = override.override_hourly_rate_by_role || {};
+  var hcRaw = override.override_headcount_by_role || {};
+  var hrRaw = override.override_hourly_rate_by_role || {};
+  var hc = {};
+  var hr = {};
+  Object.keys(hcRaw).forEach(function(k) { hc[normalizeRoleKey(k)] = hcRaw[k]; });
+  Object.keys(hrRaw).forEach(function(k) { hr[normalizeRoleKey(k)] = hrRaw[k]; });
   return baseRows.map(function(r) {
-    var role = String(r.role || "").toLowerCase();
+    var role = normalizeRoleKey(r.role);
     var roleHc = safeNum(hc[role]);
     var roleHr = safeNum(hr[role]);
     return Object.assign({}, r, {
