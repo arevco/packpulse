@@ -860,49 +860,66 @@ export default function ForecastView(props) {
                     isExpanded ? (
                       <tr key={rowKey + "-edit"} style={{ borderBottom: "1px solid " + C.border, background: C.surface }}>
                         <td colSpan={12} style={{ padding: "8px 10px" }}>
-                          <div className="flex flex-wrap items-end gap-2">
-                            <div className="text-xs text-[rgb(var(--muted))]">Headcount</div>
-                            <Input type="number" step="0.1" value={hc.labor} onChange={function(e) { setRoleHeadcount("labor", e.target.value); }} className="h-8 w-16 text-xs text-right" />
-                            <Input type="number" step="0.1" value={hc.operator} onChange={function(e) { setRoleHeadcount("operator", e.target.value); }} className="h-8 w-16 text-xs text-right" />
-                            <Input type="number" step="0.1" value={hc.fork} onChange={function(e) { setRoleHeadcount("fork", e.target.value); }} className="h-8 w-16 text-xs text-right" />
-                            <Input type="number" step="0.1" value={hc.qa} onChange={function(e) { setRoleHeadcount("qa", e.target.value); }} className="h-8 w-16 text-xs text-right" />
-                            <Input type="number" step="0.1" value={hc.maint} onChange={function(e) { setRoleHeadcount("maint", e.target.value); }} className="h-8 w-16 text-xs text-right" />
-                            <Input type="number" step="0.1" value={hc.recycling} onChange={function(e) { setRoleHeadcount("recycling", e.target.value); }} className="h-8 w-16 text-xs text-right" />
-                            <details className="ml-2">
-                              <summary className="cursor-pointer text-xs text-[rgb(var(--muted))]">Advanced</summary>
-                              <div className="mt-2 flex flex-wrap items-end gap-2 rounded border border-[rgb(var(--border))] bg-[rgb(var(--raised))] p-2">
-                                <div>
-                                  <div className="mb-1 text-[11px] text-[rgb(var(--muted))]">Line</div>
-                                  <select
-                                    value={lineValue}
-                                    onChange={function(e) {
-                                      var v = e.target.value;
-                                      upsertOverrideForWo(r, function(base) { return Object.assign({}, base, { override_line_name: v }); });
-                                      markRowDirty(rowKey);
-                                    }}
-                                    className="h-8 w-28 rounded border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2 text-xs"
-                                  >
-                                    {rowLines.map(function(line) { return <option key={line} value={line}>{line}</option>; })}
-                                  </select>
-                                </div>
-                                <div>
-                                  <div className="mb-1 text-[11px] text-[rgb(var(--muted))]">Cases/Min</div>
-                                  <Input
-                                    type="number"
-                                    step="0.01"
-                                    value={(ov && ov.override_cases_per_min) || ""}
-                                    onChange={function(e) {
-                                      var v = e.target.value;
-                                      upsertOverrideForWo(r, function(base) { return Object.assign({}, base, { override_cases_per_min: v }); });
-                                      markRowDirty(rowKey);
-                                    }}
-                                    className="h-8 w-20 text-xs text-right"
-                                    placeholder={safeNum(r.cases_per_min).toFixed(2)}
-                                  />
-                                </div>
-                                <Button size="sm" variant="outline" onClick={resetRow}>Reset</Button>
-                              </div>
-                            </details>
+                          <div className="flex flex-wrap items-end gap-2 rounded border border-[rgb(var(--border))] bg-[rgb(var(--raised))] p-2">
+                            <div className="text-xs font-medium text-[rgb(var(--muted))] pr-2">Headcount Inputs</div>
+                            <div>
+                              <div className="mb-1 text-[11px] text-[rgb(var(--muted))]">Gen</div>
+                              <Input type="number" step="0.1" value={hc.labor} onChange={function(e) { setRoleHeadcount("labor", e.target.value); }} className="h-8 w-16 text-xs text-right" />
+                            </div>
+                            <div>
+                              <div className="mb-1 text-[11px] text-[rgb(var(--muted))]">Op</div>
+                              <Input type="number" step="0.1" value={hc.operator} onChange={function(e) { setRoleHeadcount("operator", e.target.value); }} className="h-8 w-16 text-xs text-right" />
+                            </div>
+                            <div>
+                              <div className="mb-1 text-[11px] text-[rgb(var(--muted))]">Fork</div>
+                              <Input type="number" step="0.1" value={hc.fork} onChange={function(e) { setRoleHeadcount("fork", e.target.value); }} className="h-8 w-16 text-xs text-right" />
+                            </div>
+                            <div>
+                              <div className="mb-1 text-[11px] text-[rgb(var(--muted))]">QA</div>
+                              <Input type="number" step="0.1" value={hc.qa} onChange={function(e) { setRoleHeadcount("qa", e.target.value); }} className="h-8 w-16 text-xs text-right" />
+                            </div>
+                            <div>
+                              <div className="mb-1 text-[11px] text-[rgb(var(--muted))]">Maint</div>
+                              <Input type="number" step="0.1" value={hc.maint} onChange={function(e) { setRoleHeadcount("maint", e.target.value); }} className="h-8 w-16 text-xs text-right" />
+                            </div>
+                            <div>
+                              <div className="mb-1 text-[11px] text-[rgb(var(--muted))]">Rec</div>
+                              <Input type="number" step="0.1" value={hc.recycling} onChange={function(e) { setRoleHeadcount("recycling", e.target.value); }} className="h-8 w-16 text-xs text-right" />
+                            </div>
+                            <div className="ml-2 h-8 w-px bg-[rgb(var(--border))]" />
+                            <div>
+                              <div className="mb-1 text-[11px] text-[rgb(var(--muted))]">Line</div>
+                              <select
+                                value={lineValue}
+                                onChange={function(e) {
+                                  var v = e.target.value;
+                                  upsertOverrideForWo(r, function(base) { return Object.assign({}, base, { override_line_name: v }); });
+                                  markRowDirty(rowKey);
+                                }}
+                                className="h-8 w-28 rounded border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2 text-xs"
+                              >
+                                {rowLines.map(function(line) { return <option key={line} value={line}>{line}</option>; })}
+                              </select>
+                            </div>
+                            <div>
+                              <div className="mb-1 text-[11px] text-[rgb(var(--muted))]">Cases/Min</div>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                value={(ov && ov.override_cases_per_min) || ""}
+                                onChange={function(e) {
+                                  var v = e.target.value;
+                                  upsertOverrideForWo(r, function(base) { return Object.assign({}, base, { override_cases_per_min: v }); });
+                                  markRowDirty(rowKey);
+                                }}
+                                className="h-8 w-20 text-xs text-right"
+                                placeholder={safeNum(r.cases_per_min).toFixed(2)}
+                              />
+                            </div>
+                            <div>
+                              <div className="mb-1 text-[11px] text-[rgb(var(--muted))]">&nbsp;</div>
+                              <Button size="sm" variant="outline" onClick={resetRow}>Reset</Button>
+                            </div>
                           </div>
                         </td>
                       </tr>
