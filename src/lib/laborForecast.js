@@ -38,6 +38,12 @@ function statusLooksClosed(status) {
   return s.indexOf("close") !== -1 || s.indexOf("complete") !== -1 || s.indexOf("cancel") !== -1 || s.indexOf("archive") !== -1 || s.indexOf("done") !== -1;
 }
 
+function statusLooksBooked(status) {
+  var s = normalizeStr(status || "");
+  if (!s) return false;
+  return s.indexOf("book") !== -1;
+}
+
 function getWoDateIso(wo) {
   var due = pickValue(wo, ["Due Date", "due_date_at", "due_date", "dueDate"]);
   var start = pickValue(wo, ["Planned Start", "planned_start_at", "planned_start", "plannedStart"]);
@@ -261,7 +267,7 @@ export function runLaborForecast(input) {
     var unitsProduced = safeNum(pickValue(wo, ["Units Produced", "units_produced", "produced"]));
     var explicitRemaining = safeNum(pickValue(wo, ["Units Remaining", "units_remaining", "remaining"]));
     var remainingCases = explicitRemaining > 0 ? explicitRemaining : Math.max(0, unitsExpected - unitsProduced);
-    var isPriorOpenRollover = !!(monthKey && woMonth && woMonth < monthKey && !isClosed && remainingCases > 0);
+    var isPriorOpenRollover = !!(monthKey && woMonth && woMonth < monthKey && statusLooksBooked(status) && remainingCases > 0);
     var isCurrentMonth = !!(monthKey && woMonth === monthKey);
     if (monthKey && !isCurrentMonth && !isPriorOpenRollover) continue;
 
