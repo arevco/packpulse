@@ -47,6 +47,14 @@ function toIsoDateLocal(d) {
   return y + "-" + m + "-" + day;
 }
 
+function toIsoDateUTC(d) {
+  var dt = new Date(d);
+  var y = dt.getUTCFullYear();
+  var m = String(dt.getUTCMonth() + 1).padStart(2, "0");
+  var day = String(dt.getUTCDate()).padStart(2, "0");
+  return y + "-" + m + "-" + day;
+}
+
 function toIsoDateET(d) {
   var dt = d instanceof Date ? d : new Date(d);
   if (isNaN(dt)) return "";
@@ -65,30 +73,30 @@ function toIsoDateET(d) {
 }
 
 function shiftDays(dateIso, n) {
-  var d = new Date(dateIso + "T00:00:00");
-  d.setDate(d.getDate() + n);
-  return toIsoDateLocal(d);
+  var d = new Date(dateIso + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + n);
+  return toIsoDateUTC(d);
 }
 
 function weekStart(dateIso) {
-  var d = new Date(dateIso + "T00:00:00");
-  var dow = d.getDay();
+  var d = new Date(dateIso + "T00:00:00Z");
+  var dow = d.getUTCDay();
   var delta = dow === 0 ? -6 : 1 - dow; // monday start
-  d.setDate(d.getDate() + delta);
-  return toIsoDateLocal(d);
+  d.setUTCDate(d.getUTCDate() + delta);
+  return toIsoDateUTC(d);
 }
 
 function monthStart(dateIso) {
-  var d = new Date(dateIso + "T00:00:00");
-  d.setDate(1);
-  return toIsoDateLocal(d);
+  var d = new Date(dateIso + "T00:00:00Z");
+  d.setUTCDate(1);
+  return toIsoDateUTC(d);
 }
 
 function monthEnd(dateIso) {
-  var d = new Date(dateIso + "T00:00:00");
-  d.setMonth(d.getMonth() + 1);
-  d.setDate(0);
-  return toIsoDateLocal(d);
+  var d = new Date(dateIso + "T00:00:00Z");
+  d.setUTCMonth(d.getUTCMonth() + 1);
+  d.setUTCDate(0);
+  return toIsoDateUTC(d);
 }
 
 function daysInclusive(startIso, endIso) {
