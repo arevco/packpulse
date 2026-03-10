@@ -725,7 +725,6 @@ export default function ForecastView(props) {
           <div className="mb-1 text-xs text-[rgb(var(--muted))]">Equipment</div>
           <Input type="number" value={equipmentRental} onChange={function(e) { setEquipmentRental(e.target.value); }} className="h-10 w-36 text-sm" />
         </div>
-        <Button onClick={runForecast} disabled={loading}>{loading ? "Running..." : "Run Forecast"}</Button>
         <Button onClick={publishForecastVersion} disabled={publishLoading || !summary} variant="outline">
           {publishLoading ? "Publishing..." : "Publish Forecast"}
         </Button>
