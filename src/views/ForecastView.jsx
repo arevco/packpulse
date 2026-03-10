@@ -102,6 +102,10 @@ export default function ForecastView(props) {
   var [assumptionsLoading, setAssumptionsLoading] = useState(false);
   var [autosaveStatus, setAutosaveStatus] = useState("idle");
   var [autosaveError, setAutosaveError] = useState("");
+  var [versions, setVersions] = useState([]);
+  var [versionsLoading, setVersionsLoading] = useState(false);
+  var [versionsMsg, setVersionsMsg] = useState("");
+  var [publishLoading, setPublishLoading] = useState(false);
   var didLoadMonthRef = useRef({});
   var [expandedRows, setExpandedRows] = useState({});
   var [dirtyRows, setDirtyRows] = useState({});
@@ -209,6 +213,26 @@ export default function ForecastView(props) {
     }
   }, [monthKey, overheadGlobal, cogsNonLabor, equipmentRental, laborTemplates, overrides]);
 
+  var loadVersions = useCallback(async function(targetMonthKey) {
+    var mk = String(targetMonthKey || monthKey || "").trim();
+    if (!mk) return;
+    setVersionsLoading(true);
+    try {
+      var res = await fetch("/api/ops/forecast-versions?monthKey=" + encodeURIComponent(mk), { credentials: "include" });
+      var body = await res.json();
+      if (!res.ok) throw new Error((body && body.error) || "Could not load forecast versions");
+      var list = Array.isArray(body && body.versions) ? body.versions : [];
+      setVersions(list);
+      if (body && body.status === "missing_forecast_versions_table") {
+        setVersionsMsg("Run docs/supabase-forecast-versions.sql in Supabase to enable publishing.");
+      }
+    } catch (err) {
+      setVersionsMsg(err && err.message ? err.message : "Could not load forecast versions.");
+    } finally {
+      setVersionsLoading(false);
+    }
+  }, [monthKey]);
+
   useEffect(function() {
     var cancelled = false;
     (async function() {
@@ -315,6 +339,50 @@ export default function ForecastView(props) {
     }
   }, [monthKey, overheadGlobal, cogsNonLabor, equipmentRental, workOrders, itemMaster, laborTemplates, overrides]);
 
+  var publishForecastVersion = useCallback(async function() {
+    if (!monthKey) return;
+    if (!payload || !payload.forecast) {
+      setVersionsMsg("Run Forecast before publishing a version.");
+      return;
+    }
+    setPublishLoading(true);
+    setVersionsMsg("");
+    try {
+      var res = await fetch("/api/ops/forecast-versions", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "publish",
+          monthKey: monthKey,
+          snapshot: {
+            global_assumptions: {
+              overhead_global: safeNum(overheadGlobal),
+              cogs_non_labor: safeNum(cogsNonLabor),
+              equipment_rental: safeNum(equipmentRental)
+            },
+            labor_templates: laborTemplates,
+            overrides: overrides,
+            forecast: payload.forecast
+          },
+          summary: summary || {}
+        })
+      });
+      var body = await res.json();
+      if (!res.ok) throw new Error((body && body.error) || "Could not publish forecast version");
+      if (body && body.status === "missing_forecast_versions_table") {
+        setVersionsMsg("Run docs/supabase-forecast-versions.sql in Supabase to enable publishing.");
+        return;
+      }
+      setVersionsMsg("Published forecast version for " + monthKey + ".");
+      loadVersions(monthKey);
+    } catch (err) {
+      setVersionsMsg(err && err.message ? err.message : "Could not publish forecast version.");
+    } finally {
+      setPublishLoading(false);
+    }
+  }, [monthKey, payload, summary, overheadGlobal, cogsNonLabor, equipmentRental, laborTemplates, overrides, loadVersions]);
+
   useEffect(function() {
     if (!workOrders.length) return;
     runForecast();
@@ -324,6 +392,11 @@ export default function ForecastView(props) {
     if (!monthKey) return;
     loadAssumptions(monthKey);
   }, [monthKey, loadAssumptions]);
+
+  useEffect(function() {
+    if (!monthKey) return;
+    loadVersions(monthKey);
+  }, [monthKey, loadVersions]);
 
   useEffect(function() {
     if (!monthKey) return;
@@ -349,6 +422,14 @@ export default function ForecastView(props) {
   }, [byWorkOrder]);
   var visibleMicroRows = useMemo(function() { return microRows.slice(0, 200); }, [microRows]);
   var dirtyCount = useMemo(function() { return Object.keys(dirtyRows || {}).length; }, [dirtyRows]);
+  var activeVersion = useMemo(function() {
+    var found = null;
+    (versions || []).forEach(function(v) {
+      if (found) return;
+      if (v && v.is_active) found = v;
+    });
+    return found;
+  }, [versions]);
   var selectedCount = useMemo(function() {
     var count = 0;
     visibleMicroRows.forEach(function(r, idx) {
@@ -645,12 +726,19 @@ export default function ForecastView(props) {
           <Input type="number" value={equipmentRental} onChange={function(e) { setEquipmentRental(e.target.value); }} className="h-10 w-36 text-sm" />
         </div>
         <Button onClick={runForecast} disabled={loading}>{loading ? "Running..." : "Run Forecast"}</Button>
+        <Button onClick={publishForecastVersion} disabled={publishLoading || !summary} variant="outline">
+          {publishLoading ? "Publishing..." : "Publish Forecast"}
+        </Button>
       </div>
       <div className="mb-2 text-xs text-[rgb(var(--muted))]">
         {assumptionsLoading ? "Loading monthly assumptions..." : ""}
         {!assumptionsLoading && autosaveStatus === "saving" ? "Saving monthly assumptions..." : ""}
         {!assumptionsLoading && autosaveStatus === "saved" ? "Saved monthly assumptions." : ""}
         {!assumptionsLoading && autosaveStatus === "error" ? ("Autosave issue: " + (autosaveError || "Could not save assumptions.")) : ""}
+      </div>
+      <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-[rgb(var(--muted))]">
+        <span>{activeVersion ? ("Source of truth: v" + activeVersion.version_no + " (" + (activeVersion.label || "") + ")") : "No published source of truth yet."}</span>
+        {!!versionsMsg && <span>{versionsMsg}</span>}
       </div>
 
       {!!error && <div className="mb-2 text-sm text-[rgb(var(--danger))]">{error}</div>}
@@ -691,6 +779,48 @@ export default function ForecastView(props) {
           })}
         </div>
       )}
+
+      <div className="mb-3 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-2">
+        <div className="mb-1 text-sm font-semibold text-[rgb(var(--foreground))]">Published Forecast Versions</div>
+        {versionsLoading ? (
+          <div className="text-xs text-[rgb(var(--muted))]">Loading versions...</div>
+        ) : !versions.length ? (
+          <div className="text-xs text-[rgb(var(--muted))]">No published versions for this month yet.</div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ background: C.raised }}>
+                  <th style={{ textAlign: "left", padding: "6px 8px", fontSize: 12, color: C.dim }}>Version</th>
+                  <th style={{ textAlign: "left", padding: "6px 8px", fontSize: 12, color: C.dim }}>Published At</th>
+                  <th style={{ textAlign: "right", padding: "6px 8px", fontSize: 12, color: C.dim }}>Cases</th>
+                  <th style={{ textAlign: "right", padding: "6px 8px", fontSize: 12, color: C.dim }}>Revenue</th>
+                  <th style={{ textAlign: "right", padding: "6px 8px", fontSize: 12, color: C.dim }}>Labor</th>
+                  <th style={{ textAlign: "left", padding: "6px 8px", fontSize: 12, color: C.dim }}>By</th>
+                  <th style={{ textAlign: "left", padding: "6px 8px", fontSize: 12, color: C.dim }}>State</th>
+                </tr>
+              </thead>
+              <tbody>
+                {versions.slice(0, 20).map(function(v) {
+                  var s = v && v.summary && typeof v.summary === "object" ? v.summary : {};
+                  var dt = String((v && (v.published_at || v.created_at)) || "");
+                  return (
+                    <tr key={v.id || (v.version_no + "-" + dt)} style={{ borderBottom: "1px solid " + C.border }}>
+                      <td style={{ padding: "6px 8px", fontSize: 12, color: C.text }}>v{v.version_no} {v.label ? ("- " + v.label) : ""}</td>
+                      <td style={{ padding: "6px 8px", fontSize: 12, color: C.text }}>{dt ? new Date(dt).toLocaleString() : "--"}</td>
+                      <td style={{ padding: "6px 8px", fontSize: 12, color: C.text, textAlign: "right" }}>{Math.round(safeNum(s.total_cases)).toLocaleString()}</td>
+                      <td style={{ padding: "6px 8px", fontSize: 12, color: C.text, textAlign: "right" }}>{fmtMoneyWhole(s.total_revenue)}</td>
+                      <td style={{ padding: "6px 8px", fontSize: 12, color: C.text, textAlign: "right" }}>{fmtMoneyWhole(s.total_labor_cost)}</td>
+                      <td style={{ padding: "6px 8px", fontSize: 12, color: C.text }}>{v.created_by || "--"}</td>
+                      <td style={{ padding: "6px 8px", fontSize: 12, color: C.text }}>{v.is_active ? "Active" : "Archived"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       <div className="mb-1 text-sm font-semibold text-[rgb(var(--foreground))]">Work Order Micro-Forecasts</div>
       <div className="mb-2 text-xs text-[rgb(var(--muted))]">Compact rows show outcome KPIs. Expand a row to edit headcount buckets and advanced settings.</div>
