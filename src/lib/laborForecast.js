@@ -262,10 +262,14 @@ export function runLaborForecast(input) {
     var remainingCases = explicitRemaining > 0 ? explicitRemaining : Math.max(0, unitsExpected - unitsProduced);
     var isPriorOpenRollover = !!(monthKey && woMonth && woMonth < monthKey && !isClosed && remainingCases > 0);
     var isCurrentMonth = !!(monthKey && woMonth === monthKey);
-    var isUndatedOpen = !!(monthKey && !woMonth && !isClosed && remainingCases > 0);
-    if (monthKey && !isCurrentMonth && !isPriorOpenRollover && !isUndatedOpen) continue;
+    if (monthKey && !isCurrentMonth && !isPriorOpenRollover) continue;
 
-    var plannedCases = monthKey ? (remainingCases > 0 ? remainingCases : unitsExpected) : unitsExpected;
+    // Monthly case scope:
+    // - Current-month WOs: use total planned/expected cases
+    // - Prior open WOs rolling in: use remaining cases only
+    var plannedCases = unitsExpected;
+    if (monthKey && isPriorOpenRollover) plannedCases = remainingCases;
+    if (!(plannedCases > 0) && monthKey && isCurrentMonth && remainingCases > 0) plannedCases = remainingCases;
     if (!(plannedCases > 0)) continue;
     scopedTotalCases += plannedCases;
 
@@ -326,7 +330,7 @@ export function runLaborForecast(input) {
       pack_type: packType || "",
       line_name: lineName,
       wo_status: status || "",
-      rollover_source: isPriorOpenRollover ? "prior_open_balance" : (isUndatedOpen ? "undated_open_balance" : "none"),
+      rollover_source: isPriorOpenRollover ? "prior_open_balance" : "none",
       planned_cases: plannedCases,
       cases_per_min: throughput.value,
       throughput_source: throughput.source,
