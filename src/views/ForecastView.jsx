@@ -150,6 +150,21 @@ export default function ForecastView(props) {
     }
   }, []);
 
+  var applyForecastSnapshot = useCallback(function(snapshot) {
+    if (!snapshot || typeof snapshot !== "object") return false;
+    var ga = snapshot.global_assumptions && typeof snapshot.global_assumptions === "object"
+      ? snapshot.global_assumptions
+      : (snapshot.globalAssumptions && typeof snapshot.globalAssumptions === "object" ? snapshot.globalAssumptions : {});
+    var lt = Array.isArray(snapshot.labor_templates) ? snapshot.labor_templates : (Array.isArray(snapshot.laborTemplates) ? snapshot.laborTemplates : []);
+    var ov = Array.isArray(snapshot.overrides) ? snapshot.overrides : [];
+    applySavedAssumptions({
+      global_assumptions: ga,
+      labor_templates: lt,
+      overrides: ov
+    });
+    return true;
+  }, [applySavedAssumptions]);
+
   var loadAssumptions = useCallback(async function(targetMonthKey) {
     var mk = String(targetMonthKey || monthKey || "").trim();
     if (!mk) return;
@@ -213,10 +228,17 @@ export default function ForecastView(props) {
     }
   }, [monthKey, overheadGlobal, cogsNonLabor, equipmentRental, laborTemplates, overrides]);
 
-  var loadVersions = useCallback(async function(targetMonthKey) {
+  var loadVersions = useCallback(async function(targetMonthKey, opts) {
+    var options = opts && typeof opts === "object" ? opts : {};
+    var hydrate = !!options.hydrate;
     var mk = String(targetMonthKey || monthKey || "").trim();
     if (!mk) return;
     setVersionsLoading(true);
+    if (hydrate) {
+      setAssumptionsLoading(true);
+      setAutosaveError("");
+      setAutosaveStatus("loading");
+    }
     try {
       var res = await fetch("/api/ops/forecast-versions?monthKey=" + encodeURIComponent(mk), { credentials: "include" });
       var body = await res.json();
@@ -226,12 +248,33 @@ export default function ForecastView(props) {
       if (body && body.status === "missing_forecast_versions_table") {
         setVersionsMsg("Run docs/supabase-forecast-versions.sql in Supabase to enable publishing.");
       }
+      if (hydrate) {
+        var picked = null;
+        list.forEach(function(v) {
+          if (picked) return;
+          if (v && v.is_active) picked = v;
+        });
+        if (!picked && list.length) picked = list[0];
+        if (picked && picked.snapshot && typeof picked.snapshot === "object") {
+          applyForecastSnapshot(picked.snapshot);
+          didLoadMonthRef.current[mk] = true;
+          setAutosaveStatus("idle");
+          setVersionsMsg("Loaded published version v" + String(picked.version_no || "") + " for " + mk + ".");
+        } else {
+          await loadAssumptions(mk);
+        }
+      }
     } catch (err) {
-      setVersionsMsg(err && err.message ? err.message : "Could not load forecast versions.");
+      if (hydrate) {
+        await loadAssumptions(mk);
+      } else {
+        setVersionsMsg(err && err.message ? err.message : "Could not load forecast versions.");
+      }
     } finally {
       setVersionsLoading(false);
+      if (hydrate) setAssumptionsLoading(false);
     }
-  }, [monthKey]);
+  }, [monthKey, applyForecastSnapshot, loadAssumptions]);
 
   useEffect(function() {
     var cancelled = false;
@@ -390,12 +433,8 @@ export default function ForecastView(props) {
 
   useEffect(function() {
     if (!monthKey) return;
-    loadAssumptions(monthKey);
-  }, [monthKey, loadAssumptions]);
-
-  useEffect(function() {
-    if (!monthKey) return;
-    loadVersions(monthKey);
+    didLoadMonthRef.current[monthKey] = false;
+    loadVersions(monthKey, { hydrate: true });
   }, [monthKey, loadVersions]);
 
   useEffect(function() {
