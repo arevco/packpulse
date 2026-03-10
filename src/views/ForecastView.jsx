@@ -41,6 +41,14 @@ function normalizeRoleKey(role) {
 }
 
 var FORECAST_ROLE_ORDER = ["labor", "operator", "fork", "qa", "maint", "recycling"];
+var DEFAULT_MICRO_HEADCOUNT = {
+  labor: 9.6,
+  operator: 1,
+  fork: 1.5,
+  qa: 0.5,
+  maint: 0.5,
+  recycling: 0.5
+};
 
 export default function ForecastView(props) {
   var C = useTheme().C;
@@ -206,7 +214,7 @@ export default function ForecastView(props) {
             var lineDefaults = lineHeadcountDefaults[c.line_name] || {};
             var hc = safeNum(lineDefaults[role]);
             if (!(hc > 0)) hc = safeNum(headcountDefaults[role]);
-            if (role === "operator" && !(hc > 0)) hc = 0;
+            if (!(hc > 0)) hc = safeNum(DEFAULT_MICRO_HEADCOUNT[role]);
             seeded.push({
               sku: "",
               product_family: "",
@@ -455,7 +463,7 @@ export default function ForecastView(props) {
     });
   };
   var baselineHeadcountByRole = function(row) {
-    var out = { labor: 0, operator: 0, fork: 0, qa: 0, maint: 0, recycling: 0 };
+    var out = Object.assign({}, DEFAULT_MICRO_HEADCOUNT);
     var lineKey = normKey(row && row.line_name);
     var packKey = normKey(row && row.pack_type);
     var skuKey = normKey(row && row.sku);
