@@ -141,29 +141,36 @@ export default function ForecastView(props) {
     var cancelled = false;
     (async function() {
       try {
-        var res = await fetch("/api/ops/config", { credentials: "include" });
+        var res = await fetch("/api/ops/config?monthKey=" + encodeURIComponent(monthKey), { credentials: "include" });
         var body = await res.json();
         if (!res.ok || cancelled) return;
         var rates = Array.isArray(body && body.rates) ? body.rates : [];
+        var headcountDefaults = body && body.headcountDefaults && typeof body.headcountDefaults === "object"
+          ? body.headcountDefaults
+          : {};
         if (!rates.length) return;
         var seeded = rates.map(function(r) {
+          var role = String(r.role || "").trim().toLowerCase();
+          var hc = safeNum(headcountDefaults[role]);
           return {
             sku: "",
             product_family: "",
             pack_type: "",
             line_name: "",
-            role: String(r.role || "").trim().toLowerCase(),
-            headcount_assumed: 1,
+            role: role,
+            headcount_assumed: hc > 0 ? hc : 1,
             hourly_rate: (safeNum(r.hourly_rate) * (1 + safeNum(r.markup_pct))).toFixed(2)
           };
         }).filter(function(r) { return !!r.role; });
-        setLaborTemplates(seeded);
+        setLaborTemplates(function(prev) {
+          return Array.isArray(prev) && prev.length ? prev : seeded;
+        });
       } catch (e) {
         // noop
       }
     })();
     return function() { cancelled = true; };
-  }, []);
+  }, [monthKey]);
 
   var runForecast = useCallback(async function() {
     setLoading(true);
