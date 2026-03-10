@@ -790,6 +790,7 @@ export default function ForecastView(props) {
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ background: C.raised }}>
+                  <th style={{ textAlign: "left", padding: "6px 8px", fontSize: 12, color: C.dim }}>Month</th>
                   <th style={{ textAlign: "left", padding: "6px 8px", fontSize: 12, color: C.dim }}>Version</th>
                   <th style={{ textAlign: "left", padding: "6px 8px", fontSize: 12, color: C.dim }}>Published At</th>
                   <th style={{ textAlign: "right", padding: "6px 8px", fontSize: 12, color: C.dim }}>Cases</th>
@@ -803,8 +804,11 @@ export default function ForecastView(props) {
                 {versions.slice(0, 20).map(function(v) {
                   var s = v && v.summary && typeof v.summary === "object" ? v.summary : {};
                   var dt = String((v && (v.published_at || v.created_at)) || "");
+                  var mk = String((v && v.month_key) || "");
+                  var monthLabel = mk && /^\d{4}-\d{2}$/.test(mk) ? new Date(mk + "-01T00:00:00").toLocaleDateString(undefined, { year: "numeric", month: "short" }) : (mk || "--");
                   return (
                     <tr key={v.id || (v.version_no + "-" + dt)} style={{ borderBottom: "1px solid " + C.border }}>
+                      <td style={{ padding: "6px 8px", fontSize: 12, color: C.text }}>{monthLabel}</td>
                       <td style={{ padding: "6px 8px", fontSize: 12, color: C.text }}>v{v.version_no} {v.label ? ("- " + v.label) : ""}</td>
                       <td style={{ padding: "6px 8px", fontSize: 12, color: C.text }}>{dt ? new Date(dt).toLocaleString() : "--"}</td>
                       <td style={{ padding: "6px 8px", fontSize: 12, color: C.text, textAlign: "right" }}>{Math.round(safeNum(s.total_cases)).toLocaleString()}</td>
