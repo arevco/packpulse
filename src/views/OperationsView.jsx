@@ -752,9 +752,11 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     var cacheByShift = (trends && Array.isArray(trends.byShift)) ? trends.byShift : [];
     var rawByDay = (localNulogySeries && localNulogySeries.trends && Array.isArray(localNulogySeries.trends.byDay)) ? localNulogySeries.trends.byDay : [];
     var rawByShift = (localNulogySeries && localNulogySeries.trends && Array.isArray(localNulogySeries.trends.byShift)) ? localNulogySeries.trends.byShift : [];
+    var hasCache = cacheByDay.length > 0 || cacheByShift.length > 0;
+    if (hasCache) return { byDay: cacheByDay, byShift: cacheByShift };
     var hasRaw = rawByDay.length > 0 || rawByShift.length > 0;
     if (hasRaw) return { byDay: rawByDay, byShift: rawByShift };
-    return { byDay: cacheByDay, byShift: cacheByShift };
+    return { byDay: [], byShift: [] };
   }, [trends, localNulogySeries]);
 
   var effectiveBreakdown = useMemo(function() {
