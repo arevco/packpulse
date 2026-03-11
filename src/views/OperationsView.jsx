@@ -942,6 +942,10 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     var totalUnits = byDay.reduce(function(sum, d) { return sum + safeNum(d.units); }, 0);
     var avgDailyUnits = byDay.length ? Math.round(totalUnits / byDay.length) : 0;
     var today = toIsoDateET(new Date());
+    var monthAnchor = effectiveRange.end || today;
+    var monthBusinessDays = businessDaysBetween(monthStart(monthAnchor), monthEnd(monthAnchor));
+    var weeklyRunRate = avgDailyUnits * 5;
+    var monthlyRunRate = avgDailyUnits * monthBusinessDays;
     var expectedShifts = businessDaysBetween(filteredTrends.fromDate, effectiveRange.end || today) * 2;
     var shiftKeySet = {};
     filteredInputs.forEach(function(r) {
@@ -986,6 +990,9 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     return {
       totalUnits: totalUnits,
       avgDailyUnits: avgDailyUnits,
+      weeklyRunRate: weeklyRunRate,
+      monthlyRunRate: monthlyRunRate,
+      monthBusinessDays: monthBusinessDays,
       enteredShifts: enteredShifts,
       expectedShifts: expectedShifts,
       coveragePct: coveragePct,
@@ -1729,7 +1736,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
 
         <Card className="lg:col-span-4 px-3 py-3">
           <div className="mb-2 text-sm font-semibold">Operations KPI</div>
-          <div className="space-y-2">
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1 2xl:grid-cols-2">
             <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
               <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{metrics.totalUnits.toLocaleString()}</div>
               <div className="text-xs text-[rgb(var(--muted))]">Cases Produced ({windowPreset === "today" ? "today" : windowPreset === "yesterday" ? "yesterday" : windowPreset === "this_week" ? "this week" : windowPreset === "last_week" ? "last week" : range.start + " to " + range.end})</div>
@@ -1737,6 +1744,14 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
             <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
               <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{metrics.avgDailyUnits.toLocaleString()}</div>
               <div className="text-xs text-[rgb(var(--muted))]">Avg Cases / Day</div>
+            </div>
+            <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
+              <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{metrics.weeklyRunRate.toLocaleString()}</div>
+              <div className="text-xs text-[rgb(var(--muted))]">Weekly Yield Run Rate</div>
+            </div>
+            <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
+              <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{metrics.monthlyRunRate.toLocaleString()}</div>
+              <div className="text-xs text-[rgb(var(--muted))]">Monthly Yield Run Rate ({metrics.monthBusinessDays} days)</div>
             </div>
             <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
               <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{metrics.coveragePct}%</div>
