@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "../theme";
 import { Card } from "../components/ui/card";
 import { Input } from "../components/ui/input";
@@ -505,6 +505,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     { role: "recycling", hourly_rate: 20.1, markup_pct: 0.2 },
   ]);
   const [targets, setTargets] = useState([]);
+  const loadRequestRef = useRef(0);
   const [saving, setSaving] = useState(false);
   const [showEntryModal, setShowEntryModal] = useState(false);
   const [showRecentLaborInputs, setShowRecentLaborInputs] = useState(false);
@@ -576,6 +577,8 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   };
 
   var loadAll = async function() {
+    var requestId = loadRequestRef.current + 1;
+    loadRequestRef.current = requestId;
     setLoading(true);
     setErr("");
     try {
@@ -591,6 +594,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       if (!ip.ok) throw new Error(ipBody.error || "Could not load labor inputs");
       if (!cfg.ok) throw new Error(cfgBody.error || "Could not load rates/targets");
       if (!br.ok) throw new Error(brBody.error || "Could not load production breakdown");
+      if (requestId !== loadRequestRef.current) return;
       setTrends(trBody.trends || null);
       setInputs(Array.isArray(ipBody.rows) ? ipBody.rows : []);
       setRates(Array.isArray(cfgBody.rates) && cfgBody.rates.length ? cfgBody.rates : rates);
@@ -604,9 +608,10 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
         totalRows: safeNum(brBody.totalRows),
       });
     } catch (e) {
+      if (requestId !== loadRequestRef.current) return;
       setErr(e && e.message ? e.message : "Failed loading Operations data");
     } finally {
-      setLoading(false);
+      if (requestId === loadRequestRef.current) setLoading(false);
     }
   };
 
@@ -747,22 +752,53 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     return buildEvoconSeries(evoconData || []);
   }, [evoconData]);
 
-  var effectiveTrends = useMemo(function() {
+  var effectiveNulogySource = useMemo(function() {
     var cacheByDay = (trends && Array.isArray(trends.byDay)) ? trends.byDay : [];
     var cacheByShift = (trends && Array.isArray(trends.byShift)) ? trends.byShift : [];
+    var cacheBreakdown = (breakdown && Array.isArray(breakdown.rowsLite) && breakdown.rowsLite.length)
+      ? breakdown
+      : { rowsLite: [], bySku: [], byLine: [], latestByLine: [], latestDate: null, totalRows: 0 };
     var rawByDay = (localNulogySeries && localNulogySeries.trends && Array.isArray(localNulogySeries.trends.byDay)) ? localNulogySeries.trends.byDay : [];
     var rawByShift = (localNulogySeries && localNulogySeries.trends && Array.isArray(localNulogySeries.trends.byShift)) ? localNulogySeries.trends.byShift : [];
+    var rawBreakdown = (localNulogySeries && localNulogySeries.breakdown)
+      ? localNulogySeries.breakdown
+      : { rowsLite: [], bySku: [], byLine: [], latestByLine: [], latestDate: null, totalRows: 0 };
     var hasCache = cacheByDay.length > 0 || cacheByShift.length > 0;
     var hasRaw = rawByDay.length > 0 || rawByShift.length > 0;
-    if (hasCache) return { byDay: cacheByDay, byShift: cacheByShift };
-    if (hasRaw) return { byDay: rawByDay, byShift: rawByShift };
-    return { byDay: [], byShift: [] };
-  }, [trends, localNulogySeries]);
+    var serverRowCount = safeNum(trends && trends.diagnostics && trends.diagnostics.totalRowsInTable);
+    var localRowCount = Array.isArray(productionDataRaw) ? productionDataRaw.length : 0;
+    var serverLooksIncomplete = hasCache && localRowCount > 0 && serverRowCount > 0 && serverRowCount < Math.floor(localRowCount * 0.8);
 
-  var effectiveBreakdown = useMemo(function() {
-    var fallbackN = (localNulogySeries && localNulogySeries.breakdown) ? localNulogySeries.breakdown : { rowsLite: [], bySku: [], byLine: [], latestByLine: [], latestDate: null, totalRows: 0 };
-    return (breakdown && Array.isArray(breakdown.rowsLite) && breakdown.rowsLite.length) ? breakdown : fallbackN;
-  }, [breakdown, localNulogySeries]);
+    if (serverLooksIncomplete && hasRaw) {
+      return {
+        source: "local_raw",
+        trends: { byDay: rawByDay, byShift: rawByShift },
+        breakdown: rawBreakdown
+      };
+    }
+    if (hasCache) {
+      return {
+        source: "server",
+        trends: { byDay: cacheByDay, byShift: cacheByShift },
+        breakdown: cacheBreakdown.rowsLite.length ? cacheBreakdown : rawBreakdown
+      };
+    }
+    if (hasRaw) {
+      return {
+        source: "local_raw",
+        trends: { byDay: rawByDay, byShift: rawByShift },
+        breakdown: rawBreakdown
+      };
+    }
+    return {
+      source: "empty",
+      trends: { byDay: [], byShift: [] },
+      breakdown: { rowsLite: [], bySku: [], byLine: [], latestByLine: [], latestDate: null, totalRows: 0 }
+    };
+  }, [trends, breakdown, localNulogySeries, productionDataRaw]);
+
+  var effectiveTrends = effectiveNulogySource.trends;
+  var effectiveBreakdown = effectiveNulogySource.breakdown;
 
   var effectiveRange = useMemo(function() {
     if (windowPreset !== "today") return range;
