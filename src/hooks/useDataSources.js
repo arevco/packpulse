@@ -145,11 +145,20 @@ export function useDataSources() {
     (async () => {
       try {
         var sharedLoaded = false;
+        var sharedProductionTruncated = false;
         try {
           var sharedRes = await fetch("/api/cache/snapshot", { credentials: "include" });
           if (sharedRes.ok) {
             var sharedBody = await sharedRes.json();
             if (sharedBody && sharedBody.snapshot && sharedBody.snapshot.payload) {
+              var sharedRowCounts = sharedBody.snapshot.row_counts || {};
+              var sharedPayload = sharedBody.snapshot.payload || {};
+              var sharedProdRows = Array.isArray(sharedPayload.productionData) ? sharedPayload.productionData.length : 0;
+              var sharedProdCount = Number(sharedRowCounts.productionData || 0);
+              var droppedSets = sharedPayload.meta && Array.isArray(sharedPayload.meta.cacheDroppedDatasets)
+                ? sharedPayload.meta.cacheDroppedDatasets
+                : [];
+              sharedProductionTruncated = droppedSets.indexOf("productionData") !== -1 || (sharedProdCount > 0 && sharedProdRows > 0 && sharedProdRows < sharedProdCount);
               sharedLoaded = hydrateFromPayloadObject(sharedBody.snapshot.payload, "shared");
               setSharedSnapshotMeta({
                 source: "shared",
@@ -195,6 +204,13 @@ export function useDataSources() {
             if (prev.source === "shared") return prev;
             return { source: "local", syncedAt: null, updatedBy: "" };
           });
+        }
+
+        // Shared snapshots may intentionally compact production data for payload size.
+        // If local storage still has a fuller production export, prefer that for client-side
+        // fallbacks and the next server snapshot repair.
+        if (sharedLoaded && sharedProductionTruncated) {
+          hydrateDataSet(map[STORAGE_KEYS.production], setProductionData, setProductionFileName, setProductionTimestamp, "Nulogy Production (cached)");
         }
 
         if (map[STORAGE_KEYS.mappingConfirmed] === "1") {

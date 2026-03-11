@@ -375,7 +375,9 @@ export default async function handler(req, res) {
           historyStatus = "history_insert_failed";
         }
       }
-      var productionEvents = buildProductionEvents(payload, CACHE_SITE_ID, syncedAt, user.email);
+      // Build canonical production events from the full incoming dataset, not the compacted
+      // shared-cache payload. The cache payload may trim production rows for size limits.
+      var productionEvents = buildProductionEvents(incomingPayload, CACHE_SITE_ID, syncedAt, user.email);
       var productionStatus = "ok";
       var productionWritten = 0;
       if (productionEvents.length > 0) {
