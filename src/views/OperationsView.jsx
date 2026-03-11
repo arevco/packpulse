@@ -228,6 +228,15 @@ function lineColor(index) {
   return palette[index % palette.length];
 }
 
+var COMMAND_BOARD_PRESETS = [
+  { key: "today", label: "Today" },
+  { key: "yesterday", label: "Yesterday" },
+  { key: "this_week", label: "This Week" },
+  { key: "last_week", label: "Last Week" },
+  { key: "this_month", label: "This Month" },
+  { key: "last_month", label: "Last Month" }
+];
+
 function normalizeKeyLocal(s) {
   return String(s || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
 }
@@ -1001,44 +1010,70 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   }, [filteredBreakdown, targetBySku, itemMasterPriceBySku]);
 
   var commandBoard = useMemo(function() {
-    var byDay = filteredTrends.byDay || [];
-    var dayCount = byDay.length;
-    var latest = byDay.length ? byDay[0] : null;
-    var latestRows = latest ? safeNum(latest.rows) : 0;
-    var windowActual = safeNum(metrics.totalUnits);
-
-    // Baseline plan = avg daily output from days outside the current window, scaled to current window size.
-    // Fallback to current-window avg when there is no older data loaded.
     var allDays = (effectiveTrends && Array.isArray(effectiveTrends.byDay)) ? effectiveTrends.byDay : [];
-    var inWindow = {};
-    byDay.forEach(function(d) { inWindow[String(d.date || "")] = true; });
-    var priorDays = allDays.filter(function(d) { return !inWindow[String(d.date || "")]; });
-    var priorSlice = dayCount > 0 ? priorDays.slice(0, dayCount) : [];
-    var priorAvg = priorSlice.length
-      ? Math.round(priorSlice.reduce(function(sum, d) { return sum + safeNum(d.units); }, 0) / priorSlice.length)
-      : safeNum(metrics.avgDailyUnits);
-    var planUnits = dayCount > 0 ? Math.round(priorAvg * dayCount) : 0;
-    var variance = windowActual - planUnits;
+    var allRows = (effectiveBreakdown && Array.isArray(effectiveBreakdown.rowsLite)) ? effectiveBreakdown.rowsLite : [];
+    var summarizeRange = function(label, summaryRange) {
+      var byDay = allDays.filter(function(d) { return inRangeIso(String(d.date || ""), summaryRange); });
+      var dayCount = byDay.length;
+      var latest = byDay.length ? byDay[0] : null;
+      var latestRows = latest ? safeNum(latest.rows) : 0;
+      var windowActual = byDay.reduce(function(sum, d) { return sum + safeNum(d.units); }, 0);
+      var avgDailyUnits = dayCount > 0 ? Math.round(windowActual / dayCount) : 0;
 
-    var status = "On Track";
-    if (planUnits > 0) {
-      var ratio = windowActual / planUnits;
-      if (ratio < 0.85) status = "Off Track";
-      else if (ratio < 0.95) status = "At Risk";
-    }
-    var topLine = (filteredBreakdown.byLine && filteredBreakdown.byLine[0]) || null;
-    return {
-      latestDate: latest ? latest.date : null,
-      latestUnits: windowActual,
-      latestRows: latestRows,
-      dayCount: dayCount,
-      planUnits: planUnits,
-      variance: variance,
-      variancePct: pctDelta(windowActual, planUnits),
-      status: status,
-      topLine: topLine
+      var inWindow = {};
+      byDay.forEach(function(d) { inWindow[String(d.date || "")] = true; });
+      var priorDays = allDays.filter(function(d) { return !inWindow[String(d.date || "")]; });
+      var priorSlice = dayCount > 0 ? priorDays.slice(0, dayCount) : [];
+      var priorAvg = priorSlice.length
+        ? Math.round(priorSlice.reduce(function(sum, d) { return sum + safeNum(d.units); }, 0) / priorSlice.length)
+        : avgDailyUnits;
+      var planUnits = dayCount > 0 ? Math.round(priorAvg * dayCount) : 0;
+      var variance = windowActual - planUnits;
+
+      var status = "On Track";
+      if (planUnits > 0) {
+        var ratio = windowActual / planUnits;
+        if (ratio < 0.85) status = "Off Track";
+        else if (ratio < 0.95) status = "At Risk";
+      }
+
+      var byLineMap = {};
+      allRows.forEach(function(r) {
+        if (!inRange(String(r.produced_date_et || ""), summaryRange)) return;
+        var line = String(r.line || "Unknown");
+        if (!byLineMap[line]) byLineMap[line] = { line: line, units: 0, rows: 0 };
+        byLineMap[line].units += safeNum(r.units_produced);
+        byLineMap[line].rows += 1;
+      });
+      var topLine = Object.values(byLineMap).sort(function(a, b) { return b.units - a.units; })[0] || null;
+      return {
+        label: label,
+        range: summaryRange,
+        latestDate: latest ? latest.date : null,
+        latestUnits: windowActual,
+        latestRows: latestRows,
+        dayCount: dayCount,
+        planUnits: planUnits,
+        variance: variance,
+        variancePct: pctDelta(windowActual, planUnits),
+        status: status,
+        topLine: topLine
+      };
     };
-  }, [filteredTrends, metrics, filteredBreakdown.byLine, effectiveTrends]);
+
+    var presetCards = COMMAND_BOARD_PRESETS.map(function(def) {
+      var summary = summarizeRange(def.label, presetRange(def.key));
+      return Object.assign({ key: def.key }, summary);
+    });
+    var selectedSummary = windowPreset === "custom"
+      ? summarizeRange("Custom", effectiveRange)
+      : (presetCards.find(function(card) { return card.key === windowPreset; }) || summarizeRange("Selected Window", effectiveRange));
+
+    return {
+      presets: presetCards,
+      selected: selectedSummary
+    };
+  }, [effectiveTrends, effectiveBreakdown, windowPreset, effectiveRange]);
 
   var shiftPlanVsActual = useMemo(function() {
     var rows = (filteredTrends.byShift || []).slice();
@@ -1558,27 +1593,9 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     <div className="space-y-4">
       <Card className="px-3 py-2">
         <div className="flex flex-wrap lg:flex-nowrap items-center gap-1.5">
-          <span className="text-sm font-medium text-[rgb(var(--muted))] whitespace-nowrap">Operations Window</span>
+          <span className="text-sm font-medium text-[rgb(var(--muted))] whitespace-nowrap">Operations Controls</span>
           <Badge variant="secondary">Nulogy</Badge>
-          {[
-            { key: "today", label: "Today" },
-            { key: "yesterday", label: "Yesterday" },
-            { key: "this_week", label: "This Week" },
-            { key: "last_week", label: "Last Week" },
-            { key: "this_month", label: "This Month" },
-            { key: "last_month", label: "Last Month" }
-          ].map(function(p) {
-            return (
-              <Button
-                key={p.key}
-                variant={windowPreset === p.key ? "active" : "outline"}
-                size="sm"
-                onClick={function() { applyPreset(p.key); }}
-              >
-                {p.label}
-              </Button>
-            );
-          })}
+          <Badge variant="soft">{windowPreset === "custom" ? "Custom Window" : (commandBoard.selected && commandBoard.selected.label) || "Selected Window"}</Badge>
           <DatePicker value={range.start} onChange={setCustomStart} className="h-9 w-[132px]" />
           <span className="text-xs text-[rgb(var(--muted))] whitespace-nowrap">to</span>
           <DatePicker value={range.end} onChange={setCustomEnd} className="h-9 w-[132px]" />
@@ -1595,35 +1612,57 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
             <div>
               <div className="text-sm font-semibold">Shift Command Board</div>
               <div className="text-xs text-[rgb(var(--muted))]">
-                {commandBoard.dayCount > 1
-                  ? ("Window: " + range.start + " to " + range.end + " · " + commandBoard.dayCount + " production day" + (commandBoard.dayCount === 1 ? "" : "s"))
-                  : commandBoard.latestDate
-                    ? ("Day: " + commandBoard.latestDate)
+                {commandBoard.selected.dayCount > 1
+                  ? ("Selected: " + commandBoard.selected.label + " · " + commandBoard.selected.range.start + " to " + commandBoard.selected.range.end + " · " + commandBoard.selected.dayCount + " production day" + (commandBoard.selected.dayCount === 1 ? "" : "s"))
+                  : commandBoard.selected.latestDate
+                    ? ("Selected: " + commandBoard.selected.label + " · " + commandBoard.selected.latestDate)
                     : "No production day available yet"}
               </div>
             </div>
-            <span className={"inline-flex rounded-full px-2.5 py-1 text-xs font-semibold " + (commandBoard.status === "Off Track" ? "bg-[rgb(var(--danger-soft))] text-[rgb(var(--danger))]" : commandBoard.status === "At Risk" ? "bg-[rgb(var(--accent-soft))] text-[rgb(var(--accent))]" : "bg-[rgb(var(--success-soft))] text-[rgb(var(--success))]")}>
-              {commandBoard.status}
+            <span className={"inline-flex rounded-full px-2.5 py-1 text-xs font-semibold " + (commandBoard.selected.status === "Off Track" ? "bg-[rgb(var(--danger-soft))] text-[rgb(var(--danger))]" : commandBoard.selected.status === "At Risk" ? "bg-[rgb(var(--accent-soft))] text-[rgb(var(--accent))]" : "bg-[rgb(var(--success-soft))] text-[rgb(var(--success))]")}>
+              {commandBoard.selected.status}
             </span>
+          </div>
+          <div className="mb-2 grid grid-cols-2 gap-2 xl:grid-cols-3">
+            {commandBoard.presets.map(function(card) {
+              var active = windowPreset === card.key;
+              return (
+                <button
+                  key={card.key}
+                  type="button"
+                  onClick={function() { applyPreset(card.key); }}
+                  className={"rounded-md border px-3 py-2 text-left transition-colors " + (active ? "border-[rgb(var(--accent))] bg-[color-mix(in_oklab,rgb(var(--accent))_8%,white)]" : "border-[rgb(var(--border))] bg-[rgb(var(--surface))] hover:bg-white")}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-xs font-semibold text-[rgb(var(--muted))]">{card.label}</div>
+                    <div className={"text-[11px] font-semibold " + (card.variance < 0 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")}>
+                      {card.variance >= 0 ? "+" : ""}{card.variancePct}%
+                    </div>
+                  </div>
+                  <div className="mt-1 text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{card.latestUnits.toLocaleString()}</div>
+                  <div className="text-[11px] text-[rgb(var(--muted))]">Plan {card.planUnits.toLocaleString()} · {card.dayCount} day{card.dayCount === 1 ? "" : "s"}</div>
+                </button>
+              );
+            })}
           </div>
           <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
             <div className="rounded-md border border-[rgb(var(--border))] px-3 py-1.5">
-              <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{commandBoard.latestUnits.toLocaleString()}</div>
+              <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{commandBoard.selected.latestUnits.toLocaleString()}</div>
               <div className="text-xs text-[rgb(var(--muted))]">Actual Cases</div>
             </div>
             <div className="rounded-md border border-[rgb(var(--border))] px-3 py-1.5">
-              <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{commandBoard.planUnits.toLocaleString()}</div>
+              <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{commandBoard.selected.planUnits.toLocaleString()}</div>
               <div className="text-xs text-[rgb(var(--muted))]">Baseline Plan</div>
             </div>
             <div className="rounded-md border border-[rgb(var(--border))] px-3 py-1.5">
-              <div className={"text-lg font-bold [font-variant-numeric:tabular-nums] " + (commandBoard.variance < 0 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")} style={{ fontFamily: mono }}>
-                {commandBoard.variance >= 0 ? "+" : ""}{commandBoard.variance.toLocaleString()}
+              <div className={"text-lg font-bold [font-variant-numeric:tabular-nums] " + (commandBoard.selected.variance < 0 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")} style={{ fontFamily: mono }}>
+                {commandBoard.selected.variance >= 0 ? "+" : ""}{commandBoard.selected.variance.toLocaleString()}
               </div>
-              <div className="text-xs text-[rgb(var(--muted))]">Variance ({commandBoard.variancePct >= 0 ? "+" : ""}{commandBoard.variancePct}%)</div>
+              <div className="text-xs text-[rgb(var(--muted))]">Variance ({commandBoard.selected.variancePct >= 0 ? "+" : ""}{commandBoard.selected.variancePct}%)</div>
             </div>
             <div className="rounded-md border border-[rgb(var(--border))] px-3 py-1.5">
-              <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{commandBoard.topLine ? commandBoard.topLine.line : "--"}</div>
-              <div className="text-xs text-[rgb(var(--muted))]">Top Line ({commandBoard.topLine ? commandBoard.topLine.units.toLocaleString() : "--"} cases in window)</div>
+              <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{commandBoard.selected.topLine ? commandBoard.selected.topLine.line : "--"}</div>
+              <div className="text-xs text-[rgb(var(--muted))]">Top Line ({commandBoard.selected.topLine ? commandBoard.selected.topLine.units.toLocaleString() : "--"} cases in window)</div>
             </div>
           </div>
           <button
