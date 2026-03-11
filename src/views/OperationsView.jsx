@@ -958,37 +958,10 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     }, 0);
     var remainingBusinessDays = businessDaysBetween(shiftDays(monthAnchor, 1), monthEnd(monthAnchor));
     var monthlyRunRate = monthActualUnits + (trailingDailyVelocity * remainingBusinessDays);
-    var expectedShifts = businessDaysBetween(filteredTrends.fromDate, effectiveRange.end || today) * 2;
-    var shiftKeySet = {};
-    filteredInputs.forEach(function(r) {
-      var key = String(r.date_et || "") + "|" + String(r.shift_label || "");
-      if (r.date_et && r.shift_label) shiftKeySet[key] = true;
-    });
-    var enteredShifts = Object.keys(shiftKeySet).length;
-    var coveragePct = expectedShifts > 0 ? Math.round((enteredShifts / expectedShifts) * 100) : 0;
-
-    var ratesByRole = {};
-    rates.forEach(function(r) {
-      ratesByRole[String(r.role || "").toLowerCase()] = {
-        hourly: safeNum(r.hourly_rate),
-        markup: safeNum(r.markup_pct),
-      };
-    });
-    var laborCost = 0;
-    filteredInputs.forEach(function(r) {
-      var hrs = r.hours_run_override == null || r.hours_run_override === "" ? 8 : safeNum(r.hours_run_override);
-      var roleHours = {
-        labor: safeNum(r.labor_count) * hrs,
-        fork: safeNum(r.fork_count) * hrs,
-        qa: safeNum(r.qa_count) * hrs,
-        maint: safeNum(r.maint_count) * hrs,
-        recycling: safeNum(r.recycling_count) * hrs,
-      };
-      Object.keys(roleHours).forEach(function(role) {
-        var rt = ratesByRole[role] || { hourly: 0, markup: 0 };
-        laborCost += roleHours[role] * rt.hourly * (1 + rt.markup);
-      });
-    });
+    var selectedPlanInfo = forecastPlanForRange(effectiveRange, avgDailyUnits);
+    var selectedPlanUnits = selectedPlanInfo.units;
+    var forecastDeltaUnits = totalUnits - selectedPlanUnits;
+    var forecastDeltaPct = selectedPlanUnits > 0 ? Math.round((forecastDeltaUnits / selectedPlanUnits) * 100) : 0;
 
     var estimatedRevenue = filteredBreakdown.bySku.reduce(function(sum, s) {
       var k = String(s.item_code || "").trim();
@@ -1010,16 +983,16 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       monthBusinessDays: monthBusinessDays,
       monthActualUnits: monthActualUnits,
       remainingBusinessDays: remainingBusinessDays,
-      enteredShifts: enteredShifts,
-      expectedShifts: expectedShifts,
-      coveragePct: coveragePct,
-      laborCost: laborCost,
+      selectedPlanUnits: selectedPlanUnits,
+      selectedPlanSource: selectedPlanInfo.source,
+      forecastDeltaUnits: forecastDeltaUnits,
+      forecastDeltaPct: forecastDeltaPct,
       estimatedRevenue: estimatedRevenue,
       mappedSkuCount: mappedSkuCount,
       unmappedSkuCount: unmappedSkuCount,
       byShift: byShift,
     };
-  }, [effectiveTrends, filteredTrends, filteredInputs, rates, filteredBreakdown, targetBySku, itemMasterPriceBySku, effectiveRange.end]);
+  }, [effectiveTrends, filteredTrends, filteredBreakdown, targetBySku, itemMasterPriceBySku, effectiveRange]);
 
   var topSku = useMemo(function() {
     return filteredBreakdown.bySku.slice(0, 10).map(function(s) {
@@ -1720,12 +1693,16 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
               <div className="text-xs text-[rgb(var(--muted))]">Projected Month-End Yield ({metrics.remainingBusinessDays} business days remaining)</div>
             </div>
             <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
-              <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{metrics.coveragePct}%</div>
-              <div className="text-xs text-[rgb(var(--muted))]">Labor Input Coverage ({metrics.enteredShifts}/{metrics.expectedShifts} shifts)</div>
+              <div className={"text-lg font-bold [font-variant-numeric:tabular-nums] " + (metrics.forecastDeltaUnits < 0 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")} style={{ fontFamily: mono }}>
+                {metrics.forecastDeltaUnits >= 0 ? "+" : ""}{metrics.forecastDeltaUnits.toLocaleString()}
+              </div>
+              <div className="text-xs text-[rgb(var(--muted))]">
+                {metrics.selectedPlanSource === "forecast" ? "Forecast Variance" : "Plan Variance"} ({metrics.forecastDeltaPct >= 0 ? "+" : ""}{metrics.forecastDeltaPct}%)
+              </div>
             </div>
             <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
-              <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{fmtMoney(metrics.laborCost)}</div>
-              <div className="text-xs text-[rgb(var(--muted))]">Estimated Labor Cost</div>
+              <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{metrics.selectedPlanUnits.toLocaleString()}</div>
+              <div className="text-xs text-[rgb(var(--muted))]">{metrics.selectedPlanSource === "forecast" ? "Forecast Goal / Target" : "Baseline Goal / Target"}</div>
             </div>
           </div>
         </Card>
