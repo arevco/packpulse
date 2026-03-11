@@ -211,7 +211,10 @@ export default function ProductionReadiness() {
     { k:"edr", l:"EDR", ts:ds.edrTimestamp, cad:"monthly", ref:() => window.__edrR && window.__edrR.click() },
     { k:"dock", l:"OpenDock", ts:ds.dockTimestamp, cad:"daily", ref:() => window.__dockR && window.__dockR.click() },
   ];
-  var freshCount = dataSourceStatus.filter(function(s) { return staleLevel(s.ts, s.cad) === "fresh"; }).length;
+  var staleSources = dataSourceStatus.filter(function(s) {
+    return (s.forceFresh ? "fresh" : staleLevel(s.ts, s.cad)) !== "fresh";
+  });
+  var freshCount = dataSourceStatus.length - staleSources.length;
   var newestTs = dataSourceStatus.reduce(function(max, s) {
     var ts = s.ts ? new Date(s.ts).getTime() : 0;
     return ts > max ? ts : max;
@@ -228,7 +231,7 @@ export default function ProductionReadiness() {
   var freshnessLabel = freshCount === dataSourceStatus.length
     ? "Data Fresh"
     : staleCount === 1
-      ? "1 Source Needs Attention"
+      ? (String(staleSources[0] && staleSources[0].l) || "1 Source") + " Needs Attention"
       : (staleCount + " Sources Need Attention");
 
   var fetchOpenDockApi = useCallback(async () => {
@@ -948,12 +951,6 @@ export default function ProductionReadiness() {
             {dockApiError && <div className="-mt-2 mb-1 text-xs text-[rgb(var(--danger))]">OpenDock API error: {dockApiError}</div>}
             {dockApiInfo && <div className="-mt-0.5 mb-1 text-xs text-[rgb(var(--success))]">{dockApiInfo}</div>}
             {evoconApiError && <div className="-mt-0.5 mb-1 text-xs text-[rgb(var(--danger))]">Evocon API error: {evoconApiError}</div>}
-            {evoconApiInfo && (
-              <div className="-mt-0.5 mb-2.5 text-xs text-[rgb(var(--success))]">
-                {evoconApiInfo}
-                {evoconLastSyncAt ? " · Synced " + fmtTs(evoconLastSyncAt) : ""}
-              </div>
-            )}
           </>
         )}
 
