@@ -1685,18 +1685,6 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
               <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{metrics.monthlyRunRate.toLocaleString()}</div>
               <div className="text-xs text-[rgb(var(--muted))]">Projected Month-End Yield ({metrics.remainingBusinessDays} business days remaining)</div>
             </div>
-            <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
-              <div className={"text-lg font-bold [font-variant-numeric:tabular-nums] " + (metrics.forecastDeltaUnits < 0 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")} style={{ fontFamily: mono }}>
-                {metrics.forecastDeltaUnits >= 0 ? "+" : ""}{metrics.forecastDeltaUnits.toLocaleString()}
-              </div>
-              <div className="text-xs text-[rgb(var(--muted))]">
-                {metrics.selectedPlanSource === "forecast" ? "Forecast Variance" : "Plan Variance"} ({metrics.forecastDeltaPct >= 0 ? "+" : ""}{metrics.forecastDeltaPct}%)
-              </div>
-            </div>
-            <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
-              <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{metrics.selectedPlanUnits.toLocaleString()}</div>
-              <div className="text-xs text-[rgb(var(--muted))]">{metrics.selectedPlanSource === "forecast" ? "Forecast Goal / Target" : "Baseline Goal / Target"}</div>
-            </div>
           </div>
         </Card>
       </div>
