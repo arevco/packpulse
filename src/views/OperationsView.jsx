@@ -6,6 +6,7 @@ import { Button } from "../components/ui/button";
 import { DatePicker } from "../components/ui/date-picker";
 import TableShell from "../components/ui/table-shell";
 import ProductionView from "./ProductionView";
+import { Minus, TrendingDown, TrendingUp } from "lucide-react";
 import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, XAxis, YAxis } from "recharts";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "../components/ui/chart";
 import { detectPackType } from "../utils";
@@ -148,6 +149,54 @@ function shiftRange(range, days) {
     start: shiftDays(range.start, days),
     end: shiftDays(range.end, days)
   };
+}
+
+function clipRangeEnd(range, maxEnd) {
+  if (!range) return range;
+  if (!maxEnd || range.end <= maxEnd) return range;
+  return {
+    start: range.start,
+    end: maxEnd
+  };
+}
+
+function comparableRangeForPreset(presetKey, currentRange) {
+  var spanDays = daysInclusive(currentRange && currentRange.start, currentRange && currentRange.end);
+  if (!currentRange || !currentRange.start || !currentRange.end || spanDays <= 0) {
+    return { label: "vs prior period", range: null };
+  }
+  if (presetKey === "today") {
+    return { label: "vs yesterday", range: shiftRange(currentRange, -1) };
+  }
+  if (presetKey === "yesterday") {
+    return { label: "vs prior day", range: shiftRange(currentRange, -1) };
+  }
+  if (presetKey === "this_week") {
+    return { label: "vs same days last week", range: shiftRange(currentRange, -7) };
+  }
+  if (presetKey === "last_week") {
+    return { label: "vs previous week", range: shiftRange(currentRange, -7) };
+  }
+  if (presetKey === "this_month") {
+    var prevMonthEnd = shiftDays(monthStart(currentRange.start), -1);
+    var prevMonthStart = monthStart(prevMonthEnd);
+    var prevMonthRange = {
+      start: prevMonthStart,
+      end: shiftDays(prevMonthStart, spanDays - 1)
+    };
+    return { label: "vs same days last month", range: clipRangeEnd(prevMonthRange, monthEnd(prevMonthEnd)) };
+  }
+  if (presetKey === "last_month") {
+    var priorMonthEnd = shiftDays(monthStart(currentRange.start), -1);
+    return {
+      label: "vs previous month",
+      range: {
+        start: monthStart(priorMonthEnd),
+        end: monthEnd(priorMonthEnd)
+      }
+    };
+  }
+  return { label: "vs prior period", range: shiftRange(currentRange, -spanDays) };
 }
 
 function presetRange(preset) {
@@ -997,7 +1046,9 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   var commandBoard = useMemo(function() {
     var allDays = (effectiveTrends && Array.isArray(effectiveTrends.byDay)) ? effectiveTrends.byDay : [];
     var allRows = (effectiveBreakdown && Array.isArray(effectiveBreakdown.rowsLite)) ? effectiveBreakdown.rowsLite : [];
-    var summarizeRange = function(label, summaryRange) {
+    var summarizeRange = function(def) {
+      var label = def.label;
+      var summaryRange = def.range;
       var byDay = allDays.filter(function(d) { return inRangeIso(String(d.date || ""), summaryRange); });
       var dayCount = byDay.length;
       var latest = byDay.length ? byDay[0] : null;
@@ -1032,6 +1083,12 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
         byLineMap[line].rows += 1;
       });
       var topLine = Object.values(byLineMap).sort(function(a, b) { return b.units - a.units; })[0] || null;
+      var compareInfo = comparableRangeForPreset(def.key, summaryRange);
+      var compareRange = compareInfo.range;
+      var compareByDay = compareRange ? allDays.filter(function(d) { return inRangeIso(String(d.date || ""), compareRange); }) : [];
+      var compareActual = compareByDay.reduce(function(sum, d) { return sum + safeNum(d.units); }, 0);
+      var compareDelta = windowActual - compareActual;
+      var compareDeltaPct = compareActual > 0 ? Math.round((compareDelta / compareActual) * 100) : 0;
       return {
         label: label,
         range: summaryRange,
@@ -1044,15 +1101,24 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
         variance: variance,
         variancePct: pctDelta(windowActual, planUnits),
         status: status,
-        topLine: topLine
+        topLine: topLine,
+        compareLabel: compareInfo.label,
+        compareRange: compareRange,
+        compareActual: compareActual,
+        compareDelta: compareDelta,
+        compareDeltaPct: compareDeltaPct
       };
     };
 
     var presetCards = COMMAND_BOARD_PRESETS.map(function(def) {
-      var summary = summarizeRange(def.label, presetRange(def.key));
+      var summary = summarizeRange({
+        key: def.key,
+        label: def.label,
+        range: presetRange(def.key)
+      });
       return Object.assign({ key: def.key }, summary);
     });
-    var selectedSummary = presetCards.find(function(card) { return card.key === commandBoardPreset; }) || presetCards[0] || summarizeRange("Today", presetRange("today"));
+    var selectedSummary = presetCards.find(function(card) { return card.key === commandBoardPreset; }) || presetCards[0] || summarizeRange({ key: "today", label: "Today", range: presetRange("today") });
 
     return {
       presets: presetCards,
@@ -1607,6 +1673,12 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
           <div className="mb-3 grid grid-cols-2 gap-2 lg:grid-cols-3 2xl:grid-cols-6">
             {commandBoard.presets.map(function(card) {
               var active = commandBoardPreset === card.key;
+              var trendTone = card.compareDelta > 0
+                ? "text-[rgb(var(--success))]"
+                : card.compareDelta < 0
+                  ? "text-[rgb(var(--danger))]"
+                  : "text-[rgb(var(--muted))]";
+              var TrendIcon = card.compareDelta > 0 ? TrendingUp : card.compareDelta < 0 ? TrendingDown : Minus;
               return (
                 <button
                   key={card.key}
@@ -1620,6 +1692,14 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                   <div className="px-3 py-3">
                     <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[rgb(var(--muted))]">{card.label}</div>
                     <div className="mt-2 text-2xl font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{card.latestUnits.toLocaleString()}</div>
+                    <div className={"mt-2 flex items-center gap-1.5 text-[11px] font-medium " + trendTone}>
+                      <TrendIcon className="h-3.5 w-3.5 shrink-0" />
+                      <span>
+                        {card.compareDelta > 0 ? "+" : ""}{card.compareDelta.toLocaleString()}
+                        {card.compareActual > 0 ? " (" + (card.compareDeltaPct > 0 ? "+" : "") + card.compareDeltaPct + "%)" : ""}
+                        {" "}{card.compareLabel}
+                      </span>
+                    </div>
                   </div>
                 </button>
               );
