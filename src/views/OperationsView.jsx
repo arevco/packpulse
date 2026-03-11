@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "../theme";
 import { Card } from "../components/ui/card";
-import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import { DatePicker } from "../components/ui/date-picker";
 import TableShell from "../components/ui/table-shell";
@@ -28,10 +27,6 @@ function businessDaysBetween(fromDate, toDate) {
     d.setDate(d.getDate() + 1);
   }
   return c;
-}
-
-function fmtMoney(v) {
-  return "$" + Math.round(safeNum(v)).toLocaleString();
 }
 
 function pctDelta(actual, plan) {
@@ -252,13 +247,6 @@ function shortShiftLabel(label) {
   if (s.indexOf("shift 1") !== -1) return "S1";
   if (s.indexOf("shift 2") !== -1) return "S2";
   return "Un";
-}
-
-function extractTagValue(notes, tag) {
-  var n = String(notes || "");
-  var re = new RegExp("\\[" + tag + ":([^\\]]+)\\]", "i");
-  var m = n.match(re);
-  return m && m[1] ? m[1].trim() : "";
 }
 
 function toLineKey(lineName) {
@@ -564,36 +552,10 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   const [inputs, setInputs] = useState([]);
   const [breakdown, setBreakdown] = useState({ rowsLite: [], bySku: [], byLine: [], latestByLine: [], latestDate: null, totalRows: 0 });
   const [forecastPlans, setForecastPlans] = useState({});
-  const [rates, setRates] = useState([
-    { role: "labor", hourly_rate: 20.1, markup_pct: 0.2 },
-    { role: "fork", hourly_rate: 20.1, markup_pct: 0.2 },
-    { role: "qa", hourly_rate: 20.1, markup_pct: 0.2 },
-    { role: "maint", hourly_rate: 20.1, markup_pct: 0.2 },
-    { role: "recycling", hourly_rate: 20.1, markup_pct: 0.2 },
-  ]);
   const [targets, setTargets] = useState([]);
   const loadRequestRef = useRef(0);
-  const [saving, setSaving] = useState(false);
-  const [showEntryModal, setShowEntryModal] = useState(false);
-  const [showRecentLaborInputs, setShowRecentLaborInputs] = useState(false);
-  const [showTopSkuMix, setShowTopSkuMix] = useState(false);
   const [skuMixMode, setSkuMixMode] = useState("type");
   const [evoconRole, setEvoconRole] = useState("manager");
-
-  const [entry, setEntry] = useState({
-    date_et: toIsoDateET(new Date()),
-    shift_label: "Shift 1 (7a-3p)",
-    line_name: "Line 1",
-    item_code: "",
-    work_order_code: "",
-    labor_count: 10,
-    fork_count: 1.5,
-    qa_count: 0.5,
-    maint_count: 0.5,
-    recycling_count: 0.5,
-    hours_run_override: "",
-    notes: "",
-  });
 
   var range = useMemo(function() {
     if (windowPreset === "custom") {
@@ -665,12 +627,11 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       var [trBody, ipBody, cfgBody, brBody, fpBody] = await Promise.all([tr.json(), ip.json(), cfg.json(), br.json(), fp.json()]);
       if (!tr.ok) throw new Error(trBody.error || "Could not load production trends");
       if (!ip.ok) throw new Error(ipBody.error || "Could not load labor inputs");
-      if (!cfg.ok) throw new Error(cfgBody.error || "Could not load rates/targets");
+      if (!cfg.ok) throw new Error(cfgBody.error || "Could not load targets");
       if (!br.ok) throw new Error(brBody.error || "Could not load production breakdown");
       if (requestId !== loadRequestRef.current) return;
       setTrends(trBody.trends || null);
       setInputs(Array.isArray(ipBody.rows) ? ipBody.rows : []);
-      setRates(Array.isArray(cfgBody.rates) && cfgBody.rates.length ? cfgBody.rates : rates);
       setTargets(Array.isArray(cfgBody.skuTargets) ? cfgBody.skuTargets : []);
       setBreakdown({
         rowsLite: Array.isArray(brBody.rowsLite) ? brBody.rowsLite : [],
@@ -1000,15 +961,6 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     var forecastDeltaUnits = totalUnits - selectedPlanUnits;
     var forecastDeltaPct = selectedPlanUnits > 0 ? Math.round((forecastDeltaUnits / selectedPlanUnits) * 100) : 0;
 
-    var estimatedRevenue = filteredBreakdown.bySku.reduce(function(sum, s) {
-      var k = String(s.item_code || "").trim();
-      var t = revenueTargetForSku(k);
-      if (!t) return sum;
-      return sum + safeNum(s.units) * safeNum(t.revenue_per_case);
-    }, 0);
-    var mappedSkuCount = filteredBreakdown.bySku.filter(function(s) { return !!revenueTargetForSku(String(s.item_code || "").trim()); }).length;
-    var unmappedSkuCount = Math.max(0, filteredBreakdown.bySku.length - mappedSkuCount);
-
     return {
       totalUnits: totalUnits,
       avgDailyUnits: avgDailyUnits,
@@ -1024,24 +976,9 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       selectedPlanSource: selectedPlanInfo.source,
       forecastDeltaUnits: forecastDeltaUnits,
       forecastDeltaPct: forecastDeltaPct,
-      estimatedRevenue: estimatedRevenue,
-      mappedSkuCount: mappedSkuCount,
-      unmappedSkuCount: unmappedSkuCount,
       byShift: byShift,
     };
   }, [effectiveTrends, filteredTrends, filteredBreakdown, targetBySku, itemMasterPriceBySku, effectiveRange]);
-
-  var topSku = useMemo(function() {
-    return filteredBreakdown.bySku.slice(0, 10).map(function(s) {
-      var t = revenueTargetForSku(String(s.item_code || "").trim());
-      return {
-        item_code: s.item_code,
-        units: safeNum(s.units),
-        estRev: t ? safeNum(t.revenue_per_case) * safeNum(s.units) : null,
-        revSource: t && t.source ? t.source : null,
-      };
-    });
-  }, [filteredBreakdown, targetBySku, itemMasterPriceBySku]);
 
   var commandBoard = useMemo(function() {
     var allDays = (effectiveTrends && Array.isArray(effectiveTrends.byDay)) ? effectiveTrends.byDay : [];
@@ -1361,18 +1298,6 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     return cfg;
   }, [skuMixByDay.series]);
 
-  var lineOptions = useMemo(function() {
-    var set = new Set();
-    ["Line 1", "Line 2", "Line 3", "Line 4"].forEach(function(l) { set.add(l); });
-    (filteredBreakdown.byLine || []).forEach(function(r) { if (r && r.line) set.add(String(r.line)); });
-    (inputs || []).forEach(function(r) { if (r && r.line_name) set.add(String(r.line_name)); });
-    return Array.from(set).sort();
-  }, [filteredBreakdown.byLine, inputs]);
-
-  var skuOptions = useMemo(function() {
-    return (filteredBreakdown.bySku || []).map(function(r) { return String(r.item_code || "").trim(); }).filter(Boolean).slice(0, 500);
-  }, [filteredBreakdown.bySku]);
-
   var evoconInsights = useMemo(function() {
     var rows = (Array.isArray(evoconData) ? evoconData : []).filter(function(r) {
       return inRangeIso(String(r.date || ""), range);
@@ -1573,62 +1498,6 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     };
   }, [evoconData, range, evoconRole]);
 
-  async function saveShiftInput() {
-    setSaving(true);
-    setErr("");
-    try {
-      var noteParts = [];
-      if (entry.item_code) noteParts.push("[SKU:" + String(entry.item_code).trim() + "]");
-      if (entry.work_order_code) noteParts.push("[WO:" + String(entry.work_order_code).trim() + "]");
-      var plainNotes = String(entry.notes || "").trim();
-      if (plainNotes) noteParts.push(plainNotes);
-      var payload = Object.assign({}, entry, {
-        notes: noteParts.join(" ").trim()
-      });
-      var resp = await fetch("/api/ops/shift-inputs", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      var body = await resp.json();
-      if (!resp.ok) throw new Error(body.error || "Could not save shift input");
-      await loadAll();
-      setShowEntryModal(false);
-      setEntry(function(prev) {
-        return Object.assign({}, prev, {
-          item_code: "",
-          work_order_code: "",
-          notes: ""
-        });
-      });
-    } catch (e) {
-      setErr(e && e.message ? e.message : "Save failed");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function saveRates() {
-    setSaving(true);
-    setErr("");
-    try {
-      var resp = await fetch("/api/ops/config", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rates: rates })
-      });
-      var body = await resp.json();
-      if (!resp.ok) throw new Error(body.error || "Could not save rates");
-      await loadAll();
-    } catch (e) {
-      setErr(e && e.message ? e.message : "Save rates failed");
-    } finally {
-      setSaving(false);
-    }
-  }
-
   const dailyChartConfig = useMemo(function() {
     var cfg = { plan: { label: "Baseline daily plan", color: "rgb(var(--muted))" } };
     (dailyPlanVsActual.lineSeries || []).forEach(function(line) {
@@ -1667,7 +1536,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
               <DatePicker value={range.start} onChange={setCustomStart} className="h-9 w-[132px]" />
               <span className="text-xs text-[rgb(var(--muted))] whitespace-nowrap">-</span>
               <DatePicker value={range.end} onChange={setCustomEnd} className="h-9 w-[132px]" />
-              <Button variant="outline" size="sm" onClick={loadAll} disabled={loading || saving}>Refresh</Button>
+              <Button variant="outline" size="sm" onClick={loadAll} disabled={loading}>Refresh</Button>
             </div>
           </div>
           <div className="mb-3 grid grid-cols-2 gap-2 lg:grid-cols-3 2xl:grid-cols-6">
@@ -2135,99 +2004,6 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
         </Card>
       </div>
 
-      <Card className="px-4 py-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="text-xs text-[rgb(var(--muted))]">
-            Labor inputs and rates are managed in a pop-up form to keep this view focused on operations analysis.
-          </div>
-          <button
-            type="button"
-            onClick={function() { setShowEntryModal(true); }}
-            className="text-sm font-medium text-[rgb(var(--accent))] underline underline-offset-2 hover:opacity-80"
-            disabled={saving}
-          >
-            Open Labor Input Form
-          </button>
-        </div>
-      </Card>
-
-      <div className="grid gap-3 lg:grid-cols-2">
-        <Card className="px-4 py-4">
-          <button
-            type="button"
-            onClick={function() { setShowTopSkuMix(function(v) { return !v; }); }}
-            className="mb-2 flex w-full items-center justify-between text-left"
-          >
-            <span className="text-sm font-semibold">Top SKU Mix (Units)</span>
-            <span className="text-xs text-[rgb(var(--muted))]">{showTopSkuMix ? "Hide" : "Show"}</span>
-          </button>
-          {showTopSkuMix && (
-            <>
-              <TableShell>
-                <table style={{ width:"100%", borderCollapse:"collapse" }}>
-                  <thead><tr style={{ background:C.raised }}>
-                    <th className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">SKU</th>
-                    <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Units</th>
-                    <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Est Revenue</th>
-                  </tr></thead>
-                  <tbody>
-                    {topSku.map(function(s, i) {
-                      return <tr key={s.item_code + i} style={{ borderBottom:"1px solid " + C.border }}>
-                        <td className="px-2 py-2 text-sm">{s.item_code}</td>
-                        <td className="px-2 py-2 text-right text-sm" style={{ fontFamily: mono }}>{s.units.toLocaleString()}</td>
-                        <td className="px-2 py-2 text-right text-sm" style={{ fontFamily: mono, color: s.estRev == null ? C.dim : C.ok }}>{s.estRev == null ? "--" : fmtMoney(s.estRev)}</td>
-                      </tr>;
-                    })}
-                  </tbody>
-                </table>
-              </TableShell>
-              <div className="mt-2 text-xs text-[rgb(var(--muted))]">Revenue mapped (SKU target or Item Master Cost): {metrics.mappedSkuCount} | unmapped: {metrics.unmappedSkuCount}</div>
-            </>
-          )}
-        </Card>
-
-        <Card className="px-4 py-4">
-          <button
-            type="button"
-            onClick={function() { setShowRecentLaborInputs(function(v) { return !v; }); }}
-            className="mb-2 flex w-full items-center justify-between text-left"
-          >
-            <span className="text-sm font-semibold">Recent Labor Inputs</span>
-            <span className="text-xs text-[rgb(var(--muted))]">{showRecentLaborInputs ? "Hide" : "Show"}</span>
-          </button>
-          {showRecentLaborInputs && (
-            <TableShell>
-              <table style={{ width:"100%", borderCollapse:"collapse" }}>
-                <thead><tr style={{ background:C.raised }}>
-                  <th className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Date</th>
-                  <th className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Shift</th>
-                  <th className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Line</th>
-                  <th className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">SKU</th>
-                  <th className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">WO</th>
-                  <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Total HC</th>
-                </tr></thead>
-                <tbody>
-                  {inputs.slice(0, 12).map(function(r, i) {
-                    var total = safeNum(r.labor_count) + safeNum(r.fork_count) + safeNum(r.qa_count) + safeNum(r.maint_count) + safeNum(r.recycling_count);
-                    var sku = extractTagValue(r.notes, "SKU");
-                    var wo = extractTagValue(r.notes, "WO");
-                    return <tr key={i} style={{ borderBottom:"1px solid " + C.border }}>
-                      <td className="px-2 py-2 text-sm">{r.date_et}</td>
-                      <td className="px-2 py-2 text-sm">{r.shift_label}</td>
-                      <td className="px-2 py-2 text-sm">{r.line_name}</td>
-                      <td className="px-2 py-2 text-sm">{sku || "--"}</td>
-                      <td className="px-2 py-2 text-sm">{wo || "--"}</td>
-                      <td className="px-2 py-2 text-right text-sm" style={{ fontFamily: mono }}>{total}</td>
-                    </tr>;
-                  })}
-                  {!inputs.length && <tr><td colSpan={6} className="px-2 py-6 text-center text-sm text-[rgb(var(--muted))]">No labor inputs saved yet.</td></tr>}
-                </tbody>
-              </table>
-            </TableShell>
-          )}
-        </Card>
-      </div>
-
       <Card className="px-4 py-4">
         <div className="mb-2 text-sm font-semibold">Production Jobs</div>
         <div className="text-xs text-[rgb(var(--muted))] mb-3">
@@ -2235,77 +2011,6 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
         </div>
         <ProductionView productionSegments={productionSegments} />
       </Card>
-
-      {showEntryModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={function() { if (!saving) setShowEntryModal(false); }}>
-          <Card className="w-full max-w-4xl px-4 py-4" onClick={function(e) { e.stopPropagation(); }}>
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <div className="text-base font-semibold">Add Shift Entry</div>
-                <div className="text-xs text-[rgb(var(--muted))]">Capture day, shift, line, SKU, and labor for manager reporting.</div>
-              </div>
-              <Button variant="outline" onClick={function() { if (!saving) setShowEntryModal(false); }} disabled={saving}>Close</Button>
-            </div>
-
-            <div className="grid grid-cols-1 gap-2 md:grid-cols-4">
-              <DatePicker value={entry.date_et} onChange={function(nextDate){ setEntry(Object.assign({}, entry, { date_et: nextDate })); }} className="w-full" />
-              <select value={entry.shift_label} onChange={function(e){ setEntry(Object.assign({}, entry, { shift_label: e.target.value })); }} className="h-10 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm">
-                <option>Shift 1 (7a-3p)</option>
-                <option>Shift 2 (3p-11p)</option>
-              </select>
-              <select value={entry.line_name} onChange={function(e){ setEntry(Object.assign({}, entry, { line_name: e.target.value })); }} className="h-10 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm">
-                {lineOptions.map(function(line) { return <option key={line} value={line}>{line}</option>; })}
-              </select>
-              <Input value={entry.item_code} onChange={function(e){ setEntry(Object.assign({}, entry, { item_code: e.target.value })); }} placeholder="SKU (optional)" list="ops-sku-list" />
-              <datalist id="ops-sku-list">
-                {skuOptions.map(function(sku) { return <option key={sku} value={sku} />; })}
-              </datalist>
-            </div>
-
-            <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-4">
-              <Input value={entry.work_order_code} onChange={function(e){ setEntry(Object.assign({}, entry, { work_order_code: e.target.value })); }} placeholder="Work Order (optional)" />
-              <Input type="number" step="0.5" value={entry.labor_count} onChange={function(e){ setEntry(Object.assign({}, entry, { labor_count: e.target.value })); }} placeholder="Labor" />
-              <Input type="number" step="0.5" value={entry.fork_count} onChange={function(e){ setEntry(Object.assign({}, entry, { fork_count: e.target.value })); }} placeholder="Fork" />
-              <Input type="number" step="0.5" value={entry.qa_count} onChange={function(e){ setEntry(Object.assign({}, entry, { qa_count: e.target.value })); }} placeholder="QA" />
-              <Input type="number" step="0.5" value={entry.maint_count} onChange={function(e){ setEntry(Object.assign({}, entry, { maint_count: e.target.value })); }} placeholder="Maint" />
-              <Input type="number" step="0.5" value={entry.recycling_count} onChange={function(e){ setEntry(Object.assign({}, entry, { recycling_count: e.target.value })); }} placeholder="Recycling" />
-              <Input type="number" step="0.25" value={entry.hours_run_override} onChange={function(e){ setEntry(Object.assign({}, entry, { hours_run_override: e.target.value })); }} placeholder="Hours Run (optional)" />
-              <Input value={entry.notes} onChange={function(e){ setEntry(Object.assign({}, entry, { notes: e.target.value })); }} placeholder="Notes (optional)" />
-            </div>
-
-            <div className="mt-3 flex items-center gap-2">
-              <Button onClick={saveShiftInput} disabled={saving}>{saving ? "Saving..." : "Save Shift Entry"}</Button>
-              <span className="text-xs text-[rgb(var(--muted))]">Wages use Labor Rate Settings and generally remain constant.</span>
-            </div>
-
-            <details className="mt-4">
-              <summary className="cursor-pointer text-sm font-semibold">Labor Rate Settings</summary>
-              <div className="mt-3 space-y-2">
-                {rates.map(function(r, idx) {
-                  return (
-                    <div key={r.role + idx} className="grid grid-cols-[120px_1fr_1fr] gap-2">
-                      <div className="flex items-center text-sm capitalize">{r.role}</div>
-                      <Input type="number" step="0.01" value={r.hourly_rate} onChange={function(e){
-                        var next = rates.slice();
-                        next[idx] = Object.assign({}, next[idx], { hourly_rate: e.target.value });
-                        setRates(next);
-                      }} placeholder="Hourly rate" />
-                      <Input type="number" step="0.01" value={r.markup_pct} onChange={function(e){
-                        var next = rates.slice();
-                        next[idx] = Object.assign({}, next[idx], { markup_pct: e.target.value });
-                        setRates(next);
-                      }} placeholder="Markup (0.2 = 20%)" />
-                    </div>
-                  );
-                })}
-                <div className="mt-3">
-                  <Button variant="outline" onClick={saveRates} disabled={saving}>{saving ? "Saving..." : "Save Rates"}</Button>
-                </div>
-              </div>
-            </details>
-          </Card>
-        </div>
-      )}
     </div>
   );
 }
