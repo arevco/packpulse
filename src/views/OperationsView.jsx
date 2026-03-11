@@ -1623,24 +1623,47 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
               {commandBoard.selected.status}
             </span>
           </div>
-          <div className="mb-2 grid grid-cols-2 gap-2 xl:grid-cols-3">
+          <div className="mb-3 grid grid-cols-2 gap-2 lg:grid-cols-3 2xl:grid-cols-6">
             {commandBoard.presets.map(function(card) {
               var active = windowPreset === card.key;
+              var statusTone = card.status === "Off Track"
+                ? "bg-[rgb(var(--danger-soft))] text-[rgb(var(--danger))]"
+                : card.status === "At Risk"
+                  ? "bg-[rgb(var(--accent-soft))] text-[rgb(var(--accent))]"
+                  : "bg-[rgb(var(--success-soft))] text-[rgb(var(--success))]";
               return (
                 <button
                   key={card.key}
                   type="button"
                   onClick={function() { applyPreset(card.key); }}
-                  className={"rounded-md border px-3 py-2 text-left transition-colors " + (active ? "border-[rgb(var(--accent))] bg-[color-mix(in_oklab,rgb(var(--accent))_8%,white)]" : "border-[rgb(var(--border))] bg-[rgb(var(--surface))] hover:bg-white")}
+                  className={"group overflow-hidden rounded-xl border text-left transition-all " + (active
+                    ? "border-[rgb(var(--accent))] bg-[color-mix(in_oklab,rgb(var(--accent))_7%,white)] shadow-[0_8px_24px_rgba(15,23,42,0.08)]"
+                    : "border-[rgb(var(--border))] bg-[rgb(var(--surface))] hover:border-[rgb(var(--accent))] hover:bg-white")}
                 >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="text-xs font-semibold text-[rgb(var(--muted))]">{card.label}</div>
-                    <div className={"text-[11px] font-semibold " + (card.variance < 0 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")}>
-                      {card.variance >= 0 ? "+" : ""}{card.variancePct}%
+                  <div className={"h-1 w-full " + (active ? "bg-[rgb(var(--accent))]" : "bg-[rgb(var(--border))] group-hover:bg-[rgb(var(--accent))]")} />
+                  <div className="px-3 py-2.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[rgb(var(--muted))]">{card.label}</div>
+                        <div className="mt-2 text-xl font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{card.latestUnits.toLocaleString()}</div>
+                      </div>
+                      <div className={"rounded-full px-2 py-0.5 text-[10px] font-semibold " + statusTone}>
+                        {active ? "Selected" : card.status}
+                      </div>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-[rgb(var(--muted))]">
+                      <div>Plan</div>
+                      <div>Variance</div>
+                      <div className="font-semibold text-[rgb(var(--foreground))] [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{card.planUnits.toLocaleString()}</div>
+                      <div className={"font-semibold [font-variant-numeric:tabular-nums] " + (card.variance < 0 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")} style={{ fontFamily: mono }}>
+                        {card.variance >= 0 ? "+" : ""}{card.variancePct}%
+                      </div>
+                    </div>
+                    <div className="mt-3 flex items-center justify-between text-[11px] text-[rgb(var(--muted))]">
+                      <span>{card.dayCount} day{card.dayCount === 1 ? "" : "s"}</span>
+                      <span>{card.topLine ? card.topLine.line : "No line"}</span>
                     </div>
                   </div>
-                  <div className="mt-1 text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{card.latestUnits.toLocaleString()}</div>
-                  <div className="text-[11px] text-[rgb(var(--muted))]">Plan {card.planUnits.toLocaleString()} · {card.dayCount} day{card.dayCount === 1 ? "" : "s"}</div>
                 </button>
               );
             })}
