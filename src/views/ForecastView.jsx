@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "../theme";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
+import { MonthPicker } from "../components/ui/month-picker";
 import TableShell from "../components/ui/table-shell";
 import { detectPackType, safeNum } from "../utils";
 
@@ -750,7 +751,7 @@ export default function ForecastView(props) {
       <div className="mb-3 flex flex-wrap items-end gap-2">
         <div>
           <div className="mb-1 text-xs text-[rgb(var(--muted))]">Month</div>
-          <Input type="month" value={monthKey} onChange={function(e) { setMonthKey(e.target.value); }} className="h-10 w-44 text-sm" />
+          <MonthPicker value={monthKey} onChange={setMonthKey} className="w-44" />
         </div>
         <div>
           <div className="mb-1 text-xs text-[rgb(var(--muted))]">Overhead</div>

@@ -5,6 +5,7 @@ import { fmtDate, triggerDownload, buildExportHTML, normalizeStr, formatDescript
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Badge } from "../components/ui/badge";
+import { MonthPicker } from "../components/ui/month-picker";
 import TableShell from "../components/ui/table-shell";
 import SortHeaderButton from "../components/ui/sort-header-button";
 
@@ -679,12 +680,11 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
         <option value="all">All Customers</option>
         {woCustomers.map(s => <option key={s} value={s}>{s}</option>)}
       </select>
-      <Input
-        type="month"
+      <MonthPicker
         value={filterDueMonth === "all" ? "" : filterDueMonth}
-        onChange={function(e) { setFilterDueMonth(e.target.value || "all"); }}
-        className="h-10 w-40 shrink-0 text-sm"
-        title="Filter by due month (any month, including months not present in current data)."
+        onChange={function(nextMonth) { setFilterDueMonth(nextMonth || "all"); }}
+        placeholder="Due month"
+        className="w-40 shrink-0"
       />
       {filterDueMonth !== "all" && (
         <Button onClick={function() { setFilterDueMonth("all"); }} variant="outline" size="default" className="shrink-0">
