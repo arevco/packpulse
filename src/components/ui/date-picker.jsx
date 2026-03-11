@@ -36,9 +36,10 @@ function DatePicker({ value, onChange, placeholder = "Pick a date", className })
         <Popover.Content
           sideOffset={6}
           align="start"
-          className="z-50 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-0 shadow-md"
+          className="z-50 w-auto overflow-hidden rounded-md bg-[rgb(var(--surface))] p-0 shadow-md"
         >
           <Calendar
+            className="rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))]"
             mode="single"
             selected={selected || undefined}
             onSelect={function(nextDate) {

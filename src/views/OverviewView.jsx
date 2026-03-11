@@ -4,6 +4,7 @@ import { useStyles } from "../hooks/useStyles";
 import { fmtDate, formatDescriptionForDisplay, normalizeStr } from "../utils";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
+import { DatePicker } from "../components/ui/date-picker";
 import TableShell from "../components/ui/table-shell";
 import SortHeaderButton from "../components/ui/sort-header-button";
 
@@ -213,9 +214,9 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
         {woStatuses.map(function(s) { return <option key={s} value={s}>{s}</option>; })}
       </select>
       <span style={{ fontSize:13, color:C.dim, marginLeft:4 }}>Due from</span>
-      <Input type="date" value={ovDateFrom} onChange={e => setOvDateFrom(e.target.value)} className="h-10 w-full text-sm sm:w-36" />
+      <DatePicker value={ovDateFrom} onChange={setOvDateFrom} placeholder="Start date" className="w-full sm:w-36" />
       <span style={{ fontSize:13, color:C.dim }}>to</span>
-      <Input type="date" value={ovDateTo} onChange={e => setOvDateTo(e.target.value)} className="h-10 w-full text-sm sm:w-36" />
+      <DatePicker value={ovDateTo} onChange={setOvDateTo} placeholder="End date" className="w-full sm:w-36" />
       {(ovSearch || ovWoStatus!=="all" || ovCustomer!=="all" || ovDateFrom || ovDateTo) && <Button onClick={() => {setOvSearch("");setOvWoStatus("all");setOvCustomer("all");setOvDateFrom("");setOvDateTo("");}} variant="outline" size="default">Clear</Button>}
       <span style={{ fontSize:13, color:C.dim, marginLeft:4 }}>{overview.woCount} of {analysis.results.length} WOs{overview.noDueDate > 0 && ovDateFrom ? " ("+overview.noDueDate+" excluded \u2014 no due date)" : ""}</span>
     </div>

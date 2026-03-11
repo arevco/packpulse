@@ -9,35 +9,36 @@ function Calendar({ className, classNames, showOutsideDays = true, ...props }) {
   return (
     <DayPicker
       showOutsideDays={showOutsideDays}
-      className={cn("p-3", className)}
+      className={cn("w-fit p-3", className)}
       classNames={{
         months: "flex flex-col sm:flex-row gap-3",
         month: "space-y-3",
-        caption: "relative flex items-center justify-center pt-1",
+        month_caption: "relative flex h-8 items-center justify-center px-8 pt-1",
         caption_label: "text-sm font-medium",
-        nav: "flex items-center gap-1",
+        nav: "absolute inset-x-0 top-1 flex items-center justify-between",
         button_previous: cn(
-          buttonVariants({ variant: "outline", size: "sm" }),
-          "absolute left-1 h-7 w-7 bg-transparent p-0 opacity-70 hover:opacity-100"
+          buttonVariants({ variant: "outline" }),
+          "h-7 w-7 bg-[rgb(var(--surface))] p-0 opacity-80 hover:opacity-100"
         ),
         button_next: cn(
-          buttonVariants({ variant: "outline", size: "sm" }),
-          "absolute right-1 h-7 w-7 bg-transparent p-0 opacity-70 hover:opacity-100"
+          buttonVariants({ variant: "outline" }),
+          "h-7 w-7 bg-[rgb(var(--surface))] p-0 opacity-80 hover:opacity-100"
         ),
         month_grid: "w-full border-collapse",
         weekdays: "flex",
-        weekday: "w-9 rounded-md text-center text-[0.8rem] font-medium text-[rgb(var(--muted))]",
+        weekday: "w-9 text-center text-[0.8rem] font-medium text-[rgb(var(--muted))]",
+        weeks: "mt-1",
         week: "mt-1 flex w-full",
         day: "h-9 w-9 p-0 text-center text-sm",
         day_button: cn(
-          buttonVariants({ variant: "ghost", size: "sm" }),
-          "h-9 w-9 rounded-md p-0 font-normal aria-selected:opacity-100"
+          buttonVariants({ variant: "ghost" }),
+          "h-9 w-9 rounded-md p-0 font-normal text-[rgb(var(--foreground))] aria-selected:bg-[rgb(var(--accent))] aria-selected:text-[rgb(var(--accent-foreground))] aria-selected:hover:bg-[rgb(var(--accent))] aria-selected:hover:text-[rgb(var(--accent-foreground))] aria-selected:opacity-100"
         ),
         selected:
-          "bg-[rgb(var(--accent))] text-[rgb(var(--accent-foreground))] hover:bg-[rgb(var(--accent))] hover:text-[rgb(var(--accent-foreground))] focus:bg-[rgb(var(--accent))] focus:text-[rgb(var(--accent-foreground))]",
-        today: "bg-[rgb(var(--surface))] text-[rgb(var(--foreground))]",
+          "bg-transparent text-[rgb(var(--foreground))]",
+        today: "text-[rgb(var(--foreground))]",
         outside:
-          "text-[rgb(var(--muted))] opacity-50 aria-selected:bg-[rgb(var(--surface))] aria-selected:text-[rgb(var(--muted))] aria-selected:opacity-30",
+          "text-[rgb(var(--muted))] opacity-50 aria-selected:bg-transparent aria-selected:text-[rgb(var(--muted))] aria-selected:opacity-50",
         disabled: "text-[rgb(var(--muted))] opacity-50",
         hidden: "invisible",
         ...classNames,
