@@ -738,43 +738,9 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       }
     };
     var fromRaw = buildRawNulogySeries(productionDataRaw || []);
-    if (!fromSegments.trends.byDay.length && fromRaw.trends.byDay.length) return fromRaw;
-    if (!fromSegments.breakdown.rowsLite.length && fromRaw.breakdown.rowsLite.length) return fromRaw;
-    if (fromRaw.trends.byDay.length) {
-      var mergedRowsLite = (fromSegments.breakdown.rowsLite || []).concat(fromRaw.breakdown.rowsLite || []);
-      var mergedLatestDate = (fromSegments.breakdown.latestDate && fromRaw.breakdown.latestDate)
-        ? (fromSegments.breakdown.latestDate > fromRaw.breakdown.latestDate ? fromSegments.breakdown.latestDate : fromRaw.breakdown.latestDate)
-        : (fromSegments.breakdown.latestDate || fromRaw.breakdown.latestDate || null);
-      var mergedLatestByLineMap = {};
-      mergedRowsLite.forEach(function(r) {
-        if (!mergedLatestDate || String(r.produced_date_et || "") !== mergedLatestDate) return;
-        var ln = String(r.line || "Unknown");
-        if (!mergedLatestByLineMap[ln]) mergedLatestByLineMap[ln] = { line: ln, units: 0, rows: 0 };
-        mergedLatestByLineMap[ln].units += safeNum(r.units_produced);
-        mergedLatestByLineMap[ln].rows += 1;
-      });
-      return {
-        trends: {
-          byDay: mergeDaySeries(fromSegments.trends.byDay, fromRaw.trends.byDay),
-          byShift: mergeTrendSeries(fromSegments.trends.byShift, fromRaw.trends.byShift)
-        },
-        breakdown: {
-          rowsLite: mergedRowsLite,
-          bySku: mergeDaySeries(
-            (fromSegments.breakdown.bySku || []).map(function(r) { return { date: String(r.item_code || ""), units: safeNum(r.units), rows: safeNum(r.rows) }; }),
-            (fromRaw.breakdown.bySku || []).map(function(r) { return { date: String(r.item_code || ""), units: safeNum(r.units), rows: safeNum(r.rows) }; })
-          ).map(function(r) { return { item_code: r.date, units: r.units, rows: r.rows }; }).sort(function(a, b) { return b.units - a.units; }),
-          byLine: mergeDaySeries(
-            (fromSegments.breakdown.byLine || []).map(function(r) { return { date: String(r.line || ""), units: safeNum(r.units), rows: safeNum(r.rows) }; }),
-            (fromRaw.breakdown.byLine || []).map(function(r) { return { date: String(r.line || ""), units: safeNum(r.units), rows: safeNum(r.rows) }; })
-          ).map(function(r) { return { line: r.date, units: r.units, rows: r.rows }; }).sort(function(a, b) { return b.units - a.units; }),
-          latestDate: mergedLatestDate,
-          latestByLine: Object.values(mergedLatestByLineMap).sort(function(a, b) { return b.units - a.units; }),
-          totalRows: safeNum(fromSegments.breakdown.totalRows) + safeNum(fromRaw.breakdown.totalRows)
-        }
-      };
-    }
-    return fromSegments;
+    var hasSegmentData = fromSegments.trends.byDay.length > 0 || fromSegments.breakdown.rowsLite.length > 0;
+    if (hasSegmentData) return fromSegments;
+    return fromRaw;
   }, [productionSegments, productionDataRaw]);
 
   var evoconSeries = useMemo(function() {
