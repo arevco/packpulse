@@ -754,12 +754,6 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     var rawByShift = (localNulogySeries && localNulogySeries.trends && Array.isArray(localNulogySeries.trends.byShift)) ? localNulogySeries.trends.byShift : [];
     var hasCache = cacheByDay.length > 0 || cacheByShift.length > 0;
     var hasRaw = rawByDay.length > 0 || rawByShift.length > 0;
-    if (hasCache && hasRaw) {
-      return {
-        byDay: preferHigherDaySeries(cacheByDay, rawByDay),
-        byShift: preferHigherShiftSeries(cacheByShift, rawByShift)
-      };
-    }
     if (hasCache) return { byDay: cacheByDay, byShift: cacheByShift };
     if (hasRaw) return { byDay: rawByDay, byShift: rawByShift };
     return { byDay: [], byShift: [] };
