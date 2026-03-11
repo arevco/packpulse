@@ -738,9 +738,9 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       }
     };
     var fromRaw = buildRawNulogySeries(productionDataRaw || []);
-    var hasSegmentData = fromSegments.trends.byDay.length > 0 || fromSegments.breakdown.rowsLite.length > 0;
-    if (hasSegmentData) return fromSegments;
-    return fromRaw;
+    var hasRawData = fromRaw.trends.byDay.length > 0 || fromRaw.breakdown.rowsLite.length > 0;
+    if (hasRawData) return fromRaw;
+    return fromSegments;
   }, [productionSegments, productionDataRaw]);
 
   var evoconSeries = useMemo(function() {
@@ -753,8 +753,14 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     var rawByDay = (localNulogySeries && localNulogySeries.trends && Array.isArray(localNulogySeries.trends.byDay)) ? localNulogySeries.trends.byDay : [];
     var rawByShift = (localNulogySeries && localNulogySeries.trends && Array.isArray(localNulogySeries.trends.byShift)) ? localNulogySeries.trends.byShift : [];
     var hasCache = cacheByDay.length > 0 || cacheByShift.length > 0;
-    if (hasCache) return { byDay: cacheByDay, byShift: cacheByShift };
     var hasRaw = rawByDay.length > 0 || rawByShift.length > 0;
+    if (hasCache && hasRaw) {
+      return {
+        byDay: preferHigherDaySeries(cacheByDay, rawByDay),
+        byShift: preferHigherShiftSeries(cacheByShift, rawByShift)
+      };
+    }
+    if (hasCache) return { byDay: cacheByDay, byShift: cacheByShift };
     if (hasRaw) return { byDay: rawByDay, byShift: rawByShift };
     return { byDay: [], byShift: [] };
   }, [trends, localNulogySeries]);
