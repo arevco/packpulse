@@ -497,7 +497,9 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   const { C, mono } = useTheme();
   var initial = initialFilters || {};
   var initialPreset = String(initial.preset || "last_14");
+  var initialBoardPreset = COMMAND_BOARD_PRESETS.some(function(def) { return def.key === initialPreset; }) ? initialPreset : "today";
   const [windowPreset, setWindowPreset] = useState(initialPreset);
+  const [commandBoardPreset, setCommandBoardPreset] = useState(initialBoardPreset);
   const initialRange = presetRange("last_14");
   const [rangeStart, setRangeStart] = useState(String(initial.start || initialRange.start));
   const [rangeEnd, setRangeEnd] = useState(String(initial.end || initialRange.end));
@@ -558,13 +560,6 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       end: rangeEnd
     });
   }, [onPermalinkChange, windowPreset, rangeStart, rangeEnd]);
-
-  var applyPreset = function(nextPreset) {
-    var cfg = presetRange(nextPreset);
-    setWindowPreset(nextPreset);
-    setRangeStart(cfg.start);
-    setRangeEnd(cfg.end);
-  };
 
   var setCustomStart = function(v) {
     if (!v) return;
@@ -870,14 +865,29 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     };
   }, [effectiveBreakdown, effectiveRange]);
 
+  var selectedWindowLabel = useMemo(function() {
+    if (windowPreset === "today") return "Today";
+    if (windowPreset === "yesterday") return "Yesterday";
+    if (windowPreset === "this_week") return "This Week";
+    if (windowPreset === "last_week") return "Last Week";
+    if (windowPreset === "this_month") return "This Month";
+    if (windowPreset === "last_month") return "Last Month";
+    if (windowPreset === "custom") return "Custom Window";
+    return range.start + " to " + range.end;
+  }, [windowPreset, range.start, range.end]);
+
+  var commandBoardRange = useMemo(function() {
+    return presetRange(commandBoardPreset);
+  }, [commandBoardPreset]);
+
   var periodCompare = useMemo(function() {
     var allByDay = (effectiveTrends && Array.isArray(effectiveTrends.byDay)) ? effectiveTrends.byDay : [];
     var allByShift = (effectiveTrends && Array.isArray(effectiveTrends.byShift)) ? effectiveTrends.byShift : [];
-    var prior = compareRange(windowPreset, effectiveRange);
+    var prior = compareRange(commandBoardPreset, commandBoardRange);
 
     var currentUnits = allByDay.reduce(function(sum, d) {
       var date = String(d.date || "");
-      return inRangeIso(date, effectiveRange) ? (sum + safeNum(d.units)) : sum;
+      return inRangeIso(date, commandBoardRange) ? (sum + safeNum(d.units)) : sum;
     }, 0);
     var priorUnits = allByDay.reduce(function(sum, d) {
       var date = String(d.date || "");
@@ -885,7 +895,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     }, 0);
     var currentRows = allByDay.reduce(function(sum, d) {
       var date = String(d.date || "");
-      return inRangeIso(date, effectiveRange) ? (sum + safeNum(d.rows)) : sum;
+      return inRangeIso(date, commandBoardRange) ? (sum + safeNum(d.rows)) : sum;
     }, 0);
     var priorRows = allByDay.reduce(function(sum, d) {
       var date = String(d.date || "");
@@ -901,11 +911,11 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       var shift = String(r.shift || "");
       var units = safeNum(r.units);
       if (shift.indexOf("Shift 1") !== -1) {
-        if (inRangeIso(date, effectiveRange)) currentShift1 += units;
+        if (inRangeIso(date, commandBoardRange)) currentShift1 += units;
         if (inRangeIso(date, prior)) priorShift1 += units;
       }
       if (shift.indexOf("Shift 2") !== -1) {
-        if (inRangeIso(date, effectiveRange)) currentShift2 += units;
+        if (inRangeIso(date, commandBoardRange)) currentShift2 += units;
         if (inRangeIso(date, prior)) priorShift2 += units;
       }
     });
@@ -913,13 +923,13 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     var delta = currentUnits - priorUnits;
     var deltaPct = priorUnits > 0 ? Math.round((delta / priorUnits) * 100) : 0;
     return {
-      labelCurrent: windowPreset === "today" ? "Today" :
-        windowPreset === "yesterday" ? "Yesterday" :
-        windowPreset === "this_week" ? "This Week" :
-        windowPreset === "last_week" ? "Last Week" :
-        windowPreset === "this_month" ? "This Month" :
-        windowPreset === "last_month" ? "Last Month" :
-        windowPreset === "custom" ? (effectiveRange.start + " to " + effectiveRange.end) :
+      labelCurrent: commandBoardPreset === "today" ? "Today" :
+        commandBoardPreset === "yesterday" ? "Yesterday" :
+        commandBoardPreset === "this_week" ? "This Week" :
+        commandBoardPreset === "last_week" ? "Last Week" :
+        commandBoardPreset === "this_month" ? "This Month" :
+        commandBoardPreset === "last_month" ? "Last Month" :
+        commandBoardPreset === "custom" ? (commandBoardRange.start + " to " + commandBoardRange.end) :
         "Selected Window",
       labelPrior: prior.label,
       priorRange: prior.start && prior.end ? (prior.start + " to " + prior.end) : "--",
@@ -934,7 +944,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       delta: delta,
       deltaPct: deltaPct
     };
-  }, [effectiveTrends, windowPreset, effectiveRange]);
+  }, [effectiveTrends, commandBoardPreset, commandBoardRange]);
 
   var metrics = useMemo(function() {
     var allByDay = (effectiveTrends && Array.isArray(effectiveTrends.byDay)) ? effectiveTrends.byDay : [];
@@ -1091,15 +1101,13 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       var summary = summarizeRange(def.label, presetRange(def.key));
       return Object.assign({ key: def.key }, summary);
     });
-    var selectedSummary = windowPreset === "custom"
-      ? summarizeRange("Custom", effectiveRange)
-      : (presetCards.find(function(card) { return card.key === windowPreset; }) || summarizeRange("Selected Window", effectiveRange));
+    var selectedSummary = presetCards.find(function(card) { return card.key === commandBoardPreset; }) || presetCards[0] || summarizeRange("Today", presetRange("today"));
 
     return {
       presets: presetCards,
       selected: selectedSummary
     };
-  }, [effectiveTrends, effectiveBreakdown, windowPreset, effectiveRange]);
+  }, [effectiveTrends, effectiveBreakdown, commandBoardPreset]);
 
   var shiftPlanVsActual = useMemo(function() {
     var rows = (filteredTrends.byShift || []).slice();
@@ -1621,7 +1629,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
         <div className="flex flex-wrap lg:flex-nowrap items-center gap-1.5">
           <span className="text-sm font-medium text-[rgb(var(--muted))] whitespace-nowrap">Operations Controls</span>
           <Badge variant="secondary">Nulogy</Badge>
-          <Badge variant="soft">{windowPreset === "custom" ? "Custom Window" : (commandBoard.selected && commandBoard.selected.label) || "Selected Window"}</Badge>
+          <Badge variant="soft">{selectedWindowLabel}</Badge>
           <DatePicker value={range.start} onChange={setCustomStart} className="h-9 w-[132px]" />
           <span className="text-xs text-[rgb(var(--muted))] whitespace-nowrap">to</span>
           <DatePicker value={range.end} onChange={setCustomEnd} className="h-9 w-[132px]" />
@@ -1661,7 +1669,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                 <button
                   key={card.key}
                   type="button"
-                  onClick={function() { applyPreset(card.key); }}
+                  onClick={function() { setCommandBoardPreset(card.key); }}
                   className={"group overflow-hidden rounded-xl border text-left transition-all " + (active
                     ? "border-[rgb(var(--accent))] bg-[color-mix(in_oklab,rgb(var(--accent))_7%,white)] shadow-[0_8px_24px_rgba(15,23,42,0.08)]"
                     : "border-[rgb(var(--border))] bg-[rgb(var(--surface))] hover:border-[rgb(var(--accent))] hover:bg-white")}
