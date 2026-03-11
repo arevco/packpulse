@@ -177,37 +177,6 @@ function presetRange(preset) {
   return { start: shiftDays(today, -13), end: today, fetchDays: 30 };
 }
 
-function compareRange(preset, range) {
-  if (!range || !range.start || !range.end) return { start: "", end: "", label: "Previous Period" };
-  if (preset === "today") {
-    var d = shiftDays(range.start, -1);
-    return { start: d, end: d, label: "Yesterday" };
-  }
-  if (preset === "yesterday") {
-    var dd = shiftDays(range.start, -1);
-    return { start: dd, end: dd, label: "Prior Day" };
-  }
-  if (preset === "this_week") {
-    return { start: shiftDays(range.start, -7), end: shiftDays(range.end, -7), label: "Last Week" };
-  }
-  if (preset === "last_week") {
-    return { start: shiftDays(range.start, -7), end: shiftDays(range.end, -7), label: "Prior Week" };
-  }
-  if (preset === "this_month") {
-    var prevMonthEnd = shiftDays(range.start, -1);
-    return { start: monthStart(prevMonthEnd), end: monthEnd(prevMonthEnd), label: "Last Month" };
-  }
-  if (preset === "last_month") {
-    var lastMonthStart = monthStart(range.start);
-    var priorMonthEnd = shiftDays(lastMonthStart, -1);
-    return { start: monthStart(priorMonthEnd), end: monthEnd(priorMonthEnd), label: "Prior Month" };
-  }
-  var span = Math.max(1, daysInclusive(range.start, range.end));
-  var prevEnd = shiftDays(range.start, -1);
-  var prevStart = shiftDays(prevEnd, -(span - 1));
-  return { start: prevStart, end: prevEnd, label: "Previous " + span + " days" };
-}
-
 function inRange(dateIso, range) {
   if (!dateIso || !range) return false;
   var raw = String(dateIso || "").trim();
@@ -560,7 +529,6 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   const [showEntryModal, setShowEntryModal] = useState(false);
   const [showRecentLaborInputs, setShowRecentLaborInputs] = useState(false);
   const [showTopSkuMix, setShowTopSkuMix] = useState(false);
-  const [showWindowCompare, setShowWindowCompare] = useState(false);
   const [skuMixMode, setSkuMixMode] = useState("type");
   const [evoconRole, setEvoconRole] = useState("manager");
 
@@ -965,72 +933,6 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   var commandBoardRange = useMemo(function() {
     return presetRange(commandBoardPreset);
   }, [commandBoardPreset]);
-
-  var periodCompare = useMemo(function() {
-    var allByDay = (effectiveTrends && Array.isArray(effectiveTrends.byDay)) ? effectiveTrends.byDay : [];
-    var allByShift = (effectiveTrends && Array.isArray(effectiveTrends.byShift)) ? effectiveTrends.byShift : [];
-    var prior = compareRange(commandBoardPreset, commandBoardRange);
-
-    var currentUnits = allByDay.reduce(function(sum, d) {
-      var date = String(d.date || "");
-      return inRangeIso(date, commandBoardRange) ? (sum + safeNum(d.units)) : sum;
-    }, 0);
-    var priorUnits = allByDay.reduce(function(sum, d) {
-      var date = String(d.date || "");
-      return inRangeIso(date, prior) ? (sum + safeNum(d.units)) : sum;
-    }, 0);
-    var currentRows = allByDay.reduce(function(sum, d) {
-      var date = String(d.date || "");
-      return inRangeIso(date, commandBoardRange) ? (sum + safeNum(d.rows)) : sum;
-    }, 0);
-    var priorRows = allByDay.reduce(function(sum, d) {
-      var date = String(d.date || "");
-      return inRangeIso(date, prior) ? (sum + safeNum(d.rows)) : sum;
-    }, 0);
-
-    var currentShift1 = 0;
-    var priorShift1 = 0;
-    var currentShift2 = 0;
-    var priorShift2 = 0;
-    allByShift.forEach(function(r) {
-      var date = String(r.date || "");
-      var shift = String(r.shift || "");
-      var units = safeNum(r.units);
-      if (shift.indexOf("Shift 1") !== -1) {
-        if (inRangeIso(date, commandBoardRange)) currentShift1 += units;
-        if (inRangeIso(date, prior)) priorShift1 += units;
-      }
-      if (shift.indexOf("Shift 2") !== -1) {
-        if (inRangeIso(date, commandBoardRange)) currentShift2 += units;
-        if (inRangeIso(date, prior)) priorShift2 += units;
-      }
-    });
-
-    var delta = currentUnits - priorUnits;
-    var deltaPct = priorUnits > 0 ? Math.round((delta / priorUnits) * 100) : 0;
-    return {
-      labelCurrent: commandBoardPreset === "today" ? "Today" :
-        commandBoardPreset === "yesterday" ? "Yesterday" :
-        commandBoardPreset === "this_week" ? "This Week" :
-        commandBoardPreset === "last_week" ? "Last Week" :
-        commandBoardPreset === "this_month" ? "This Month" :
-        commandBoardPreset === "last_month" ? "Last Month" :
-        commandBoardPreset === "custom" ? (commandBoardRange.start + " to " + commandBoardRange.end) :
-        "Selected Window",
-      labelPrior: prior.label,
-      priorRange: prior.start && prior.end ? (prior.start + " to " + prior.end) : "--",
-      currentUnits: currentUnits,
-      priorUnits: priorUnits,
-      currentRows: currentRows,
-      priorRows: priorRows,
-      currentShift1: currentShift1,
-      priorShift1: priorShift1,
-      currentShift2: currentShift2,
-      priorShift2: priorShift2,
-      delta: delta,
-      deltaPct: deltaPct
-    };
-  }, [effectiveTrends, commandBoardPreset, commandBoardRange]);
 
   var metrics = useMemo(function() {
     var allByDay = (effectiveTrends && Array.isArray(effectiveTrends.byDay)) ? effectiveTrends.byDay : [];
@@ -1796,63 +1698,6 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
               );
             })}
           </div>
-          <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-            <div className="rounded-md border border-[rgb(var(--border))] px-3 py-1.5">
-              <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{commandBoard.selected.latestUnits.toLocaleString()}</div>
-              <div className="text-xs text-[rgb(var(--muted))]">Actual Cases</div>
-            </div>
-            <div className="rounded-md border border-[rgb(var(--border))] px-3 py-1.5">
-              <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{commandBoard.selected.planUnits.toLocaleString()}</div>
-              <div className="text-xs text-[rgb(var(--muted))]">{commandBoard.selected.planSource === "forecast" ? "Forecast Plan" : "Baseline Plan"}</div>
-            </div>
-            <div className="rounded-md border border-[rgb(var(--border))] px-3 py-1.5">
-              <div className={"text-lg font-bold [font-variant-numeric:tabular-nums] " + (commandBoard.selected.variance < 0 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")} style={{ fontFamily: mono }}>
-                {commandBoard.selected.variance >= 0 ? "+" : ""}{commandBoard.selected.variance.toLocaleString()}
-              </div>
-              <div className="text-xs text-[rgb(var(--muted))]">Variance ({commandBoard.selected.variancePct >= 0 ? "+" : ""}{commandBoard.selected.variancePct}%)</div>
-            </div>
-            <div className="rounded-md border border-[rgb(var(--border))] px-3 py-1.5">
-              <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{commandBoard.selected.topLine ? commandBoard.selected.topLine.line : "--"}</div>
-              <div className="text-xs text-[rgb(var(--muted))]">Top Line ({commandBoard.selected.topLine ? commandBoard.selected.topLine.units.toLocaleString() : "--"} cases in window)</div>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={function() { setShowWindowCompare(function(v) { return !v; }); }}
-            className="mt-2 flex w-full items-center justify-between rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-1.5 text-left"
-          >
-            <span className="text-xs font-semibold text-[rgb(var(--muted))]">Compare: {periodCompare.labelCurrent} vs {periodCompare.labelPrior}</span>
-            <span className="text-xs text-[rgb(var(--muted))]">{showWindowCompare ? "Hide" : "Show"}</span>
-          </button>
-          {showWindowCompare && (
-            <div className="mt-1 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-2">
-              <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-                <div className="text-xs text-[rgb(var(--muted))]">
-                  <div className="font-semibold text-[rgb(var(--foreground))] [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{periodCompare.currentUnits.toLocaleString()}</div>
-                  <div>{periodCompare.labelCurrent} cases</div>
-                </div>
-                <div className="text-xs text-[rgb(var(--muted))]">
-                  <div className="font-semibold text-[rgb(var(--foreground))] [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{periodCompare.priorUnits.toLocaleString()}</div>
-                  <div>{periodCompare.labelPrior} cases</div>
-                </div>
-                <div className="text-xs text-[rgb(var(--muted))]">
-                  <div className={"font-semibold [font-variant-numeric:tabular-nums] " + (periodCompare.delta < 0 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")} style={{ fontFamily: mono }}>
-                    {periodCompare.delta >= 0 ? "+" : ""}{periodCompare.delta.toLocaleString()}
-                  </div>
-                  <div>Case delta</div>
-                </div>
-                <div className="text-xs text-[rgb(var(--muted))]">
-                  <div className={"font-semibold [font-variant-numeric:tabular-nums] " + (periodCompare.deltaPct < 0 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")} style={{ fontFamily: mono }}>
-                    {periodCompare.deltaPct >= 0 ? "+" : ""}{periodCompare.deltaPct}%
-                  </div>
-                  <div>Percent delta</div>
-                </div>
-              </div>
-              <div className="mt-1 text-[11px] text-[rgb(var(--muted))]">
-                Prior window: {periodCompare.priorRange}
-              </div>
-            </div>
-          )}
         </Card>
 
         <Card className="lg:col-span-4 px-3 py-3">
