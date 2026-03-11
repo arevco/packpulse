@@ -6,7 +6,7 @@ import { DatePicker } from "../components/ui/date-picker";
 import TableShell from "../components/ui/table-shell";
 import ProductionView from "./ProductionView";
 import { Minus, TrendingDown, TrendingUp } from "lucide-react";
-import { Bar, CartesianGrid, ComposedChart, ResponsiveContainer, XAxis, YAxis } from "recharts";
+import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, XAxis, YAxis } from "recharts";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "../components/ui/chart";
 import { detectPackType } from "../utils";
 
