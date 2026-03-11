@@ -937,15 +937,29 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   }, [effectiveTrends, windowPreset, effectiveRange]);
 
   var metrics = useMemo(function() {
+    var allByDay = (effectiveTrends && Array.isArray(effectiveTrends.byDay)) ? effectiveTrends.byDay : [];
     var byDay = filteredTrends.byDay || [];
     var byShift = filteredTrends.byShift || [];
     var totalUnits = byDay.reduce(function(sum, d) { return sum + safeNum(d.units); }, 0);
     var avgDailyUnits = byDay.length ? Math.round(totalUnits / byDay.length) : 0;
     var today = toIsoDateET(new Date());
-    var monthAnchor = effectiveRange.end || today;
+    var latestProductionDate = allByDay.map(function(d) { return String(d.date || ""); }).filter(Boolean).sort().pop() || "";
+    var monthAnchor = latestProductionDate || effectiveRange.end || today;
     var monthBusinessDays = businessDaysBetween(monthStart(monthAnchor), monthEnd(monthAnchor));
-    var weeklyRunRate = avgDailyUnits * 5;
-    var monthlyRunRate = avgDailyUnits * monthBusinessDays;
+    var trailingProductionDays = allByDay
+      .filter(function(d) { return String(d.date || "") <= monthAnchor; })
+      .slice(0, 5);
+    var trailingDailyVelocity = trailingProductionDays.length
+      ? Math.round(trailingProductionDays.reduce(function(sum, d) { return sum + safeNum(d.units); }, 0) / trailingProductionDays.length)
+      : 0;
+    var weeklyRunRate = trailingDailyVelocity * 5;
+    var monthActualUnits = allByDay.reduce(function(sum, d) {
+      var date = String(d.date || "");
+      if (date >= monthStart(monthAnchor) && date <= monthAnchor) return sum + safeNum(d.units);
+      return sum;
+    }, 0);
+    var remainingBusinessDays = businessDaysBetween(shiftDays(monthAnchor, 1), monthEnd(monthAnchor));
+    var monthlyRunRate = monthActualUnits + (trailingDailyVelocity * remainingBusinessDays);
     var expectedShifts = businessDaysBetween(filteredTrends.fromDate, effectiveRange.end || today) * 2;
     var shiftKeySet = {};
     filteredInputs.forEach(function(r) {
@@ -990,9 +1004,14 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     return {
       totalUnits: totalUnits,
       avgDailyUnits: avgDailyUnits,
+      latestProductionDate: monthAnchor,
+      trailingProductionDays: trailingProductionDays.length,
+      trailingDailyVelocity: trailingDailyVelocity,
       weeklyRunRate: weeklyRunRate,
       monthlyRunRate: monthlyRunRate,
       monthBusinessDays: monthBusinessDays,
+      monthActualUnits: monthActualUnits,
+      remainingBusinessDays: remainingBusinessDays,
       enteredShifts: enteredShifts,
       expectedShifts: expectedShifts,
       coveragePct: coveragePct,
@@ -1002,7 +1021,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       unmappedSkuCount: unmappedSkuCount,
       byShift: byShift,
     };
-  }, [filteredTrends, filteredInputs, rates, filteredBreakdown, targetBySku, itemMasterPriceBySku, effectiveRange.end]);
+  }, [effectiveTrends, filteredTrends, filteredInputs, rates, filteredBreakdown, targetBySku, itemMasterPriceBySku, effectiveRange.end]);
 
   var topSku = useMemo(function() {
     return filteredBreakdown.bySku.slice(0, 10).map(function(s) {
@@ -1747,11 +1766,11 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
             </div>
             <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
               <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{metrics.weeklyRunRate.toLocaleString()}</div>
-              <div className="text-xs text-[rgb(var(--muted))]">Weekly Yield Run Rate</div>
+              <div className="text-xs text-[rgb(var(--muted))]">Weekly Yield Run Rate (trailing {metrics.trailingProductionDays} production days)</div>
             </div>
             <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
               <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{metrics.monthlyRunRate.toLocaleString()}</div>
-              <div className="text-xs text-[rgb(var(--muted))]">Monthly Yield Run Rate ({metrics.monthBusinessDays} days)</div>
+              <div className="text-xs text-[rgb(var(--muted))]">Projected Month-End Yield ({metrics.remainingBusinessDays} business days remaining)</div>
             </div>
             <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
               <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{metrics.coveragePct}%</div>
