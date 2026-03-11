@@ -807,9 +807,6 @@ export default function ProductionReadiness() {
           <div className="mb-2.5 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2.5 py-2">
             <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-semibold text-[rgb(var(--foreground))]">Live Sync</span>
-            <span className="text-xs text-[rgb(var(--muted))]">
-              {isActivelySyncing ? "Syncing data..." : "Up to date"}
-            </span>
             <span className="min-w-11 text-right text-xs font-semibold [font-variant-numeric:tabular-nums]" style={{ color:syncPctColor }}>
               {Math.round(syncVisualPct)}%
             </span>
@@ -819,7 +816,6 @@ export default function ProductionReadiness() {
                 {syncProgress.activeText}
               </span>
             )}
-            {nulogySyncState && nulogySyncState.syncing && <Badge variant="secondary">Nulogy</Badge>}
             {dockApiLoading && <Badge variant="secondary">OpenDock</Badge>}
             {dockApiInfo && syncVisualPct < 100 && <Badge variant="success">{dockApiInfo}</Badge>}
             {dockApiError && <Badge variant="danger">OpenDock: {dockApiError}</Badge>}
