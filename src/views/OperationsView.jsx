@@ -1596,14 +1596,11 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     <div className="space-y-4">
       <Card className="px-3 py-2">
         <div className="flex flex-wrap lg:flex-nowrap items-center gap-1.5">
-          <span className="text-sm font-medium text-[rgb(var(--muted))] whitespace-nowrap">Operations Controls</span>
-          <Badge variant="secondary">Nulogy</Badge>
           <Badge variant="soft">{selectedWindowLabel}</Badge>
           <DatePicker value={range.start} onChange={setCustomStart} className="h-9 w-[132px]" />
-          <span className="text-xs text-[rgb(var(--muted))] whitespace-nowrap">to</span>
+          <span className="text-xs text-[rgb(var(--muted))] whitespace-nowrap">-</span>
           <DatePicker value={range.end} onChange={setCustomEnd} className="h-9 w-[132px]" />
           <Button variant="outline" size="sm" onClick={loadAll} disabled={loading || saving}>Refresh</Button>
-          {loading && <span className="text-xs text-[rgb(var(--muted))] whitespace-nowrap">Loading…</span>}
         </div>
       </Card>
 
