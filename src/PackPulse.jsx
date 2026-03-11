@@ -221,9 +221,15 @@ export default function ProductionReadiness() {
   var sharedWrite = ds.sharedSnapshotWrite || { status:"idle", attemptedAt:null, succeededAt:null, error:"", snapshotVersion:"" };
   var sharedSourceLabel = sharedMeta.source === "shared" ? "Shared cache" : sharedMeta.source === "local" ? "Local cache" : sharedMeta.source === "empty" ? "Shared cache empty" : "Shared cache unavailable";
   var sharedStamp = sharedMeta.syncedAt ? fmtTs(sharedMeta.syncedAt) : "--";
-  var sharedBy = sharedMeta.updatedBy ? sharedMeta.updatedBy : "--";
   var sharedAgeMins = sharedMeta.syncedAt ? Math.max(0, Math.floor((Date.now() - new Date(sharedMeta.syncedAt).getTime()) / 60000)) : null;
   var sharedSeemsStale = !!(sharedAgeMins != null && sharedAgeMins > 30 && freshCount >= 3);
+  var staleCount = Math.max(0, dataSourceStatus.length - freshCount);
+  var freshnessVariant = freshCount === dataSourceStatus.length ? "success" : freshCount >= 3 ? "warning" : "danger";
+  var freshnessLabel = freshCount === dataSourceStatus.length
+    ? "Data Fresh"
+    : staleCount === 1
+      ? "1 Source Needs Attention"
+      : (staleCount + " Sources Need Attention");
 
   var fetchOpenDockApi = useCallback(async () => {
     setDockApiLoading(true);
@@ -831,39 +837,28 @@ export default function ProductionReadiness() {
           <div className="mb-1.5 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-2.5">
             <div className="mb-2 flex flex-wrap items-center gap-1.5">
               <Button onClick={() => setShowDataControlsPanel(v => !v)} variant={showDataControlsPanel ? "active" : "outline"} size="sm">
-                {showDataControlsPanel ? "Hide Data Controls" : "Data Controls"}
+                {showDataControlsPanel ? "Hide Details" : "Details"}
               </Button>
-              <Button onClick={() => setShowSettings(!showSettings)} variant={showSettings ? "active" : "outline"} size="sm">Data Mapping</Button>
-              <Button onClick={() => setShowUserActivity(v => !v)} variant={showUserActivity ? "active" : "outline"} size="sm">User Activity</Button>
+              <Badge variant={freshnessVariant}>{freshnessLabel}</Badge>
               <span className="text-xs text-[rgb(var(--muted))]">
-                <span style={{ color:freshCount===dataSourceStatus.length?C.ok:freshCount>=3?C.warn:C.bad, fontWeight:600 }}>{freshCount}/{dataSourceStatus.length}</span> fresh · updated {summaryStamp}
-              </span>
-              <span className="text-xs text-[rgb(var(--muted))]">
-                · {sharedSourceLabel}: {sharedStamp}{sharedMeta.source === "shared" ? " · " + sharedBy : ""}
+                Updated {summaryStamp}
               </span>
               {sharedWrite.status === "writing" && <Badge variant="secondary">Saving shared snapshot…</Badge>}
-              {sharedWrite.status === "ok" && <Badge variant="success">Shared snapshot saved</Badge>}
               {sharedWrite.status === "error" && <Badge variant="danger">Shared snapshot save failed</Badge>}
-              {sharedWrite.snapshotVersion && <span className="text-xs text-[rgb(var(--muted))]">v{sharedWrite.snapshotVersion}</span>}
             </div>
           </div>
         )}
         {!syncHealthy && (
         <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
           <Button onClick={() => setShowDataControlsPanel(v => !v)} variant={showDataControlsPanel ? "active" : "outline"} size="sm">
-            {showDataControlsPanel ? "Hide Data Controls" : "Data Controls"}
+            {showDataControlsPanel ? "Hide Details" : "Details"}
           </Button>
-          <Button onClick={() => setShowSettings(!showSettings)} variant={showSettings ? "active" : "outline"} size="sm">Data Mapping</Button>
+          <Badge variant={freshnessVariant}>{freshnessLabel}</Badge>
           <span className="text-xs text-[rgb(var(--muted))]">
-            <span style={{ color:freshCount===dataSourceStatus.length?C.ok:freshCount>=3?C.warn:C.bad, fontWeight:600 }}>{freshCount}/{dataSourceStatus.length}</span> fresh · updated {summaryStamp}
-          </span>
-          <span className="text-xs text-[rgb(var(--muted))]">
-            · {sharedSourceLabel}: {sharedStamp}{sharedMeta.source === "shared" ? " · " + sharedBy : ""}
+            Updated {summaryStamp}
           </span>
           {sharedWrite.status === "writing" && <Badge variant="secondary">Saving shared snapshot…</Badge>}
-          {sharedWrite.status === "ok" && <Badge variant="success">Shared snapshot saved</Badge>}
           {sharedWrite.status === "error" && <Badge variant="danger">Shared snapshot save failed</Badge>}
-          {sharedWrite.snapshotVersion && <span className="text-xs text-[rgb(var(--muted))]">v{sharedWrite.snapshotVersion}</span>}
         </div>
         )}
         {sharedSeemsStale && (
@@ -871,7 +866,7 @@ export default function ProductionReadiness() {
             className="mb-2 rounded-md px-3 py-2 text-xs"
             style={{ border: "1px solid " + C.warnLine, background: C.warnSoft, color: C.warn }}
           >
-            Shared cache looks stale ({sharedAgeMins}m old) while local feeds are fresh. Local data is current; shared snapshot may have failed to write.
+            Shared data may be stale ({sharedAgeMins}m old). Local data is current, but the shared snapshot may not have updated.
           </div>
         )}
         {showDataControlsPanel && (!syncHealthy || showQuickControls) && (
@@ -901,7 +896,7 @@ export default function ProductionReadiness() {
                 Item Master (Debug)
               </Button>
               <Button onClick={() => setShowUserActivity(v => !v)} variant={showUserActivity ? "active" : "outline"} size="sm">
-                User Activity
+                Recent Logins
               </Button>
             </div>
             {showUserActivity && (
