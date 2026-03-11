@@ -3,7 +3,6 @@ import { useTheme } from "../theme";
 import { Card } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
-import { Badge } from "../components/ui/badge";
 import { DatePicker } from "../components/ui/date-picker";
 import TableShell from "../components/ui/table-shell";
 import ProductionView from "./ProductionView";
@@ -919,17 +918,6 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     };
   };
 
-  var selectedWindowLabel = useMemo(function() {
-    if (windowPreset === "today") return "Today";
-    if (windowPreset === "yesterday") return "Yesterday";
-    if (windowPreset === "this_week") return "This Week";
-    if (windowPreset === "last_week") return "Last Week";
-    if (windowPreset === "this_month") return "This Month";
-    if (windowPreset === "last_month") return "Last Month";
-    if (windowPreset === "custom") return "Custom Window";
-    return range.start + " to " + range.end;
-  }, [windowPreset, range.start, range.end]);
-
   var commandBoardRange = useMemo(function() {
     return presetRange(commandBoardPreset);
   }, [commandBoardPreset]);
@@ -1594,21 +1582,11 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
 
   return (
     <div className="space-y-4">
-      <Card className="px-3 py-2">
-        <div className="flex flex-wrap lg:flex-nowrap items-center gap-1.5">
-          <Badge variant="soft">{selectedWindowLabel}</Badge>
-          <DatePicker value={range.start} onChange={setCustomStart} className="h-9 w-[132px]" />
-          <span className="text-xs text-[rgb(var(--muted))] whitespace-nowrap">-</span>
-          <DatePicker value={range.end} onChange={setCustomEnd} className="h-9 w-[132px]" />
-          <Button variant="outline" size="sm" onClick={loadAll} disabled={loading || saving}>Refresh</Button>
-        </div>
-      </Card>
-
       {err && <Card className="border-[rgb(var(--danger-line))] bg-[rgb(var(--danger-soft))] px-3 py-2 text-sm text-[rgb(var(--danger))]">{err}</Card>}
 
       <div className="grid gap-2 lg:grid-cols-12">
         <Card className="lg:col-span-8 px-3 py-3">
-          <div className="mb-2">
+          <div className="mb-2 flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <div className="text-sm font-semibold">Shift Command Board</div>
               <div className="text-xs text-[rgb(var(--muted))]">
@@ -1618,6 +1596,12 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                     ? ("Selected: " + commandBoard.selected.label + " · " + commandBoard.selected.latestDate)
                     : "No production day available yet"}
               </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5 lg:justify-end">
+              <DatePicker value={range.start} onChange={setCustomStart} className="h-9 w-[132px]" />
+              <span className="text-xs text-[rgb(var(--muted))] whitespace-nowrap">-</span>
+              <DatePicker value={range.end} onChange={setCustomEnd} className="h-9 w-[132px]" />
+              <Button variant="outline" size="sm" onClick={loadAll} disabled={loading || saving}>Refresh</Button>
             </div>
           </div>
           <div className="mb-3 grid grid-cols-2 gap-2 lg:grid-cols-3 2xl:grid-cols-6">
