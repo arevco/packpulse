@@ -99,6 +99,44 @@ function monthEnd(dateIso) {
   return toIsoDateUTC(d);
 }
 
+function eachDayIsoBetween(startIso, endIso) {
+  if (!startIso || !endIso) return [];
+  var start = new Date(startIso + "T00:00:00Z");
+  var end = new Date(endIso + "T00:00:00Z");
+  if (isNaN(start) || isNaN(end) || end < start) return [];
+  var out = [];
+  var d = new Date(start);
+  while (d <= end) {
+    out.push(toIsoDateUTC(d));
+    d.setUTCDate(d.getUTCDate() + 1);
+  }
+  return out;
+}
+
+function eachMonthKeysBetween(startIso, endIso) {
+  if (!startIso || !endIso) return [];
+  var start = String(startIso).slice(0, 7);
+  var end = String(endIso).slice(0, 7);
+  if (!/^\d{4}-\d{2}$/.test(start) || !/^\d{4}-\d{2}$/.test(end) || end < start) return [];
+  var out = [];
+  var cursor = new Date(start + "-01T00:00:00Z");
+  var limit = new Date(end + "-01T00:00:00Z");
+  while (cursor <= limit) {
+    out.push(toIsoDateUTC(cursor).slice(0, 7));
+    cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+    cursor.setUTCDate(1);
+  }
+  return out;
+}
+
+function isBusinessDay(dateIso) {
+  if (!dateIso) return false;
+  var d = new Date(String(dateIso).slice(0, 10) + "T00:00:00Z");
+  if (isNaN(d)) return false;
+  var dow = d.getUTCDay();
+  return dow !== 0 && dow !== 6;
+}
+
 function daysInclusive(startIso, endIso) {
   var start = new Date(startIso + "T00:00:00");
   var end = new Date(endIso + "T00:00:00");
@@ -508,6 +546,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   const [trends, setTrends] = useState(null);
   const [inputs, setInputs] = useState([]);
   const [breakdown, setBreakdown] = useState({ rowsLite: [], bySku: [], byLine: [], latestByLine: [], latestDate: null, totalRows: 0 });
+  const [forecastPlans, setForecastPlans] = useState({});
   const [rates, setRates] = useState([
     { role: "labor", hourly_rate: 20.1, markup_pct: 0.2 },
     { role: "fork", hourly_rate: 20.1, markup_pct: 0.2 },
@@ -561,6 +600,16 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     });
   }, [onPermalinkChange, windowPreset, rangeStart, rangeEnd]);
 
+  var forecastPlanMonths = useMemo(function() {
+    var wanted = {};
+    eachMonthKeysBetween(range.start, range.end).forEach(function(monthKey) { wanted[monthKey] = true; });
+    COMMAND_BOARD_PRESETS.forEach(function(def) {
+      var preset = presetRange(def.key);
+      eachMonthKeysBetween(preset.start, preset.end).forEach(function(monthKey) { wanted[monthKey] = true; });
+    });
+    return Object.keys(wanted).sort();
+  }, [range.start, range.end]);
+
   var setCustomStart = function(v) {
     if (!v) return;
     setWindowPreset("custom");
@@ -587,13 +636,17 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     setErr("");
     try {
       var fetchDays = range.fetchDays;
-      var [tr, ip, cfg, br] = await Promise.all([
+      var forecastPlanReq = forecastPlanMonths.length
+        ? fetch("/api/ops/forecast-plan?monthKeys=" + encodeURIComponent(forecastPlanMonths.join(",")), { credentials: "include" })
+        : Promise.resolve({ ok: true, json: async function() { return { plans: {} }; } });
+      var [tr, ip, cfg, br, fp] = await Promise.all([
         fetch("/api/cache/production-trends?days=" + fetchDays, { credentials: "include" }),
         fetch("/api/ops/shift-inputs?days=" + fetchDays, { credentials: "include" }),
         fetch("/api/ops/config", { credentials: "include" }),
         fetch("/api/ops/production-breakdown?days=" + fetchDays, { credentials: "include" }),
+        forecastPlanReq,
       ]);
-      var [trBody, ipBody, cfgBody, brBody] = await Promise.all([tr.json(), ip.json(), cfg.json(), br.json()]);
+      var [trBody, ipBody, cfgBody, brBody, fpBody] = await Promise.all([tr.json(), ip.json(), cfg.json(), br.json(), fp.json()]);
       if (!tr.ok) throw new Error(trBody.error || "Could not load production trends");
       if (!ip.ok) throw new Error(ipBody.error || "Could not load labor inputs");
       if (!cfg.ok) throw new Error(cfgBody.error || "Could not load rates/targets");
@@ -611,6 +664,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
         latestDate: brBody.latestDate || null,
         totalRows: safeNum(brBody.totalRows),
       });
+      setForecastPlans(fp && fp.ok && fpBody && typeof fpBody.plans === "object" ? fpBody.plans : {});
     } catch (e) {
       if (requestId !== loadRequestRef.current) return;
       setErr(e && e.message ? e.message : "Failed loading Operations data");
@@ -621,7 +675,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
 
   useEffect(function() {
     loadAll();
-  }, [windowPreset, rangeStart, rangeEnd]);
+  }, [windowPreset, rangeStart, rangeEnd, forecastPlanMonths.join(",")]);
 
   var normalizeSkuKey = function(v) {
     return String(v || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -865,6 +919,38 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     };
   }, [effectiveBreakdown, effectiveRange]);
 
+  var forecastDailyTargetForDate = function(dateIso) {
+    var day = String(dateIso || "").slice(0, 10);
+    if (!day || !isBusinessDay(day)) return null;
+    var monthKey = day.slice(0, 7);
+    var monthPlan = forecastPlans && forecastPlans[monthKey] ? forecastPlans[monthKey] : null;
+    var totalCases = safeNum(monthPlan && monthPlan.total_cases);
+    if (!(totalCases > 0)) return null;
+    var monthDays = businessDaysBetween(monthStart(day), monthEnd(day));
+    if (!(monthDays > 0)) return null;
+    return totalCases / monthDays;
+  };
+
+  var forecastPlanForRange = function(targetRange, fallbackDaily) {
+    var days = eachDayIsoBetween(targetRange && targetRange.start, targetRange && targetRange.end);
+    var total = 0;
+    var usedForecast = false;
+    days.forEach(function(day) {
+      if (!isBusinessDay(day)) return;
+      var forecastDaily = forecastDailyTargetForDate(day);
+      if (forecastDaily != null) {
+        total += forecastDaily;
+        usedForecast = true;
+      } else if (fallbackDaily != null) {
+        total += safeNum(fallbackDaily);
+      }
+    });
+    return {
+      units: Math.round(total),
+      source: usedForecast ? "forecast" : "historical"
+    };
+  };
+
   var selectedWindowLabel = useMemo(function() {
     if (windowPreset === "today") return "Today";
     if (windowPreset === "yesterday") return "Yesterday";
@@ -1063,7 +1149,8 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       var priorAvg = priorSlice.length
         ? Math.round(priorSlice.reduce(function(sum, d) { return sum + safeNum(d.units); }, 0) / priorSlice.length)
         : avgDailyUnits;
-      var planUnits = dayCount > 0 ? Math.round(priorAvg * dayCount) : 0;
+      var planInfo = forecastPlanForRange(summaryRange, priorAvg);
+      var planUnits = planInfo.units;
       var variance = windowActual - planUnits;
 
       var status = "On Track";
@@ -1090,6 +1177,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
         latestRows: latestRows,
         dayCount: dayCount,
         planUnits: planUnits,
+        planSource: planInfo.source,
         variance: variance,
         variancePct: pctDelta(windowActual, planUnits),
         status: status,
@@ -1107,7 +1195,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       presets: presetCards,
       selected: selectedSummary
     };
-  }, [effectiveTrends, effectiveBreakdown, commandBoardPreset]);
+  }, [effectiveTrends, effectiveBreakdown, commandBoardPreset, forecastPlans]);
 
   var shiftPlanVsActual = useMemo(function() {
     var rows = (filteredTrends.byShift || []).slice();
@@ -1131,7 +1219,10 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     var baselineDaily = priorDays.length
       ? Math.round(priorDays.reduce(function(sum, d) { return sum + safeNum(d.units); }, 0) / priorDays.length)
       : (metrics.avgDailyUnits || 0);
-    var max = dayRows.reduce(function(m, r) { return Math.max(m, r.total, baselineDaily); }, 0) || 1;
+    var max = dayRows.reduce(function(m, r) {
+      var dayPlan = forecastDailyTargetForDate(r.date);
+      return Math.max(m, r.total, dayPlan == null ? baselineDaily : dayPlan);
+    }, 0) || 1;
     return {
       rows: dayRows.map(function(r) {
         var total = Math.max(1, r.total);
@@ -1139,6 +1230,8 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
         var s1PctOfTotal = Math.round((r.s1 / total) * 100);
         var s2PctOfTotal = Math.round((r.s2 / total) * 100);
         var unPctOfTotal = Math.max(0, 100 - s1PctOfTotal - s2PctOfTotal);
+        var dayPlan = forecastDailyTargetForDate(r.date);
+        var effectivePlan = dayPlan == null ? baselineDaily : dayPlan;
         return {
           date: r.date,
           s1: r.s1,
@@ -1149,22 +1242,22 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
           s1Pct: Math.round((totalPct * s1PctOfTotal) / 100),
           s2Pct: Math.round((totalPct * s2PctOfTotal) / 100),
           unPct: Math.round((totalPct * unPctOfTotal) / 100),
-          plan: baselineDaily,
-          planPct: Math.round((baselineDaily / max) * 100),
+          plan: effectivePlan,
+          planPct: Math.round((effectivePlan / max) * 100),
           tooltip: [
             r.date || "--",
             "Shift 1: " + Math.round(r.s1).toLocaleString(),
             "Shift 2: " + Math.round(r.s2).toLocaleString(),
             "Unassigned: " + Math.round(r.un).toLocaleString(),
             "Total: " + Math.round(r.total).toLocaleString(),
-            "Baseline: " + baselineDaily.toLocaleString(),
-            "Variance: " + ((r.total - baselineDaily) >= 0 ? "+" : "") + (r.total - baselineDaily).toLocaleString()
+            (dayPlan == null ? "Baseline" : "Forecast Plan") + ": " + Math.round(effectivePlan).toLocaleString(),
+            "Variance: " + ((r.total - effectivePlan) >= 0 ? "+" : "") + Math.round(r.total - effectivePlan).toLocaleString()
           ].join("\n")
         };
       }),
       max: max
     };
-  }, [filteredTrends.byShift, effectiveTrends, range.start, metrics.avgDailyUnits]);
+  }, [filteredTrends.byShift, effectiveTrends, range.start, metrics.avgDailyUnits, forecastPlans]);
 
   var dailyPlanVsActual = useMemo(function() {
     var dayRows = (filteredTrends.byDay || []).slice().sort(function(a, b) { return String(a.date || "").localeCompare(String(b.date || "")); });
@@ -1200,10 +1293,11 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
 
     var rowData = dayRows.map(function(r) {
       var date = String(r.date || "");
+      var dayPlan = forecastDailyTargetForDate(date);
       var row = {
         date: date,
         total: safeNum(r.units),
-        plan: baselineDaily,
+        plan: dayPlan == null ? baselineDaily : dayPlan,
       };
       lineSeries.forEach(function(line) {
         row[line.key] = safeNum(byDateLine[date] && byDateLine[date][line.key]);
@@ -1212,7 +1306,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     });
 
     return { rows: rowData, lineSeries: lineSeries };
-  }, [filteredTrends.byDay, effectiveTrends, range.start, metrics.avgDailyUnits, filteredBreakdown.rowsLite]);
+  }, [filteredTrends.byDay, effectiveTrends, range.start, metrics.avgDailyUnits, filteredBreakdown.rowsLite, forecastPlans]);
 
   var linePerformance = useMemo(function() {
     var laborByLine = {};
@@ -1659,7 +1753,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
           </div>
           <div className="mb-3 grid grid-cols-2 gap-2 lg:grid-cols-3 2xl:grid-cols-6">
             {commandBoard.presets.map(function(card) {
-              var active = windowPreset === card.key;
+              var active = commandBoardPreset === card.key;
               var statusTone = card.status === "Off Track"
                 ? "bg-[rgb(var(--danger-soft))] text-[rgb(var(--danger))]"
                 : card.status === "At Risk"
@@ -1686,7 +1780,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                       </div>
                     </div>
                     <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-[rgb(var(--muted))]">
-                      <div>Plan</div>
+                      <div>{card.planSource === "forecast" ? "Forecast" : "Plan"}</div>
                       <div>Variance</div>
                       <div className="font-semibold text-[rgb(var(--foreground))] [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{card.planUnits.toLocaleString()}</div>
                       <div className={"font-semibold [font-variant-numeric:tabular-nums] " + (card.variance < 0 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")} style={{ fontFamily: mono }}>
@@ -1709,7 +1803,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
             </div>
             <div className="rounded-md border border-[rgb(var(--border))] px-3 py-1.5">
               <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{commandBoard.selected.planUnits.toLocaleString()}</div>
-              <div className="text-xs text-[rgb(var(--muted))]">Baseline Plan</div>
+              <div className="text-xs text-[rgb(var(--muted))]">{commandBoard.selected.planSource === "forecast" ? "Forecast Plan" : "Baseline Plan"}</div>
             </div>
             <div className="rounded-md border border-[rgb(var(--border))] px-3 py-1.5">
               <div className={"text-lg font-bold [font-variant-numeric:tabular-nums] " + (commandBoard.selected.variance < 0 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")} style={{ fontFamily: mono }}>
@@ -1861,7 +1955,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                 </span>
               );
             })}
-            <span className="inline-flex items-center gap-1"><span className="h-px w-3 border-t-2 border-dashed border-[rgb(var(--muted))]" />Baseline daily plan</span>
+            <span className="inline-flex items-center gap-1"><span className="h-px w-3 border-t-2 border-dashed border-[rgb(var(--muted))]" />Forecast daily plan</span>
           </div>
         </Card>
         <Card className="px-4 py-4">
@@ -1927,7 +2021,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
             <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-[rgb(var(--accent))]" />Shift 1</span>
             <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-[rgb(var(--accent))/0.7]" />Shift 2</span>
             <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-[rgb(var(--muted))/0.3]" />Unassigned</span>
-            <span className="inline-flex items-center gap-1"><span className="h-px w-3 border-t-2 border-dashed border-[rgb(var(--muted))]" />Baseline daily plan</span>
+            <span className="inline-flex items-center gap-1"><span className="h-px w-3 border-t-2 border-dashed border-[rgb(var(--muted))]" />Forecast daily plan</span>
           </div>
         </Card>
         <Card className="px-4 py-4">
