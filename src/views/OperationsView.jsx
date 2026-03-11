@@ -6,7 +6,7 @@ import { DatePicker } from "../components/ui/date-picker";
 import TableShell from "../components/ui/table-shell";
 import ProductionView from "./ProductionView";
 import { Minus, TrendingDown, TrendingUp } from "lucide-react";
-import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, XAxis, YAxis } from "recharts";
+import { Bar, CartesianGrid, ComposedChart, ResponsiveContainer, XAxis, YAxis } from "recharts";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "../components/ui/chart";
 import { detectPackType } from "../utils";
 
@@ -549,10 +549,8 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [trends, setTrends] = useState(null);
-  const [inputs, setInputs] = useState([]);
   const [breakdown, setBreakdown] = useState({ rowsLite: [], bySku: [], byLine: [], latestByLine: [], latestDate: null, totalRows: 0 });
   const [forecastPlans, setForecastPlans] = useState({});
-  const [targets, setTargets] = useState([]);
   const loadRequestRef = useRef(0);
   const [skuMixMode, setSkuMixMode] = useState("type");
   const [evoconRole, setEvoconRole] = useState("manager");
@@ -564,7 +562,8 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       if (end < start) {
         var tmp = start; start = end; end = tmp;
       }
-      return { start: start, end: end, fetchDays: Math.max(30, Math.min(180, daysInclusive(start, end) + 21)) };
+      var spanDays = daysInclusive(start, end);
+      return { start: start, end: end, fetchDays: Math.max(30, Math.min(180, (spanDays * 2) + 21)) };
     }
     return presetRange(windowPreset);
   }, [windowPreset, rangeStart, rangeEnd, initialRange.start, initialRange.end]);
@@ -617,22 +616,16 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       var forecastPlanReq = forecastPlanMonths.length
         ? fetch("/api/ops/forecast-plan?monthKeys=" + encodeURIComponent(forecastPlanMonths.join(",")), { credentials: "include" })
         : Promise.resolve({ ok: true, json: async function() { return { plans: {} }; } });
-      var [tr, ip, cfg, br, fp] = await Promise.all([
+      var [tr, br, fp] = await Promise.all([
         fetch("/api/cache/production-trends?days=" + fetchDays, { credentials: "include" }),
-        fetch("/api/ops/shift-inputs?days=" + fetchDays, { credentials: "include" }),
-        fetch("/api/ops/config", { credentials: "include" }),
         fetch("/api/ops/production-breakdown?days=" + fetchDays, { credentials: "include" }),
         forecastPlanReq,
       ]);
-      var [trBody, ipBody, cfgBody, brBody, fpBody] = await Promise.all([tr.json(), ip.json(), cfg.json(), br.json(), fp.json()]);
+      var [trBody, brBody, fpBody] = await Promise.all([tr.json(), br.json(), fp.json()]);
       if (!tr.ok) throw new Error(trBody.error || "Could not load production trends");
-      if (!ip.ok) throw new Error(ipBody.error || "Could not load labor inputs");
-      if (!cfg.ok) throw new Error(cfgBody.error || "Could not load targets");
       if (!br.ok) throw new Error(brBody.error || "Could not load production breakdown");
       if (requestId !== loadRequestRef.current) return;
       setTrends(trBody.trends || null);
-      setInputs(Array.isArray(ipBody.rows) ? ipBody.rows : []);
-      setTargets(Array.isArray(cfgBody.skuTargets) ? cfgBody.skuTargets : []);
       setBreakdown({
         rowsLite: Array.isArray(brBody.rowsLite) ? brBody.rowsLite : [],
         bySku: Array.isArray(brBody.bySku) ? brBody.bySku : [],
@@ -653,63 +646,6 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   useEffect(function() {
     loadAll();
   }, [windowPreset, rangeStart, rangeEnd, forecastPlanMonths.join(",")]);
-
-  var normalizeSkuKey = function(v) {
-    return String(v || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-  };
-
-  var targetBySku = useMemo(function() {
-    var map = {};
-    targets.forEach(function(t) {
-      var raw = String(t.item_code || "").trim();
-      if (!raw) return;
-      var rev = safeNum(t.revenue_per_case);
-      if (!(rev > 0)) return;
-      var norm = normalizeSkuKey(raw);
-      var payload = {
-        revenue_per_case: rev,
-        target_cases_per_hour: safeNum(t.target_cases_per_hour),
-        source: "ops_target"
-      };
-      if (!map[raw]) map[raw] = payload;
-      if (norm && !map[norm]) map[norm] = payload;
-    });
-    return map;
-  }, [targets]);
-
-  var itemMasterPriceBySku = useMemo(function() {
-    var rows = Array.isArray(itemMaster) ? itemMaster : [];
-    var map = {};
-    rows.forEach(function(r) {
-      var rawSku = pickFieldLooseLocal(r, ["Item Code", "Code", "item_code", "code"]);
-      var raw = String(rawSku || "").trim();
-      if (!raw) return;
-      var fgRaw = String(pickFieldLooseLocal(r, ["Is Finished Good", "is_finished_good"]) || "").trim().toLowerCase();
-      if (fgRaw && !(fgRaw === "true" || fgRaw === "1" || fgRaw === "yes" || fgRaw === "y")) return;
-      var cost = safeNum(pickFieldLooseLocal(r, [
-        "Cost Per Unit", "cost_per_unit", "Unit Cost", "unit_cost",
-        "Standard Cost", "standard_cost", "Cost Per Base Unit", "cost_per_base_unit"
-      ]));
-      if (!(cost > 0)) return;
-      var norm = normalizeSkuKey(raw);
-      if (!map[raw]) map[raw] = cost;
-      if (norm && !map[norm]) map[norm] = cost;
-    });
-    return map;
-  }, [itemMaster]);
-
-  var revenueTargetForSku = function(itemCode) {
-    var raw = String(itemCode || "").trim();
-    if (!raw) return null;
-    var norm = normalizeSkuKey(raw);
-    var manual = targetBySku[raw] || (norm ? targetBySku[norm] : null);
-    if (manual && safeNum(manual.revenue_per_case) > 0) return manual;
-    var imCost = itemMasterPriceBySku[raw] || (norm ? itemMasterPriceBySku[norm] : 0);
-    if (safeNum(imCost) > 0) {
-      return { revenue_per_case: safeNum(imCost), target_cases_per_hour: 0, source: "item_master_cost" };
-    }
-    return null;
-  };
 
   var localNulogySeries = useMemo(function() {
     var shiftRows = (productionSegments && Array.isArray(productionSegments.shiftRows)) ? productionSegments.shiftRows : [];
@@ -857,10 +793,6 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     return { byDay: byDay, byShift: byShift, fromDate: effectiveRange.start };
   }, [effectiveTrends, effectiveRange]);
 
-  var filteredInputs = useMemo(function() {
-    return (inputs || []).filter(function(r) { return inRange(String(r.date_et || ""), effectiveRange); });
-  }, [inputs, effectiveRange]);
-
   var filteredBreakdown = useMemo(function() {
     var rows = (effectiveBreakdown && Array.isArray(effectiveBreakdown.rowsLite)) ? effectiveBreakdown.rowsLite.filter(function(r) { return inRange(String(r.produced_date_et || ""), effectiveRange); }) : [];
     var bySku = {};
@@ -978,7 +910,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       forecastDeltaPct: forecastDeltaPct,
       byShift: byShift,
     };
-  }, [effectiveTrends, filteredTrends, filteredBreakdown, targetBySku, itemMasterPriceBySku, effectiveRange]);
+  }, [effectiveTrends, filteredTrends, filteredBreakdown, effectiveRange]);
 
   var commandBoard = useMemo(function() {
     var allDays = (effectiveTrends && Array.isArray(effectiveTrends.byDay)) ? effectiveTrends.byDay : [];
@@ -1174,55 +1106,77 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     return { rows: rowData, lineSeries: lineSeries };
   }, [filteredTrends.byDay, effectiveTrends, range.start, metrics.avgDailyUnits, filteredBreakdown.rowsLite, forecastPlans]);
 
-  var linePerformance = useMemo(function() {
-    var laborByLine = {};
-    filteredInputs.forEach(function(r) {
-      var line = String(r.line_name || "Unknown");
-      if (!laborByLine[line]) laborByLine[line] = { laborHours: 0, shifts: 0 };
-      var hrs = r.hours_run_override == null || r.hours_run_override === "" ? 8 : safeNum(r.hours_run_override);
-      var heads = safeNum(r.labor_count) + safeNum(r.fork_count) + safeNum(r.qa_count) + safeNum(r.maint_count) + safeNum(r.recycling_count);
-      laborByLine[line].laborHours += heads * hrs;
-      laborByLine[line].shifts += 1;
+  var lineScoreboard = useMemo(function() {
+    var compareInfo = comparableRangeForPreset(windowPreset, effectiveRange);
+    var compareRange = compareInfo.range;
+    var rowsLite = (effectiveBreakdown && Array.isArray(effectiveBreakdown.rowsLite)) ? effectiveBreakdown.rowsLite : [];
+    var currentByLine = {};
+    var priorByLine = {};
+    var currentTotal = 0;
+    var priorTotal = 0;
+
+    rowsLite.forEach(function(r) {
+      var date = String(r.produced_date_et || "");
+      if (!date) return;
+      var line = String(r.line || "Unknown");
+      var units = safeNum(r.units_produced);
+      if (inRange(date, effectiveRange)) {
+        currentByLine[line] = (currentByLine[line] || 0) + units;
+        currentTotal += units;
+      }
+      if (compareRange && inRange(date, compareRange)) {
+        priorByLine[line] = (priorByLine[line] || 0) + units;
+        priorTotal += units;
+      }
     });
-    var rows = (filteredBreakdown.byLine || []).map(function(l) {
-      var line = String(l.line || "Unknown");
-      var labor = laborByLine[line] ? laborByLine[line].laborHours : 0;
-      var shifts = laborByLine[line] ? laborByLine[line].shifts : 0;
-      var units = safeNum(l.units);
-      var cplh = labor > 0 ? units / labor : 0;
-      var avgPerShift = shifts > 0 ? units / shifts : 0;
-      var latest = (filteredBreakdown.latestByLine || []).find(function(x) { return String(x.line || "") === line; });
-      var latestUnits = latest ? safeNum(latest.units) : 0;
-      var attainment = avgPerShift > 0 ? Math.round((latestUnits / avgPerShift) * 100) : 0;
+
+    var lineKeys = {};
+    Object.keys(currentByLine).forEach(function(line) { lineKeys[line] = true; });
+    Object.keys(priorByLine).forEach(function(line) { lineKeys[line] = true; });
+
+    var rows = Object.keys(lineKeys).map(function(line) {
+      var units = safeNum(currentByLine[line]);
+      var priorUnits = safeNum(priorByLine[line]);
+      var deltaUnits = units - priorUnits;
+      var deltaPct = priorUnits > 0 ? Math.round((deltaUnits / priorUnits) * 100) : (units > 0 ? 100 : 0);
+      var sharePct = currentTotal > 0 ? Math.round((units / currentTotal) * 100) : 0;
+      var trend = deltaUnits > 0 ? "up" : deltaUnits < 0 ? "down" : "flat";
+      var status = "Stable";
+
+      if (units === 0 && priorUnits > 0) status = "Idle";
+      else if (sharePct >= 35) status = "Leading";
+      else if (deltaUnits >= 1000 || deltaPct >= 12) status = "Improving";
+      else if (deltaUnits <= -1000 || deltaPct <= -12) status = "Softening";
+
       return {
         line: line,
         units: units,
-        laborHours: labor,
-        cplh: cplh,
-        avgPerShift: avgPerShift,
-        latestUnits: latestUnits,
-        attainment: attainment
+        priorUnits: priorUnits,
+        sharePct: sharePct,
+        deltaUnits: deltaUnits,
+        deltaPct: deltaPct,
+        trend: trend,
+        status: status
       };
-    }).sort(function(a, b) { return b.latestUnits - a.latestUnits; });
-    return rows;
-  }, [filteredBreakdown.byLine, filteredBreakdown.latestByLine, filteredInputs]);
+    }).sort(function(a, b) {
+      if (b.units !== a.units) return b.units - a.units;
+      return b.priorUnits - a.priorUnits;
+    });
 
-  var lineYieldChartData = useMemo(function() {
-    return (linePerformance || []).map(function(r) {
-      return {
-        line: String(r.line || "Unknown"),
-        units: Math.round(safeNum(r.units)),
-        latest: Math.round(safeNum(r.latestUnits))
-      };
-    }).slice(0, 10);
-  }, [linePerformance]);
+    var leader = rows[0] || null;
+    var moversUp = rows.filter(function(r) { return r.deltaUnits > 0; }).sort(function(a, b) { return b.deltaUnits - a.deltaUnits; });
+    var moversDown = rows.filter(function(r) { return r.deltaUnits < 0; }).sort(function(a, b) { return a.deltaUnits - b.deltaUnits; });
 
-  const lineYieldChartConfig = useMemo(function() {
     return {
-      units: { label: "Window yield", color: "rgb(var(--accent))" },
-      latest: { label: "Latest day", color: "color-mix(in oklab, rgb(var(--success)) 85%, white)" }
+      rows: rows.slice(0, 8),
+      totalUnits: currentTotal,
+      priorTotal: priorTotal,
+      compareLabel: compareInfo.label,
+      leader: leader,
+      biggestUp: moversUp[0] || null,
+      biggestDown: moversDown[0] || null
     };
-  }, []);
+  }, [effectiveBreakdown, effectiveRange, windowPreset]);
 
   const evoconLossChartConfig = useMemo(function() {
     return {
@@ -1938,69 +1892,97 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
 
       <div className="grid gap-3 lg:grid-cols-12">
         <Card className="lg:col-span-12 px-4 py-4">
-          <div className="mb-2 text-sm font-semibold">Line Performance (Latest Day vs Baseline)</div>
-          {lineYieldChartData.length ? (
-            <ChartContainer config={lineYieldChartConfig} className="mb-3 h-48">
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={lineYieldChartData} margin={{ top: 8, right: 8, left: 4, bottom: 8 }}>
-                  <CartesianGrid vertical={false} stroke="rgb(var(--border))" strokeOpacity={0.4} />
-                  <XAxis
-                    dataKey="line"
-                    tickLine={false}
-                    axisLine={false}
-                    minTickGap={12}
-                    tick={{ fill: "rgb(var(--muted))", fontSize: 11 }}
-                  />
-                  <YAxis
-                    width={62}
-                    tickLine={false}
-                    axisLine={false}
-                    tickFormatter={function(v) { return Math.round(safeNum(v)).toLocaleString(); }}
-                    tick={{ fill: "rgb(var(--muted))", fontSize: 11 }}
-                  />
-                  <ChartTooltip
-                    cursor={{ fill: "rgb(var(--surface))" }}
-                    content={
-                      <ChartTooltipContent
-                        labelFormatter={function(value) { return "Line " + value; }}
-                        formatter={function(value) { return Math.round(safeNum(value)); }}
-                      />
-                    }
-                  />
-                  <Bar dataKey="units" fill="var(--color-units)" radius={[4, 4, 0, 0]} maxBarSize={28} />
-                  <Line type="monotone" dataKey="latest" stroke="var(--color-latest)" strokeWidth={2} dot={false} />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </ChartContainer>
-          ) : null}
+          <div className="mb-1 text-sm font-semibold">Line Scoreboard</div>
+          <div className="mb-3 text-xs text-[rgb(var(--muted))]">
+            Output by line for the selected window, {lineScoreboard.compareLabel}.
+          </div>
+          <div className="mb-3 grid gap-2 md:grid-cols-3">
+            <div className="rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-2">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Leader</div>
+              <div className="mt-1 text-sm font-semibold">
+                {lineScoreboard.leader ? lineScoreboard.leader.line : "No production"}
+              </div>
+              <div className="text-xs text-[rgb(var(--muted))]">
+                {lineScoreboard.leader
+                  ? (Math.round(lineScoreboard.leader.units).toLocaleString() + " cases · " + lineScoreboard.leader.sharePct + "% of output")
+                  : "No line output in this window."}
+              </div>
+            </div>
+            <div className="rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-2">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Biggest Lift</div>
+              <div className="mt-1 flex items-center gap-1.5 text-sm font-semibold">
+                {lineScoreboard.biggestUp ? <TrendingUp className="h-3.5 w-3.5 text-[rgb(var(--success))]" /> : null}
+                <span>{lineScoreboard.biggestUp ? lineScoreboard.biggestUp.line : "No improving line"}</span>
+              </div>
+              <div className="text-xs text-[rgb(var(--muted))]">
+                {lineScoreboard.biggestUp
+                  ? ("+" + Math.round(lineScoreboard.biggestUp.deltaUnits).toLocaleString() + " cases")
+                  : ("No positive movement " + lineScoreboard.compareLabel + ".")}
+              </div>
+            </div>
+            <div className="rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-2">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Watch</div>
+              <div className="mt-1 flex items-center gap-1.5 text-sm font-semibold">
+                {lineScoreboard.biggestDown ? <TrendingDown className="h-3.5 w-3.5 text-[rgb(var(--danger))]" /> : null}
+                <span>{lineScoreboard.biggestDown ? lineScoreboard.biggestDown.line : "No lagging line"}</span>
+              </div>
+              <div className="text-xs text-[rgb(var(--muted))]">
+                {lineScoreboard.biggestDown
+                  ? (Math.round(lineScoreboard.biggestDown.deltaUnits).toLocaleString() + " cases")
+                  : ("No negative movement " + lineScoreboard.compareLabel + ".")}
+              </div>
+            </div>
+          </div>
           <TableShell>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ background: C.raised }}>
                   <th className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Line</th>
-                  <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Today</th>
-                  <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Attain</th>
-                  <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Cases/LH</th>
+                  <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Cases</th>
+                  <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Share</th>
+                  <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Delta</th>
+                  <th className="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Status</th>
                 </tr>
               </thead>
               <tbody>
-                {linePerformance.slice(0, 8).map(function(r) {
+                {lineScoreboard.rows.map(function(r) {
+                  var TrendIcon = r.trend === "up" ? TrendingUp : r.trend === "down" ? TrendingDown : Minus;
+                  var deltaTone = r.trend === "up"
+                    ? "text-[rgb(var(--success))]"
+                    : r.trend === "down"
+                      ? "text-[rgb(var(--danger))]"
+                      : "text-[rgb(var(--muted))]";
+                  var statusTone = r.status === "Leading"
+                    ? "border-[rgb(var(--accent))] bg-[color-mix(in_oklab,rgb(var(--accent))_8%,white)] text-[rgb(var(--accent))]"
+                    : r.status === "Improving"
+                      ? "border-[rgb(var(--success-line))] bg-[rgb(var(--success-soft))] text-[rgb(var(--success))]"
+                      : r.status === "Softening" || r.status === "Idle"
+                        ? "border-[rgb(var(--danger-line))] bg-[rgb(var(--danger-soft))] text-[rgb(var(--danger))]"
+                        : "border-[rgb(var(--border))] bg-[rgb(var(--surface))] text-[rgb(var(--muted))]";
                   return (
                     <tr key={r.line} style={{ borderBottom: "1px solid " + C.border }}>
                       <td className="px-2 py-2 text-sm">{r.line}</td>
-                      <td className="px-2 py-2 text-right text-sm [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{Math.round(r.latestUnits).toLocaleString()}</td>
-                      <td className={"px-2 py-2 text-right text-sm [font-variant-numeric:tabular-nums] " + (r.attainment < 90 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")} style={{ fontFamily: mono }}>
-                        {r.attainment ? r.attainment + "%" : "--"}
+                      <td className="px-2 py-2 text-right text-sm [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{Math.round(r.units).toLocaleString()}</td>
+                      <td className="px-2 py-2 text-right text-sm [font-variant-numeric:tabular-nums] text-[rgb(var(--muted))]" style={{ fontFamily: mono }}>{r.sharePct}%</td>
+                      <td className={"px-2 py-2 text-right text-sm [font-variant-numeric:tabular-nums] " + deltaTone} style={{ fontFamily: mono }}>
+                        <span className="inline-flex items-center justify-end gap-1.5">
+                          <TrendIcon className="h-3.5 w-3.5 shrink-0" />
+                          <span>
+                            {r.deltaUnits > 0 ? "+" : ""}{Math.round(r.deltaUnits).toLocaleString()}
+                            {r.priorUnits > 0 ? " (" + (r.deltaPct > 0 ? "+" : "") + r.deltaPct + "%)" : ""}
+                          </span>
+                        </span>
                       </td>
-                      <td className="px-2 py-2 text-right text-sm [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{r.cplh ? r.cplh.toFixed(1) : "--"}</td>
+                      <td className="px-2 py-2 text-right">
+                        <span className={"inline-flex rounded-full border px-2 py-1 text-[11px] font-medium " + statusTone}>{r.status}</span>
+                      </td>
                     </tr>
                   );
                 })}
-                {!linePerformance.length && <tr><td colSpan={4} className="px-2 py-6 text-center text-sm text-[rgb(var(--muted))]">No line performance data yet.</td></tr>}
+                {!lineScoreboard.rows.length && <tr><td colSpan={5} className="px-2 py-6 text-center text-sm text-[rgb(var(--muted))]">No line output data in this window.</td></tr>}
               </tbody>
             </table>
           </TableShell>
-          <div className="mt-2 text-xs text-[rgb(var(--muted))]">Attainment compares latest day output to each line's average output per entered shift.</div>
         </Card>
       </div>
 
