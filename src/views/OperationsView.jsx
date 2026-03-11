@@ -1608,7 +1608,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
 
       <div className="grid gap-2 lg:grid-cols-12">
         <Card className="lg:col-span-8 px-3 py-3">
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div className="mb-2">
             <div>
               <div className="text-sm font-semibold">Shift Command Board</div>
               <div className="text-xs text-[rgb(var(--muted))]">
@@ -1619,18 +1619,10 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                     : "No production day available yet"}
               </div>
             </div>
-            <span className={"inline-flex rounded-full px-2.5 py-1 text-xs font-semibold " + (commandBoard.selected.status === "Off Track" ? "bg-[rgb(var(--danger-soft))] text-[rgb(var(--danger))]" : commandBoard.selected.status === "At Risk" ? "bg-[rgb(var(--accent-soft))] text-[rgb(var(--accent))]" : "bg-[rgb(var(--success-soft))] text-[rgb(var(--success))]")}>
-              {commandBoard.selected.status}
-            </span>
           </div>
           <div className="mb-3 grid grid-cols-2 gap-2 lg:grid-cols-3 2xl:grid-cols-6">
             {commandBoard.presets.map(function(card) {
               var active = commandBoardPreset === card.key;
-              var statusTone = card.status === "Off Track"
-                ? "bg-[rgb(var(--danger-soft))] text-[rgb(var(--danger))]"
-                : card.status === "At Risk"
-                  ? "bg-[rgb(var(--accent-soft))] text-[rgb(var(--accent))]"
-                  : "bg-[rgb(var(--success-soft))] text-[rgb(var(--success))]";
               return (
                 <button
                   key={card.key}
@@ -1641,28 +1633,9 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                     : "border-[rgb(var(--border))] bg-[rgb(var(--surface))] hover:border-[rgb(var(--accent))] hover:bg-white")}
                 >
                   <div className={"h-1 w-full " + (active ? "bg-[rgb(var(--accent))]" : "bg-[rgb(var(--border))] group-hover:bg-[rgb(var(--accent))]")} />
-                  <div className="px-3 py-2.5">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[rgb(var(--muted))]">{card.label}</div>
-                        <div className="mt-2 text-xl font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{card.latestUnits.toLocaleString()}</div>
-                      </div>
-                      <div className={"rounded-full px-2 py-0.5 text-[10px] font-semibold " + statusTone}>
-                        {active ? "Selected" : card.status}
-                      </div>
-                    </div>
-                    <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-[rgb(var(--muted))]">
-                      <div>{card.planSource === "forecast" ? "Forecast" : "Plan"}</div>
-                      <div>Variance</div>
-                      <div className="font-semibold text-[rgb(var(--foreground))] [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{card.planUnits.toLocaleString()}</div>
-                      <div className={"font-semibold [font-variant-numeric:tabular-nums] " + (card.variance < 0 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--success))]")} style={{ fontFamily: mono }}>
-                        {card.variance >= 0 ? "+" : ""}{card.variancePct}%
-                      </div>
-                    </div>
-                    <div className="mt-3 flex items-center justify-between text-[11px] text-[rgb(var(--muted))]">
-                      <span>{card.dayCount} day{card.dayCount === 1 ? "" : "s"}</span>
-                      <span>{card.topLine ? card.topLine.line : "No line"}</span>
-                    </div>
+                  <div className="px-3 py-3">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[rgb(var(--muted))]">{card.label}</div>
+                    <div className="mt-2 text-2xl font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{card.latestUnits.toLocaleString()}</div>
                   </div>
                 </button>
               );
