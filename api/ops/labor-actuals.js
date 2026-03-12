@@ -212,6 +212,8 @@ export default async function handler(req, res) {
     var casesByLine = {};
     var casesByWo = {};
     var casesByJob = {};
+    var casesByJobDateLineItem = {};
+    var casesByJobDateLine = {};
     var casesByWoDateLine = {};
     var casesByItemDateShiftLine = {};
     productionRows.forEach(function(r) {
@@ -231,6 +233,11 @@ export default async function handler(req, res) {
       if (job) {
         var jobKey = [job, date, shift, wo, line, item].join("|");
         casesByJob[jobKey] = (casesByJob[jobKey] || 0) + units;
+        casesByJobDateLine[job + "|" + date + "|" + line] = (casesByJobDateLine[job + "|" + date + "|" + line] || 0) + units;
+        if (item) {
+          var jobLineItemKey = [job, date, line, item].join("|");
+          casesByJobDateLineItem[jobLineItemKey] = (casesByJobDateLineItem[jobLineItemKey] || 0) + units;
+        }
       }
     });
 
@@ -309,6 +316,14 @@ export default async function handler(req, res) {
       if (jobId) {
         resolutionKey = [jobId, date, shift, wo, line, item].join("|");
         cases = toNum(casesByJob[resolutionKey]);
+      }
+      if (!(cases > 0) && jobId) {
+        resolutionKey = [jobId, date, line, item].join("|");
+        cases = toNum(casesByJobDateLineItem[resolutionKey]);
+      }
+      if (!(cases > 0) && jobId) {
+        resolutionKey = [jobId, date, line].join("|");
+        cases = toNum(casesByJobDateLine[resolutionKey]);
       }
       if (!(cases > 0) && wo) {
         resolutionKey = wo + "|" + date + "|" + line;

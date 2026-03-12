@@ -30,6 +30,16 @@ function formatNulogyDate(date) {
   return `${y}-${m}-${day}`;
 }
 
+function parseMissingColumns(errorText) {
+  var text = String(errorText || "");
+  var m = text.match(/The following columns do not exist:\s*([^.\]]+)/i);
+  if (!m || !m[1]) return [];
+  return m[1]
+    .split(",")
+    .map(function(s) { return s.replace(/[\[\]"]/g, "").trim(); })
+    .filter(Boolean);
+}
+
 function buildProductionFilters() {
   var shiftHours = Number(process.env.NULOGY_SHIFT_HOURS || 8);
   var shiftsPerDay = Number(process.env.NULOGY_SHIFTS_PER_DAY || 2);
@@ -242,6 +252,55 @@ export default async function handler(req, res) {
           status: response.status,
           nulogyError: errorText
         });
+
+        if (reportType === "labor") {
+          var missing = parseMissingColumns(errorText);
+          if (missing.length) {
+            var missingLookup = {};
+            missing.forEach(function(col) { missingLookup[String(col || "").trim()] = true; });
+            var prunedColumns = columns.filter(function(col) {
+              return !missingLookup[String(col || "").trim()];
+            });
+            if (prunedColumns.length > 0 && prunedColumns.length < columns.length) {
+              const prunedBody = {
+                report: config.report,
+                columns: prunedColumns,
+                locale: "en_US"
+              };
+              if (config.filters) {
+                prunedBody.filters = typeof config.filters === "function" ? config.filters() : config.filters;
+              }
+              if (siteUuid) prunedBody.site_uuid = siteUuid;
+
+              const prunedRes = await fetch(`${NULOGY_URL}/api/reports/report_runs`, {
+                method: "POST",
+                headers: {
+                  "Authorization": `Basic ${auth}`,
+                  "Content-Type": "application/json"
+                },
+                body: JSON.stringify(prunedBody)
+              });
+
+              if (prunedRes.ok || prunedRes.status === 201) {
+                const statusUrl = prunedRes.headers.get("location") || prunedRes.headers.get("Location");
+                const prunedResponseBody = await prunedRes.json().catch(() => ({}));
+                const taskId = prunedResponseBody.task_id;
+                const finalStatusUrl = statusUrl || prunedResponseBody.status_url || `${NULOGY_URL}/api/reports/report_runs/${taskId}`;
+
+                return res.status(201).json({
+                  taskId,
+                  statusUrl: finalStatusUrl,
+                  reportType,
+                  nulogyReport: config.report,
+                  columnsUsed: prunedColumns,
+                  attempt: attempt + 1,
+                  note: "auto-pruned unsupported labor columns",
+                  totalColumns: prunedColumns.length
+                });
+              }
+            }
+          }
+        }
 
         // If error is about filters, retry without them
         if (errorText.includes("filter") && config.filters) {

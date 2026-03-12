@@ -13,6 +13,12 @@ function normKey(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+function mergeLaborMetric(target, row) {
+  target.payable_hours += safeNum(row && row.payable_hours);
+  target.productive_hours += safeNum(row && row.productive_hours);
+  target.labor_cost += safeNum(row && row.labor_cost);
+}
+
 export default function ProductionView({ productionSegments, laborActuals }) {
   const { C, mono } = useTheme();
   const { thS, tdN, tdM } = useStyles();
@@ -56,6 +62,8 @@ export default function ProductionView({ productionSegments, laborActuals }) {
   var laborByJobKey = useMemo(function() {
     var exact = {};
     var slim = {};
+    var byLineItem = {};
+    var byLine = {};
     laborJobRows.forEach(function(r) {
       var exactKey = [
         normKey(r && r.job_id),
@@ -70,10 +78,29 @@ export default function ProductionView({ productionSegments, laborActuals }) {
         normKey(r && r.date_et),
         normKey(r && r.shift_label)
       ].join("|");
+      var lineItemKey = [
+        normKey(r && r.job_id),
+        normKey(r && r.date_et),
+        normKey(r && r.line_name),
+        normKey(r && r.item_code)
+      ].join("|");
+      var lineKey = [
+        normKey(r && r.job_id),
+        normKey(r && r.date_et),
+        normKey(r && r.line_name)
+      ].join("|");
       if (exactKey && !exact[exactKey]) exact[exactKey] = r;
       if (slimKey && !slim[slimKey]) slim[slimKey] = r;
+      if (lineItemKey) {
+        if (!byLineItem[lineItemKey]) byLineItem[lineItemKey] = { payable_hours: 0, productive_hours: 0, labor_cost: 0 };
+        mergeLaborMetric(byLineItem[lineItemKey], r);
+      }
+      if (lineKey) {
+        if (!byLine[lineKey]) byLine[lineKey] = { payable_hours: 0, productive_hours: 0, labor_cost: 0 };
+        mergeLaborMetric(byLine[lineKey], r);
+      }
     });
-    return { exact: exact, slim: slim };
+    return { exact: exact, slim: slim, byLineItem: byLineItem, byLine: byLine };
   }, [laborJobRows]);
 
   var jobsWithLabor = useMemo(function() {
@@ -91,7 +118,23 @@ export default function ProductionView({ productionSegments, laborActuals }) {
         normKey(r.date),
         normKey(r.shift)
       ].join("|");
-      var labor = laborByJobKey.exact[exactKey] || laborByJobKey.slim[slimKey] || null;
+      var lineItemKey = [
+        normKey(r.jobId),
+        normKey(r.date),
+        normKey(r.line),
+        normKey(r.itemCode)
+      ].join("|");
+      var lineKey = [
+        normKey(r.jobId),
+        normKey(r.date),
+        normKey(r.line)
+      ].join("|");
+      var labor =
+        laborByJobKey.exact[exactKey] ||
+        laborByJobKey.slim[slimKey] ||
+        laborByJobKey.byLineItem[lineItemKey] ||
+        laborByJobKey.byLine[lineKey] ||
+        null;
       var payableHours = safeNum(labor && labor.payable_hours);
       var productiveHours = safeNum(labor && labor.productive_hours);
       var laborCost = safeNum(labor && labor.labor_cost);

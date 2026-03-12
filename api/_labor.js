@@ -1,5 +1,21 @@
 import crypto from "crypto";
 
+var ET_TIME_ZONE = "America/New_York";
+var MONTH_INDEX = {
+  jan: 0,
+  feb: 1,
+  mar: 2,
+  apr: 3,
+  may: 4,
+  jun: 5,
+  jul: 6,
+  aug: 7,
+  sep: 8,
+  oct: 9,
+  nov: 10,
+  dec: 11
+};
+
 export function toNum(value) {
   if (typeof value === "number") return Number.isFinite(value) ? value : 0;
   if (value == null || value === "") return 0;
@@ -9,6 +25,84 @@ export function toNum(value) {
 
 export function normalizeKey(value) {
   return String(value || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+
+function timeZoneParts(date, timeZone) {
+  if (!(date instanceof Date) || isNaN(date)) return null;
+  var out = {};
+  new Intl.DateTimeFormat("en-US", {
+    timeZone: timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  }).formatToParts(date).forEach(function(p) {
+    if (p.type !== "literal") out[p.type] = p.value;
+  });
+  if (!out.year || !out.month || !out.day) return null;
+  return {
+    year: parseInt(out.year, 10),
+    month: parseInt(out.month, 10),
+    day: parseInt(out.day, 10),
+    hour: parseInt(out.hour || "0", 10),
+    minute: parseInt(out.minute || "0", 10),
+    second: parseInt(out.second || "0", 10)
+  };
+}
+
+function timeZoneOffsetMillis(date, timeZone) {
+  var parts = timeZoneParts(date, timeZone);
+  if (!parts) return 0;
+  var asUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+  return asUtc - date.getTime();
+}
+
+function easternWallClockToDate(year, monthIndex, day, hour24, minute, second) {
+  var utcGuess = Date.UTC(year, monthIndex, day, hour24, minute || 0, second || 0);
+  var offset = timeZoneOffsetMillis(new Date(utcGuess), ET_TIME_ZONE);
+  var actual = utcGuess - offset;
+  var resolvedOffset = timeZoneOffsetMillis(new Date(actual), ET_TIME_ZONE);
+  if (resolvedOffset !== offset) actual = utcGuess - resolvedOffset;
+  return new Date(actual);
+}
+
+function parseNulogyWallClock(value) {
+  var raw = String(value || "").trim();
+  if (!raw) return null;
+  var m = raw.match(/^(\d{4})-([A-Za-z]{3})-(\d{1,2})[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AP]M)$/i);
+  if (!m) return null;
+  var year = parseInt(m[1], 10);
+  var monthIndex = MONTH_INDEX[String(m[2] || "").toLowerCase()];
+  var day = parseInt(m[3], 10);
+  var hour = parseInt(m[4], 10);
+  var minute = parseInt(m[5], 10);
+  var second = parseInt(m[6] || "0", 10);
+  var meridiem = String(m[7] || "").toUpperCase();
+  if (!Number.isFinite(year) || monthIndex == null || !Number.isFinite(day)) return null;
+  if (meridiem === "PM" && hour < 12) hour += 12;
+  if (meridiem === "AM" && hour === 12) hour = 0;
+  var parsed = easternWallClockToDate(year, monthIndex, day, hour, minute, second);
+  return isNaN(parsed) ? null : parsed;
+}
+
+function parseDateLoose(value) {
+  if (!value) return null;
+  if (value instanceof Date) return isNaN(value) ? null : value;
+  if (typeof value === "number") {
+    var fromNum = new Date(value);
+    return isNaN(fromNum) ? null : fromNum;
+  }
+  var raw = String(value).trim();
+  if (!raw) return null;
+
+  var wallClock = parseNulogyWallClock(raw);
+  if (wallClock) return wallClock;
+
+  var parsed = new Date(raw);
+  return isNaN(parsed) ? null : parsed;
 }
 
 export function stableRowHash(row) {
@@ -40,17 +134,17 @@ export function pickFieldLoose(row, keys) {
 
 export function toIso(value) {
   if (!value) return null;
-  var d = value instanceof Date ? value : new Date(value);
-  if (isNaN(d)) return null;
+  var d = parseDateLoose(value);
+  if (!d || isNaN(d)) return null;
   return d.toISOString();
 }
 
 export function toEasternParts(value) {
   if (!value) return null;
-  var d = value instanceof Date ? value : new Date(value);
-  if (isNaN(d)) return null;
+  var d = parseDateLoose(value);
+  if (!d || isNaN(d)) return null;
   var dtf = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
+    timeZone: ET_TIME_ZONE,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
