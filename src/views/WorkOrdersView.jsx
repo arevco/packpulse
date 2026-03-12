@@ -43,6 +43,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
   const [filterPackType, setFilterPackType] = useState(String(initial.packType || "all"));
   const [filterShared, setFilterShared] = useState(!!initial.shared);
   const [filterRunNext, setFilterRunNext] = useState(!!initial.runNext);
+  const [filterBatchable, setFilterBatchable] = useState(!!initial.batchable);
   const [runNextLimit, setRunNextLimit] = useState(String(initial.runNextLimit || "12"));
   const [sortField, setSortField] = useState(String(initial.sortField || "readiness"));
   const [sortDir, setSortDir] = useState(String(initial.sortDir || "desc"));
@@ -124,6 +125,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     setFilterPackType("all");
     setFilterShared(false);
     setFilterRunNext(false);
+    setFilterBatchable(false);
     setSearchTerm("");
   }, [prefilterCustomer, prefilterNonce]);
 
@@ -138,11 +140,12 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       packType: filterPackType,
       shared: !!filterShared,
       runNext: !!filterRunNext,
+      batchable: !!filterBatchable,
       runNextLimit: runNextLimit,
       sortField: sortField,
       sortDir: sortDir
     });
-  }, [onPermalinkChange, searchTerm, filterStatus, filterWoStatus, filterCustomer, filterDueMonth, filterPackType, filterShared, filterRunNext, runNextLimit, sortField, sortDir]);
+  }, [onPermalinkChange, searchTerm, filterStatus, filterWoStatus, filterCustomer, filterDueMonth, filterPackType, filterShared, filterRunNext, filterBatchable, runNextLimit, sortField, sortDir]);
 
   var handleSort = f => { if (sortField === f) setSortDir(d => d==="asc"?"desc":"asc"); else { setSortField(f); setSortDir("desc"); } };
   var woCommitKey = function(wo) { return [wo.woNum || "", wo.productSkuRaw || "", wo.dueDate || ""].join("|"); };
@@ -162,6 +165,17 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     var y = d.getFullYear();
     var m = String(d.getMonth() + 1).padStart(2, "0");
     return y + "-" + m;
+  };
+  var batchOpportunityKey = function(wo) {
+    if (!wo) return "";
+    var rawSku = String(wo.productSkuRaw || wo.productSku || "").trim();
+    if (!rawSku) return "";
+    return normalizeSkuSearchValue(rawSku) || normalizeSearchValue(rawSku);
+  };
+  var isBatchOpportunityEligible = function(wo) {
+    if (!wo) return false;
+    if (statusLooksClosed(wo.status)) return false;
+    return Number(wo.unitsRemaining || 0) > 0 && !!batchOpportunityKey(wo);
   };
 
   var commitmentMap = useMemo(() => {
@@ -380,6 +394,69 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     });
   };
 
+  var batchScopeResults = useMemo(function() {
+    if (!analysis) return [];
+    var r = analysis.results.slice();
+    if (filterStatus !== "all") r = r.filter(function(w) { return w.runStatus === filterStatus; });
+    if (filterCustomer !== "all") r = r.filter(function(w) { return w.customer === filterCustomer; });
+    if (filterDueMonth !== "all") r = r.filter(function(w) { return dueMonthKey(w.dueDate) === filterDueMonth; });
+    if (filterShared) r = r.filter(function(w) { return hasSharedComponent(w); });
+    if (filterRunNext) r = r.filter(function(w) { return !!runNextWoSet[String(w.woNum || "")]; });
+    if (filterWoStatus !== "all") r = r.filter(function(w) { return w.status === filterWoStatus; });
+    if (filterPackType !== "all") r = r.filter(function(w) { return detectPackType(w.productDesc || w.productSkuRaw || "", w.productSkuRaw || w.productSku || "") === filterPackType; });
+    return r;
+  }, [analysis, filterStatus, filterCustomer, filterDueMonth, filterShared, filterRunNext, filterWoStatus, filterPackType, sharedComponentUsage, runNextWoSet]);
+
+  var batchOpportunityGroups = useMemo(function() {
+    var grouped = {};
+    batchScopeResults.forEach(function(wo) {
+      if (!isBatchOpportunityEligible(wo)) return;
+      var key = batchOpportunityKey(wo);
+      if (!key) return;
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(wo);
+    });
+    return Object.keys(grouped).map(function(key) {
+      var rows = grouped[key].slice().sort(function(a, b) {
+        var dt = parseDueDateTs(a.dueDate) - parseDueDateTs(b.dueDate);
+        if (dt !== 0) return dt;
+        return String(a.woNum || "").localeCompare(String(b.woNum || ""), undefined, { numeric:true, sensitivity:"base" });
+      });
+      return {
+        key: key,
+        itemLabel: rows[0] ? (rows[0].productSkuRaw || rows[0].productSku || "--") : "--",
+        batchCount: rows.length,
+        totalRemainingUnits: rows.reduce(function(sum, row) { return sum + Number(row.unitsRemaining || 0); }, 0),
+        dueStart: rows[0] ? rows[0].dueDate : "",
+        dueEnd: rows[rows.length - 1] ? rows[rows.length - 1].dueDate : "",
+        woNums: rows.map(function(row) { return String(row.woNum || "").trim(); }).filter(Boolean),
+        rows: rows
+      };
+    }).filter(function(group) {
+      return group.batchCount > 1;
+    }).sort(function(a, b) {
+      if (b.batchCount !== a.batchCount) return b.batchCount - a.batchCount;
+      return b.totalRemainingUnits - a.totalRemainingUnits;
+    });
+  }, [batchScopeResults]);
+
+  var batchOpportunityMap = useMemo(function() {
+    var map = {};
+    batchOpportunityGroups.forEach(function(group) {
+      group.rows.forEach(function(wo, idx) {
+        map[woCommitKey(wo)] = {
+          batchCount: group.batchCount,
+          totalRemainingUnits: group.totalRemainingUnits,
+          dueStart: group.dueStart,
+          dueEnd: group.dueEnd,
+          woNums: group.woNums,
+          sequenceIndex: idx + 1
+        };
+      });
+    });
+    return map;
+  }, [batchOpportunityGroups]);
+
   var filteredResults = useMemo(() => {
     if (!analysis) return []; var r = analysis.results.slice();
     if (filterStatus !== "all") r = r.filter(w => w.runStatus === filterStatus);
@@ -395,10 +472,21 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     }
     if (filterWoStatus !== "all") r = r.filter(w => w.status === filterWoStatus);
     if (filterPackType !== "all") r = r.filter(function(w) { return detectPackType(w.productDesc || w.productSkuRaw || "", w.productSkuRaw || w.productSku || "") === filterPackType; });
+    if (filterBatchable) r = r.filter(function(w) { return !!batchOpportunityMap[woCommitKey(w)]; });
     r.sort((a,b) => {
       var c = 0;
       if (sortField==="woNum") c=a.woNum.localeCompare(b.woNum);
       else if (sortField==="product") c=a.productSkuRaw.localeCompare(b.productSkuRaw);
+      else if (sortField==="batchCount") {
+        var ab = batchOpportunityMap[woCommitKey(a)] ? batchOpportunityMap[woCommitKey(a)].batchCount : 0;
+        var bb = batchOpportunityMap[woCommitKey(b)] ? batchOpportunityMap[woCommitKey(b)].batchCount : 0;
+        c = ab - bb;
+        if (c === 0) {
+          var au = batchOpportunityMap[woCommitKey(a)] ? batchOpportunityMap[woCommitKey(a)].totalRemainingUnits : 0;
+          var bu = batchOpportunityMap[woCommitKey(b)] ? batchOpportunityMap[woCommitKey(b)].totalRemainingUnits : 0;
+          c = au - bu;
+        }
+      }
       else if (sortField==="desc") c=(a.productDesc||"").localeCompare(b.productDesc||"");
       else if (sortField==="skuType") {
         var at = detectPackType(a.productDesc || a.productSkuRaw || "", a.productSkuRaw || a.productSku || "");
@@ -460,7 +548,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       return sortDir==="desc"?-c:c;
     });
     return r;
-  }, [analysis, filterStatus, filterWoStatus, filterCustomer, filterDueMonth, filterPackType, filterShared, filterRunNext, searchTerm, sortField, sortDir, commitmentMap, sharedComponentUsage, runNextWoSet, runNextMetaMap]);
+  }, [analysis, filterStatus, filterWoStatus, filterCustomer, filterDueMonth, filterPackType, filterShared, filterRunNext, filterBatchable, searchTerm, sortField, sortDir, commitmentMap, sharedComponentUsage, runNextWoSet, runNextMetaMap, batchOpportunityMap]);
 
   var woStatusBreakdown = useMemo(function() {
     if (!analysis) return [];
@@ -477,6 +565,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       r = r.filter(function(w) { return matchesWorkOrderSearch(w, qRaw, qNorm, qSku); });
     }
     if (filterPackType !== "all") r = r.filter(function(w) { return detectPackType(w.productDesc || w.productSkuRaw || "", w.productSkuRaw || w.productSku || "") === filterPackType; });
+    if (filterBatchable) r = r.filter(function(w) { return !!batchOpportunityMap[woCommitKey(w)]; });
     var map = {};
     r.forEach(function(w) {
       var key = String(w.status || "--").trim() || "--";
@@ -485,7 +574,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       map[key].qtyUnits += Number(w.qtyToProduce || 0);
     });
     return Object.values(map).sort(function(a, b) { return b.qtyUnits - a.qtyUnits; });
-  }, [analysis, filterStatus, filterCustomer, filterDueMonth, filterPackType, filterShared, filterRunNext, searchTerm, commitmentMap, sharedComponentUsage, runNextWoSet]);
+  }, [analysis, filterStatus, filterCustomer, filterDueMonth, filterPackType, filterShared, filterRunNext, filterBatchable, searchTerm, commitmentMap, sharedComponentUsage, runNextWoSet, batchOpportunityMap]);
 
   var packMixBreakdown = useMemo(function() {
     var byType = {};
@@ -523,12 +612,13 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
   };
 
   var renderWORows = () => {
-    if (filteredResults.length === 0) return <tr><td colSpan={18} style={{ padding:36, textAlign:"center", color:C.dim, fontSize:14 }}>No work orders match filters.</td></tr>;
+    if (filteredResults.length === 0) return <tr><td colSpan={19} style={{ padding:36, textAlign:"center", color:C.dim, fontSize:14 }}>No work orders match filters.</td></tr>;
     var out = [];
     filteredResults.forEach((wo, idx) => {
       var rowKey = wo.woNum + "|" + idx;
       var isX = !!expandedWOs[rowKey];
       var commitment = commitmentMap[woCommitKey(wo)] || { committedCanMake:0, commitmentGap:0, sharedConstraint:false };
+      var batchMeta = batchOpportunityMap[woCommitKey(wo)] || null;
       var runMeta = runNextMetaMap[String(wo.woNum || "")] || null;
       var rs = runStatusMeta(wo.runStatus);
       var skuType = detectPackType(wo.productDesc || wo.productSkuRaw || "", wo.productSkuRaw || wo.productSku || "");
@@ -544,6 +634,18 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
           onMouseEnter={e => { if (!isX) e.currentTarget.style.background = C.hover; }} onMouseLeave={e => { if (!isX) e.currentTarget.style.background = isX ? C.raised : "transparent"; }}>
           <td style={Object.assign({}, tdM, { fontWeight:600, color:C.bright })}>{wo.woNum}</td>
           <td style={tdM}>{wo.productSkuRaw}</td>
+          <td style={Object.assign({}, tdN, { whiteSpace:"nowrap" })}>
+            {batchMeta ? (
+              <Badge
+                variant="info"
+                title={"Batch opportunity across " + batchMeta.batchCount + " open work orders for item " + (wo.productSkuRaw || wo.productSku || "--") + " \u2022 Remaining " + fmtNum(batchMeta.totalRemainingUnits) + " \u2022 WO order: " + batchMeta.woNums.join(", ")}
+              >
+                {"x" + batchMeta.batchCount}
+              </Badge>
+            ) : (
+              <span style={{ color:C.dim }}>--</span>
+            )}
+          </td>
           <td style={Object.assign({}, tdN, { whiteSpace:"nowrap" })}><Badge variant="secondary">{skuType}</Badge></td>
           <td style={Object.assign({}, tdN, { color:C.dim }, truncate(220))}>{formatDescriptionForDisplay(wo.productDesc) || "--"}</td>
           <td style={Object.assign({}, tdN, { color:C.dim }, truncate(140))}>{wo.customer || "--"}</td>
@@ -587,6 +689,14 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
             <span style={{ fontFamily:mono, color:C.bright }}>Score {runMeta.score}</span>{" \u2022 "}
             <span style={{ color:C.bright }}>{runMeta.action || "Run Next"}</span>
             {runMeta.why ? <span>{" \u2022 " + runMeta.why.replace(/^WO\s+\S+\s+\u2022\s*/i, "")}</span> : null}
+          </div>
+        );
+        if (batchMeta) details.push(
+          <div key="batch" style={{ fontSize:13, color:C.dim, marginBottom:8 }}>
+            <span style={{ fontWeight:700, color:C.accent }}>Batch opportunity x{batchMeta.batchCount}</span>
+            {" \u2022 "}Same item queued on <span style={{ color:C.bright }}>{batchMeta.woNums.join(", ")}</span>
+            {" \u2022 "}Remaining <span style={{ color:C.bright, fontFamily:mono }}>{fmtNum(batchMeta.totalRemainingUnits)}</span>
+            {" \u2022 "}Due window <span style={{ color:C.bright, fontFamily:mono }}>{fmtDate(batchMeta.dueStart)}</span> to <span style={{ color:C.bright, fontFamily:mono }}>{fmtDate(batchMeta.dueEnd)}</span>
           </div>
         );
         if (wo.reference1) details.push(<div key="ref" style={{ fontSize:13, color:C.text, marginBottom:8 }}><span style={{ fontSize:12, fontWeight:600, color:C.dim, letterSpacing:0.1, marginRight:6 }}>Notes</span>{wo.reference1}</div>);
@@ -664,7 +774,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
           </div>
         );
         out.push(
-          <tr key={"d"+idx}><td colSpan={18} style={{ padding:"0 12px 14px 36px", background:C.raised }}>
+          <tr key={"d"+idx}><td colSpan={19} style={{ padding:"0 12px 14px 36px", background:C.raised }}>
             {details}
           </td></tr>
         );
@@ -728,6 +838,9 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
           <option value="20">Top 20</option>
         </select>
       )}
+      <Button onClick={function() { setFilterBatchable(function(v) { return !v; }); }} variant={filterBatchable ? "active" : "outline"} size="default" className="shrink-0" title="Show same-item work orders that can be batched to reduce changeovers">
+        Batch
+      </Button>
       <Button onClick={function() { setFilterShared(function(v) { return !v; }); }} variant={filterShared ? "active" : "outline"} size="default" className="shrink-0">Shared</Button>
       <Button onClick={function() { if (typeof navigator !== "undefined" && navigator.clipboard) navigator.clipboard.writeText(window.location.href); }} variant="outline" size="default" className="shrink-0">Copy Link</Button>
       <Button onClick={exportCSV} variant="outline" size="default" className="shrink-0">CSV</Button>
@@ -741,6 +854,15 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
             <span style={{ color:C.bad, fontWeight:700 }}>{commitmentSummary.atRisk} WOs</span>
             <span style={{ color:C.bad, fontWeight:700 }}>{fmtNum(commitmentSummary.reducedUnits)} units</span>
           </span>
+          {batchOpportunityGroups.length > 0 && (
+            <span style={{ display:"inline-flex", alignItems:"center", gap:8, padding:"4px 10px", borderRadius:999, border:"1px solid "+(filterBatchable ? C.accentLine : C.border), background:filterBatchable ? C.accentSoft : C.surface, fontSize:13, color:filterBatchable ? C.accent : C.dim }}>
+              <span style={{ fontWeight:700 }}>Batch</span>
+              <span style={{ color:filterBatchable ? C.accent : C.bright, fontWeight:700 }}>{batchOpportunityGroups.length} item groups</span>
+              <span style={{ color:filterBatchable ? C.accent : C.text, fontWeight:700 }}>
+                {fmtNum(batchOpportunityGroups.reduce(function(sum, group) { return sum + group.batchCount; }, 0))} WOs
+              </span>
+            </span>
+          )}
           {woStatusBreakdown.length > 0 && (
             <>
               <span style={{ fontSize:12, color:C.dim, fontWeight:700, letterSpacing:0.2 }}>WO Status Qty</span>
@@ -787,6 +909,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
           <thead><tr style={{ background:C.raised }}>
             <SortTh field="woNum">WO#</SortTh>
             <SortTh field="product">Product</SortTh>
+            <SortTh field="batchCount"><span title="Open work orders sharing the same item">Batch</span></SortTh>
             <SortTh field="skuType">SKU Type</SortTh>
             <SortTh field="desc">Product Description</SortTh>
             <SortTh field="customer">Customer</SortTh>
