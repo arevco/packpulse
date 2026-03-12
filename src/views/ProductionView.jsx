@@ -8,6 +8,20 @@ import TableShell from "../components/ui/table-shell";
 var MIN_TRUSTED_JOB_LABOR_HOURS = 0.25;
 var MAX_TOP_JOBS_PER_LINE = 3;
 var SHIFT_MINUTES = 480;
+var MONTH_INDEX = {
+  jan: 0,
+  feb: 1,
+  mar: 2,
+  apr: 3,
+  may: 4,
+  jun: 5,
+  jul: 6,
+  aug: 7,
+  sep: 8,
+  oct: 9,
+  nov: 10,
+  dec: 11
+};
 
 function fmtMoneyWhole(value) {
   var rounded = Math.round(safeNum(value));
@@ -24,6 +38,31 @@ function normKey(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+function normalizeLooseKey(value) {
+  return String(value || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+
+function pickFieldLoose(row, keys) {
+  if (!row || typeof row !== "object") return "";
+  var rowKeys = Object.keys(row);
+  for (var i = 0; i < keys.length; i += 1) {
+    var target = String(keys[i] || "").toLowerCase();
+    for (var j = 0; j < rowKeys.length; j += 1) {
+      var rowKey = rowKeys[j];
+      if (String(rowKey || "").toLowerCase() === target) return row[rowKey];
+    }
+  }
+  var wanted = {};
+  keys.forEach(function(key) {
+    wanted[normalizeLooseKey(key)] = true;
+  });
+  for (var x = 0; x < rowKeys.length; x += 1) {
+    var looseKey = rowKeys[x];
+    if (wanted[normalizeLooseKey(looseKey)]) return row[looseKey];
+  }
+  return "";
+}
+
 function mergeLaborMetric(target, row) {
   target.payable_hours += safeNum(row && row.payable_hours);
   target.productive_hours += safeNum(row && row.productive_hours);
@@ -34,7 +73,87 @@ function hasAssignedShift(shiftLabel) {
   return !!shiftLabel && String(shiftLabel) !== "Unassigned";
 }
 
-export default function ProductionView({ productionSegments, laborActuals, resolveRevenueForRow }) {
+function normalizeShiftLabel(value) {
+  var s = String(value || "").toLowerCase();
+  if (!s) return "";
+  if (s.indexOf("cross") !== -1) return "Cross-Shift Job";
+  if (s.indexOf("unassigned") !== -1) return "Unassigned";
+  if (s.indexOf("1") !== -1 || s.indexOf("1st") !== -1) return "Shift 1 (7a-3p)";
+  if (s.indexOf("2") !== -1 || s.indexOf("2nd") !== -1) return "Shift 2 (3p-11p)";
+  return "";
+}
+
+function classifyShiftFromHour(hour) {
+  if (hour >= 7 && hour < 15) return "Shift 1 (7a-3p)";
+  if (hour >= 15 && hour < 23) return "Shift 2 (3p-11p)";
+  return "Unassigned";
+}
+
+function parseLaborWallClock(value) {
+  var raw = String(value || "").trim();
+  if (!raw) return null;
+  var patterns = [
+    /^(\d{4})-([A-Za-z]{3})-(\d{1,2})(?:[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AP]M)?)?$/i,
+    /^(\d{4})-(\d{2})-(\d{2})(?:[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AP]M)?)?$/i,
+    /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AP]M)?)?$/i
+  ];
+  for (var i = 0; i < patterns.length; i += 1) {
+    var m = raw.match(patterns[i]);
+    if (!m) continue;
+    var year = 0;
+    var monthIndex = 0;
+    var day = 0;
+    var hour = parseInt(m[4] || "0", 10);
+    var minute = parseInt(m[5] || "0", 10);
+    var meridiem = String(m[7] || m[6] || "").toUpperCase();
+    if (i === 0) {
+      year = parseInt(m[1], 10);
+      monthIndex = MONTH_INDEX[String(m[2] || "").toLowerCase()];
+      day = parseInt(m[3], 10);
+    } else if (i === 1) {
+      year = parseInt(m[1], 10);
+      monthIndex = parseInt(m[2], 10) - 1;
+      day = parseInt(m[3], 10);
+    } else {
+      monthIndex = parseInt(m[1], 10) - 1;
+      day = parseInt(m[2], 10);
+      year = parseInt(m[3], 10);
+    }
+    if (!Number.isFinite(year) || !Number.isFinite(monthIndex) || monthIndex < 0 || monthIndex > 11 || !Number.isFinite(day)) continue;
+    if (meridiem === "PM" && hour < 12) hour += 12;
+    if (meridiem === "AM" && hour === 12) hour = 0;
+    return {
+      date: year + "-" + String(monthIndex + 1).padStart(2, "0") + "-" + String(day).padStart(2, "0"),
+      shift: classifyShiftFromHour(hour)
+    };
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return { date: raw, shift: "Unassigned" };
+  }
+  return null;
+}
+
+function rawLaborTiming(row) {
+  var shift = normalizeShiftLabel(pickFieldLoose(row, ["Shift Label", "shift_label", "Shift"])) || "";
+  var explicitDate = String(pickFieldLoose(row, ["worked_date_et", "Worked Date ET", "Worked Date", "Date"]) || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(explicitDate)) {
+    return { date: explicitDate, shift: shift || "Unassigned" };
+  }
+  var parsed = parseLaborWallClock(
+    pickFieldLoose(row, [
+      "Clock In Time", "Clock in time", "clock_in_at_utc",
+      "Clock Out Time", "Clock out time", "clock_out_at_utc",
+      "Worked At", "worked_at_utc", "Start Time", "start_time"
+    ])
+  );
+  if (!parsed) return { date: "", shift: shift || "" };
+  return {
+    date: parsed.date,
+    shift: shift || parsed.shift || "Unassigned"
+  };
+}
+
+export default function ProductionView({ productionSegments, laborActuals, laborDataRaw, resolveRevenueForRow }) {
   const { C, mono } = useTheme();
   const { thS, tdN, tdM } = useStyles();
 
@@ -47,6 +166,7 @@ export default function ProductionView({ productionSegments, laborActuals, resol
   var prodShiftRows = productionSegments && Array.isArray(productionSegments.shiftRows) ? productionSegments.shiftRows : [];
   var prodJobRows = productionSegments && Array.isArray(productionSegments.jobRows) ? productionSegments.jobRows : [];
   var laborJobRows = laborActuals && Array.isArray(laborActuals.byJob) ? laborActuals.byJob : [];
+  var laborRawRows = Array.isArray(laborDataRaw) ? laborDataRaw : [];
   var totalRows = productionSegments && productionSegments.totalRows ? productionSegments.totalRows : 0;
   var rowsWithShift = productionSegments && productionSegments.rowsWithShift ? productionSegments.rowsWithShift : 0;
   var prodDates = Array.from(new Set(prodShiftRows.map(function(r) { return r.date; }))).sort().reverse();
@@ -119,6 +239,63 @@ export default function ProductionView({ productionSegments, laborActuals, resol
     return { exact: exact, slim: slim, byLineItem: byLineItem, byLine: byLine };
   }, [laborJobRows]);
 
+  var rawLaborByJobKey = useMemo(function() {
+    var exact = {};
+    var slim = {};
+    var byLineItem = {};
+    var byLine = {};
+    laborRawRows.forEach(function(row) {
+      var jobId = String(pickFieldLoose(row, ["Job ID", "job_id", "Job"]) || "").trim();
+      if (!jobId) return;
+      var timing = rawLaborTiming(row);
+      var date = timing.date;
+      var shift = timing.shift || "Unassigned";
+      if (!date || !shift) return;
+      var line = String(pickFieldLoose(row, ["Line Name", "Line name", "line_name", "Line"]) || "").trim() || "Unknown";
+      var workOrder = String(pickFieldLoose(row, ["Work Order Code", "work_order_code", "project_code", "Project Code"]) || "").trim();
+      var itemCode = String(pickFieldLoose(row, ["Item Code", "Item code", "item_code"]) || "").trim();
+      var metric = {
+        payable_hours: safeNum(pickFieldLoose(row, ["Payable Hours", "Payable hours", "payable_hours"])),
+        productive_hours: safeNum(pickFieldLoose(row, ["Productive Hours", "Productive hours", "productive_hours"])),
+        labor_cost: 0
+      };
+      metric.labor_cost = metric.payable_hours * safeNum(pickFieldLoose(row, ["Badge Type Rate", "Badge type rate", "badge_type_rate", "Hourly Rate", "hourly_rate"]));
+      var exactKey = [
+        normKey(jobId),
+        normKey(date),
+        normKey(shift),
+        normKey(line),
+        normKey(workOrder),
+        normKey(itemCode)
+      ].join("|");
+      var slimKey = [
+        normKey(jobId),
+        normKey(date),
+        normKey(shift)
+      ].join("|");
+      var lineItemKey = [
+        normKey(jobId),
+        normKey(date),
+        normKey(line),
+        normKey(itemCode)
+      ].join("|");
+      var lineKey = [
+        normKey(jobId),
+        normKey(date),
+        normKey(line)
+      ].join("|");
+      if (!exact[exactKey]) exact[exactKey] = { payable_hours: 0, productive_hours: 0, labor_cost: 0 };
+      if (!slim[slimKey]) slim[slimKey] = { payable_hours: 0, productive_hours: 0, labor_cost: 0 };
+      if (!byLineItem[lineItemKey]) byLineItem[lineItemKey] = { payable_hours: 0, productive_hours: 0, labor_cost: 0 };
+      if (!byLine[lineKey]) byLine[lineKey] = { payable_hours: 0, productive_hours: 0, labor_cost: 0 };
+      mergeLaborMetric(exact[exactKey], metric);
+      mergeLaborMetric(slim[slimKey], metric);
+      mergeLaborMetric(byLineItem[lineItemKey], metric);
+      mergeLaborMetric(byLine[lineKey], metric);
+    });
+    return { exact: exact, slim: slim, byLineItem: byLineItem, byLine: byLine };
+  }, [laborRawRows]);
+
   var jobsWithLabor = useMemo(function() {
     return filteredJobRows.map(function(r) {
       var exactKey = [
@@ -150,6 +327,10 @@ export default function ProductionView({ productionSegments, laborActuals, resol
         laborByJobKey.slim[slimKey] ||
         laborByJobKey.byLineItem[lineItemKey] ||
         laborByJobKey.byLine[lineKey] ||
+        rawLaborByJobKey.exact[exactKey] ||
+        rawLaborByJobKey.slim[slimKey] ||
+        rawLaborByJobKey.byLineItem[lineItemKey] ||
+        rawLaborByJobKey.byLine[lineKey] ||
         null;
       var rawPayableHours = safeNum(labor && labor.payable_hours);
       var payableHours = rawPayableHours >= MIN_TRUSTED_JOB_LABOR_HOURS ? rawPayableHours : 0;
@@ -182,7 +363,7 @@ export default function ProductionView({ productionSegments, laborActuals, resol
         hasRevenue: revenue > 0
       });
     });
-  }, [filteredJobRows, laborByJobKey, resolveRevenueForRow]);
+  }, [filteredJobRows, laborByJobKey, rawLaborByJobKey, resolveRevenueForRow]);
 
   var shiftTotals = useMemo(function() {
     var map = {};

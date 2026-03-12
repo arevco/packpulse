@@ -2312,6 +2312,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
         <ProductionView
           productionSegments={productionSegments}
           laborActuals={laborActuals}
+          laborDataRaw={laborDataRaw}
           resolveRevenueForRow={revenuePerCaseForRow}
         />
       </Card>
