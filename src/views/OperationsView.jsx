@@ -422,8 +422,7 @@ function buildRawNulogySeries(rows) {
     if (!(units > 0)) return;
     var producedRaw = pickFieldLooseLocal(row, [
       "Actual Job End", "actual_job_end_at",
-      "Produced At", "produced_at", "Produced date", "producedAt",
-      "Actual Job Start", "actual_job_start_at"
+      "Produced At", "produced_at", "Produced date", "producedAt"
     ]);
     var date = toIsoDateET(producedRaw || new Date());
     if (!date) return;

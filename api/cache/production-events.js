@@ -124,9 +124,9 @@ function buildProductionEvents(rows, siteId, syncedAt, updatedBy) {
     if (!(units > 0)) return;
     var producedRaw = pickFieldLoose(row, [
       // Canonical production timestamp: completed job time aligns with close reporting.
+      // Avoid job start as a shift fallback because a single job can span both shifts.
       "Actual Job End", "actual_job_end_at",
-      "Produced At", "produced_at", "Produced date", "producedAt",
-      "Actual Job Start", "actual_job_start_at"
+      "Produced At", "produced_at", "Produced date", "producedAt"
     ]);
     var producedIso = toIso(producedRaw);
     var eastern = toEasternParts(producedIso || producedRaw || syncedAt);

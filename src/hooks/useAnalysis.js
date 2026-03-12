@@ -192,11 +192,10 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       var units = safeNum(firstValueLoose(row, ["Units Produced", "units_produced", "unitsProduced", "Produced Units", "Quantity Produced", "Qty Produced"]));
       if (!(units > 0)) return;
       // Canonical production timestamp for daily close reporting.
-      // Prefer completed job end time, then produced-at, then start as fallback.
+      // Do not use job start as a shift fallback because open jobs can span both shifts.
       var producedAt = firstValueLoose(row, [
         "Actual Job End", "actual_job_end_at",
-        "Produced At", "produced_at", "Produced date", "producedAt",
-        "Actual Job Start", "actual_job_start_at"
+        "Produced At", "produced_at", "Produced date", "producedAt"
       ]);
       var parts = toEasternParts(producedAt);
       var shift = classifyShiftET(parts);
