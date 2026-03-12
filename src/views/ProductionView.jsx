@@ -161,6 +161,7 @@ export default function ProductionView({ productionSegments, laborActuals, resol
       var revenue = revenuePerCase > 0 && unitsProduced > 0 ? (unitsProduced * revenuePerCase) : 0;
       var laborMargin = revenue - laborCost;
       var laborMarginPct = revenue > 0 ? (laborMargin / revenue) : null;
+      var missingRevenue = unitsProduced > 0 && !(revenue > 0);
       var shiftMinutes = hasAssignedShift(r.shift) ? SHIFT_MINUTES : 0;
       return Object.assign({}, r, {
         laborPayableHours: payableHours,
@@ -170,6 +171,9 @@ export default function ProductionView({ productionSegments, laborActuals, resol
         revenueCoveredUnits: revenue > 0 ? unitsProduced : 0,
         laborMargin: laborMargin,
         laborMarginPct: laborMarginPct,
+        missingRevenue: missingRevenue,
+        missingRevenueUnits: missingRevenue ? unitsProduced : 0,
+        missingRevenueSkuKey: normKey(r.itemCode) || "unknown",
         shiftMinutes: shiftMinutes,
         casesPerMinute: shiftMinutes > 0 ? (unitsProduced / shiftMinutes) : 0,
         casesPerPayableHour: payableHours > 0 ? (unitsProduced / payableHours) : 0,
@@ -209,7 +213,9 @@ export default function ProductionView({ productionSegments, laborActuals, resol
           revenue: 0,
           revenueCoveredUnits: 0,
           laborMargin: 0,
-          shiftSlots: {}
+          shiftSlots: {},
+          missingRevenueUnits: 0,
+          missingRevenueSkuKeys: {}
         };
       }
       map[line].units += safeNum(r.unitsProduced);
@@ -219,6 +225,8 @@ export default function ProductionView({ productionSegments, laborActuals, resol
       map[line].revenue += safeNum(r.revenue);
       map[line].revenueCoveredUnits += safeNum(r.revenueCoveredUnits);
       map[line].laborMargin += safeNum(r.laborMargin);
+      map[line].missingRevenueUnits += safeNum(r.missingRevenueUnits);
+      if (r.missingRevenue) map[line].missingRevenueSkuKeys[r.missingRevenueSkuKey] = r.itemCode || "Unknown SKU";
       if (hasAssignedShift(r.shift) && r.date) map[line].shiftSlots[String(r.date) + "|" + String(r.shift)] = true;
     });
     return Object.values(map).map(function(r) {
@@ -229,6 +237,7 @@ export default function ProductionView({ productionSegments, laborActuals, resol
         shiftSlotCount: shiftSlotCount,
         shiftMinutes: shiftMinutes,
         revenueCoveragePct: r.units > 0 ? Math.round((r.revenueCoveredUnits / r.units) * 100) : 0,
+        missingRevenueSkuCount: Object.keys(r.missingRevenueSkuKeys).length,
         casesPerMinute: shiftMinutes > 0 ? (r.units / shiftMinutes) : 0,
         laborCostPerCase: r.units > 0 ? (r.laborCost / r.units) : 0,
         laborMarginPct: r.revenue > 0 ? (r.laborMargin / r.revenue) : null
@@ -255,7 +264,9 @@ export default function ProductionView({ productionSegments, laborActuals, resol
           revenueCoveredUnits: 0,
           laborMargin: 0,
           shifts: {},
-          shiftSlots: {}
+          shiftSlots: {},
+          missingRevenueUnits: 0,
+          missingRevenueSkuKeys: {}
         };
       }
       map[key].unitsProduced += safeNum(r.unitsProduced);
@@ -264,6 +275,8 @@ export default function ProductionView({ productionSegments, laborActuals, resol
       map[key].revenue += safeNum(r.revenue);
       map[key].revenueCoveredUnits += safeNum(r.revenueCoveredUnits);
       map[key].laborMargin += safeNum(r.laborMargin);
+      map[key].missingRevenueUnits += safeNum(r.missingRevenueUnits);
+      if (r.missingRevenue) map[key].missingRevenueSkuKeys[r.missingRevenueSkuKey] = r.itemCode || "Unknown SKU";
       map[key].shifts[String(r.shift || "Unassigned")] = true;
       if (hasAssignedShift(r.shift) && r.date) map[key].shiftSlots[String(r.date) + "|" + String(r.shift)] = true;
     });
@@ -278,6 +291,7 @@ export default function ProductionView({ productionSegments, laborActuals, resol
         casesPerPayableHour: r.laborPayableHours > 0 ? (r.unitsProduced / r.laborPayableHours) : 0,
         laborCostPerCase: r.unitsProduced > 0 ? (r.laborCost / r.unitsProduced) : 0,
         revenueCoveragePct: r.unitsProduced > 0 ? Math.round((r.revenueCoveredUnits / r.unitsProduced) * 100) : 0,
+        missingRevenueSkuCount: Object.keys(r.missingRevenueSkuKeys).length,
         laborMarginPct: r.revenue > 0 ? (r.laborMargin / r.revenue) : null
       });
     }).sort(function(a, b) { return b.unitsProduced - a.unitsProduced; });
@@ -439,8 +453,10 @@ export default function ProductionView({ productionSegments, laborActuals, resol
                     </td>
                     <td style={tdM}>
                       <div>{r.sharePct}% share · {r.jobs} jobs</div>
-                      {r.revenue > 0 && r.revenueCoveragePct > 0 && r.revenueCoveragePct < 100 ? (
-                        <div style={{ fontSize:11, color:C.dim }}>{r.revenueCoveragePct}% revenue coverage</div>
+                      {r.missingRevenueSkuCount > 0 ? (
+                        <div style={{ fontSize:11, color:C.bad }}>
+                          {r.revenueCoveragePct}% priced · {r.missingRevenueSkuCount} SKU{r.missingRevenueSkuCount === 1 ? "" : "s"} missing revenue
+                        </div>
                       ) : null}
                     </td>
                     <td style={Object.assign({}, tdM, { fontWeight:700, color:C.ok })}>{r.units.toLocaleString()}</td>
@@ -464,9 +480,11 @@ export default function ProductionView({ productionSegments, laborActuals, resol
                         </td>
                         <td style={Object.assign({}, tdM, { fontWeight:700, color:C.ok })}>{job.unitsProduced.toLocaleString()}</td>
                         <td style={tdM}>
-                          {job.revenue > 0 ? fmtMoneyWhole(job.revenue) : "--"}
-                          {job.revenue > 0 && job.revenueCoveragePct > 0 && job.revenueCoveragePct < 100 ? (
-                            <div style={{ fontSize:11, color:C.dim }}>{job.revenueCoveragePct}% cov</div>
+                          {job.revenue > 0 ? fmtMoneyWhole(job.revenue) : <span style={{ color:C.bad, fontWeight:600 }}>Missing</span>}
+                          {job.missingRevenueSkuCount > 0 ? (
+                            <div style={{ fontSize:11, color:C.bad }}>
+                              {job.revenueCoveragePct}% priced · {job.missingRevenueSkuCount} missing
+                            </div>
                           ) : null}
                         </td>
                         <td style={tdM}>{job.laborPayableHours > 0 ? job.laborPayableHours.toFixed(1) : "--"}</td>
@@ -522,7 +540,9 @@ export default function ProductionView({ productionSegments, laborActuals, resol
                 <td style={tdM}>{r.itemCode}</td>
                 <td style={Object.assign({}, tdN, { color:C.dim, maxWidth:260, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" })}>{formatDescriptionForDisplay(r.itemDesc) || "--"}</td>
                 <td style={Object.assign({}, tdM, { fontWeight:700, color:C.ok })}>{r.unitsProduced.toLocaleString()}</td>
-                <td style={tdM}>{r.revenue > 0 ? fmtMoneyWhole(r.revenue) : "--"}</td>
+                <td style={tdM}>
+                  {r.revenue > 0 ? fmtMoneyWhole(r.revenue) : <span style={{ color:C.bad, fontWeight:600 }}>Missing</span>}
+                </td>
                 <td style={tdM}>{r.laborPayableHours > 0 ? r.laborPayableHours.toFixed(1) : "--"}</td>
                 <td style={tdM}>{r.laborCost > 0 ? fmtMoneyWhole(r.laborCost) : "--"}</td>
                 <td style={tdM}>{r.revenue > 0 ? fmtMoneyWhole(r.laborMargin) : "--"}</td>
