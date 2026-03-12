@@ -31,12 +31,22 @@ function severityFromUnits(units) {
   return "info";
 }
 
+function normalizeSku(value) {
+  return String(value || "").trim().replace(/\.0+$/, "").toLowerCase();
+}
+
+function statusLooksClosed(status) {
+  var s = String(status || "").toLowerCase();
+  return !!s && (s.includes("close") || s.includes("complete") || s.includes("cancel") || s.includes("archive") || s.includes("done"));
+}
+
 export default function AICopilotView(props) {
   var summary = props.summary || { total: 0, ready: 0, blocked: 0 };
   var criticalItems = Array.isArray(props.criticalItems) ? props.criticalItems : [];
   var dispatchQueue = Array.isArray(props.dispatchQueue) ? props.dispatchQueue : [];
   var productionSegments = props.productionSegments || { shiftRows: [], jobRows: [] };
   var evoconData = Array.isArray(props.evoconData) ? props.evoconData : [];
+  var workOrders = Array.isArray(props.workOrders) ? props.workOrders : [];
   var onNavigate = typeof props.onNavigate === "function" ? props.onNavigate : function() {};
   const { mono } = useTheme();
 
@@ -72,6 +82,44 @@ export default function AICopilotView(props) {
       return String(r && r.targetView || "") === "workorders";
     }).slice(0, 5);
 
+    var batchGroups = {};
+    workOrders.forEach(function(wo) {
+      var skuRaw = String((wo && (wo.productSkuRaw || wo.productSku)) || "").trim();
+      var skuKey = normalizeSku(skuRaw);
+      if (!skuKey || statusLooksClosed(wo && wo.status)) return;
+      var unitsRemaining = safeNum(wo && wo.unitsRemaining);
+      if (!(unitsRemaining > 0)) {
+        var qty = safeNum(wo && wo.qtyToProduce);
+        var produced = safeNum(wo && wo.unitsProduced);
+        unitsRemaining = Math.max(0, qty - produced);
+      }
+      if (!(unitsRemaining > 0)) return;
+      if (!batchGroups[skuKey]) {
+        batchGroups[skuKey] = {
+          sku: skuRaw || "--",
+          count: 0,
+          remainingUnits: 0,
+          woNums: [],
+          dueStart: "",
+          dueEnd: ""
+        };
+      }
+      batchGroups[skuKey].count += 1;
+      batchGroups[skuKey].remainingUnits += unitsRemaining;
+      if (wo && wo.woNum) batchGroups[skuKey].woNums.push(wo.woNum);
+      var due = String(wo && wo.dueDate || "").slice(0, 10);
+      if (due && (!batchGroups[skuKey].dueStart || due < batchGroups[skuKey].dueStart)) batchGroups[skuKey].dueStart = due;
+      if (due && (!batchGroups[skuKey].dueEnd || due > batchGroups[skuKey].dueEnd)) batchGroups[skuKey].dueEnd = due;
+    });
+    var batchList = Object.keys(batchGroups)
+      .map(function(key) { return batchGroups[key]; })
+      .filter(function(group) { return group.count > 1; })
+      .sort(function(a, b) {
+        if (b.count !== a.count) return b.count - a.count;
+        return b.remainingUnits - a.remainingUnits;
+      });
+    var topBatch = batchList[0] || null;
+
     var evRowsToday = evoconData.filter(function(r) {
       return String(r && r.date || "") === todayEt;
     });
@@ -91,11 +139,14 @@ export default function AICopilotView(props) {
       highRiskCount: highRisk.length,
       topRisk: topRisk,
       topRunNext: topRunNext,
+      batchGroupCount: batchList.length,
+      batchWorkOrderCount: batchList.reduce(function(sum, group) { return sum + safeNum(group.count); }, 0),
+      topBatch: topBatch,
       evoconTodayRows: evRowsToday.length,
       evoconUnplannedMin: unplannedMin,
       evoconSlowMin: slowMin
     };
-  }, [productionSegments, todayEt, summary, criticalItems, dispatchQueue, evoconData]);
+  }, [productionSegments, todayEt, summary, criticalItems, dispatchQueue, evoconData, workOrders]);
 
   var cards = useMemo(function() {
     var list = [];
@@ -139,6 +190,17 @@ export default function AICopilotView(props) {
         view: "workorders"
       });
     }
+    if (facts.topBatch) {
+      list.push({
+        id: "batching",
+        title: "Batching Opportunity",
+        severity: facts.topBatch.count >= 4 ? "warning" : "info",
+        why: facts.batchGroupCount + " same-item batch groups are open. Top group: " + facts.topBatch.sku + " with " + facts.topBatch.count + " WOs and " + Math.round(facts.topBatch.remainingUnits).toLocaleString() + " remaining cases.",
+        action: "Use Work Orders batch filter to reduce changeovers on the top repeated items first.",
+        confidence: "High",
+        view: "workorders"
+      });
+    }
     list.push({
       id: "ops-loss",
       title: "Evocon Loss Watch",
@@ -160,6 +222,7 @@ export default function AICopilotView(props) {
         "Work orders: " + facts.woTotal + " total, " + facts.woReady + " ready, " + facts.woBlocked + " blocked",
         "Today produced: " + Math.round(facts.producedToday),
         "Supply risk: " + facts.riskSkuCount + " SKUs, " + Math.round(facts.atRiskUnits) + " units at risk",
+        "Batching: " + facts.batchGroupCount + " item groups, " + facts.batchWorkOrderCount + " work orders, top batch " + (facts.topBatch ? facts.topBatch.sku + " x" + facts.topBatch.count : "none"),
         "Evocon today: " + facts.evoconUnplannedMin + " unplanned min, " + facts.evoconSlowMin + " speed loss min",
         "Top run next count: " + facts.topRunNext.length
       ];
@@ -192,10 +255,10 @@ export default function AICopilotView(props) {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <div className="text-sm font-semibold">AI Copilot</div>
-            <div className="text-xs text-[rgb(var(--muted))]">Deterministic insights with optional AI narrative for standup calls.</div>
+            <div className="text-xs text-[rgb(var(--muted))]">Deterministic standup signals with AI narrative grounded in current Operations, Work Orders, and Supply Risk data.</div>
           </div>
           <div className="flex items-center gap-1.5">
-            <Badge variant="info">Stage 1</Badge>
+            <Badge variant="success">Live</Badge>
             <Button variant="outline" size="sm" onClick={generateBrief} disabled={aiLoading}>
               {aiLoading ? "Generating..." : "Generate AI Brief"}
             </Button>

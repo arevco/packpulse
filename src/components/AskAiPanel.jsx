@@ -10,11 +10,17 @@ function buildPrototypeReply(text, context) {
   if (q.includes("run next") || q.includes("what should we run")) {
     return "Fallback answer: prioritize WOs with highest net units, nearest due dates, and lowest shared-component risk.";
   }
+  if (q.includes("batch") || q.includes("changeover")) {
+    return "Fallback answer: group open work orders by shared finished-good SKU, then rank by batch count, remaining units, and due-date window.";
+  }
   if (q.includes("risk") || q.includes("short")) {
     return "Fallback answer: focus first on high-impact shortages (units at risk + due date urgency), then split by packaging vs WIP to route ownership faster.";
   }
   if (q.includes("production") || q.includes("yield") || q.includes("operations")) {
     return "Fallback answer: compare actual vs baseline by day, then drill into line-level variance and shift mix to isolate throughput loss.";
+  }
+  if (q.includes("revenue") || q.includes("labor")) {
+    return "Fallback answer: compare output, revenue coverage, and labor cost in the same period, then isolate the lines or SKUs driving the gap.";
   }
   if (q.includes("delivery") || q.includes("inbound") || q.includes("dock")) {
     return "Fallback answer: anchor to OpenDock scheduled inbounds, then layer EDR confidence. Flag unknown/unmatched loads separately to avoid false certainty.";
@@ -34,6 +40,7 @@ export default function AskAiPanel(props) {
   var metrics = props.metrics && typeof props.metrics === "object" ? props.metrics : {};
   var labelByView = {
     overview: "Overview",
+    aicopilot: "AI Copilot",
     operations: "Operations",
     workorders: "Work Orders",
     supplyrisk: "Supply Risk",
@@ -47,7 +54,7 @@ export default function AskAiPanel(props) {
   var [messages, setMessages] = useState([
     {
       role: "assistant",
-      text: "Ask AI is ready. Ask about run priorities, supply risk, or production trends.",
+      text: "Ask AI is ready. Ask about run priorities, batching opportunities, revenue coverage, labor productivity, or production trends.",
     },
   ]);
 
@@ -55,7 +62,7 @@ export default function AskAiPanel(props) {
     if (activeView === "workorders") {
       return [
         "What should we run next and why?",
-        "Which work orders are changeover risks?",
+        "Where are the best batching opportunities?",
         "Summarize top blockers in one paragraph.",
       ];
     }
@@ -69,8 +76,15 @@ export default function AskAiPanel(props) {
     if (activeView === "operations") {
       return [
         "Summarize today vs yesterday output.",
-        "Which line is underperforming?",
-        "Where is the largest variance this week?",
+        "How much revenue did we produce today?",
+        "What is labor cost per case this week?",
+      ];
+    }
+    if (activeView === "aicopilot") {
+      return [
+        "Write a standup brief with output, risk, and actions.",
+        "Where are the best batching opportunities?",
+        "Which SKUs are missing revenue coverage?",
       ];
     }
     return [

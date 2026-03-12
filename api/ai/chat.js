@@ -76,6 +76,56 @@ function isPeriodComparisonQuestion(prompt) {
   );
 }
 
+function isRevenueQuestion(prompt) {
+  var q = toText(prompt).toLowerCase();
+  if (!q) return false;
+  return (
+    q.includes("revenue") ||
+    q.includes("sales value") ||
+    q.includes("dollar value") ||
+    q.includes("dollars produced") ||
+    q.includes("value produced")
+  ) && !q.includes("missing revenue") && !q.includes("pricing coverage");
+}
+
+function isMissingRevenueQuestion(prompt) {
+  var q = toText(prompt).toLowerCase();
+  if (!q) return false;
+  return (
+    q.includes("missing revenue") ||
+    q.includes("missing pricing") ||
+    q.includes("unpriced sku") ||
+    q.includes("pricing coverage") ||
+    q.includes("which skus are missing revenue")
+  );
+}
+
+function isLaborQuestion(prompt) {
+  var q = toText(prompt).toLowerCase();
+  if (!q) return false;
+  return (
+    q.includes("labor cost") ||
+    q.includes("labour cost") ||
+    q.includes("labor hours") ||
+    q.includes("labour hours") ||
+    q.includes("cases per labor hour") ||
+    q.includes("cases per labour hour") ||
+    q.includes("labor productivity") ||
+    q.includes("labor efficiency")
+  );
+}
+
+function isBatchOpportunityQuestion(prompt) {
+  var q = toText(prompt).toLowerCase();
+  if (!q) return false;
+  return (
+    q.includes("batch") ||
+    q.includes("same item") ||
+    q.includes("changeover") ||
+    q.includes("batching opportunity")
+  );
+}
+
 function detectPeriodLabel(prompt) {
   var q = toText(prompt).toLowerCase();
   if (!q) return "";
@@ -230,6 +280,39 @@ function normalizeSku(value) {
   return String(value || "").trim().replace(/\.0+$/, "").toLowerCase();
 }
 
+function parseDateIso(value) {
+  if (!value) return "";
+  var d = value instanceof Date ? value : new Date(value);
+  if (isNaN(d)) return "";
+  return d.toISOString().slice(0, 10);
+}
+
+function statusLooksClosed(status) {
+  var s = toText(status).toLowerCase();
+  return !!s && (
+    s.includes("close") ||
+    s.includes("complete") ||
+    s.includes("cancel") ||
+    s.includes("archive") ||
+    s.includes("done")
+  );
+}
+
+function pickItemMasterValue(row) {
+  return toNum(firstField(row, [
+    "Cost Per Unit", "cost_per_unit", "Unit Cost", "unit_cost",
+    "Standard Cost", "standard_cost", "Cost Per Base Unit", "cost_per_base_unit"
+  ]));
+}
+
+function sourceNote(label, detail) {
+  var cleanLabel = toText(label);
+  var cleanDetail = toText(detail);
+  if (!cleanLabel && !cleanDetail) return "";
+  if (cleanLabel && cleanDetail) return " Source: " + cleanLabel + " through " + cleanDetail + ".";
+  return " Source: " + (cleanLabel || cleanDetail) + ".";
+}
+
 function firstField(row, keys) {
   if (!row || typeof row !== "object") return "";
   for (var i = 0; i < keys.length; i++) {
@@ -272,6 +355,61 @@ function componentsForSkuFromPayload(payload, skuRaw) {
   return { hasBomData: true, items: out };
 }
 
+function buildBatchOpportunitiesFromSnapshot(payload) {
+  var workOrders = payload && Array.isArray(payload.workOrders) ? payload.workOrders : [];
+  var groups = {};
+  workOrders.forEach(function(row) {
+    var skuRaw = toText(firstField(row, [
+      "Item Code", "item_code", "Product SKU", "productSku", "productSkuRaw", "SKU", "sku"
+    ]));
+    var skuKey = normalizeSku(skuRaw);
+    if (!skuKey) return;
+    var status = toText(firstField(row, [
+      "Work Order Status", "status", "project_status"
+    ]));
+    if (statusLooksClosed(status)) return;
+    var remaining = toNum(firstField(row, [
+      "Units Remaining", "units_remaining", "Remaining Units", "remaining_units"
+    ]));
+    if (!(remaining > 0)) {
+      var expected = toNum(firstField(row, [
+        "Units Expected", "units_expected", "Order Qty", "qtyToProduce", "Quantity", "quantity"
+      ]));
+      var produced = toNum(firstField(row, [
+        "Units Produced", "units_produced", "Produced", "unitsProduced"
+      ]));
+      remaining = Math.max(0, expected - produced);
+    }
+    if (!(remaining > 0)) return;
+    var woNum = toText(firstField(row, [
+      "Work Order Code", "project_code", "Project Code", "Work Order", "wo_num"
+    ]));
+    var dueDate = parseDateIso(firstField(row, ["Due Date", "due_date_at", "dueDate"]));
+    if (!groups[skuKey]) {
+      groups[skuKey] = {
+        sku: skuRaw || "--",
+        batchCount: 0,
+        totalRemainingUnits: 0,
+        woNums: [],
+        dueStart: "",
+        dueEnd: ""
+      };
+    }
+    groups[skuKey].batchCount += 1;
+    groups[skuKey].totalRemainingUnits += remaining;
+    if (woNum) groups[skuKey].woNums.push(woNum);
+    if (dueDate && (!groups[skuKey].dueStart || dueDate < groups[skuKey].dueStart)) groups[skuKey].dueStart = dueDate;
+    if (dueDate && (!groups[skuKey].dueEnd || dueDate > groups[skuKey].dueEnd)) groups[skuKey].dueEnd = dueDate;
+  });
+  return Object.keys(groups)
+    .map(function(key) { return groups[key]; })
+    .filter(function(group) { return group.batchCount > 1; })
+    .sort(function(a, b) {
+      if (b.batchCount !== a.batchCount) return b.batchCount - a.batchCount;
+      return b.totalRemainingUnits - a.totalRemainingUnits;
+    });
+}
+
 async function loadSupabaseAiContext() {
   var supabase = getSupabaseAdmin();
 
@@ -283,24 +421,73 @@ async function loadSupabaseAiContext() {
     .limit(1);
   if (snapshotQ.error) throw snapshotQ.error;
   var snapshot = Array.isArray(snapshotQ.data) && snapshotQ.data.length ? snapshotQ.data[0] : null;
+  var snapshotPayload = snapshot && snapshot.payload ? snapshot.payload : null;
 
   var prodQ = await supabase
     .from("production_events")
     .select("produced_date_et,units_produced,shift_label,line_name,item_code,work_order_code")
     .eq("site_id", CACHE_SITE_ID)
     .order("produced_date_et", { ascending: false })
-    .limit(2000);
+    .limit(5000);
   var productionRows = [];
   if (!prodQ.error && Array.isArray(prodQ.data)) productionRows = prodQ.data;
 
   var laborQ = await supabase
-    .from("ops_shift_inputs")
-    .select("date_et,shift_label,line_name,total_headcount,total_hours")
+    .from("labor_events")
+    .select("worked_date_et,payable_hours,productive_hours,hourly_rate,line_name,job_id,work_order_code,item_code")
     .eq("site_id", CACHE_SITE_ID)
-    .order("date_et", { ascending: false })
-    .limit(120);
+    .order("worked_date_et", { ascending: false })
+    .limit(8000);
   var laborRows = [];
   if (!laborQ.error && Array.isArray(laborQ.data)) laborRows = laborQ.data;
+
+  var pricingQ = await supabase
+    .from("ops_sku_targets")
+    .select("item_code,revenue_per_case,active_from,active_to,updated_at")
+    .eq("site_id", CACHE_SITE_ID)
+    .order("updated_at", { ascending: false })
+    .limit(5000);
+  var pricingRows = [];
+  if (!pricingQ.error && Array.isArray(pricingQ.data)) pricingRows = pricingQ.data;
+
+  var itemMasterRows = snapshotPayload && Array.isArray(snapshotPayload.itemMaster) ? snapshotPayload.itemMaster : [];
+  var itemMasterBySku = {};
+  itemMasterRows.forEach(function(row) {
+    var sku = normalizeSku(firstField(row, ["Item Code", "item_code", "SKU", "sku", "Product SKU"]));
+    if (!sku) return;
+    var value = pickItemMasterValue(row);
+    if (!(value > 0)) return;
+    if (!itemMasterBySku[sku] || value > itemMasterBySku[sku]) itemMasterBySku[sku] = value;
+  });
+
+  var pricingBySku = {};
+  pricingRows.forEach(function(row) {
+    var sku = normalizeSku(row && row.item_code);
+    if (!sku || !(toNum(row && row.revenue_per_case) > 0)) return;
+    if (!pricingBySku[sku]) pricingBySku[sku] = [];
+    pricingBySku[sku].push({
+      revenue_per_case: toNum(row && row.revenue_per_case),
+      active_from: parseDateIso(row && row.active_from) || "1900-01-01",
+      active_to: parseDateIso(row && row.active_to) || "9999-12-31"
+    });
+  });
+
+  function resolveRevenuePerCase(itemCode, dateIso) {
+    var sku = normalizeSku(itemCode);
+    if (!sku) return { value: 0, source: "missing" };
+    var dateKey = toText(dateIso) || "1900-01-01";
+    var rows = pricingBySku[sku] || [];
+    var best = 0;
+    rows.forEach(function(row) {
+      var from = toText(row.active_from) || "1900-01-01";
+      var to = toText(row.active_to) || "9999-12-31";
+      if (dateKey < from || dateKey > to) return;
+      if (toNum(row.revenue_per_case) > best) best = toNum(row.revenue_per_case);
+    });
+    if (best > 0) return { value: best, source: "ops_sku_targets" };
+    if (toNum(itemMasterBySku[sku]) > 0) return { value: toNum(itemMasterBySku[sku]), source: "item_master_cost_per_unit" };
+    return { value: 0, source: "missing" };
+  }
 
   var byDay = {};
   var lineTotals = {};
@@ -329,7 +516,7 @@ async function loadSupabaseAiContext() {
     .slice(0, 8);
 
   function rangeTotals(start, end) {
-    if (!start || !end) return { totalCases: 0, byLineTop: [], bySkuTop: [], byShift: [], productionDays: 0, rows: 0 };
+    if (!start || !end) return { totalCases: 0, totalRevenue: 0, revenueCoveredUnits: 0, byLineTop: [], bySkuTop: [], byShift: [], missingRevenueSkus: [], productionDays: 0, rows: 0 };
     var rangeRows = productionRows.filter(function(r) {
       var d = toText(r.produced_date_et);
       return d && d >= start && d <= end;
@@ -339,33 +526,94 @@ async function loadSupabaseAiContext() {
     var skuMap = {};
     var shiftMap = {};
     var dayMap = {};
+    var totalRevenue = 0;
+    var revenueCoveredUnits = 0;
+    var missingRevenueSkus = {};
     rangeRows.forEach(function(r) {
       var u = toNum(r.units_produced);
       if (!(u > 0)) return;
       totalCases += u;
+      var dateKey = toText(r.produced_date_et);
       var ln = toText(r.line_name || "Unassigned");
       var sk = toText(r.item_code || "Unknown");
       var sh = toText(r.shift_label || "Unassigned");
-      var dy = toText(r.produced_date_et);
-      lineMap[ln] = (lineMap[ln] || 0) + u;
-      skuMap[sk] = (skuMap[sk] || 0) + u;
+      var rev = resolveRevenuePerCase(sk, dateKey);
+      var revenue = toNum(rev.value) * u;
+      if (!lineMap[ln]) lineMap[ln] = { line: ln, units: 0, revenue: 0 };
+      if (!skuMap[sk]) skuMap[sk] = { sku: sk, units: 0, revenue: 0 };
+      lineMap[ln].units += u;
+      lineMap[ln].revenue += revenue;
+      skuMap[sk].units += u;
+      skuMap[sk].revenue += revenue;
       shiftMap[sh] = (shiftMap[sh] || 0) + u;
-      if (dy) dayMap[dy] = true;
+      if (dateKey) dayMap[dateKey] = true;
+      if (revenue > 0) {
+        totalRevenue += revenue;
+        revenueCoveredUnits += u;
+      } else {
+        missingRevenueSkus[sk] = (missingRevenueSkus[sk] || 0) + u;
+      }
     });
-    var byLineTop = Object.keys(lineMap).map(function(k) { return { line: k, units: lineMap[k] }; }).sort(function(a, b) { return b.units - a.units; }).slice(0, 5);
-    var bySkuTop = Object.keys(skuMap).map(function(k) { return { sku: k, units: skuMap[k] }; }).sort(function(a, b) { return b.units - a.units; }).slice(0, 8);
+    var byLineTop = Object.keys(lineMap).map(function(k) { return lineMap[k]; }).sort(function(a, b) { return b.units - a.units; }).slice(0, 5);
+    var bySkuTop = Object.keys(skuMap).map(function(k) { return skuMap[k]; }).sort(function(a, b) { return b.units - a.units; }).slice(0, 8);
     var byShift = Object.keys(shiftMap).map(function(k) { return { shift: k, units: shiftMap[k] }; }).sort(function(a, b) { return b.units - a.units; });
-    return { totalCases: totalCases, byLineTop: byLineTop, bySkuTop: bySkuTop, byShift: byShift, productionDays: Object.keys(dayMap).length, rows: rangeRows.length };
+    var missingList = Object.keys(missingRevenueSkus)
+      .map(function(k) { return { sku: k, units: missingRevenueSkus[k] }; })
+      .sort(function(a, b) { return b.units - a.units; })
+      .slice(0, 10);
+    return {
+      totalCases: totalCases,
+      totalRevenue: totalRevenue,
+      revenueCoveredUnits: revenueCoveredUnits,
+      byLineTop: byLineTop,
+      bySkuTop: bySkuTop,
+      byShift: byShift,
+      missingRevenueSkus: missingList,
+      productionDays: Object.keys(dayMap).length,
+      rows: rangeRows.length
+    };
   }
 
   var latestLaborDate = "";
   var laborByDate = {};
   laborRows.forEach(function(r) {
-    var d = toText(r.date_et);
+    var d = toText(r.worked_date_et);
     if (!d) return;
     laborByDate[d] = (laborByDate[d] || 0) + 1;
     if (!latestLaborDate || d > latestLaborDate) latestLaborDate = d;
   });
+
+  function laborRange(start, end) {
+    if (!start || !end) return { payableHours: 0, productiveHours: 0, laborCost: 0, rows: 0, byLineTop: [] };
+    var rangeRows = laborRows.filter(function(r) {
+      var d = toText(r.worked_date_et);
+      return d && d >= start && d <= end;
+    });
+    var payableHours = 0;
+    var productiveHours = 0;
+    var laborCost = 0;
+    var byLine = {};
+    rangeRows.forEach(function(r) {
+      var payable = toNum(r.payable_hours);
+      var productive = toNum(r.productive_hours);
+      var rate = toNum(r.hourly_rate);
+      var line = toText(r.line_name || "Unassigned");
+      payableHours += payable;
+      productiveHours += productive;
+      laborCost += payable * rate;
+      if (!byLine[line]) byLine[line] = { line: line, payableHours: 0, productiveHours: 0, laborCost: 0 };
+      byLine[line].payableHours += payable;
+      byLine[line].productiveHours += productive;
+      byLine[line].laborCost += payable * rate;
+    });
+    return {
+      payableHours: payableHours,
+      productiveHours: productiveHours,
+      laborCost: laborCost,
+      rows: rangeRows.length,
+      byLineTop: Object.keys(byLine).map(function(k) { return byLine[k]; }).sort(function(a, b) { return b.laborCost - a.laborCost; }).slice(0, 5)
+    };
+  }
 
   return {
     siteId: CACHE_SITE_ID,
@@ -373,7 +621,7 @@ async function loadSupabaseAiContext() {
     snapshotUpdatedBy: snapshot && snapshot.updated_by ? snapshot.updated_by : "",
     snapshotRowCounts: snapshot && snapshot.row_counts ? snapshot.row_counts : {},
     snapshotMetrics: snapshot && snapshot.metrics ? snapshot.metrics : {},
-    snapshotPayload: snapshot && snapshot.payload ? snapshot.payload : null,
+    snapshotPayload: snapshotPayload,
     production: {
       totalRows: productionRows.length,
       latestDate: latestProdDate,
@@ -387,6 +635,14 @@ async function loadSupabaseAiContext() {
       totalRows: laborRows.length,
       latestDate: latestLaborDate,
       entriesOnLatestDate: latestLaborDate ? (laborByDate[latestLaborDate] || 0) : 0,
+      range: laborRange,
+    },
+    revenue: {
+      pricingRows: pricingRows.length,
+      itemMasterFallbackSkus: Object.keys(itemMasterBySku).length,
+    },
+    workOrders: {
+      batchOpportunities: buildBatchOpportunitiesFromSnapshot(snapshotPayload),
     },
   };
 }
@@ -399,12 +655,6 @@ export default async function handler(req, res) {
   try {
     var user = getAuthenticatedUser(req);
     if (!user) return res.status(401).json({ error: "Unauthorized" });
-
-    var apiKey = process.env.OPENAI_API_KEY || "";
-    var model = process.env.OPENAI_MODEL || "gpt-4o-mini";
-    if (!apiKey) {
-      return res.status(500).json({ error: "OPENAI_API_KEY is not configured" });
-    }
 
     var body = req.body || {};
     var prompt = toText(body.prompt);
@@ -445,6 +695,15 @@ export default async function handler(req, res) {
       });
     }
 
+    var anchorDateEt = toText(metrics.todayEt) || ymdInEtFromDate(new Date());
+    var defaultOpsPeriod = resolvePeriodRange(detectPeriodLabel(prompt) || "today", anchorDateEt);
+    var defaultProdAgg = (supabaseContext && supabaseContext.production && typeof supabaseContext.production.range === "function")
+      ? supabaseContext.production.range(defaultOpsPeriod.start, defaultOpsPeriod.end)
+      : null;
+    var defaultLaborAgg = (supabaseContext && supabaseContext.labor && typeof supabaseContext.labor.range === "function")
+      ? supabaseContext.labor.range(defaultOpsPeriod.start, defaultOpsPeriod.end)
+      : null;
+
     // Deterministic answer for high-frequency operational ask.
     if (isTodayCasesQuestion(prompt)) {
       var todayCases = toNum(metrics.productionTodayCases);
@@ -457,7 +716,8 @@ export default async function handler(req, res) {
           ". Shift 1: " + s1.toLocaleString() +
           ", Shift 2: " + s2.toLocaleString() + "." +
           (supabaseContext && supabaseContext.production && supabaseContext.production.latestDate
-            ? " Supabase latest production date: " + supabaseContext.production.latestDate + " (" + toNum(supabaseContext.production.latestDateUnits).toLocaleString() + " cases)."
+            ? " Latest production date: " + supabaseContext.production.latestDate + " (" + toNum(supabaseContext.production.latestDateUnits).toLocaleString() + " cases)." +
+              sourceNote("production_events", supabaseContext.production.latestDate)
             : ""),
         model: "deterministic",
       });
@@ -497,7 +757,8 @@ export default async function handler(req, res) {
         answer:
           "Cases produced yesterday (" + (yesterdayEt || "ET") + "): " + yCases.toLocaleString() +
           ". Shift 1: " + yS1.toLocaleString() +
-          ", Shift 2: " + yS2.toLocaleString() + ".",
+          ", Shift 2: " + yS2.toLocaleString() + "." +
+          sourceNote("production_events", yesterdayEt),
         model: "deterministic",
       });
     }
@@ -523,7 +784,8 @@ export default async function handler(req, res) {
         return res.status(200).json({
           answer:
             "Average daily production for " + periodForOps.label + " (" + periodForOps.start + " to " + periodForOps.end + "): " +
-            avgDaily.toLocaleString() + " cases/day across " + days + " production day" + (days === 1 ? "" : "s") + ".",
+            avgDaily.toLocaleString() + " cases/day across " + days + " production day" + (days === 1 ? "" : "s") + "." +
+            sourceNote("production_events", periodForOps.end),
           model: "deterministic",
         });
       }
@@ -535,7 +797,8 @@ export default async function handler(req, res) {
         return res.status(200).json({
           answer:
             "Top line for " + periodForOps.label + " (" + periodForOps.start + " to " + periodForOps.end + "): " +
-            String(topLine.line || "--") + " with " + toNum(topLine.units).toLocaleString() + " cases.",
+            String(topLine.line || "--") + " with " + toNum(topLine.units).toLocaleString() + " cases." +
+            sourceNote("production_events", periodForOps.end),
           model: "deterministic",
         });
       }
@@ -546,7 +809,8 @@ export default async function handler(req, res) {
         return res.status(200).json({
           answer:
             "Top SKU mix for " + periodForOps.label + " (" + periodForOps.start + " to " + periodForOps.end + "):\n" +
-            (skuList.length ? skuList.join("\n") : "No SKU totals found."),
+            (skuList.length ? skuList.join("\n") : "No SKU totals found.") +
+            sourceNote("production_events", periodForOps.end),
           model: "deterministic",
         });
       }
@@ -559,10 +823,93 @@ export default async function handler(req, res) {
           answer:
             "Shift split for " + periodForOps.label + " (" + periodForOps.start + " to " + periodForOps.end + "): " +
             (shiftList.length ? shiftList.join(" | ") : "No shift totals found.") +
-            (topShift ? ". Highest output: " + String(topShift.shift || "--") + "." : ""),
+            (topShift ? ". Highest output: " + String(topShift.shift || "--") + "." : "") +
+            sourceNote("production_events", periodForOps.end),
           model: "deterministic",
         });
       }
+    }
+    if (isRevenueQuestion(prompt) && defaultProdAgg) {
+      var revenueTotal = toNum(defaultProdAgg.totalRevenue);
+      var revenueCases = toNum(defaultProdAgg.totalCases);
+      var coveredUnits = toNum(defaultProdAgg.revenueCoveredUnits);
+      var coveragePct = revenueCases > 0 ? Math.round((coveredUnits / revenueCases) * 100) : 0;
+      var missingCount = Array.isArray(defaultProdAgg.missingRevenueSkus) ? defaultProdAgg.missingRevenueSkus.length : 0;
+      var topMissing = missingCount
+        ? defaultProdAgg.missingRevenueSkus.slice(0, 3).map(function(x) { return String(x.sku || "--") + " (" + toNum(x.units).toLocaleString() + ")"; }).join(", ")
+        : "";
+      return res.status(200).json({
+        answer:
+          "Revenue for " + defaultOpsPeriod.label + " (" + defaultOpsPeriod.start + " to " + defaultOpsPeriod.end + "): $" +
+          Math.round(revenueTotal).toLocaleString() + " across " + revenueCases.toLocaleString() + " cases. " +
+          "Coverage: " + coveragePct + "% of produced units." +
+          (missingCount ? " Missing revenue on " + missingCount + " SKU" + (missingCount === 1 ? "" : "s") + (topMissing ? ": " + topMissing + "." : ".") : "") +
+          sourceNote("production_events + ops_sku_targets + item master cost", defaultOpsPeriod.end),
+        model: "deterministic",
+      });
+    }
+    if (isMissingRevenueQuestion(prompt) && defaultProdAgg) {
+      var missingSkuRows = Array.isArray(defaultProdAgg.missingRevenueSkus) ? defaultProdAgg.missingRevenueSkus : [];
+      if (!missingSkuRows.length) {
+        return res.status(200).json({
+          answer:
+            "All produced SKUs for " + defaultOpsPeriod.label + " (" + defaultOpsPeriod.start + " to " + defaultOpsPeriod.end + ") have revenue coverage." +
+            sourceNote("production_events + ops_sku_targets + item master cost", defaultOpsPeriod.end),
+          model: "deterministic",
+        });
+      }
+      var missingSkuText = missingSkuRows.slice(0, 8).map(function(x, idx) {
+        return (idx + 1) + ". " + String(x.sku || "--") + " - " + toNum(x.units).toLocaleString() + " cases";
+      }).join("\n");
+      return res.status(200).json({
+        answer:
+          "SKUs missing revenue coverage for " + defaultOpsPeriod.label + " (" + defaultOpsPeriod.start + " to " + defaultOpsPeriod.end + "):\n" +
+          missingSkuText +
+          sourceNote("production_events + ops_sku_targets + item master cost", defaultOpsPeriod.end),
+        model: "deterministic",
+      });
+    }
+    if (isLaborQuestion(prompt) && defaultProdAgg && defaultLaborAgg) {
+      var payableHours = toNum(defaultLaborAgg.payableHours);
+      var productiveHours = toNum(defaultLaborAgg.productiveHours);
+      var laborCost = toNum(defaultLaborAgg.laborCost);
+      var prodCases = toNum(defaultProdAgg.totalCases);
+      var casesPerPayable = payableHours > 0 ? Math.round((prodCases / payableHours) * 10) / 10 : 0;
+      var casesPerProductive = productiveHours > 0 ? Math.round((prodCases / productiveHours) * 10) / 10 : 0;
+      var laborCostPerCase = prodCases > 0 ? Math.round((laborCost / prodCases) * 100) / 100 : 0;
+      return res.status(200).json({
+        answer:
+          "Labor actuals for " + defaultOpsPeriod.label + " (" + defaultOpsPeriod.start + " to " + defaultOpsPeriod.end + "): " +
+          payableHours.toFixed(1) + " payable hrs, " + productiveHours.toFixed(1) + " productive hrs, $" + Math.round(laborCost).toLocaleString() + " labor cost. " +
+          "Productivity: " + casesPerPayable.toLocaleString() + " cases/payable hr, " +
+          casesPerProductive.toLocaleString() + " cases/productive hr. " +
+          "Labor cost per case: $" + laborCostPerCase.toFixed(2) + "." +
+          sourceNote("labor_events + production_events", defaultOpsPeriod.end),
+        model: "deterministic",
+      });
+    }
+    if (isBatchOpportunityQuestion(prompt) && supabaseContext && supabaseContext.workOrders) {
+      var batchList = Array.isArray(supabaseContext.workOrders.batchOpportunities) ? supabaseContext.workOrders.batchOpportunities : [];
+      if (!batchList.length) {
+        return res.status(200).json({
+          answer:
+            "No same-item batching opportunities were found in the current open work orders snapshot." +
+            sourceNote("cache snapshot workOrders", supabaseContext.snapshotSyncedAt),
+          model: "deterministic",
+        });
+      }
+      var batchLines = batchList.slice(0, 6).map(function(group, idx) {
+        var dueWindow = group.dueStart && group.dueEnd ? (" due " + group.dueStart + " to " + group.dueEnd) : "";
+        return (idx + 1) + ". " + group.sku + " - " + group.batchCount + " WOs, " +
+          Math.round(toNum(group.totalRemainingUnits)).toLocaleString() + " remaining cases" + dueWindow;
+      });
+      return res.status(200).json({
+        answer:
+          "Top batching opportunities from current open work orders:\n" +
+          batchLines.join("\n") +
+          sourceNote("cache snapshot workOrders", supabaseContext.snapshotSyncedAt),
+        model: "deterministic",
+      });
     }
     if (
       isPeriodComparisonQuestion(prompt) &&
@@ -708,8 +1055,17 @@ export default async function handler(req, res) {
       // remove function before serialization
       delete supabaseContext.production.range;
     }
+    if (supabaseContext && supabaseContext.labor) {
+      delete supabaseContext.labor.range;
+    }
     if (supabaseContext && Object.prototype.hasOwnProperty.call(supabaseContext, "snapshotPayload")) {
       delete supabaseContext.snapshotPayload;
+    }
+
+    var apiKey = process.env.OPENAI_API_KEY || "";
+    var model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+    if (!apiKey) {
+      return res.status(500).json({ error: "OPENAI_API_KEY is not configured" });
     }
 
     var system = [
