@@ -2222,7 +2222,11 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
             Labor actuals are not enabled yet. Run `docs/supabase-labor-events.sql` in Supabase.
           </div>
         )}
-        <ProductionView productionSegments={productionSegments} laborActuals={laborActuals} />
+        <ProductionView
+          productionSegments={productionSegments}
+          laborActuals={laborActuals}
+          resolveRevenueForRow={revenuePerCaseForRow}
+        />
       </Card>
     </div>
   );

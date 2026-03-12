@@ -21,7 +21,7 @@ function mergeLaborMetric(target, row) {
   target.labor_cost += safeNum(row && row.labor_cost);
 }
 
-export default function ProductionView({ productionSegments, laborActuals }) {
+export default function ProductionView({ productionSegments, laborActuals, resolveRevenueForRow }) {
   const { C, mono } = useTheme();
   const { thS, tdN, tdM } = useStyles();
 
@@ -141,16 +141,23 @@ export default function ProductionView({ productionSegments, laborActuals }) {
       var payableHours = rawPayableHours >= MIN_TRUSTED_JOB_LABOR_HOURS ? rawPayableHours : 0;
       var productiveHours = payableHours > 0 ? safeNum(labor && labor.productive_hours) : 0;
       var laborCost = payableHours > 0 ? safeNum(labor && labor.labor_cost) : 0;
+      var unitsProduced = safeNum(r.unitsProduced);
+      var revenueMatch = typeof resolveRevenueForRow === "function" ? resolveRevenueForRow(r.itemCode, r.date) : null;
+      var revenuePerCase = safeNum(revenueMatch && revenueMatch.value);
+      var revenue = revenuePerCase > 0 && unitsProduced > 0 ? (unitsProduced * revenuePerCase) : 0;
       return Object.assign({}, r, {
         laborPayableHours: payableHours,
         laborProductiveHours: productiveHours,
         laborCost: laborCost,
-        casesPerPayableHour: payableHours > 0 ? (safeNum(r.unitsProduced) / payableHours) : 0,
-        laborCostPerCase: safeNum(r.unitsProduced) > 0 ? (laborCost / safeNum(r.unitsProduced)) : 0,
-        hasLabor: payableHours > 0
+        revenue: revenue,
+        revenueCoveredUnits: revenue > 0 ? unitsProduced : 0,
+        casesPerPayableHour: payableHours > 0 ? (unitsProduced / payableHours) : 0,
+        laborCostPerCase: unitsProduced > 0 ? (laborCost / unitsProduced) : 0,
+        hasLabor: payableHours > 0,
+        hasRevenue: revenue > 0
       });
     });
-  }, [filteredJobRows, laborByJobKey]);
+  }, [filteredJobRows, laborByJobKey, resolveRevenueForRow]);
 
   var shiftTotals = useMemo(function() {
     var map = {};
@@ -201,19 +208,24 @@ export default function ProductionView({ productionSegments, laborActuals }) {
           unitsProduced: 0,
           laborPayableHours: 0,
           laborCost: 0,
+          revenue: 0,
+          revenueCoveredUnits: 0,
           shifts: {}
         };
       }
       map[key].unitsProduced += safeNum(r.unitsProduced);
       map[key].laborPayableHours += safeNum(r.laborPayableHours);
       map[key].laborCost += safeNum(r.laborCost);
+      map[key].revenue += safeNum(r.revenue);
+      map[key].revenueCoveredUnits += safeNum(r.revenueCoveredUnits);
       map[key].shifts[String(r.shift || "Unassigned")] = true;
     });
     return Object.values(map).map(function(r) {
       return Object.assign({}, r, {
         shiftCount: Object.keys(r.shifts).length,
         casesPerPayableHour: r.laborPayableHours > 0 ? (r.unitsProduced / r.laborPayableHours) : 0,
-        laborCostPerCase: r.unitsProduced > 0 ? (r.laborCost / r.unitsProduced) : 0
+        laborCostPerCase: r.unitsProduced > 0 ? (r.laborCost / r.unitsProduced) : 0,
+        revenueCoveragePct: r.unitsProduced > 0 ? Math.round((r.revenueCoveredUnits / r.unitsProduced) * 100) : 0
       });
     }).sort(function(a, b) { return b.unitsProduced - a.unitsProduced; });
   }, [jobsWithLabor]);
@@ -355,6 +367,7 @@ export default function ProductionView({ productionSegments, laborActuals }) {
                   <th style={thS}>WO#</th>
                   <th style={thS}>Line</th>
                   <th style={thS}>Units</th>
+                  <th style={thS}>Revenue</th>
                   <th style={thS}>Labor</th>
                   <th style={thS}>Cases/LH</th>
                 </tr>
@@ -370,12 +383,18 @@ export default function ProductionView({ productionSegments, laborActuals }) {
                       <td style={tdM}>{r.workOrder}</td>
                       <td style={tdM}>{r.line}</td>
                       <td style={Object.assign({}, tdM, { fontWeight:700, color:C.ok })}>{r.unitsProduced.toLocaleString()}</td>
+                      <td style={tdM}>
+                        {r.revenue > 0 ? fmtMoneyWhole(r.revenue) : "--"}
+                        {r.revenue > 0 && r.revenueCoveragePct > 0 && r.revenueCoveragePct < 100 ? (
+                          <div style={{ fontSize:11, color:C.dim }}>{r.revenueCoveragePct}% cov</div>
+                        ) : null}
+                      </td>
                       <td style={tdM}>{r.laborCost > 0 ? fmtMoneyWhole(r.laborCost) : "--"}</td>
                       <td style={tdM}>{r.casesPerPayableHour > 0 ? r.casesPerPayableHour.toFixed(1) : "--"}</td>
                     </tr>
                   );
                 })}
-                {!jobRollup.length && <tr><td colSpan={6} style={{ padding:20, textAlign:"center", color:C.dim }}>No jobs for current filters.</td></tr>}
+                {!jobRollup.length && <tr><td colSpan={7} style={{ padding:20, textAlign:"center", color:C.dim }}>No jobs for current filters.</td></tr>}
               </tbody>
             </table>
           </TableShell>
@@ -396,6 +415,7 @@ export default function ProductionView({ productionSegments, laborActuals }) {
             <th style={thS}>Item</th>
             <th style={thS}>Description</th>
             <th style={thS}>Units Produced</th>
+            <th style={thS}>Revenue</th>
             <th style={thS}>Labor Hrs</th>
             <th style={thS}>Labor Cost</th>
           </tr></thead>
@@ -409,12 +429,13 @@ export default function ProductionView({ productionSegments, laborActuals }) {
                 <td style={tdM}>{r.itemCode}</td>
                 <td style={Object.assign({}, tdN, { color:C.dim, maxWidth:260, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" })}>{formatDescriptionForDisplay(r.itemDesc) || "--"}</td>
                 <td style={Object.assign({}, tdM, { fontWeight:700, color:C.ok })}>{r.unitsProduced.toLocaleString()}</td>
+                <td style={tdM}>{r.revenue > 0 ? fmtMoneyWhole(r.revenue) : "--"}</td>
                 <td style={tdM}>{r.laborPayableHours > 0 ? r.laborPayableHours.toFixed(1) : "--"}</td>
                 <td style={tdM}>{r.laborCost > 0 ? fmtMoneyWhole(r.laborCost) : "--"}</td>
               </tr>;
             })}
             {jobsWithLabor.length === 0 && (
-              <tr><td colSpan={9} style={{ padding:24, textAlign:"center", color:C.dim }}>No production rows for the selected day/filters.</td></tr>
+              <tr><td colSpan={10} style={{ padding:24, textAlign:"center", color:C.dim }}>No production rows for the selected day/filters.</td></tr>
             )}
           </tbody>
         </table>
