@@ -98,10 +98,11 @@ export default function ProductionView({ productionSegments }) {
   }, [filteredJobRows]);
 
   var totalUnitsProduced = filteredJobRows.reduce(function(sum, r) { return sum + safeNum(r.unitsProduced); }, 0);
-  var totalJobRowsVisible = filteredJobRows.length;
   var topLine = lineLoad[0] || null;
   var topJob = jobRollup[0] || null;
   var topShift = shiftTotals[0] || null;
+  var shift1Total = shiftTotals.find(function(r) { return r.shift === "Shift 1 (7a-3p)"; }) || null;
+  var shift2Total = shiftTotals.find(function(r) { return r.shift === "Shift 2 (3p-11p)"; }) || null;
 
   var shortShift = function(shiftLabel) {
     return String(shiftLabel || "")
@@ -139,9 +140,9 @@ export default function ProductionView({ productionSegments }) {
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(160px, 1fr))", gap:10, marginBottom:10 }}>
         {[
           { l:"Units", v:totalUnitsProduced.toLocaleString(), s:prodDate === "all" ? "all matching days" : (selectedProdDate || "selected day"), c:C.bright },
-          { l:"Job Rows", v:totalJobRowsVisible.toLocaleString(), s:"matching rows", c:C.dim },
-          { l:"Top Line", v:topLine ? topLine.line : "--", s:topLine ? (topLine.units.toLocaleString() + " cs · " + topLine.sharePct + "% share") : "no line data", c:C.ok },
-          { l:"Top Job", v:topJob ? topJob.jobId : "--", s:topJob ? (topJob.unitsProduced.toLocaleString() + " cs on " + topJob.line) : "no job data", c:C.accent }
+          { l:"Shift 1 Yield", v:shift1Total ? shift1Total.units.toLocaleString() : "0", s:"7a-3p", c:C.ok },
+          { l:"Shift 2 Yield", v:shift2Total ? shift2Total.units.toLocaleString() : "0", s:"3p-11p", c:C.accent },
+          { l:"Top Line", v:topLine ? topLine.line : "--", s:topLine ? (topLine.units.toLocaleString() + " cs · " + topLine.sharePct + "% share") : "no line data", c:C.ok }
         ].map(function(s) {
           return <div key={s.l} style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, padding:"12px 14px" }}>
             <div style={{ fontSize:20, fontWeight:700, fontFamily:mono, color:s.c, lineHeight:1 }}>{s.v}</div>
@@ -149,6 +150,18 @@ export default function ProductionView({ productionSegments }) {
             <div style={{ fontSize:11, color:C.dim, marginTop:4 }}>{s.s}</div>
           </div>;
         })}
+        <div style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, padding:"12px 14px" }}>
+          <div style={{ fontSize:20, fontWeight:700, fontFamily:mono, color:C.accent, lineHeight:1 }}>
+            {topJob ? (topJob.itemCode || "--") : "--"}
+          </div>
+          <div style={{ fontSize:12, color:C.dim, marginTop:6, fontWeight:600 }}>Top Job</div>
+          <div style={{ fontSize:11, color:C.dim, marginTop:4, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+            {topJob ? (topJob.itemDesc || "--") : "no job data"}
+          </div>
+          <div style={{ fontSize:11, color:C.dim, marginTop:4 }}>
+            {topJob ? (topJob.unitsProduced.toLocaleString() + " cs · Job " + topJob.jobId + " · " + topJob.line) : ""}
+          </div>
+        </div>
       </div>
 
       <div className="mb-3 flex flex-wrap items-center gap-3 text-xs text-[rgb(var(--muted))]">
@@ -228,7 +241,7 @@ export default function ProductionView({ productionSegments }) {
 
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="text-sm font-semibold">Job Rows</div>
-        <div className="text-xs text-[rgb(var(--muted))]">Top {Math.min(filteredJobRows.length, 100)} of {filteredJobRows.length.toLocaleString()} matching rows</div>
+        <div className="text-xs text-[rgb(var(--muted))]">Showing {Math.min(filteredJobRows.length, 100)} of {filteredJobRows.length.toLocaleString()} rows</div>
       </div>
       <TableShell>
         <table style={{ width:"100%", borderCollapse:"collapse" }}>
