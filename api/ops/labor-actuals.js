@@ -176,6 +176,52 @@ function finalizeTimingBucket(bucket) {
   return date ? { date: date, shift: shift || "Unassigned" } : null;
 }
 
+function resolveProductionMatch(row, casesByJob, casesByJobDateLineItem, casesByJobDateLine, casesByWoDateLine, casesByItemDateShiftLine) {
+  var jobId = textKey(row.job_id);
+  var date = textKey(row.date_et);
+  var shift = textKey(row.shift_label, "Unassigned");
+  var line = textKey(row.line_name, "Unknown");
+  var wo = textKey(row.work_order_code);
+  var item = textKey(row.item_code);
+  var resolutionKey = "";
+  var cases = 0;
+  if (jobId) {
+    resolutionKey = [jobId, date, shift, wo, line, item].join("|");
+    cases = toNum(casesByJob[resolutionKey]);
+  }
+  if (!(cases > 0) && jobId) {
+    resolutionKey = [jobId, date, line, item].join("|");
+    cases = toNum(casesByJobDateLineItem[resolutionKey]);
+  }
+  if (!(cases > 0) && jobId) {
+    resolutionKey = [jobId, date, line].join("|");
+    cases = toNum(casesByJobDateLine[resolutionKey]);
+  }
+  if (!(cases > 0) && wo) {
+    resolutionKey = wo + "|" + date + "|" + line;
+    cases = toNum(casesByWoDateLine[resolutionKey]);
+  }
+  if (!(cases > 0) && item) {
+    resolutionKey = item + "|" + date + "|" + shift + "|" + line;
+    cases = toNum(casesByItemDateShiftLine[resolutionKey]);
+  }
+  return {
+    resolutionKey: resolutionKey,
+    cases: cases
+  };
+}
+
+function shouldPreferMatchCandidate(nextCandidate, currentCandidate) {
+  if (!currentCandidate) return true;
+  var nextHours = toNum(nextCandidate && nextCandidate.row && nextCandidate.row.payable_hours);
+  var currentHours = toNum(currentCandidate && currentCandidate.row && currentCandidate.row.payable_hours);
+  if (nextHours !== currentHours) return nextHours > currentHours;
+  var nextCost = toNum(nextCandidate && nextCandidate.row && nextCandidate.row.labor_cost);
+  var currentCost = toNum(currentCandidate && currentCandidate.row && currentCandidate.row.labor_cost);
+  if (nextCost !== currentCost) return nextCost > currentCost;
+  return String(nextCandidate && nextCandidate.jobKey || "").localeCompare(String(currentCandidate && currentCandidate.jobKey || "")) < 0;
+}
+
 export default async function handler(req, res) {
   withCors(req, res, ["GET", "OPTIONS"]);
   if (req.method === "OPTIONS") return res.status(200).end();
@@ -390,43 +436,47 @@ export default async function handler(req, res) {
     var matchedCaseKeys = {};
     var casesByResolvedShift = {};
     var casesByResolvedDay = {};
-    var byJob = Object.keys(byJobMap).map(function(key) {
+    var duplicateMatchSuppressedRows = 0;
+    var jobCandidates = Object.keys(byJobMap).map(function(key) {
       var row = byJobMap[key];
-      var jobId = textKey(row.job_id);
-      var date = textKey(row.date_et);
-      var shift = textKey(row.shift_label, "Unassigned");
-      var line = textKey(row.line_name, "Unknown");
-      var wo = textKey(row.work_order_code);
-      var item = textKey(row.item_code);
-      var resolutionKey = "";
-      var cases = 0;
-      if (jobId) {
-        resolutionKey = [jobId, date, shift, wo, line, item].join("|");
-        cases = toNum(casesByJob[resolutionKey]);
+      var resolved = resolveProductionMatch(
+        row,
+        casesByJob,
+        casesByJobDateLineItem,
+        casesByJobDateLine,
+        casesByWoDateLine,
+        casesByItemDateShiftLine
+      );
+      return {
+        jobKey: key,
+        row: row,
+        resolutionKey: resolved.resolutionKey,
+        cases: resolved.cases
+      };
+    });
+    var bestClaimByResolution = {};
+    jobCandidates.forEach(function(candidate) {
+      if (!(candidate.cases > 0) || !candidate.resolutionKey) return;
+      if (shouldPreferMatchCandidate(candidate, bestClaimByResolution[candidate.resolutionKey])) {
+        bestClaimByResolution[candidate.resolutionKey] = candidate;
       }
-      if (!(cases > 0) && jobId) {
-        resolutionKey = [jobId, date, line, item].join("|");
-        cases = toNum(casesByJobDateLineItem[resolutionKey]);
+    });
+    var byJob = jobCandidates.map(function(candidate) {
+      var assignedCases = 0;
+      if (candidate.cases > 0 && candidate.resolutionKey) {
+        if (bestClaimByResolution[candidate.resolutionKey] === candidate) {
+          assignedCases = candidate.cases;
+          matchedCaseKeys[candidate.resolutionKey] = candidate.cases;
+        } else {
+          duplicateMatchSuppressedRows += 1;
+        }
       }
-      if (!(cases > 0) && jobId) {
-        resolutionKey = [jobId, date, line].join("|");
-        cases = toNum(casesByJobDateLine[resolutionKey]);
-      }
-      if (!(cases > 0) && wo) {
-        resolutionKey = wo + "|" + date + "|" + line;
-        cases = toNum(casesByWoDateLine[resolutionKey]);
-      }
-      if (!(cases > 0) && item) {
-        resolutionKey = item + "|" + date + "|" + shift + "|" + line;
-        cases = toNum(casesByItemDateShiftLine[resolutionKey]);
-      }
-      if (cases > 0 && resolutionKey) matchedCaseKeys[resolutionKey] = cases;
-      var finalized = finalizeMetricRow(row, cases);
+      var finalized = finalizeMetricRow(candidate.row, assignedCases);
       var dayKey = textKey(finalized.date_et);
       var shiftBucketKey = dayKey + "|" + textKey(finalized.shift_label, "Unassigned");
-      if (dayKey && cases > 0) {
-        casesByResolvedDay[dayKey] = (casesByResolvedDay[dayKey] || 0) + cases;
-        casesByResolvedShift[shiftBucketKey] = (casesByResolvedShift[shiftBucketKey] || 0) + cases;
+      if (dayKey && assignedCases > 0) {
+        casesByResolvedDay[dayKey] = (casesByResolvedDay[dayKey] || 0) + assignedCases;
+        casesByResolvedShift[shiftBucketKey] = (casesByResolvedShift[shiftBucketKey] || 0) + assignedCases;
       }
       return finalized;
     }).sort(function(a, b) { return b.labor_cost - a.labor_cost; });
@@ -468,6 +518,7 @@ export default async function handler(req, res) {
     summaryFinal.unique_work_order_count = Object.keys(summary.unique_work_orders || {}).length;
     summaryFinal.inferred_job_timing_rows = inferredTimingRows;
     summaryFinal.cross_shift_job_rows = crossShiftTimingRows;
+    summaryFinal.duplicate_match_suppressed_rows = duplicateMatchSuppressedRows;
     summaryFinal.labor_query_mode = laborQueryMode;
     summaryFinal.labor_rows_fetched = laborRows.length;
     summaryFinal.labor_rows_in_range = laborRowsInRange;
