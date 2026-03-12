@@ -5,6 +5,8 @@ import { safeNum, formatDescriptionForDisplay } from "../utils";
 import { Input } from "../components/ui/input";
 import TableShell from "../components/ui/table-shell";
 
+var MIN_TRUSTED_JOB_LABOR_HOURS = 0.25;
+
 function fmtMoneyWhole(value) {
   return "$" + Math.round(safeNum(value)).toLocaleString();
 }
@@ -135,16 +137,17 @@ export default function ProductionView({ productionSegments, laborActuals }) {
         laborByJobKey.byLineItem[lineItemKey] ||
         laborByJobKey.byLine[lineKey] ||
         null;
-      var payableHours = safeNum(labor && labor.payable_hours);
-      var productiveHours = safeNum(labor && labor.productive_hours);
-      var laborCost = safeNum(labor && labor.labor_cost);
+      var rawPayableHours = safeNum(labor && labor.payable_hours);
+      var payableHours = rawPayableHours >= MIN_TRUSTED_JOB_LABOR_HOURS ? rawPayableHours : 0;
+      var productiveHours = payableHours > 0 ? safeNum(labor && labor.productive_hours) : 0;
+      var laborCost = payableHours > 0 ? safeNum(labor && labor.labor_cost) : 0;
       return Object.assign({}, r, {
         laborPayableHours: payableHours,
         laborProductiveHours: productiveHours,
         laborCost: laborCost,
         casesPerPayableHour: payableHours > 0 ? (safeNum(r.unitsProduced) / payableHours) : 0,
         laborCostPerCase: safeNum(r.unitsProduced) > 0 ? (laborCost / safeNum(r.unitsProduced)) : 0,
-        hasLabor: !!labor
+        hasLabor: payableHours > 0
       });
     });
   }, [filteredJobRows, laborByJobKey]);
