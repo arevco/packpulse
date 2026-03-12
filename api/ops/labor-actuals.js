@@ -132,6 +132,44 @@ function textKey(value, fallback) {
   return s || fallback || "";
 }
 
+function getTimingBucket(map, key) {
+  if (!key) return null;
+  if (!map[key]) {
+    map[key] = {
+      dateWeights: {},
+      shiftWeights: {}
+    };
+  }
+  return map[key];
+}
+
+function addTimingWeight(bucket, date, shift, units) {
+  if (!bucket || !date) return;
+  var weight = units > 0 ? units : 1;
+  bucket.dateWeights[date] = (bucket.dateWeights[date] || 0) + weight;
+  if (shift) bucket.shiftWeights[shift] = (bucket.shiftWeights[shift] || 0) + weight;
+}
+
+function pickDominantKey(weightMap) {
+  var keys = Object.keys(weightMap || {});
+  if (!keys.length) return "";
+  return keys.sort(function(a, b) {
+    var diff = (weightMap[b] || 0) - (weightMap[a] || 0);
+    if (diff) return diff;
+    return String(a).localeCompare(String(b));
+  })[0] || "";
+}
+
+function finalizeTimingBucket(bucket) {
+  if (!bucket) return null;
+  var date = pickDominantKey(bucket.dateWeights);
+  var shiftKeys = Object.keys(bucket.shiftWeights || {});
+  var shift = "";
+  if (shiftKeys.length === 1) shift = shiftKeys[0];
+  else if (shiftKeys.length > 1) shift = "Cross-Shift Job";
+  return date ? { date: date, shift: shift || "Unassigned" } : null;
+}
+
 export default async function handler(req, res) {
   withCors(req, res, ["GET", "OPTIONS"]);
   if (req.method === "OPTIONS") return res.status(200).end();
@@ -216,6 +254,8 @@ export default async function handler(req, res) {
     var casesByJobDateLine = {};
     var casesByWoDateLine = {};
     var casesByItemDateShiftLine = {};
+    var jobTimingByJob = {};
+    var jobTimingByJobLine = {};
     productionRows.forEach(function(r) {
       var date = textKey(r.produced_date_et);
       var shift = textKey(r.shift_label, "Unassigned");
@@ -231,6 +271,8 @@ export default async function handler(req, res) {
       if (wo) casesByWoDateLine[wo + "|" + date + "|" + line] = (casesByWoDateLine[wo + "|" + date + "|" + line] || 0) + units;
       if (item) casesByItemDateShiftLine[item + "|" + date + "|" + shift + "|" + line] = (casesByItemDateShiftLine[item + "|" + date + "|" + shift + "|" + line] || 0) + units;
       if (job) {
+        addTimingWeight(getTimingBucket(jobTimingByJob, job), date, shift, units);
+        addTimingWeight(getTimingBucket(jobTimingByJobLine, job + "|" + line), date, shift, units);
         var jobKey = [job, date, shift, wo, line, item].join("|");
         casesByJob[jobKey] = (casesByJob[jobKey] || 0) + units;
         casesByJobDateLine[job + "|" + date + "|" + line] = (casesByJobDateLine[job + "|" + date + "|" + line] || 0) + units;
@@ -251,15 +293,20 @@ export default async function handler(req, res) {
     var byRoleMap = {};
     var byWoMap = {};
     var byJobMap = {};
+    var inferredTimingRows = 0;
+    var crossShiftTimingRows = 0;
 
     laborRows.forEach(function(r) {
-      var date = textKey(r.worked_date_et);
-      var shift = textKey(r.shift_label, "Unassigned");
+      var jobId = textKey(r.job_id);
       var line = textKey(r.line_name, "Unknown");
+      var timing = finalizeTimingBucket(jobTimingByJobLine[jobId + "|" + line]) || finalizeTimingBucket(jobTimingByJob[jobId]);
+      var date = textKey((timing && timing.date) || r.worked_date_et);
+      var shift = textKey((timing && timing.shift) || r.shift_label, "Unassigned");
+      if (timing && timing.date && timing.date !== textKey(r.worked_date_et)) inferredTimingRows += 1;
+      if (timing && timing.shift === "Cross-Shift Job") crossShiftTimingRows += 1;
       var roleKey = textKey(r.role_key || normalizeLaborRoleKey(r.role_name), "other");
       var roleName = textKey(r.role_name, roleKey);
       var workOrderCode = textKey(r.work_order_code);
-      var jobId = textKey(r.job_id);
       var itemCode = textKey(r.item_code);
       var itemDescription = textKey(r.item_description, itemCode || "--");
       var shiftKey = date + "|" + shift;
@@ -303,6 +350,8 @@ export default async function handler(req, res) {
     });
 
     var matchedCaseKeys = {};
+    var casesByResolvedShift = {};
+    var casesByResolvedDay = {};
     var byJob = Object.keys(byJobMap).map(function(key) {
       var row = byJobMap[key];
       var jobId = textKey(row.job_id);
@@ -334,11 +383,18 @@ export default async function handler(req, res) {
         cases = toNum(casesByItemDateShiftLine[resolutionKey]);
       }
       if (cases > 0 && resolutionKey) matchedCaseKeys[resolutionKey] = cases;
-      return finalizeMetricRow(row, cases);
+      var finalized = finalizeMetricRow(row, cases);
+      var dayKey = textKey(finalized.date_et);
+      var shiftBucketKey = dayKey + "|" + textKey(finalized.shift_label, "Unassigned");
+      if (dayKey && cases > 0) {
+        casesByResolvedDay[dayKey] = (casesByResolvedDay[dayKey] || 0) + cases;
+        casesByResolvedShift[shiftBucketKey] = (casesByResolvedShift[shiftBucketKey] || 0) + cases;
+      }
+      return finalized;
     }).sort(function(a, b) { return b.labor_cost - a.labor_cost; });
 
     var byShift = Object.keys(byShiftMap).map(function(key) {
-      return finalizeMetricRow(byShiftMap[key], toNum(casesByShift[key]));
+      return finalizeMetricRow(byShiftMap[key], toNum(casesByResolvedShift[key]));
     }).sort(function(a, b) {
       if (a.date_et !== b.date_et) return String(b.date_et || "").localeCompare(String(a.date_et || ""));
       return String(a.shift_label || "").localeCompare(String(b.shift_label || ""));
@@ -359,10 +415,7 @@ export default async function handler(req, res) {
     }).sort(function(a, b) { return b.labor_cost - a.labor_cost; });
 
     var byDay = Object.keys(byDayMap).map(function(key) {
-      var dayCases = byShift
-        .filter(function(r) { return String(r.date_et || "") === key; })
-        .reduce(function(sum, r) { return sum + toNum(r.cases_produced); }, 0);
-      return finalizeMetricRow(byDayMap[key], dayCases);
+      return finalizeMetricRow(byDayMap[key], toNum(casesByResolvedDay[key]));
     }).sort(function(a, b) { return String(b.date_et || "").localeCompare(String(a.date_et || "")); });
 
     var matchedCases = Object.keys(matchedCaseKeys).reduce(function(sum, key) {
@@ -375,6 +428,8 @@ export default async function handler(req, res) {
     summaryFinal.coverage_pct = totalProductionCases > 0 ? (matchedCases / totalProductionCases) : 0;
     summaryFinal.unique_job_count = Object.keys(summary.unique_jobs || {}).length;
     summaryFinal.unique_work_order_count = Object.keys(summary.unique_work_orders || {}).length;
+    summaryFinal.inferred_job_timing_rows = inferredTimingRows;
+    summaryFinal.cross_shift_job_rows = crossShiftTimingRows;
     summaryFinal.days_with_labor = byDay.length;
     summaryFinal.latest_date = byDay.length ? byDay[0].date_et : null;
     delete summaryFinal.unique_jobs;

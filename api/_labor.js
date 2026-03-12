@@ -72,20 +72,42 @@ function easternWallClockToDate(year, monthIndex, day, hour24, minute, second) {
 function parseNulogyWallClock(value) {
   var raw = String(value || "").trim();
   if (!raw) return null;
-  var m = raw.match(/^(\d{4})-([A-Za-z]{3})-(\d{1,2})[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AP]M)$/i);
-  if (!m) return null;
-  var year = parseInt(m[1], 10);
-  var monthIndex = MONTH_INDEX[String(m[2] || "").toLowerCase()];
-  var day = parseInt(m[3], 10);
-  var hour = parseInt(m[4], 10);
-  var minute = parseInt(m[5], 10);
-  var second = parseInt(m[6] || "0", 10);
-  var meridiem = String(m[7] || "").toUpperCase();
-  if (!Number.isFinite(year) || monthIndex == null || !Number.isFinite(day)) return null;
-  if (meridiem === "PM" && hour < 12) hour += 12;
-  if (meridiem === "AM" && hour === 12) hour = 0;
-  var parsed = easternWallClockToDate(year, monthIndex, day, hour, minute, second);
-  return isNaN(parsed) ? null : parsed;
+  var patterns = [
+    /^(\d{4})-([A-Za-z]{3})-(\d{1,2})[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AP]M)(?:\s+[A-Z]{2,5}|[+-]\d{2}:?\d{2})?$/i,
+    /^(\d{4})-([A-Za-z]{3})-(\d{1,2})[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s+[A-Z]{2,5}|[+-]\d{2}:?\d{2})?$/i,
+    /^(\d{4})-(\d{2})-(\d{2})[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AP]M)?(?:\s+[A-Z]{2,5}|[+-]\d{2}:?\d{2})?$/i,
+    /^(\d{1,2})\/(\d{1,2})\/(\d{4})[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AP]M)?$/i
+  ];
+  for (var p = 0; p < patterns.length; p++) {
+    var m = raw.match(patterns[p]);
+    if (!m) continue;
+    var year = 0;
+    var monthIndex = 0;
+    var day = 0;
+    if (p === 0 || p === 1) {
+      year = parseInt(m[1], 10);
+      monthIndex = MONTH_INDEX[String(m[2] || "").toLowerCase()];
+      day = parseInt(m[3], 10);
+    } else if (p === 2) {
+      year = parseInt(m[1], 10);
+      monthIndex = parseInt(m[2], 10) - 1;
+      day = parseInt(m[3], 10);
+    } else {
+      monthIndex = parseInt(m[1], 10) - 1;
+      day = parseInt(m[2], 10);
+      year = parseInt(m[3], 10);
+    }
+    var hour = parseInt(m[4], 10);
+    var minute = parseInt(m[5], 10);
+    var second = parseInt(m[6] || "0", 10);
+    var meridiem = String(m[7] || "").toUpperCase();
+    if (!Number.isFinite(year) || !Number.isFinite(monthIndex) || monthIndex < 0 || monthIndex > 11 || !Number.isFinite(day)) continue;
+    if (meridiem === "PM" && hour < 12) hour += 12;
+    if (meridiem === "AM" && hour === 12) hour = 0;
+    var parsed = easternWallClockToDate(year, monthIndex, day, hour, minute, second);
+    if (!isNaN(parsed)) return parsed;
+  }
+  return null;
 }
 
 function parseDateLoose(value) {
@@ -130,6 +152,46 @@ export function pickFieldLoose(row, keys) {
     if (wanted[normalizeKey(rowKey)]) return row[rowKey];
   }
   return "";
+}
+
+function scoreTimestampFieldName(name) {
+  var key = normalizeKey(name);
+  if (!key) return -1;
+  var score = 0;
+  if (key.includes("clockin")) score += 12;
+  if (key.includes("clockout")) score += 12;
+  if (key.includes("clockedin")) score += 12;
+  if (key.includes("clockedout")) score += 12;
+  if (key.includes("start")) score += 10;
+  if (key.includes("end")) score += 10;
+  if (key.includes("workedat")) score += 10;
+  if (key.includes("workedon")) score += 9;
+  if (key.includes("workdate")) score += 9;
+  if (key === "date" || key.endsWith("date")) score += 8;
+  if (key.includes("time")) score += 6;
+  if (key.includes("datetime")) score += 6;
+  if (key.includes("createdat") || key.includes("updatedat")) score += 3;
+  return score;
+}
+
+function pickBestTimestampValue(row, preferredKeys) {
+  var direct = pickFieldLoose(row, preferredKeys || []);
+  if (direct && parseDateLoose(direct)) return direct;
+  if (!row || typeof row !== "object") return "";
+  var bestKey = "";
+  var bestScore = -1;
+  var rowKeys = Object.keys(row);
+  for (var i = 0; i < rowKeys.length; i++) {
+    var key = rowKeys[i];
+    var value = row[key];
+    if (!value || !parseDateLoose(value)) continue;
+    var score = scoreTimestampFieldName(key);
+    if (score > bestScore) {
+      bestScore = score;
+      bestKey = key;
+    }
+  }
+  return bestKey ? row[bestKey] : "";
 }
 
 export function toIso(value) {
@@ -207,25 +269,43 @@ export function buildLaborEvents(rows, siteId, syncedAt, updatedBy) {
     var durationHours = parseDurationHours(pickFieldLoose(row, ["Duration", "duration"]));
     if (!(payableHours > 0) && !(productiveHours > 0) && !(durationHours > 0)) return;
 
-    var clockInRaw = pickFieldLoose(row, [
+    var clockInRaw = pickBestTimestampValue(row, [
       "Clock in time",
+      "Clock In Time",
       "clock_in_time",
       "Clock In At",
       "clock_in_at",
       "Clocked In At",
       "clocked_in_at",
+      "Clocked In Time",
+      "clocked_in_time",
       "Started At",
-      "started_at"
+      "started_at",
+      "Start Time",
+      "start_time",
+      "Start At",
+      "start_at",
+      "Worked At",
+      "worked_at",
+      "Work Date",
+      "work_date"
     ]);
-    var clockOutRaw = pickFieldLoose(row, [
+    var clockOutRaw = pickBestTimestampValue(row, [
       "Clock out time",
+      "Clock Out Time",
       "clock_out_time",
       "Clock Out At",
       "clock_out_at",
       "Clocked Out At",
       "clocked_out_at",
+      "Clocked Out Time",
+      "clocked_out_time",
       "Ended At",
-      "ended_at"
+      "ended_at",
+      "End Time",
+      "end_time",
+      "End At",
+      "end_at"
     ]);
     var clockInIso = toIso(clockInRaw);
     var clockOutIso = toIso(clockOutRaw);
