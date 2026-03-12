@@ -842,7 +842,6 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
         Batch
       </Button>
       <Button onClick={function() { setFilterShared(function(v) { return !v; }); }} variant={filterShared ? "active" : "outline"} size="default" className="shrink-0">Shared</Button>
-      <Button onClick={function() { if (typeof navigator !== "undefined" && navigator.clipboard) navigator.clipboard.writeText(window.location.href); }} variant="outline" size="default" className="shrink-0">Copy Link</Button>
       <Button onClick={exportCSV} variant="outline" size="default" className="shrink-0">CSV</Button>
       <Button onClick={exportPDF} variant="outline" size="default" className="shrink-0">PDF</Button>
     </div>
