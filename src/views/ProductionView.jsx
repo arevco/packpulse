@@ -8,7 +8,14 @@ import TableShell from "../components/ui/table-shell";
 var MIN_TRUSTED_JOB_LABOR_HOURS = 0.25;
 
 function fmtMoneyWhole(value) {
-  return "$" + Math.round(safeNum(value)).toLocaleString();
+  var rounded = Math.round(safeNum(value));
+  if (rounded < 0) return "-$" + Math.abs(rounded).toLocaleString();
+  return "$" + rounded.toLocaleString();
+}
+
+function fmtPct(value) {
+  if (value == null || !Number.isFinite(value)) return "--";
+  return (safeNum(value) * 100).toFixed(1) + "%";
 }
 
 function normKey(value) {
@@ -145,12 +152,16 @@ export default function ProductionView({ productionSegments, laborActuals, resol
       var revenueMatch = typeof resolveRevenueForRow === "function" ? resolveRevenueForRow(r.itemCode, r.date) : null;
       var revenuePerCase = safeNum(revenueMatch && revenueMatch.value);
       var revenue = revenuePerCase > 0 && unitsProduced > 0 ? (unitsProduced * revenuePerCase) : 0;
+      var laborMargin = revenue - laborCost;
+      var laborMarginPct = revenue > 0 ? (laborMargin / revenue) : null;
       return Object.assign({}, r, {
         laborPayableHours: payableHours,
         laborProductiveHours: productiveHours,
         laborCost: laborCost,
         revenue: revenue,
         revenueCoveredUnits: revenue > 0 ? unitsProduced : 0,
+        laborMargin: laborMargin,
+        laborMarginPct: laborMarginPct,
         casesPerPayableHour: payableHours > 0 ? (unitsProduced / payableHours) : 0,
         laborCostPerCase: unitsProduced > 0 ? (laborCost / unitsProduced) : 0,
         hasLabor: payableHours > 0,
@@ -210,6 +221,7 @@ export default function ProductionView({ productionSegments, laborActuals, resol
           laborCost: 0,
           revenue: 0,
           revenueCoveredUnits: 0,
+          laborMargin: 0,
           shifts: {}
         };
       }
@@ -218,6 +230,7 @@ export default function ProductionView({ productionSegments, laborActuals, resol
       map[key].laborCost += safeNum(r.laborCost);
       map[key].revenue += safeNum(r.revenue);
       map[key].revenueCoveredUnits += safeNum(r.revenueCoveredUnits);
+      map[key].laborMargin += safeNum(r.laborMargin);
       map[key].shifts[String(r.shift || "Unassigned")] = true;
     });
     return Object.values(map).map(function(r) {
@@ -225,7 +238,8 @@ export default function ProductionView({ productionSegments, laborActuals, resol
         shiftCount: Object.keys(r.shifts).length,
         casesPerPayableHour: r.laborPayableHours > 0 ? (r.unitsProduced / r.laborPayableHours) : 0,
         laborCostPerCase: r.unitsProduced > 0 ? (r.laborCost / r.unitsProduced) : 0,
-        revenueCoveragePct: r.unitsProduced > 0 ? Math.round((r.revenueCoveredUnits / r.unitsProduced) * 100) : 0
+        revenueCoveragePct: r.unitsProduced > 0 ? Math.round((r.revenueCoveredUnits / r.unitsProduced) * 100) : 0,
+        laborMarginPct: r.revenue > 0 ? (r.laborMargin / r.revenue) : null
       });
     }).sort(function(a, b) { return b.unitsProduced - a.unitsProduced; });
   }, [jobsWithLabor]);
@@ -369,6 +383,8 @@ export default function ProductionView({ productionSegments, laborActuals, resol
                   <th style={thS}>Units</th>
                   <th style={thS}>Revenue</th>
                   <th style={thS}>Labor</th>
+                  <th style={thS}>Labor Margin</th>
+                  <th style={thS}>Margin %</th>
                   <th style={thS}>Cases/LH</th>
                 </tr>
               </thead>
@@ -390,11 +406,13 @@ export default function ProductionView({ productionSegments, laborActuals, resol
                         ) : null}
                       </td>
                       <td style={tdM}>{r.laborCost > 0 ? fmtMoneyWhole(r.laborCost) : "--"}</td>
+                      <td style={tdM}>{r.revenue > 0 ? fmtMoneyWhole(r.laborMargin) : "--"}</td>
+                      <td style={tdM}>{r.revenue > 0 ? fmtPct(r.laborMarginPct) : "--"}</td>
                       <td style={tdM}>{r.casesPerPayableHour > 0 ? r.casesPerPayableHour.toFixed(1) : "--"}</td>
                     </tr>
                   );
                 })}
-                {!jobRollup.length && <tr><td colSpan={7} style={{ padding:20, textAlign:"center", color:C.dim }}>No jobs for current filters.</td></tr>}
+                {!jobRollup.length && <tr><td colSpan={9} style={{ padding:20, textAlign:"center", color:C.dim }}>No jobs for current filters.</td></tr>}
               </tbody>
             </table>
           </TableShell>
@@ -418,6 +436,8 @@ export default function ProductionView({ productionSegments, laborActuals, resol
             <th style={thS}>Revenue</th>
             <th style={thS}>Labor Hrs</th>
             <th style={thS}>Labor Cost</th>
+            <th style={thS}>Labor Margin</th>
+            <th style={thS}>Margin %</th>
           </tr></thead>
           <tbody>
             {jobsWithLabor.slice(0, 100).map(function(r, i) {
@@ -432,10 +452,12 @@ export default function ProductionView({ productionSegments, laborActuals, resol
                 <td style={tdM}>{r.revenue > 0 ? fmtMoneyWhole(r.revenue) : "--"}</td>
                 <td style={tdM}>{r.laborPayableHours > 0 ? r.laborPayableHours.toFixed(1) : "--"}</td>
                 <td style={tdM}>{r.laborCost > 0 ? fmtMoneyWhole(r.laborCost) : "--"}</td>
+                <td style={tdM}>{r.revenue > 0 ? fmtMoneyWhole(r.laborMargin) : "--"}</td>
+                <td style={tdM}>{r.revenue > 0 ? fmtPct(r.laborMarginPct) : "--"}</td>
               </tr>;
             })}
             {jobsWithLabor.length === 0 && (
-              <tr><td colSpan={10} style={{ padding:24, textAlign:"center", color:C.dim }}>No production rows for the selected day/filters.</td></tr>
+              <tr><td colSpan={12} style={{ padding:24, textAlign:"center", color:C.dim }}>No production rows for the selected day/filters.</td></tr>
             )}
           </tbody>
         </table>
