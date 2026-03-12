@@ -44,6 +44,31 @@ function normalizeItemCode(value) {
   return normalizeStr(String(value || "").trim());
 }
 
+function pickItemMasterCostValue(row) {
+  if (!row || typeof row !== "object") return 0;
+  var keys = [
+    "Cost Per Unit", "cost_per_unit", "Unit Cost", "unit_cost",
+    "Standard Cost", "standard_cost", "Cost Per Base Unit", "cost_per_base_unit"
+  ];
+  for (var i = 0; i < keys.length; i += 1) {
+    var key = keys[i];
+    if (Object.prototype.hasOwnProperty.call(row, key) && row[key] != null && row[key] !== "") {
+      return safeNum(row[key]);
+    }
+  }
+  var rowKeys = Object.keys(row);
+  for (var j = 0; j < rowKeys.length; j += 1) {
+    var rk = rowKeys[j];
+    var nk = normalizeStr(rk || "");
+    var hasCostToken = nk.includes("cost") || nk.includes("price");
+    var looksLikeUnitish = nk.includes("unit") || nk.includes("base") || nk.includes("standard") || nk.includes("average") || nk.includes("avg") || nk === "cost" || nk === "price";
+    if (hasCostToken && looksLikeUnitish && !nk.includes("total") && !nk.includes("extended") && !nk.includes("amount")) {
+      return safeNum(row[rk]);
+    }
+  }
+  return 0;
+}
+
 function businessDaysBetween(fromDate, toDate) {
   var from = new Date(fromDate);
   var to = new Date(toDate);
@@ -874,6 +899,18 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     return map;
   }, [opsSkuTargets]);
 
+  var itemMasterValueBySku = useMemo(function() {
+    var map = {};
+    (Array.isArray(itemMaster) ? itemMaster : []).forEach(function(row) {
+      var sku = normalizeItemCode((row && (row["Item Code"] || row.Code || row.item_code || row.code)) || "");
+      if (!sku) return;
+      var value = pickItemMasterCostValue(row);
+      if (!(value > 0)) return;
+      if (!map[sku] || value > map[sku]) map[sku] = value;
+    });
+    return map;
+  }, [itemMaster]);
+
   var revenuePerCaseForRow = function(itemCode, dateIso) {
     var sku = normalizeItemCode(itemCode);
     if (!sku) return { value: 0, source: "missing" };
@@ -890,6 +927,8 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       if (safeNum(row.revenue_per_case) > best) best = safeNum(row.revenue_per_case);
     }
     if (best > 0) return { value: best, source: "pricing" };
+    var itemMasterValue = safeNum(itemMasterValueBySku[sku]);
+    if (itemMasterValue > 0) return { value: itemMasterValue, source: "item_master_cost_per_unit" };
     return { value: 0, source: "missing" };
   };
 
@@ -1167,7 +1206,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       presets: presetCards,
       selected: selectedSummary
     };
-  }, [effectiveTrends, effectiveBreakdown, commandBoardPreset, forecastPlans, revenueTargetsBySku]);
+  }, [effectiveTrends, effectiveBreakdown, commandBoardPreset, forecastPlans, revenueTargetsBySku, itemMasterValueBySku]);
 
   var shiftPlanVsActual = useMemo(function() {
     var rows = (filteredTrends.byShift || []).slice();
@@ -1749,7 +1788,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                 <span>
                   {commandBoard.selected.revenuePricedUnits > 0
                     ? ("Revenue: " + fmtMoney(commandBoard.selected.revenueActual)
-                      + (commandBoard.selected.revenueCoveragePct < 100 ? " · " + commandBoard.selected.revenueCoveragePct + "% priced" : "")
+                      + (commandBoard.selected.revenueCoveragePct < 100 ? " · " + commandBoard.selected.revenueCoveragePct + "% covered" : "")
                       + (commandBoard.selected.missingRevenueSkuCount > 0 ? " · " + fmtMissingRevenueSkuCount(commandBoard.selected.missingRevenueSkuCount) : ""))
                     : (commandBoard.selected.missingRevenueSkuCount > 0
                       ? ("Revenue unavailable · " + fmtMissingRevenueSkuCount(commandBoard.selected.missingRevenueSkuCount))
@@ -1796,7 +1835,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                       className="mt-1 text-xs text-[rgb(var(--muted))]"
                       title={card.revenuePricedUnits > 0
                         ? ("Revenue " + fmtMoney(card.revenueActual)
-                          + (card.revenueCoveragePct < 100 ? " · " + card.revenueCoveragePct + "% of units priced" : "")
+                          + (card.revenueCoveragePct < 100 ? " · " + card.revenueCoveragePct + "% of units covered" : "")
                           + (missingSkuLabel ? " · " + missingSkuLabel : "")
                           + (missingSkuNames.length ? " · Missing: " + missingSkuNames.join(", ") : ""))
                         : (missingSkuLabel
@@ -1804,7 +1843,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                           : "Revenue unavailable for this window")}
                     >
                       {card.revenuePricedUnits > 0 ? ("Rev " + fmtMoneyCompact(card.revenueActual)) : "Rev --"}
-                      {card.revenuePricedUnits > 0 && card.revenueCoveragePct < 100 ? " · " + card.revenueCoveragePct + "% priced" : ""}
+                      {card.revenuePricedUnits > 0 && card.revenueCoveragePct < 100 ? " · " + card.revenueCoveragePct + "% cov" : ""}
                       {card.missingRevenueSkuCount > 0 ? " · " + card.missingRevenueSkuCount + " miss" : ""}
                     </div>
                     <div className={"mt-2 flex items-center gap-1.5 text-[11px] font-medium " + trendTone}>
