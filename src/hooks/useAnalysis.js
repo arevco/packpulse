@@ -1332,7 +1332,10 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       var dispatchRec = {
         id: "R" + (nextId++),
         priorityScore: Math.round(dispatchScore * 1.3),
+        basePriorityScore: Math.round(dispatchScore * 1.3),
         woNum: wo.woNum,
+        dueDate: wo.dueDate,
+        skuKey: normalizeStr(wo.productSkuRaw || wo.productSku || ""),
         owner: "Planner / Supervisor",
         action: action,
         why: "WO " + wo.woNum + " \u2022 " + whyBits.join(" \u2022 "),
@@ -1462,8 +1465,72 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       var p = r.priorityScore >= 120 ? "P1" : r.priorityScore >= 85 ? "P2" : "P3";
       return Object.assign({}, r, { priority:p });
     };
+    var compareDispatchDueAsc = function(a, b) {
+      var aDate = a && a.dueDate ? new Date(a.dueDate) : null;
+      var bDate = b && b.dueDate ? new Date(b.dueDate) : null;
+      var aMissing = !aDate || isNaN(aDate);
+      var bMissing = !bDate || isNaN(bDate);
+      if (aMissing && !bMissing) return 1;
+      if (!aMissing && bMissing) return -1;
+      if (!aMissing && !bMissing) {
+        var delta = aDate.getTime() - bDate.getTime();
+        if (delta !== 0) return delta;
+      }
+      return String(a && a.woNum || "").localeCompare(String(b && b.woNum || ""), undefined, { numeric:true, sensitivity:"base" });
+    };
+    var rankedDispatchQueue = (function() {
+      var grouped = {};
+      dispatchQueue.forEach(function(row) {
+        var key = normalizeStr(row.skuKey || "");
+        if (!key) key = "__single__|" + String(row.woNum || "");
+        if (!grouped[key]) grouped[key] = [];
+        grouped[key].push(row);
+      });
+      var families = Object.keys(grouped).map(function(key) {
+        var rows = grouped[key].slice().sort(function(a, b) {
+          var dueDelta = compareDispatchDueAsc(a, b);
+          if (dueDelta !== 0) return dueDelta;
+          return Number(b.basePriorityScore || b.priorityScore || 0) - Number(a.basePriorityScore || a.priorityScore || 0);
+        });
+        var familySize = rows.length;
+        var familyAnchorScore = rows.reduce(function(maxScore, row) {
+          return Math.max(maxScore, Number(row.basePriorityScore || row.priorityScore || 0));
+        }, 0) + (familySize > 1 ? Math.min(10, (familySize - 1) * 5) : 0);
+        var earliestDate = rows[0] && rows[0].dueDate ? new Date(rows[0].dueDate) : null;
+        return {
+          key: key,
+          rows: rows,
+          familySize: familySize,
+          familyAnchorScore: familyAnchorScore,
+          earliestTs: earliestDate && !isNaN(earliestDate) ? earliestDate.getTime() : Number.POSITIVE_INFINITY
+        };
+      }).sort(function(a, b) {
+        if (b.familyAnchorScore !== a.familyAnchorScore) return b.familyAnchorScore - a.familyAnchorScore;
+        if (a.earliestTs !== b.earliestTs) return a.earliestTs - b.earliestTs;
+        return String(a.key || "").localeCompare(String(b.key || ""));
+      });
+      var flattened = [];
+      families.forEach(function(family) {
+        family.rows.forEach(function(row, idx) {
+          var adjustedScore = Number(row.basePriorityScore || row.priorityScore || 0);
+          if (family.familySize > 1) {
+            adjustedScore = Math.max(1, Math.round(family.familyAnchorScore - (idx * 3)));
+          }
+          var why = row.why || "";
+          if (family.familySize > 1) {
+            why += " \u2022 Same SKU seq " + (idx + 1) + "/" + family.familySize;
+          }
+          flattened.push(Object.assign({}, row, {
+            priorityScore: adjustedScore,
+            familySequence: idx + 1,
+            familySize: family.familySize,
+            why: why
+          }));
+        });
+      });
+      return flattened.map(withPriority);
+    })();
     var topRecommendations = recs.slice(0, 30).map(withPriority);
-    var rankedDispatchQueue = dispatchQueue.slice().sort(function(a, b) { return b.priorityScore - a.priorityScore; }).map(withPriority);
     return { recommendations: topRecommendations, dispatchQueue: rankedDispatchQueue };
   }, [analysis, inboundCoverage, boms, edrData, dockData]);
 
