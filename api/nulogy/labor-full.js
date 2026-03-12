@@ -8,6 +8,7 @@ import { getAuthenticatedUser, withCors } from "../ops/_common.js";
 const NULOGY_URL = process.env.NULOGY_URL || "https://app.nulogy.net";
 const POLL_INTERVAL_MS = 2500;
 const MAX_POLLS = 90;
+const STATUS_WINDOW_POLLS = 3;
 
 function sleep(ms) {
   return new Promise(function(resolve) { return setTimeout(resolve, ms); });
@@ -105,6 +106,29 @@ async function pollToCompleted(auth, statusUrl) {
   return { ok: false, error: "Timed out waiting for Nulogy report completion." };
 }
 
+async function pollForWindow(auth, statusUrl, maxPolls) {
+  for (var i = 0; i < Math.max(1, maxPolls || 1); i++) {
+    await sleep(POLL_INTERVAL_MS);
+    var res = await fetch(statusUrl, { headers: { "Authorization": auth } });
+    var text = await res.text();
+    var payload = {};
+    try { payload = JSON.parse(text); } catch (e) { payload = {}; }
+    if (!res.ok) {
+      return { ok: false, error: "Status poll failed (" + res.status + "): " + text.slice(0, 300) };
+    }
+    if (payload.status === "COMPLETED" && payload.download_url) {
+      return { ok: true, status: "COMPLETED", downloadUrl: payload.download_url, payload: payload };
+    }
+    if (payload.status === "FAILED" || payload.status === "ERROR") {
+      return { ok: false, error: "Nulogy report failed: " + text.slice(0, 300), status: payload.status };
+    }
+    if (i === maxPolls - 1) {
+      return { ok: true, status: payload.status || "PENDING", payload: payload };
+    }
+  }
+  return { ok: true, status: "PENDING", payload: {} };
+}
+
 function parseCSV(text) {
   var lines = String(text || "").split("\n");
   if (lines.length < 2) return [];
@@ -153,6 +177,74 @@ function parseCSVLine(line) {
   return result;
 }
 
+function isSafeNulogyUrl(url) {
+  var value = String(url || "").trim();
+  if (!value) return false;
+  return value.indexOf(NULOGY_URL + "/") === 0;
+}
+
+function getOrigin(req) {
+  var proto = req.headers["x-forwarded-proto"] || "https";
+  var host = req.headers["x-forwarded-host"] || req.headers.host || "";
+  return proto + "://" + host;
+}
+
+function buildSelfUrl(req, params) {
+  var usp = new URLSearchParams();
+  Object.keys(params || {}).forEach(function(key) {
+    var value = params[key];
+    if (value == null || value === "") return;
+    usp.set(key, String(value));
+  });
+  return getOrigin(req) + "/api/nulogy/labor-full" + (usp.toString() ? ("?" + usp.toString()) : "");
+}
+
+async function downloadLaborResult(auth, downloadUrl, req, reportName, columnsUsed, createAttempts) {
+  if (!isSafeNulogyUrl(downloadUrl)) {
+    return {
+      statusCode: 400,
+      body: { error: "Unsafe or invalid Nulogy download URL." }
+    };
+  }
+  var csvRes = await fetch(downloadUrl, { headers: { "Authorization": auth } });
+  var csv = await csvRes.text();
+  if (!csvRes.ok) {
+    return {
+      statusCode: 502,
+      body: { error: "Failed to download CSV: " + csv.slice(0, 300) }
+    };
+  }
+
+  var format = String(req.query.format || "").trim().toLowerCase();
+  if (format === "csv" || String(req.query.download || "") === "1") {
+    return {
+      statusCode: 200,
+      csv: csv
+    };
+  }
+
+  var rows = parseCSV(csv);
+  return {
+    statusCode: 200,
+    body: {
+      ok: true,
+      stage: "completed",
+      report: reportName || "",
+      columnsUsed: columnsUsed || [],
+      rowCount: rows.length,
+      columns: rows.length ? Object.keys(rows[0]) : [],
+      sampleRows: rows.slice(0, 10),
+      downloadUrl: buildSelfUrl(req, {
+        mode: "download",
+        downloadUrl: downloadUrl,
+        report: reportName || "",
+        columnsUsed: Array.isArray(columnsUsed) && columnsUsed.length ? JSON.stringify(columnsUsed) : ""
+      }),
+      attempts: createAttempts || []
+    }
+  };
+}
+
 export default async function handler(req, res) {
   withCors(req, res, ["GET", "OPTIONS"]);
   if (req.method === "OPTIONS") return res.status(200).end();
@@ -168,6 +260,62 @@ export default async function handler(req, res) {
     if (!nulogyUser || !pass) return res.status(500).json({ error: "Nulogy credentials not configured." });
 
     var auth = "Basic " + Buffer.from(nulogyUser + ":" + pass).toString("base64");
+    var mode = String(req.query.mode || "").trim().toLowerCase();
+    var existingStatusUrl = String(req.query.statusUrl || "").trim();
+    var existingDownloadUrl = String(req.query.downloadUrl || "").trim();
+    var existingReport = String(req.query.report || "").trim();
+    var existingColumnsUsed = [];
+    if (req.query.columnsUsed) {
+      try { existingColumnsUsed = JSON.parse(String(req.query.columnsUsed)); } catch (e) { existingColumnsUsed = []; }
+    }
+
+    if (mode === "download" || existingDownloadUrl) {
+      var dl = await downloadLaborResult(auth, existingDownloadUrl, req, existingReport, existingColumnsUsed, []);
+      if (dl.csv != null) {
+        res.setHeader("Content-Type", "text/csv; charset=utf-8");
+        res.setHeader("Content-Disposition", 'attachment; filename="' + defaultFileName() + '"');
+        return res.status(dl.statusCode).send(dl.csv);
+      }
+      return res.status(dl.statusCode).json(dl.body);
+    }
+
+    if (mode === "status" || existingStatusUrl) {
+      if (!isSafeNulogyUrl(existingStatusUrl)) {
+        return res.status(400).json({ error: "Unsafe or invalid Nulogy status URL." });
+      }
+      var statusResult = await pollForWindow(auth, existingStatusUrl, STATUS_WINDOW_POLLS);
+      if (!statusResult.ok) {
+        return res.status(502).json({
+          error: statusResult.error,
+          report: existingReport || "",
+          columnsUsed: existingColumnsUsed
+        });
+      }
+      if (statusResult.status === "COMPLETED" && statusResult.downloadUrl) {
+        var complete = await downloadLaborResult(auth, statusResult.downloadUrl, req, existingReport, existingColumnsUsed, []);
+        if (complete.csv != null) {
+          res.setHeader("Content-Type", "text/csv; charset=utf-8");
+          res.setHeader("Content-Disposition", 'attachment; filename="' + defaultFileName() + '"');
+          return res.status(complete.statusCode).send(complete.csv);
+        }
+        return res.status(complete.statusCode).json(complete.body);
+      }
+      return res.status(202).json({
+        ok: true,
+        stage: "pending",
+        report: existingReport || "",
+        columnsUsed: existingColumnsUsed,
+        status: statusResult.status || "PENDING",
+        statusUrl: buildSelfUrl(req, {
+          mode: "status",
+          statusUrl: existingStatusUrl,
+          report: existingReport || "",
+          columnsUsed: Array.isArray(existingColumnsUsed) && existingColumnsUsed.length ? JSON.stringify(existingColumnsUsed) : ""
+        }),
+        note: "Nulogy labor report is still generating. Poll the status URL again."
+      });
+    }
+
     var reportCandidates = getReportCandidates(req);
     var columnSets = getColumnSets();
     var createAttempts = [];
@@ -234,39 +382,19 @@ export default async function handler(req, res) {
       });
     }
 
-    var completed = await pollToCompleted(auth, started.statusUrl);
-    if (!completed.ok) {
-      return res.status(502).json({
-        error: completed.error,
-        report: started.report,
-        columnsUsed: started.columnsUsed,
-        statusUrl: started.statusUrl,
-        attempts: createAttempts
-      });
-    }
-
-    var csvRes = await fetch(completed.downloadUrl, { headers: { "Authorization": auth } });
-    var csv = await csvRes.text();
-    if (!csvRes.ok) {
-      return res.status(502).json({ error: "Failed to download CSV: " + csv.slice(0, 300) });
-    }
-
-    var format = String(req.query.format || "").trim().toLowerCase();
-    if (format === "csv" || String(req.query.download || "") === "1") {
-      res.setHeader("Content-Type", "text/csv; charset=utf-8");
-      res.setHeader("Content-Disposition", 'attachment; filename="' + defaultFileName() + '"');
-      return res.status(200).send(csv);
-    }
-
-    var rows = parseCSV(csv);
-    return res.status(200).json({
+    return res.status(202).json({
       ok: true,
+      stage: "started",
       report: started.report,
       columnsUsed: started.columnsUsed,
-      rowCount: rows.length,
-      columns: rows.length ? Object.keys(rows[0]) : [],
-      sampleRows: rows.slice(0, 10),
-      attempts: createAttempts
+      statusUrl: buildSelfUrl(req, {
+        mode: "status",
+        statusUrl: started.statusUrl,
+        report: started.report,
+        columnsUsed: Array.isArray(started.columnsUsed) && started.columnsUsed.length ? JSON.stringify(started.columnsUsed) : ""
+      }),
+      attempts: createAttempts,
+      note: "Nulogy labor report started. Poll the returned statusUrl to continue."
     });
   } catch (err) {
     Sentry.captureException(err);
