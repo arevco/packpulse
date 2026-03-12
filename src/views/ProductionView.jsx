@@ -358,8 +358,8 @@ export default function ProductionView({ productionSegments, laborActuals, resol
       <div className="mb-3 grid gap-3 xl:grid-cols-2">
         <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-3">
           <div className="mb-2 text-sm font-semibold">Line Load</div>
-          <TableShell>
-            <table style={{ width:"100%", borderCollapse:"collapse" }}>
+          <TableShell className="overflow-x-auto overflow-y-hidden">
+            <table style={{ width:"100%", minWidth:980, borderCollapse:"collapse" }}>
               <thead>
                 <tr style={{ background:C.raised }}>
                   <th style={thS}>Line</th>
