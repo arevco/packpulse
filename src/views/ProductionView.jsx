@@ -7,6 +7,7 @@ import TableShell from "../components/ui/table-shell";
 
 var MIN_TRUSTED_JOB_LABOR_HOURS = 0.25;
 var MAX_TOP_JOBS_PER_LINE = 3;
+var SHIFT_MINUTES = 480;
 
 function fmtMoneyWhole(value) {
   var rounded = Math.round(safeNum(value));
@@ -27,6 +28,10 @@ function mergeLaborMetric(target, row) {
   target.payable_hours += safeNum(row && row.payable_hours);
   target.productive_hours += safeNum(row && row.productive_hours);
   target.labor_cost += safeNum(row && row.labor_cost);
+}
+
+function hasAssignedShift(shiftLabel) {
+  return !!shiftLabel && String(shiftLabel) !== "Unassigned";
 }
 
 export default function ProductionView({ productionSegments, laborActuals, resolveRevenueForRow }) {
@@ -156,6 +161,7 @@ export default function ProductionView({ productionSegments, laborActuals, resol
       var revenue = revenuePerCase > 0 && unitsProduced > 0 ? (unitsProduced * revenuePerCase) : 0;
       var laborMargin = revenue - laborCost;
       var laborMarginPct = revenue > 0 ? (laborMargin / revenue) : null;
+      var shiftMinutes = hasAssignedShift(r.shift) ? SHIFT_MINUTES : 0;
       return Object.assign({}, r, {
         laborPayableHours: payableHours,
         laborProductiveHours: productiveHours,
@@ -164,6 +170,8 @@ export default function ProductionView({ productionSegments, laborActuals, resol
         revenueCoveredUnits: revenue > 0 ? unitsProduced : 0,
         laborMargin: laborMargin,
         laborMarginPct: laborMarginPct,
+        shiftMinutes: shiftMinutes,
+        casesPerMinute: shiftMinutes > 0 ? (unitsProduced / shiftMinutes) : 0,
         casesPerPayableHour: payableHours > 0 ? (unitsProduced / payableHours) : 0,
         laborCostPerCase: unitsProduced > 0 ? (laborCost / unitsProduced) : 0,
         hasLabor: payableHours > 0,
@@ -200,7 +208,8 @@ export default function ProductionView({ productionSegments, laborActuals, resol
           laborCost: 0,
           revenue: 0,
           revenueCoveredUnits: 0,
-          laborMargin: 0
+          laborMargin: 0,
+          shiftSlots: {}
         };
       }
       map[line].units += safeNum(r.unitsProduced);
@@ -210,12 +219,17 @@ export default function ProductionView({ productionSegments, laborActuals, resol
       map[line].revenue += safeNum(r.revenue);
       map[line].revenueCoveredUnits += safeNum(r.revenueCoveredUnits);
       map[line].laborMargin += safeNum(r.laborMargin);
+      if (hasAssignedShift(r.shift) && r.date) map[line].shiftSlots[String(r.date) + "|" + String(r.shift)] = true;
     });
     return Object.values(map).map(function(r) {
+      var shiftSlotCount = Object.keys(r.shiftSlots).length;
+      var shiftMinutes = shiftSlotCount * SHIFT_MINUTES;
       return Object.assign({}, r, {
         sharePct: totalUnits > 0 ? Math.round((r.units / totalUnits) * 100) : 0,
+        shiftSlotCount: shiftSlotCount,
+        shiftMinutes: shiftMinutes,
         revenueCoveragePct: r.units > 0 ? Math.round((r.revenueCoveredUnits / r.units) * 100) : 0,
-        casesPerMinute: r.laborPayableHours > 0 ? (r.units / (r.laborPayableHours * 60)) : 0,
+        casesPerMinute: shiftMinutes > 0 ? (r.units / shiftMinutes) : 0,
         laborCostPerCase: r.units > 0 ? (r.laborCost / r.units) : 0,
         laborMarginPct: r.revenue > 0 ? (r.laborMargin / r.revenue) : null
       });
@@ -240,7 +254,8 @@ export default function ProductionView({ productionSegments, laborActuals, resol
           revenue: 0,
           revenueCoveredUnits: 0,
           laborMargin: 0,
-          shifts: {}
+          shifts: {},
+          shiftSlots: {}
         };
       }
       map[key].unitsProduced += safeNum(r.unitsProduced);
@@ -250,12 +265,17 @@ export default function ProductionView({ productionSegments, laborActuals, resol
       map[key].revenueCoveredUnits += safeNum(r.revenueCoveredUnits);
       map[key].laborMargin += safeNum(r.laborMargin);
       map[key].shifts[String(r.shift || "Unassigned")] = true;
+      if (hasAssignedShift(r.shift) && r.date) map[key].shiftSlots[String(r.date) + "|" + String(r.shift)] = true;
     });
     return Object.values(map).map(function(r) {
+      var shiftSlotCount = Object.keys(r.shiftSlots).length;
+      var shiftMinutes = shiftSlotCount * SHIFT_MINUTES;
       return Object.assign({}, r, {
         shiftCount: Object.keys(r.shifts).length,
+        shiftSlotCount: shiftSlotCount,
+        shiftMinutes: shiftMinutes,
+        casesPerMinute: shiftMinutes > 0 ? (r.unitsProduced / shiftMinutes) : 0,
         casesPerPayableHour: r.laborPayableHours > 0 ? (r.unitsProduced / r.laborPayableHours) : 0,
-        casesPerMinute: r.laborPayableHours > 0 ? (r.unitsProduced / (r.laborPayableHours * 60)) : 0,
         laborCostPerCase: r.unitsProduced > 0 ? (r.laborCost / r.unitsProduced) : 0,
         revenueCoveragePct: r.unitsProduced > 0 ? Math.round((r.revenueCoveredUnits / r.unitsProduced) * 100) : 0,
         laborMarginPct: r.revenue > 0 ? (r.laborMargin / r.revenue) : null
