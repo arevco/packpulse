@@ -39,17 +39,25 @@ function getColumnSets() {
   return [
     [],
     [
-      "date", "date_at", "shift", "shift_label", "line", "line_name",
-      "job_id", "project_code", "item_code", "item_description",
-      "role", "role_name", "user_name", "employee_name",
-      "hours_worked", "hours_run", "labor_hours", "labor_minutes",
-      "labor_count", "operator_count", "fork_count", "qa_count", "maint_count", "recycling_count"
+      "availability", "badge", "badge_type_name", "badge_type_prefix", "badge_type_rate",
+      "clock_in_time", "clock_out_time", "duration",
+      "item_alternate_code_1", "item_alternate_code_2", "item_category_name",
+      "item_code", "item_customer_name", "item_description", "item_family_name",
+      "item_gtin", "item_type", "item_upc",
+      "job_id", "job_reference", "line_efficiency", "line_leader_name", "line_name",
+      "payable_hours", "performance", "productive_hours", "site_name",
+      "project_code", "work_order_id",
+      "work_order_reference_1", "work_order_reference_2", "work_order_reference_3",
+      "work_order_reference_4", "work_order_reference_5"
     ],
     [
-      "date", "shift", "line", "job_id", "project_code", "item_code", "role", "hours_worked"
+      "clock_in_time", "clock_out_time", "badge_type_name", "badge_type_rate",
+      "job_id", "line_name", "payable_hours", "productive_hours", "performance",
+      "line_efficiency", "project_code", "item_code", "item_description"
     ],
     [
-      "date", "line", "shift", "labor_count"
+      "line_name", "job_id", "project_code", "item_code", "item_description",
+      "badge_type_name", "badge_type_rate", "payable_hours", "productive_hours"
     ]
   ];
 }
