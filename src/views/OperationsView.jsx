@@ -117,6 +117,41 @@ function toIsoDateET(d) {
   return parts.year + "-" + parts.month + "-" + parts.day;
 }
 
+function toEasternDateTimeParts(d) {
+  var dt = d instanceof Date ? d : new Date(d);
+  if (isNaN(dt)) return null;
+  var parts = {};
+  var fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  });
+  fmt.formatToParts(dt).forEach(function(p) {
+    if (p.type !== "literal") parts[p.type] = p.value;
+  });
+  if (!parts.year || !parts.month || !parts.day || !parts.hour || !parts.minute) return null;
+  return {
+    date: parts.year + "-" + parts.month + "-" + parts.day,
+    hour: parseInt(parts.hour, 10),
+    minute: parseInt(parts.minute, 10)
+  };
+}
+
+function productionDayElapsedMinutesET(d) {
+  var parts = toEasternDateTimeParts(d);
+  if (!parts) return 0;
+  var totalMinutes = (safeNum(parts.hour) * 60) + safeNum(parts.minute);
+  var productionStart = 7 * 60;
+  var productionEnd = 23 * 60;
+  if (totalMinutes <= productionStart) return 0;
+  if (totalMinutes >= productionEnd) return 960;
+  return Math.max(0, Math.min(960, totalMinutes - productionStart));
+}
+
 function shiftDays(dateIso, n) {
   var d = new Date(dateIso + "T00:00:00Z");
   d.setUTCDate(d.getUTCDate() + n);
@@ -1100,6 +1135,19 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       var compareDelta = windowActual - compareActual;
       var compareDeltaPct = compareActual > 0 ? Math.round((compareDelta / compareActual) * 100) : 0;
       var revenueCoveragePct = windowActual > 0 ? Math.round((pricedUnits / windowActual) * 100) : 0;
+      var displayDelta = compareDelta;
+      var displayDeltaPct = compareDeltaPct;
+      var displayLabel = compareInfo.label;
+      var paceProjectedUnits = null;
+      if (def.key === "today") {
+        var elapsedMinutes = productionDayElapsedMinutesET(new Date());
+        if (windowActual > 0 && elapsedMinutes > 0 && elapsedMinutes < 960) {
+          paceProjectedUnits = Math.round((windowActual / elapsedMinutes) * 960);
+          displayDelta = paceProjectedUnits - compareActual;
+          displayDeltaPct = compareActual > 0 ? Math.round((displayDelta / compareActual) * 100) : (paceProjectedUnits > 0 ? 100 : 0);
+          displayLabel = "pace vs yesterday";
+        }
+      }
       return {
         label: label,
         range: summaryRange,
@@ -1122,7 +1170,11 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
         compareRange: compareRange,
         compareActual: compareActual,
         compareDelta: compareDelta,
-        compareDeltaPct: compareDeltaPct
+        compareDeltaPct: compareDeltaPct,
+        displayDelta: displayDelta,
+        displayDeltaPct: displayDeltaPct,
+        displayLabel: displayLabel,
+        paceProjectedUnits: paceProjectedUnits
       };
     };
 
@@ -1738,12 +1790,14 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
           <div className="mb-3 grid grid-cols-2 gap-2 lg:grid-cols-3 2xl:grid-cols-6">
             {commandBoard.presets.map(function(card) {
               var active = commandBoardPreset === card.key;
-              var trendTone = card.compareDelta > 0
+              var displayDelta = safeNum(card.displayDelta);
+              var displayPct = safeNum(card.displayDeltaPct);
+              var trendTone = displayDelta > 0
                 ? "text-[rgb(var(--success))]"
-                : card.compareDelta < 0
+                : displayDelta < 0
                   ? "text-[rgb(var(--danger))]"
                   : "text-[rgb(var(--muted))]";
-              var TrendIcon = card.compareDelta > 0 ? TrendingUp : card.compareDelta < 0 ? TrendingDown : Minus;
+              var TrendIcon = displayDelta > 0 ? TrendingUp : displayDelta < 0 ? TrendingDown : Minus;
               return (
                 <button
                   key={card.key}
@@ -1772,9 +1826,10 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                     <div className={"mt-2 flex items-center gap-1.5 text-[11px] font-medium " + trendTone}>
                       <TrendIcon className="h-3.5 w-3.5 shrink-0" />
                       <span>
-                        {card.compareDelta > 0 ? "+" : ""}{card.compareDelta.toLocaleString()}
-                        {card.compareActual > 0 ? " (" + (card.compareDeltaPct > 0 ? "+" : "") + card.compareDeltaPct + "%)" : ""}
-                        {" "}{card.compareLabel}
+                        {card.paceProjectedUnits != null ? ("Pacing " + card.paceProjectedUnits.toLocaleString() + " · ") : ""}
+                        {displayDelta > 0 ? "+" : ""}{displayDelta.toLocaleString()}
+                        {card.compareActual > 0 ? " (" + (displayPct > 0 ? "+" : "") + displayPct + "%)" : ""}
+                        {" "}{(card.displayLabel || card.compareLabel)}
                       </span>
                     </div>
                   </div>
