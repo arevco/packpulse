@@ -8,7 +8,7 @@ import ProductionView from "./ProductionView";
 import { Minus, TrendingDown, TrendingUp } from "lucide-react";
 import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, XAxis, YAxis } from "recharts";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "../components/ui/chart";
-import { detectPackType } from "../utils";
+import { detectPackType, normalizeStr } from "../utils";
 
 function safeNum(v) {
   var n = Number(v || 0);
@@ -37,7 +37,7 @@ function fmtMoney(v) {
 }
 
 function normalizeItemCode(value) {
-  return String(value || "").trim().toUpperCase();
+  return normalizeStr(String(value || "").trim());
 }
 
 function businessDaysBetween(fromDate, toDate) {
@@ -816,7 +816,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   var revenueTargetsBySku = useMemo(function() {
     var map = {};
     (Array.isArray(opsSkuTargets) ? opsSkuTargets : []).forEach(function(row) {
-      var sku = normalizeItemCode(row && row.item_code);
+      var sku = normalizeItemCode((row && (row.item_code || row.sku || row.code)) || "");
       if (!sku) return;
       if (!map[sku]) map[sku] = [];
       map[sku].push({
@@ -841,14 +841,17 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     var pricingRows = revenueTargetsBySku[sku] || [];
     if (!pricingRows.length) return 0;
     var day = String(dateIso || "").slice(0, 10);
+    var best = 0;
     for (var i = 0; i < pricingRows.length; i += 1) {
       var row = pricingRows[i];
       if (!(safeNum(row.revenue_per_case) > 0)) continue;
-      if (day && row.active_from && day < row.active_from) continue;
-      if (day && row.active_to && day > row.active_to) continue;
-      return safeNum(row.revenue_per_case);
+      var start = String(row.active_from || "1900-01-01");
+      var end = String(row.active_to || "9999-12-31");
+      if (day && day < start) continue;
+      if (day && day > end) continue;
+      if (safeNum(row.revenue_per_case) > best) best = safeNum(row.revenue_per_case);
     }
-    return 0;
+    return best;
   };
 
   var effectiveRange = useMemo(function() {
