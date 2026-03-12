@@ -323,16 +323,25 @@ export default async function handler(req, res) {
       var jobId = textKey(r.job_id);
       var line = textKey(r.line_name, "Unknown");
       var timing = finalizeTimingBucket(jobTimingByJobLine[jobId + "|" + line]) || finalizeTimingBucket(jobTimingByJob[jobId]);
-      var date = textKey((timing && timing.date) || r.worked_date_et);
+      var storedDate = textKey(r.worked_date_et);
+      var date = textKey(storedDate || (timing && timing.date));
       if (!date) {
         var fallbackDate = textKey(r.source_snapshot_at).slice(0, 10);
         if (sanitizeDate(fallbackDate)) date = fallbackDate;
       }
       if (!dateInRange(date, startDate, endDate)) return;
       laborRowsInRange += 1;
-      var shift = textKey((timing && timing.shift) || r.shift_label, "Unassigned");
-      if (timing && timing.date && timing.date !== textKey(r.worked_date_et)) inferredTimingRows += 1;
-      if (timing && timing.shift === "Cross-Shift Job") crossShiftTimingRows += 1;
+      var storedShift = textKey(r.shift_label);
+      var shift = textKey(
+        (storedShift && storedShift !== "Unassigned")
+          ? storedShift
+          : ((timing && timing.shift) || storedShift),
+        "Unassigned"
+      );
+      if (!storedDate && timing && timing.date) inferredTimingRows += 1;
+      if ((!storedShift || storedShift === "Unassigned") && timing && timing.shift === "Cross-Shift Job") {
+        crossShiftTimingRows += 1;
+      }
       var roleKey = textKey(r.role_key || normalizeLaborRoleKey(r.role_name), "other");
       var roleName = textKey(r.role_name, roleKey);
       var workOrderCode = textKey(r.work_order_code);
