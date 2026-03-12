@@ -59,6 +59,12 @@ async function fetchAllRows(supabase, tableName, columns, dateCol, startDate, en
   return { error: null, data: out };
 }
 
+function dateInRange(dateKey, startDate, endDate) {
+  var date = sanitizeDate(dateKey);
+  if (!date) return false;
+  return (!startDate || date >= startDate) && (!endDate || date <= endDate);
+}
+
 function avgPct(sum, weight) {
   return weight > 0 ? (sum / weight) : 0;
 }
@@ -199,10 +205,11 @@ export default async function handler(req, res) {
     }
 
     var supabase = getSupabaseAdmin();
+    var laborQueryMode = "worked_date";
     var laborQ = await fetchAllRows(
       supabase,
       "labor_events",
-      "worked_date_et,shift_label,line_name,job_id,work_order_code,work_order_id,item_code,item_description,item_family_name,role_name,role_key,payable_hours,productive_hours,hourly_rate,availability_pct,performance_pct,line_efficiency_pct",
+      "worked_date_et,source_snapshot_at,shift_label,line_name,job_id,work_order_code,work_order_id,item_code,item_description,item_family_name,role_name,role_key,payable_hours,productive_hours,hourly_rate,availability_pct,performance_pct,line_efficiency_pct",
       "worked_date_et",
       startDate,
       endDate
@@ -224,6 +231,21 @@ export default async function handler(req, res) {
       throw laborQ.error;
     }
     var laborRows = Array.isArray(laborQ.data) ? laborQ.data : [];
+    if (!laborRows.length) {
+      laborQueryMode = "all_rows_fallback";
+      var laborAllQ = await fetchAllRows(
+        supabase,
+        "labor_events",
+        "worked_date_et,source_snapshot_at,shift_label,line_name,job_id,work_order_code,work_order_id,item_code,item_description,item_family_name,role_name,role_key,payable_hours,productive_hours,hourly_rate,availability_pct,performance_pct,line_efficiency_pct",
+        "source_snapshot_at",
+        "",
+        ""
+      );
+      if (laborAllQ.error) {
+        throw laborAllQ.error;
+      }
+      laborRows = Array.isArray(laborAllQ.data) ? laborAllQ.data : [];
+    }
 
     var prodQ = await fetchAllRows(
       supabase,
@@ -295,12 +317,19 @@ export default async function handler(req, res) {
     var byJobMap = {};
     var inferredTimingRows = 0;
     var crossShiftTimingRows = 0;
+    var laborRowsInRange = 0;
 
     laborRows.forEach(function(r) {
       var jobId = textKey(r.job_id);
       var line = textKey(r.line_name, "Unknown");
       var timing = finalizeTimingBucket(jobTimingByJobLine[jobId + "|" + line]) || finalizeTimingBucket(jobTimingByJob[jobId]);
       var date = textKey((timing && timing.date) || r.worked_date_et);
+      if (!date) {
+        var fallbackDate = textKey(r.source_snapshot_at).slice(0, 10);
+        if (sanitizeDate(fallbackDate)) date = fallbackDate;
+      }
+      if (!dateInRange(date, startDate, endDate)) return;
+      laborRowsInRange += 1;
       var shift = textKey((timing && timing.shift) || r.shift_label, "Unassigned");
       if (timing && timing.date && timing.date !== textKey(r.worked_date_et)) inferredTimingRows += 1;
       if (timing && timing.shift === "Cross-Shift Job") crossShiftTimingRows += 1;
@@ -430,6 +459,9 @@ export default async function handler(req, res) {
     summaryFinal.unique_work_order_count = Object.keys(summary.unique_work_orders || {}).length;
     summaryFinal.inferred_job_timing_rows = inferredTimingRows;
     summaryFinal.cross_shift_job_rows = crossShiftTimingRows;
+    summaryFinal.labor_query_mode = laborQueryMode;
+    summaryFinal.labor_rows_fetched = laborRows.length;
+    summaryFinal.labor_rows_in_range = laborRowsInRange;
     summaryFinal.days_with_labor = byDay.length;
     summaryFinal.latest_date = byDay.length ? byDay[0].date_et : null;
     delete summaryFinal.unique_jobs;

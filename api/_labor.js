@@ -69,6 +69,12 @@ function easternWallClockToDate(year, monthIndex, day, hour24, minute, second) {
   return new Date(actual);
 }
 
+function isReasonableDate(date) {
+  if (!(date instanceof Date) || isNaN(date)) return false;
+  var year = date.getUTCFullYear();
+  return year >= 2000 && year <= 2100;
+}
+
 function parseNulogyWallClock(value) {
   var raw = String(value || "").trim();
   if (!raw) return null;
@@ -112,19 +118,28 @@ function parseNulogyWallClock(value) {
 
 function parseDateLoose(value) {
   if (!value) return null;
-  if (value instanceof Date) return isNaN(value) ? null : value;
+  if (value instanceof Date) return isReasonableDate(value) ? value : null;
   if (typeof value === "number") {
     var fromNum = new Date(value);
-    return isNaN(fromNum) ? null : fromNum;
+    return isReasonableDate(fromNum) ? fromNum : null;
   }
   var raw = String(value).trim();
   if (!raw) return null;
+  if (/^[+-]?\d{4,}$/.test(raw)) return null;
 
   var wallClock = parseNulogyWallClock(raw);
   if (wallClock) return wallClock;
 
+  var looksDateLike =
+    /[A-Za-z]{3}/.test(raw) ||
+    raw.indexOf("/") !== -1 ||
+    raw.indexOf(":") !== -1 ||
+    raw.indexOf("T") !== -1 ||
+    /^\d{4}-\d{2}-\d{2}/.test(raw);
+  if (!looksDateLike) return null;
+
   var parsed = new Date(raw);
-  return isNaN(parsed) ? null : parsed;
+  return isReasonableDate(parsed) ? parsed : null;
 }
 
 export function stableRowHash(row) {
@@ -184,8 +199,9 @@ function pickBestTimestampValue(row, preferredKeys) {
   for (var i = 0; i < rowKeys.length; i++) {
     var key = rowKeys[i];
     var value = row[key];
-    if (!value || !parseDateLoose(value)) continue;
     var score = scoreTimestampFieldName(key);
+    if (!(score > 0)) continue;
+    if (!value || !parseDateLoose(value)) continue;
     if (score > bestScore) {
       bestScore = score;
       bestKey = key;
@@ -309,7 +325,9 @@ export function buildLaborEvents(rows, siteId, syncedAt, updatedBy) {
     ]);
     var clockInIso = toIso(clockInRaw);
     var clockOutIso = toIso(clockOutRaw);
-    var eastern = toEasternParts(clockInIso || clockOutIso || syncedAt);
+    // If labor has no usable clock/date field, keep the timestamp null here and
+    // let downstream job-timing reconciliation infer the reporting date/shift.
+    var eastern = toEasternParts(clockInIso || clockOutIso);
     var shift = classifyShiftET(eastern);
     var roleName = String(pickFieldLoose(row, ["Badge type name", "badge_type_name", "Role", "role_name"]) || "").trim();
     var badgeTypePrefix = String(pickFieldLoose(row, ["Badge type prefix", "badge_type_prefix"]) || "").trim();
