@@ -100,14 +100,33 @@ export default function ProductionView({ productionSegments }) {
   var totalUnitsProduced = filteredJobRows.reduce(function(sum, r) { return sum + safeNum(r.unitsProduced); }, 0);
   var topLine = lineLoad[0] || null;
   var topJob = jobRollup[0] || null;
-  var topShift = shiftTotals[0] || null;
   var shift1Total = shiftTotals.find(function(r) { return r.shift === "Shift 1 (7a-3p)"; }) || null;
   var shift2Total = shiftTotals.find(function(r) { return r.shift === "Shift 2 (3p-11p)"; }) || null;
+  var shift1Units = shift1Total ? shift1Total.units : 0;
+  var shift2Units = shift2Total ? shift2Total.units : 0;
+  var shift1Jobs = shift1Total ? shift1Total.jobs : 0;
+  var shift2Jobs = shift2Total ? shift2Total.jobs : 0;
+  var shift1Share = totalUnitsProduced > 0 ? Math.round((shift1Units / totalUnitsProduced) * 100) : 0;
+  var shift2Share = totalUnitsProduced > 0 ? Math.round((shift2Units / totalUnitsProduced) * 100) : 0;
+  var shift1AvgPerJob = shift1Jobs > 0 ? Math.round(shift1Units / shift1Jobs) : 0;
+  var shift2AvgPerJob = shift2Jobs > 0 ? Math.round(shift2Units / shift2Jobs) : 0;
+  var shift1Delta = shift1Units - shift2Units;
+  var shift2Delta = shift2Units - shift1Units;
 
   var shortShift = function(shiftLabel) {
     return String(shiftLabel || "")
       .replace("Shift 1 (7a-3p)", "S1")
       .replace("Shift 2 (3p-11p)", "S2");
+  };
+  var formatDelta = function(value) {
+    if (!value) return "even";
+    return (value > 0 ? "+" : "-") + Math.abs(value).toLocaleString();
+  };
+  var shiftCompareText = function(selfJobs, otherJobs, delta, otherLabel, avgPerJob) {
+    if (!selfJobs && !otherJobs) return "no shift data";
+    if (!selfJobs) return "no jobs logged";
+    if (!otherJobs) return "no " + otherLabel + " compare yet";
+    return formatDelta(delta) + " vs " + otherLabel + " · " + avgPerJob.toLocaleString() + "/job";
   };
 
   if (!prodShiftRows.length) {
@@ -137,17 +156,18 @@ export default function ProductionView({ productionSegments }) {
         </select>
       </div>
 
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(160px, 1fr))", gap:10, marginBottom:10 }}>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(180px, 1fr))", gap:10, marginBottom:10 }}>
         {[
           { l:"Units", v:totalUnitsProduced.toLocaleString(), s:prodDate === "all" ? "all matching days" : (selectedProdDate || "selected day"), c:C.bright },
-          { l:"Shift 1 Yield", v:shift1Total ? shift1Total.units.toLocaleString() : "0", s:"7a-3p", c:C.ok },
-          { l:"Shift 2 Yield", v:shift2Total ? shift2Total.units.toLocaleString() : "0", s:"3p-11p", c:C.accent },
+          { l:"Shift 1 Yield", v:shift1Units.toLocaleString(), s:"7a-3p · " + shift1Share + "% share", t:shiftCompareText(shift1Jobs, shift2Jobs, shift1Delta, "S2", shift1AvgPerJob), c:C.ok },
+          { l:"Shift 2 Yield", v:shift2Units.toLocaleString(), s:"3p-11p · " + shift2Share + "% share", t:shiftCompareText(shift2Jobs, shift1Jobs, shift2Delta, "S1", shift2AvgPerJob), c:C.accent },
           { l:"Top Line", v:topLine ? topLine.line : "--", s:topLine ? (topLine.units.toLocaleString() + " cs · " + topLine.sharePct + "% share") : "no line data", c:C.ok }
         ].map(function(s) {
           return <div key={s.l} style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, padding:"12px 14px" }}>
             <div style={{ fontSize:20, fontWeight:700, fontFamily:mono, color:s.c, lineHeight:1 }}>{s.v}</div>
             <div style={{ fontSize:12, color:C.dim, marginTop:6, fontWeight:600 }}>{s.l}</div>
             <div style={{ fontSize:11, color:C.dim, marginTop:4 }}>{s.s}</div>
+            {s.t ? <div style={{ fontSize:11, color:C.dim, marginTop:4 }}>{s.t}</div> : null}
           </div>;
         })}
         <div style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, padding:"12px 14px" }}>
@@ -162,18 +182,6 @@ export default function ProductionView({ productionSegments }) {
             {topJob ? (topJob.unitsProduced.toLocaleString() + " cs · Job " + topJob.jobId + " · " + topJob.line) : ""}
           </div>
         </div>
-      </div>
-
-      <div className="mb-3 flex flex-wrap items-center gap-3 text-xs text-[rgb(var(--muted))]">
-        {shiftTotals.map(function(r) {
-          return (
-            <span key={r.shift} className="inline-flex items-center gap-1 rounded-full border border-[rgb(var(--border))] px-2 py-1">
-              <span className="font-semibold">{shortShift(r.shift)}</span>
-              <span>{r.units.toLocaleString()} cs</span>
-            </span>
-          );
-        })}
-        {topShift ? <span>Shift leader: <span className="font-semibold">{shortShift(topShift.shift)}</span></span> : null}
       </div>
 
       <div className="mb-3 grid gap-3 xl:grid-cols-2">
