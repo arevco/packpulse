@@ -206,6 +206,7 @@ export default function ProductionReadiness() {
     { k:"wo", l:"Work Orders", ts:ds.woTimestamp, cad:"monthly", ref:() => window.__woR && window.__woR.click() },
     { k:"itemmaster", l:"Item Master", ts:ds.itemMasterTimestamp, cad:"rare", ref:null },
     { k:"prod", l:"Production", ts:ds.productionTimestamp, cad:"daily", ref:null },
+    { k:"labor", l:"Labor", ts:ds.laborTimestamp, cad:"daily", ref:null },
     { k:"evocon", l:"Evocon", ts:ds.evoconTimestamp || evoconLastSyncAt, cad:"daily", ref:null, forceFresh: !!(ds.evoconTimestamp || evoconLastSyncAt || evoconApiInfo) },
     { k:"bom", l:"BOMs", ts:ds.bomTimestamp, cad:"rare", ref:() => window.__bomR && window.__bomR.click() },
     { k:"edr", l:"EDR", ts:ds.edrTimestamp, cad:"monthly", ref:() => window.__edrR && window.__edrR.click() },
@@ -355,6 +356,19 @@ export default function ProductionReadiness() {
         body: JSON.stringify({ rows: getRows(results.production), syncedAt: ts.toISOString() })
       }).catch(function() {
         // Non-blocking: local dashboard still works even if trend ingest fails.
+      });
+    }
+    if (results.labor) {
+      ds.setLaborData(getRows(results.labor));
+      ds.setLaborFileName("Nulogy Sync");
+      ds.setLaborTimestamp(ts);
+      fetch("/api/cache/labor-events", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rows: getRows(results.labor), syncedAt: ts.toISOString() })
+      }).catch(function() {
+        // Non-blocking: UI can still work once shared snapshot repairs the labor table.
       });
     }
     if (results.bom) {
@@ -980,8 +994,8 @@ export default function ProductionReadiness() {
         <Suspense fallback={<Card className="mt-3 p-4 text-sm text-[rgb(var(--muted))]">Loading view...</Card>}>
           {activeView === "overview" && <OverviewView analysis={analysisForUI} woStatuses={woStatusesForUI} onSelectCustomer={openWorkOrdersForCustomer} />}
           {activeView === "aicopilot" && <AICopilotView summary={summaryForUI} criticalItems={criticalItemsForUI} dispatchQueue={dispatchQueue || []} productionSegments={productionSegmentsForUI} evoconData={ds.evoconData || []} onNavigate={setActiveView} />}
-          {activeView === "operations" && <OperationsView productionSegments={productionSegmentsForUI} productionDataRaw={ds.productionData || []} evoconData={ds.evoconData || []} evoconTimestamp={ds.evoconTimestamp || evoconLastSyncAt} itemMaster={ds.itemMaster || []} initialFilters={operationsPermalinkState} onPermalinkChange={handleOperationsPermalinkChange} />}
-          {activeView === "forecast" && <ForecastView workOrders={ds.workOrders || []} itemMaster={ds.itemMaster || []} productionData={ds.productionData || []} initialFilters={forecastPermalinkState} onPermalinkChange={handleForecastPermalinkChange} />}
+          {activeView === "operations" && <OperationsView productionSegments={productionSegmentsForUI} productionDataRaw={ds.productionData || []} laborDataRaw={ds.laborData || []} evoconData={ds.evoconData || []} evoconTimestamp={ds.evoconTimestamp || evoconLastSyncAt} itemMaster={ds.itemMaster || []} initialFilters={operationsPermalinkState} onPermalinkChange={handleOperationsPermalinkChange} />}
+          {activeView === "forecast" && <ForecastView workOrders={ds.workOrders || []} itemMaster={ds.itemMaster || []} productionData={ds.productionData || []} laborData={ds.laborData || []} initialFilters={forecastPermalinkState} onPermalinkChange={handleForecastPermalinkChange} />}
           {activeView === "workorders" && <WorkOrdersView analysis={analysisForUI} woStatuses={woStatusesForUI} woCustomers={woCustomersForUI} recommendations={recommendationsForUI} dispatchQueue={dispatchQueue || []} prefilterCustomer={workOrdersPrefilterCustomer} prefilterNonce={workOrdersPrefilterNonce} initialFilters={workOrdersPermalinkState} onPermalinkChange={handleWorkOrdersPermalinkChange} />}
           {activeView === "itemmaster" && <ItemMasterView itemMaster={ds.itemMaster || []} inventory={ds.inventory || []} />}
           {activeView === "supplyrisk" && <SupplyRiskView rawCriticalItems={criticalItemsForUI} inboundCoverage={inboundCoverage} timelineData={timelineData} deliveriesV2={deliveriesV2} />}

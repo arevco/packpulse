@@ -5,7 +5,15 @@ import { safeNum, formatDescriptionForDisplay } from "../utils";
 import { Input } from "../components/ui/input";
 import TableShell from "../components/ui/table-shell";
 
-export default function ProductionView({ productionSegments }) {
+function fmtMoneyWhole(value) {
+  return "$" + Math.round(safeNum(value)).toLocaleString();
+}
+
+function normKey(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+export default function ProductionView({ productionSegments, laborActuals }) {
   const { C, mono } = useTheme();
   const { thS, tdN, tdM } = useStyles();
 
@@ -16,6 +24,7 @@ export default function ProductionView({ productionSegments }) {
 
   var prodShiftRows = productionSegments && Array.isArray(productionSegments.shiftRows) ? productionSegments.shiftRows : [];
   var prodJobRows = productionSegments && Array.isArray(productionSegments.jobRows) ? productionSegments.jobRows : [];
+  var laborJobRows = laborActuals && Array.isArray(laborActuals.byJob) ? laborActuals.byJob : [];
   var totalRows = productionSegments && productionSegments.totalRows ? productionSegments.totalRows : 0;
   var rowsWithShift = productionSegments && productionSegments.rowsWithShift ? productionSegments.rowsWithShift : 0;
   var prodDates = Array.from(new Set(prodShiftRows.map(function(r) { return r.date; }))).sort().reverse();
@@ -44,36 +53,96 @@ export default function ProductionView({ productionSegments }) {
     }).sort(function(a, b) { return safeNum(b.unitsProduced) - safeNum(a.unitsProduced); });
   }, [search, selectedJobRows, lineFilter, shiftFilter]);
 
+  var laborByJobKey = useMemo(function() {
+    var exact = {};
+    var slim = {};
+    laborJobRows.forEach(function(r) {
+      var exactKey = [
+        normKey(r && r.job_id),
+        normKey(r && r.date_et),
+        normKey(r && r.shift_label),
+        normKey(r && r.line_name),
+        normKey(r && r.work_order_code),
+        normKey(r && r.item_code)
+      ].join("|");
+      var slimKey = [
+        normKey(r && r.job_id),
+        normKey(r && r.date_et),
+        normKey(r && r.shift_label)
+      ].join("|");
+      if (exactKey && !exact[exactKey]) exact[exactKey] = r;
+      if (slimKey && !slim[slimKey]) slim[slimKey] = r;
+    });
+    return { exact: exact, slim: slim };
+  }, [laborJobRows]);
+
+  var jobsWithLabor = useMemo(function() {
+    return filteredJobRows.map(function(r) {
+      var exactKey = [
+        normKey(r.jobId),
+        normKey(r.date),
+        normKey(r.shift),
+        normKey(r.line),
+        normKey(r.workOrder),
+        normKey(r.itemCode)
+      ].join("|");
+      var slimKey = [
+        normKey(r.jobId),
+        normKey(r.date),
+        normKey(r.shift)
+      ].join("|");
+      var labor = laborByJobKey.exact[exactKey] || laborByJobKey.slim[slimKey] || null;
+      var payableHours = safeNum(labor && labor.payable_hours);
+      var productiveHours = safeNum(labor && labor.productive_hours);
+      var laborCost = safeNum(labor && labor.labor_cost);
+      return Object.assign({}, r, {
+        laborPayableHours: payableHours,
+        laborProductiveHours: productiveHours,
+        laborCost: laborCost,
+        casesPerPayableHour: payableHours > 0 ? (safeNum(r.unitsProduced) / payableHours) : 0,
+        laborCostPerCase: safeNum(r.unitsProduced) > 0 ? (laborCost / safeNum(r.unitsProduced)) : 0,
+        hasLabor: !!labor
+      });
+    });
+  }, [filteredJobRows, laborByJobKey]);
+
   var shiftTotals = useMemo(function() {
     var map = {};
-    filteredJobRows.forEach(function(r) {
+    jobsWithLabor.forEach(function(r) {
       var shift = String(r.shift || "Unassigned");
-      if (!map[shift]) map[shift] = { shift: shift, units: 0, jobs: 0 };
+      if (!map[shift]) map[shift] = { shift: shift, units: 0, jobs: 0, laborPayableHours: 0, laborCost: 0, laborJobs: 0 };
       map[shift].units += safeNum(r.unitsProduced);
       map[shift].jobs += 1;
+      map[shift].laborPayableHours += safeNum(r.laborPayableHours);
+      map[shift].laborCost += safeNum(r.laborCost);
+      if (r.hasLabor) map[shift].laborJobs += 1;
     });
     return Object.values(map).sort(function(a, b) { return b.units - a.units; });
-  }, [filteredJobRows]);
+  }, [jobsWithLabor]);
 
   var lineLoad = useMemo(function() {
     var map = {};
-    var totalUnits = filteredJobRows.reduce(function(sum, r) { return sum + safeNum(r.unitsProduced); }, 0);
-    filteredJobRows.forEach(function(r) {
+    var totalUnits = jobsWithLabor.reduce(function(sum, r) { return sum + safeNum(r.unitsProduced); }, 0);
+    jobsWithLabor.forEach(function(r) {
       var line = String(r.line || "Unknown").trim() || "Unknown";
-      if (!map[line]) map[line] = { line: line, units: 0, jobs: 0 };
+      if (!map[line]) map[line] = { line: line, units: 0, jobs: 0, laborPayableHours: 0, laborCost: 0 };
       map[line].units += safeNum(r.unitsProduced);
       map[line].jobs += 1;
+      map[line].laborPayableHours += safeNum(r.laborPayableHours);
+      map[line].laborCost += safeNum(r.laborCost);
     });
     return Object.values(map).map(function(r) {
       return Object.assign({}, r, {
-        sharePct: totalUnits > 0 ? Math.round((r.units / totalUnits) * 100) : 0
+        sharePct: totalUnits > 0 ? Math.round((r.units / totalUnits) * 100) : 0,
+        casesPerPayableHour: r.laborPayableHours > 0 ? (r.units / r.laborPayableHours) : 0,
+        laborCostPerCase: r.units > 0 ? (r.laborCost / r.units) : 0
       });
     }).sort(function(a, b) { return b.units - a.units; });
-  }, [filteredJobRows]);
+  }, [jobsWithLabor]);
 
   var jobRollup = useMemo(function() {
     var map = {};
-    filteredJobRows.forEach(function(r) {
+    jobsWithLabor.forEach(function(r) {
       var key = [r.jobId || "", r.workOrder || "", r.line || "", r.itemCode || ""].join("|");
       if (!map[key]) {
         map[key] = {
@@ -84,20 +153,26 @@ export default function ProductionView({ productionSegments }) {
           itemCode: r.itemCode || "--",
           itemDesc: formatDescriptionForDisplay(r.itemDesc) || "--",
           unitsProduced: 0,
+          laborPayableHours: 0,
+          laborCost: 0,
           shifts: {}
         };
       }
       map[key].unitsProduced += safeNum(r.unitsProduced);
+      map[key].laborPayableHours += safeNum(r.laborPayableHours);
+      map[key].laborCost += safeNum(r.laborCost);
       map[key].shifts[String(r.shift || "Unassigned")] = true;
     });
     return Object.values(map).map(function(r) {
       return Object.assign({}, r, {
-        shiftCount: Object.keys(r.shifts).length
+        shiftCount: Object.keys(r.shifts).length,
+        casesPerPayableHour: r.laborPayableHours > 0 ? (r.unitsProduced / r.laborPayableHours) : 0,
+        laborCostPerCase: r.unitsProduced > 0 ? (r.laborCost / r.unitsProduced) : 0
       });
     }).sort(function(a, b) { return b.unitsProduced - a.unitsProduced; });
-  }, [filteredJobRows]);
+  }, [jobsWithLabor]);
 
-  var totalUnitsProduced = filteredJobRows.reduce(function(sum, r) { return sum + safeNum(r.unitsProduced); }, 0);
+  var totalUnitsProduced = jobsWithLabor.reduce(function(sum, r) { return sum + safeNum(r.unitsProduced); }, 0);
   var topLine = lineLoad[0] || null;
   var topJob = jobRollup[0] || null;
   var shift1Total = shiftTotals.find(function(r) { return r.shift === "Shift 1 (7a-3p)"; }) || null;
@@ -127,6 +202,10 @@ export default function ProductionView({ productionSegments }) {
     if (!selfJobs) return "no jobs logged";
     if (!otherJobs) return "no " + otherLabel + " compare yet";
     return formatDelta(delta) + " vs " + otherLabel + " · " + avgPerJob.toLocaleString() + "/job";
+  };
+  var laborRateText = function(hours, cases, cost) {
+    if (!(hours > 0) || !(cases > 0)) return "labor not matched";
+    return (cases / hours).toFixed(1) + " cs/lh · " + fmtMoneyWhole(cost / cases) + "/case";
   };
 
   if (!prodShiftRows.length) {
@@ -159,15 +238,16 @@ export default function ProductionView({ productionSegments }) {
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(180px, 1fr))", gap:10, marginBottom:10 }}>
         {[
           { l:"Units", v:totalUnitsProduced.toLocaleString(), s:prodDate === "all" ? "all matching days" : (selectedProdDate || "selected day"), c:C.bright },
-          { l:"Shift 1 Yield", v:shift1Units.toLocaleString(), s:"7a-3p · " + shift1Share + "% share", t:shiftCompareText(shift1Jobs, shift2Jobs, shift1Delta, "S2", shift1AvgPerJob), c:C.ok },
-          { l:"Shift 2 Yield", v:shift2Units.toLocaleString(), s:"3p-11p · " + shift2Share + "% share", t:shiftCompareText(shift2Jobs, shift1Jobs, shift2Delta, "S1", shift2AvgPerJob), c:C.accent },
-          { l:"Top Line", v:topLine ? topLine.line : "--", s:topLine ? (topLine.units.toLocaleString() + " cs · " + topLine.sharePct + "% share") : "no line data", c:C.ok }
+          { l:"Shift 1 Yield", v:shift1Units.toLocaleString(), s:"7a-3p · " + shift1Share + "% share", t:shiftCompareText(shift1Jobs, shift2Jobs, shift1Delta, "S2", shift1AvgPerJob), meta:laborRateText(safeNum(shift1Total && shift1Total.laborPayableHours), shift1Units, safeNum(shift1Total && shift1Total.laborCost)), c:C.ok },
+          { l:"Shift 2 Yield", v:shift2Units.toLocaleString(), s:"3p-11p · " + shift2Share + "% share", t:shiftCompareText(shift2Jobs, shift1Jobs, shift2Delta, "S1", shift2AvgPerJob), meta:laborRateText(safeNum(shift2Total && shift2Total.laborPayableHours), shift2Units, safeNum(shift2Total && shift2Total.laborCost)), c:C.accent },
+          { l:"Top Line", v:topLine ? topLine.line : "--", s:topLine ? (topLine.units.toLocaleString() + " cs · " + topLine.sharePct + "% share") : "no line data", meta:topLine ? laborRateText(topLine.laborPayableHours, topLine.units, topLine.laborCost) : "labor not matched", c:C.ok }
         ].map(function(s) {
           return <div key={s.l} style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, padding:"12px 14px" }}>
             <div style={{ fontSize:20, fontWeight:700, fontFamily:mono, color:s.c, lineHeight:1 }}>{s.v}</div>
             <div style={{ fontSize:12, color:C.dim, marginTop:6, fontWeight:600 }}>{s.l}</div>
             <div style={{ fontSize:11, color:C.dim, marginTop:4 }}>{s.s}</div>
             {s.t ? <div style={{ fontSize:11, color:C.dim, marginTop:4 }}>{s.t}</div> : null}
+            {s.meta ? <div style={{ fontSize:11, color:C.dim, marginTop:4 }}>{s.meta}</div> : null}
           </div>;
         })}
         <div style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, padding:"12px 14px" }}>
@@ -181,6 +261,9 @@ export default function ProductionView({ productionSegments }) {
           <div style={{ fontSize:11, color:C.dim, marginTop:4 }}>
             {topJob ? (topJob.unitsProduced.toLocaleString() + " cs · Job " + topJob.jobId + " · " + topJob.line) : ""}
           </div>
+          <div style={{ fontSize:11, color:C.dim, marginTop:4 }}>
+            {topJob ? laborRateText(topJob.laborPayableHours, topJob.unitsProduced, topJob.laborCost) : ""}
+          </div>
         </div>
       </div>
 
@@ -192,9 +275,10 @@ export default function ProductionView({ productionSegments }) {
               <thead>
                 <tr style={{ background:C.raised }}>
                   <th style={thS}>Line</th>
-                  <th style={thS}>Jobs</th>
                   <th style={thS}>Share</th>
                   <th style={thS}>Units</th>
+                  <th style={thS}>Labor Hrs</th>
+                  <th style={thS}>Cases/LH</th>
                 </tr>
               </thead>
               <tbody>
@@ -202,13 +286,14 @@ export default function ProductionView({ productionSegments }) {
                   return (
                     <tr key={r.line} style={{ borderBottom:"1px solid "+C.border }}>
                       <td style={tdM}>{r.line}</td>
-                      <td style={tdM}>{r.jobs.toLocaleString()}</td>
                       <td style={tdM}>{r.sharePct}%</td>
                       <td style={Object.assign({}, tdM, { fontWeight:700, color:C.ok })}>{r.units.toLocaleString()}</td>
+                      <td style={tdM}>{r.laborPayableHours > 0 ? r.laborPayableHours.toFixed(1) : "--"}</td>
+                      <td style={tdM}>{r.casesPerPayableHour > 0 ? r.casesPerPayableHour.toFixed(1) : "--"}</td>
                     </tr>
                   );
                 })}
-                {!lineLoad.length && <tr><td colSpan={4} style={{ padding:20, textAlign:"center", color:C.dim }}>No line load for current filters.</td></tr>}
+                {!lineLoad.length && <tr><td colSpan={5} style={{ padding:20, textAlign:"center", color:C.dim }}>No line load for current filters.</td></tr>}
               </tbody>
             </table>
           </TableShell>
@@ -224,6 +309,8 @@ export default function ProductionView({ productionSegments }) {
                   <th style={thS}>WO#</th>
                   <th style={thS}>Line</th>
                   <th style={thS}>Units</th>
+                  <th style={thS}>Labor</th>
+                  <th style={thS}>Cases/LH</th>
                 </tr>
               </thead>
               <tbody>
@@ -237,10 +324,12 @@ export default function ProductionView({ productionSegments }) {
                       <td style={tdM}>{r.workOrder}</td>
                       <td style={tdM}>{r.line}</td>
                       <td style={Object.assign({}, tdM, { fontWeight:700, color:C.ok })}>{r.unitsProduced.toLocaleString()}</td>
+                      <td style={tdM}>{r.laborCost > 0 ? fmtMoneyWhole(r.laborCost) : "--"}</td>
+                      <td style={tdM}>{r.casesPerPayableHour > 0 ? r.casesPerPayableHour.toFixed(1) : "--"}</td>
                     </tr>
                   );
                 })}
-                {!jobRollup.length && <tr><td colSpan={4} style={{ padding:20, textAlign:"center", color:C.dim }}>No jobs for current filters.</td></tr>}
+                {!jobRollup.length && <tr><td colSpan={6} style={{ padding:20, textAlign:"center", color:C.dim }}>No jobs for current filters.</td></tr>}
               </tbody>
             </table>
           </TableShell>
@@ -261,9 +350,11 @@ export default function ProductionView({ productionSegments }) {
             <th style={thS}>Item</th>
             <th style={thS}>Description</th>
             <th style={thS}>Units Produced</th>
+            <th style={thS}>Labor Hrs</th>
+            <th style={thS}>Labor Cost</th>
           </tr></thead>
           <tbody>
-            {filteredJobRows.slice(0, 100).map(function(r, i) {
+            {jobsWithLabor.slice(0, 100).map(function(r, i) {
               return <tr key={i} style={{ borderBottom:"1px solid "+C.border }}>
                 <td style={tdM}>{shortShift(r.shift)}</td>
                 <td style={Object.assign({}, tdM, { fontWeight:600, color:C.bright })}>{r.jobId}</td>
@@ -272,10 +363,12 @@ export default function ProductionView({ productionSegments }) {
                 <td style={tdM}>{r.itemCode}</td>
                 <td style={Object.assign({}, tdN, { color:C.dim, maxWidth:260, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" })}>{formatDescriptionForDisplay(r.itemDesc) || "--"}</td>
                 <td style={Object.assign({}, tdM, { fontWeight:700, color:C.ok })}>{r.unitsProduced.toLocaleString()}</td>
+                <td style={tdM}>{r.laborPayableHours > 0 ? r.laborPayableHours.toFixed(1) : "--"}</td>
+                <td style={tdM}>{r.laborCost > 0 ? fmtMoneyWhole(r.laborCost) : "--"}</td>
               </tr>;
             })}
-            {filteredJobRows.length === 0 && (
-              <tr><td colSpan={7} style={{ padding:24, textAlign:"center", color:C.dim }}>No production rows for the selected day/filters.</td></tr>
+            {jobsWithLabor.length === 0 && (
+              <tr><td colSpan={9} style={{ padding:24, textAlign:"center", color:C.dim }}>No production rows for the selected day/filters.</td></tr>
             )}
           </tbody>
         </table>

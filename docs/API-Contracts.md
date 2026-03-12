@@ -30,6 +30,11 @@
 - Purpose:
   - ingest normalized production rows to `production_events`
 
+## `/api/cache/labor-events`
+- Method: `POST`
+- Purpose:
+  - ingest normalized labor rows to `labor_events`
+
 ## `/api/cache/production-trends`
 - Method: `GET`
 - Query:
@@ -60,10 +65,18 @@
 - Purpose:
   - breakdown for operations charts and KPI cards
 
+## `/api/ops/labor-actuals`
+- Method: `GET`
+- Query:
+  - `start?: YYYY-MM-DD`
+  - `end?: YYYY-MM-DD`
+  - `monthKey?: YYYY-MM`
+- Purpose:
+  - labor actual summaries for Operations and Forecast
+
 ## `/api/ops/user-logins`
 - Method: `GET`
 - Query:
   - `limit?: number`
 - Purpose:
   - lightweight user login activity
-

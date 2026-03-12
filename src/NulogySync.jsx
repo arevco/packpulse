@@ -14,10 +14,11 @@ const REPORT_TYPES = [
   { key: "workorders", label: "Work Orders", required: true },
   { key: "itemmaster", label: "Item Master", required: false },
   { key: "bom", label: "Bill of Materials", required: false },
-  { key: "production", label: "Production", required: false }
+  { key: "production", label: "Production", required: false },
+  { key: "labor", label: "Labor", required: false }
 ];
 const CORE_REPORT_TYPES = ["inventory", "workorders", "production"];
-const OPTIONAL_DEFERRED_TYPES = ["itemmaster", "bom"];
+const OPTIONAL_DEFERRED_TYPES = ["itemmaster", "bom", "labor"];
 
 const POLL_INTERVAL = 4000; // 4 seconds between polls
 const MAX_POLLS = 60; // max ~4 minutes of polling
@@ -37,9 +38,10 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
     workorders: { status: IDLE, progress: "", error: null, rowCount: 0 },
     itemmaster: { status: IDLE, progress: "", error: null, rowCount: 0 },
     bom: { status: IDLE, progress: "", error: null, rowCount: 0 },
-    production: { status: IDLE, progress: "", error: null, rowCount: 0 }
+    production: { status: IDLE, progress: "", error: null, rowCount: 0 },
+    labor: { status: IDLE, progress: "", error: null, rowCount: 0 }
   });
-  const [syncTypes, setSyncTypes] = useState(["inventory", "workorders", "itemmaster", "bom", "production"]);
+  const [syncTypes, setSyncTypes] = useState(["inventory", "workorders", "itemmaster", "bom", "production", "labor"]);
   const abortRef = useRef(false);
   const autoStartedRef = useRef(false);
 
@@ -332,7 +334,7 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
                 ? "Connected — pull live data from Nulogy"
                 : connectionStatus?.configured
                 ? "Credentials set but not connected"
-                : "Pull inventory, WOs, item master, BOMs, and production from Nulogy"}
+                : "Pull inventory, WOs, item master, BOMs, production, and labor from Nulogy"}
             </div>
           </div>
           <span aria-hidden="true" style={{
@@ -503,7 +505,7 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
                 )}
                 {deferredSyncing && !syncing && (
                   <span style={{ fontSize: 13, color: C.dim }}>
-                    Optional BOM is syncing in background...
+                    Optional reports are syncing in background...
                   </span>
                 )}
               </div>

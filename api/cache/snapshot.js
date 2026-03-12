@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import Sentry from "../_sentry.js";
+import { buildLaborEvents } from "../_labor.js";
 
 const SESSION_SECRET = process.env.SESSION_SECRET || "packpulse-default-secret-change-me";
 const CACHE_SITE_ID = process.env.CACHE_SITE_ID || "default";
@@ -43,7 +44,7 @@ function getSupabaseAdmin() {
 
 function sanitizePayload(p) {
   if (!p || typeof p !== "object") return {};
-  const allowed = ["inventory", "workOrders", "productionData", "evoconData", "itemMaster", "boms", "edrData", "dockData", "meta"];
+  const allowed = ["inventory", "workOrders", "productionData", "laborData", "evoconData", "itemMaster", "boms", "edrData", "dockData", "meta"];
   const out = {};
   allowed.forEach(function(k) {
     if (Object.prototype.hasOwnProperty.call(p, k)) out[k] = p[k];
@@ -76,11 +77,12 @@ function compactPayloadForCache(input) {
 
   // First pass: trim known heavy arrays while preserving useful hydration data.
   if (Array.isArray(payload.productionData)) payload.productionData = compactRows(payload.productionData, { maxRows: 1400 });
+  if (Array.isArray(payload.laborData)) payload.laborData = compactRows(payload.laborData, { maxRows: 1400 });
   if (Array.isArray(payload.evoconData)) payload.evoconData = compactRows(payload.evoconData, { maxRows: 1400 });
   bytes = Buffer.byteLength(JSON.stringify(payload), "utf8");
 
   // Progressive drop of optional datasets if payload is still too large.
-  var optionalOrder = ["evoconData", "productionData", "edrData", "dockData", "boms"];
+  var optionalOrder = ["evoconData", "productionData", "laborData", "edrData", "dockData", "boms"];
   for (var i = 0; i < optionalOrder.length && bytes > SOFT_LIMIT; i++) {
     var key = optionalOrder[i];
     if (Array.isArray(payload[key]) && payload[key].length) {
@@ -101,6 +103,7 @@ function rowCountsFromPayload(payload) {
     inventory: Array.isArray(payload.inventory) ? payload.inventory.length : 0,
     workOrders: Array.isArray(payload.workOrders) ? payload.workOrders.length : 0,
     productionData: Array.isArray(payload.productionData) ? payload.productionData.length : 0,
+    laborData: Array.isArray(payload.laborData) ? payload.laborData.length : 0,
     evoconData: Array.isArray(payload.evoconData) ? payload.evoconData.length : 0,
     itemMaster: Array.isArray(payload.itemMaster) ? payload.itemMaster.length : 0,
     boms: Array.isArray(payload.boms) ? payload.boms.length : 0,
@@ -170,6 +173,7 @@ function deriveMetrics(payload, rowCounts) {
     woRemainingUnits: Math.round(remainingUnits),
     inventoryRows: rowCounts.inventory || 0,
     productionRows: rowCounts.productionData || 0,
+    laborRows: rowCounts.laborData || 0,
     evoconRows: rowCounts.evoconData || 0,
     bomRows: rowCounts.boms || 0,
     edrRows: rowCounts.edrData || 0,
@@ -378,8 +382,11 @@ export default async function handler(req, res) {
       // Build canonical production events from the full incoming dataset, not the compacted
       // shared-cache payload. The cache payload may trim production rows for size limits.
       var productionEvents = buildProductionEvents(incomingPayload, CACHE_SITE_ID, syncedAt, user.email);
+      var laborEvents = buildLaborEvents(incomingPayload && incomingPayload.laborData, CACHE_SITE_ID, syncedAt, user.email);
       var productionStatus = "ok";
       var productionWritten = 0;
+      var laborStatus = "ok";
+      var laborWritten = 0;
       if (productionEvents.length > 0) {
         var del = await supabase.from("production_events").delete().eq("site_id", CACHE_SITE_ID);
         if (del.error) {
@@ -389,6 +396,18 @@ export default async function handler(req, res) {
           } else {
             productionStatus = "production_events_delete_failed";
             Sentry.captureException(del.error);
+          }
+        }
+      }
+      if (laborEvents.length > 0) {
+        var laborDel = await supabase.from("labor_events").delete().eq("site_id", CACHE_SITE_ID);
+        if (laborDel.error) {
+          var laborDelMsg = String(laborDel.error.message || "").toLowerCase();
+          if (laborDelMsg.includes("labor_events") && laborDelMsg.includes("schema cache")) {
+            laborStatus = "missing_labor_events_table";
+          } else {
+            laborStatus = "labor_events_delete_failed";
+            Sentry.captureException(laborDel.error);
           }
         }
       }
@@ -412,16 +431,43 @@ export default async function handler(req, res) {
           productionWritten += chunk.length;
         }
       }
+      if (laborEvents.length > 0 && laborStatus === "ok") {
+        var laborChunkSize = 500;
+        for (var l = 0; l < laborEvents.length; l += laborChunkSize) {
+          var laborChunk = laborEvents.slice(l, l + laborChunkSize);
+          var le = await supabase
+            .from("labor_events")
+            .upsert(laborChunk, { onConflict: "site_id,event_key" });
+          if (le.error) {
+            var leMsg = String(le.error.message || "").toLowerCase();
+            if (leMsg.includes("labor_events") && leMsg.includes("schema cache")) {
+              laborStatus = "missing_labor_events_table";
+            } else {
+              laborStatus = "labor_events_upsert_failed";
+              Sentry.captureException(le.error);
+            }
+            break;
+          }
+          laborWritten += laborChunk.length;
+        }
+      }
       var syncRun = await logSyncRun(supabase, {
         site_id: CACHE_SITE_ID,
         source: "snapshot",
-        status: historyStatus === "ok" && (productionStatus === "ok" || productionStatus === "missing_production_events_table") ? "ok" : "partial",
+        status: historyStatus === "ok" &&
+          (productionStatus === "ok" || productionStatus === "missing_production_events_table") &&
+          (laborStatus === "ok" || laborStatus === "missing_labor_events_table")
+            ? "ok"
+            : "partial",
         row_counts: rowCounts,
         details: {
           historyStatus: historyStatus,
           productionStatus: productionStatus,
           productionRowsSubmitted: productionEvents.length,
           productionRowsWritten: productionWritten,
+          laborStatus: laborStatus,
+          laborRowsSubmitted: laborEvents.length,
+          laborRowsWritten: laborWritten,
           snapshotVersion: snapshotVersion,
           cachePayloadBytes: compacted.bytes,
           cacheDroppedDatasets: compacted.dropped
@@ -439,6 +485,9 @@ export default async function handler(req, res) {
         productionStatus: productionStatus,
         productionRowsSubmitted: productionEvents.length,
         productionRowsWritten: productionWritten,
+        laborStatus: laborStatus,
+        laborRowsSubmitted: laborEvents.length,
+        laborRowsWritten: laborWritten,
         syncRunStatus: syncRun.status,
         cachePayloadBytes: compacted.bytes,
         cacheDroppedDatasets: compacted.dropped

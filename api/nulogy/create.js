@@ -1,6 +1,6 @@
 // POST /api/nulogy/create
 // Creates a Nulogy report job with automatic column name discovery
-// Body: { reportType: "inventory" | "workorders" | "bom" | "itemmaster" | "production" }
+// Body: { reportType: "inventory" | "workorders" | "bom" | "itemmaster" | "production" | "labor" }
 
 import Sentry from "../_sentry.js";
 
@@ -145,6 +145,17 @@ const REPORT_CONFIGS = {
       ["produced_at", "job_id", "units_produced"]
     ],
     filters: buildProductionFilters
+  },
+  labor: {
+    report: "labor",
+    columnSets: [
+      ["clock_in_time", "clock_out_time", "duration", "badge_type_name", "badge_type_prefix", "badge_type_rate",
+       "job_id", "project_code", "work_order_id", "item_code", "item_description", "item_family_name",
+       "line_name", "line_leader_name", "payable_hours", "productive_hours", "availability", "performance", "line_efficiency"],
+      ["clock_in_time", "clock_out_time", "badge_type_name", "badge_type_rate", "job_id", "project_code",
+       "item_code", "item_description", "line_name", "payable_hours", "productive_hours", "availability", "performance"],
+      ["line_name", "job_id", "project_code", "item_code", "item_description", "badge_type_name", "badge_type_rate", "payable_hours", "productive_hours"]
+    ]
   }
 };
 
@@ -168,7 +179,7 @@ export default async function handler(req, res) {
   const config = REPORT_CONFIGS[reportType];
 
   if (!config) {
-    return res.status(400).json({ error: `Invalid report type: ${reportType}. Use: inventory, workorders, itemmaster, bom, or production` });
+    return res.status(400).json({ error: `Invalid report type: ${reportType}. Use: inventory, workorders, itemmaster, bom, production, or labor` });
   }
 
   const auth = Buffer.from(`${user}:${pass}`).toString("base64");

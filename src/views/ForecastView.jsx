@@ -89,6 +89,7 @@ export default function ForecastView(props) {
   var workOrders = Array.isArray(props.workOrders) ? props.workOrders : [];
   var itemMaster = Array.isArray(props.itemMaster) ? props.itemMaster : [];
   var productionData = Array.isArray(props.productionData) ? props.productionData : [];
+  var laborData = Array.isArray(props.laborData) ? props.laborData : [];
   var initial = props.initialFilters || {};
   var onPermalinkChange = props.onPermalinkChange;
   var [monthKey, setMonthKey] = useState(currentMonthKey());
@@ -107,6 +108,7 @@ export default function ForecastView(props) {
   var [versionsLoading, setVersionsLoading] = useState(false);
   var [versionsMsg, setVersionsMsg] = useState("");
   var [publishLoading, setPublishLoading] = useState(false);
+  var [laborActuals, setLaborActuals] = useState({ status: "idle", summary: {} });
   var didLoadMonthRef = useRef({});
   var [expandedRows, setExpandedRows] = useState({});
   var [dirtyRows, setDirtyRows] = useState({});
@@ -439,6 +441,29 @@ export default function ForecastView(props) {
   }, [monthKey, loadVersions]);
 
   useEffect(function() {
+    var cancelled = false;
+    if (!monthKey) return;
+    (async function() {
+      try {
+        var res = await fetch("/api/ops/labor-actuals?monthKey=" + encodeURIComponent(monthKey), { credentials: "include" });
+        var body = await res.json();
+        if (cancelled) return;
+        if (!res.ok) throw new Error((body && body.error) || "Could not load labor actuals");
+        setLaborActuals({
+          status: body.status || "ok",
+          summary: body.summary || {},
+          byWorkOrder: Array.isArray(body.byWorkOrder) ? body.byWorkOrder : [],
+          byJob: Array.isArray(body.byJob) ? body.byJob : []
+        });
+      } catch (err) {
+        if (cancelled) return;
+        setLaborActuals({ status: "error", summary: {}, byWorkOrder: [], byJob: [], error: err && err.message ? err.message : "Could not load labor actuals" });
+      }
+    })();
+    return function() { cancelled = true; };
+  }, [monthKey, laborData]);
+
+  useEffect(function() {
     if (!monthKey) return;
     if (assumptionsLoading) return;
     if (!didLoadMonthRef.current[monthKey]) return;
@@ -450,6 +475,7 @@ export default function ForecastView(props) {
 
   var forecast = payload && payload.forecast ? payload.forecast : null;
   var summary = forecast && forecast.summary ? forecast.summary : null;
+  var actualLaborSummary = laborActuals && laborActuals.summary && typeof laborActuals.summary === "object" ? laborActuals.summary : {};
   var bySku = forecast && Array.isArray(forecast.bySku) ? forecast.bySku : [];
   var byWorkOrder = forecast && Array.isArray(forecast.byWorkOrder) ? forecast.byWorkOrder : [];
   var daily = forecast && Array.isArray(forecast.daily) ? forecast.daily : [];
@@ -798,7 +824,11 @@ export default function ForecastView(props) {
             { label: "Gross Margin", value: fmtMoneyWhole(summary.gross_margin) },
             { label: "Net Operating Income", value: fmtMoneyWhole(summary.net_operating_income) },
             { label: "Production Hours", value: Math.round(safeNum(summary.total_prod_hours)).toLocaleString() },
-            { label: "Headcount Hours", value: Math.round(safeNum(summary.total_headcount_hours)).toLocaleString() }
+            { label: "Headcount Hours", value: Math.round(safeNum(summary.total_headcount_hours)).toLocaleString() },
+            { label: "Actual Labor Cost", value: fmtMoneyWhole(actualLaborSummary.labor_cost) },
+            { label: "Actual Payable Hours", value: Math.round(safeNum(actualLaborSummary.payable_hours)).toLocaleString() },
+            { label: "Actual Cases / Labor Hr", value: safeNum(actualLaborSummary.cases_per_payable_hour).toFixed(1) },
+            { label: "Actual Labor $ / Case", value: fmtMoney(safeNum(actualLaborSummary.labor_cost_per_case)) }
           ].map(function(card) {
             return (
               <div key={card.label} style={{ background: C.surface, border: "1px solid " + C.border, borderRadius: 10, padding: "10px 12px" }}>
@@ -807,6 +837,17 @@ export default function ForecastView(props) {
               </div>
             );
           })}
+        </div>
+      )}
+      {!!summary && laborActuals.status === "ok" && safeNum(actualLaborSummary.payable_hours) > 0 && (
+        <div className="mb-3 text-xs text-[rgb(var(--muted))]">
+          Labor actuals matched {Math.round(safeNum(actualLaborSummary.matched_cases)).toLocaleString()} cases across {Math.round(safeNum(actualLaborSummary.unique_job_count)).toLocaleString()} jobs through {actualLaborSummary.latest_date || monthKey}.
+          {" "}Coverage: {fmtPctWhole(actualLaborSummary.coverage_pct || 0)} of production cases in the selected month.
+        </div>
+      )}
+      {!!summary && laborActuals.status === "missing_labor_events_table" && (
+        <div className="mb-3 text-xs text-[rgb(var(--muted))]">
+          Labor actuals are not enabled yet. Run `docs/supabase-labor-events.sql` in Supabase.
         </div>
       )}
 

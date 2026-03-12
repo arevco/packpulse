@@ -536,7 +536,7 @@ function preferHigherShiftSeries(primaryRows, fallbackRows) {
   });
 }
 
-export default function OperationsView({ productionSegments, productionDataRaw, evoconData, evoconTimestamp, itemMaster, initialFilters, onPermalinkChange }) {
+export default function OperationsView({ productionSegments, productionDataRaw, laborDataRaw, evoconData, evoconTimestamp, itemMaster, initialFilters, onPermalinkChange }) {
   const { C, mono } = useTheme();
   var initial = initialFilters || {};
   var initialPreset = String(initial.preset || "last_14");
@@ -551,6 +551,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   const [trends, setTrends] = useState(null);
   const [breakdown, setBreakdown] = useState({ rowsLite: [], bySku: [], byLine: [], latestByLine: [], latestDate: null, totalRows: 0 });
   const [forecastPlans, setForecastPlans] = useState({});
+  const [laborActuals, setLaborActuals] = useState({ summary: {}, byDay: [], byShift: [], byLine: [], byRole: [], byWorkOrder: [], byJob: [], status: "idle", productionStatus: "ok" });
   const loadRequestRef = useRef(0);
   const [skuMixMode, setSkuMixMode] = useState("type");
 
@@ -615,12 +616,13 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       var forecastPlanReq = forecastPlanMonths.length
         ? fetch("/api/ops/forecast-plan?monthKeys=" + encodeURIComponent(forecastPlanMonths.join(",")), { credentials: "include" })
         : Promise.resolve({ ok: true, json: async function() { return { plans: {} }; } });
-      var [tr, br, fp] = await Promise.all([
+      var [tr, br, fp, laborResp] = await Promise.all([
         fetch("/api/cache/production-trends?days=" + fetchDays, { credentials: "include" }),
         fetch("/api/ops/production-breakdown?days=" + fetchDays, { credentials: "include" }),
         forecastPlanReq,
+        fetch("/api/ops/labor-actuals?start=" + encodeURIComponent(range.start) + "&end=" + encodeURIComponent(range.end), { credentials: "include" }),
       ]);
-      var [trBody, brBody, fpBody] = await Promise.all([tr.json(), br.json(), fp.json()]);
+      var [trBody, brBody, fpBody, laborBody] = await Promise.all([tr.json(), br.json(), fp.json(), laborResp.json()]);
       if (!tr.ok) throw new Error(trBody.error || "Could not load production trends");
       if (!br.ok) throw new Error(brBody.error || "Could not load production breakdown");
       if (requestId !== loadRequestRef.current) return;
@@ -634,6 +636,19 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
         totalRows: safeNum(brBody.totalRows),
       });
       setForecastPlans(fp && fp.ok && fpBody && typeof fpBody.plans === "object" ? fpBody.plans : {});
+      setLaborActuals(laborResp.ok && laborBody
+        ? {
+            summary: laborBody.summary || {},
+            byDay: Array.isArray(laborBody.byDay) ? laborBody.byDay : [],
+            byShift: Array.isArray(laborBody.byShift) ? laborBody.byShift : [],
+            byLine: Array.isArray(laborBody.byLine) ? laborBody.byLine : [],
+            byRole: Array.isArray(laborBody.byRole) ? laborBody.byRole : [],
+            byWorkOrder: Array.isArray(laborBody.byWorkOrder) ? laborBody.byWorkOrder : [],
+            byJob: Array.isArray(laborBody.byJob) ? laborBody.byJob : [],
+            status: laborBody.status || "ok",
+            productionStatus: laborBody.productionStatus || "ok"
+          }
+        : { summary: {}, byDay: [], byShift: [], byLine: [], byRole: [], byWorkOrder: [], byJob: [], status: "error", productionStatus: "error" });
     } catch (e) {
       if (requestId !== loadRequestRef.current) return;
       setErr(e && e.message ? e.message : "Failed loading Operations data");
@@ -2056,7 +2071,12 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
         <div className="text-xs text-[rgb(var(--muted))] mb-3">
           Job-level production detail is now consolidated here for shift execution and performance review.
         </div>
-        <ProductionView productionSegments={productionSegments} />
+        {laborActuals.status === "missing_labor_events_table" && (
+          <div className="mb-3 text-xs text-[rgb(var(--muted))]">
+            Labor actuals are not enabled yet. Run `docs/supabase-labor-events.sql` in Supabase.
+          </div>
+        )}
+        <ProductionView productionSegments={productionSegments} laborActuals={laborActuals} />
       </Card>
     </div>
   );

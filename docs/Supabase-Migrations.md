@@ -8,9 +8,11 @@ Track SQL setup order and what each script provisions.
    - Shared cache snapshot + history tables
 2. `/Users/aj/Documents/New project/supabase-production-events.sql`
    - Normalized production event table for trend reporting
-3. `/Users/aj/Documents/New project/supabase-operations-schema.sql`
+3. `/Users/aj/Documents/New project/docs/supabase-labor-events.sql`
+   - Canonical labor actuals table for shift/line/job reporting
+4. `/Users/aj/Documents/New project/supabase-operations-schema.sql`
    - Operations config + labor inputs + related tables
-4. `/Users/aj/Documents/New project/supabase-user-login-events.sql`
+5. `/Users/aj/Documents/New project/supabase-user-login-events.sql`
    - User login analytics table
 
 ## Required Environment Variables
@@ -23,6 +25,8 @@ Track SQL setup order and what each script provisions.
   - `select site_id, synced_at from cache_snapshot order by synced_at desc limit 5;`
 - Production events loaded:
   - `select count(*) from production_events;`
+- Labor events loaded:
+  - `select count(*) from labor_events;`
 - Ops inputs loaded:
   - `select count(*) from ops_shift_inputs;`
 - Login events loaded:
@@ -35,4 +39,3 @@ Track SQL setup order and what each script provisions.
   - Confirm vars are assigned to `packpulse` project.
 - API routes still seeing old vars.
   - Redeploy after env var updates.
-
