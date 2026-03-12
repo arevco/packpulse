@@ -159,10 +159,12 @@ const REPORT_CONFIGS = {
   labor: {
     report: "labor",
     columnSets: [
-      ["clock_in_time", "clock_out_time", "duration", "badge_type_name", "badge_type_prefix", "badge_type_rate",
+      ["clock_in_time", "clock_out_time", "clock_in_at", "clock_out_at", "clocked_in_at", "clocked_out_at", "started_at", "ended_at",
+       "duration", "badge_type_name", "badge_type_prefix", "badge_type_rate",
        "job_id", "project_code", "work_order_id", "item_code", "item_description", "item_family_name",
        "line_name", "line_leader_name", "payable_hours", "productive_hours", "availability", "performance", "line_efficiency"],
-      ["clock_in_time", "clock_out_time", "badge_type_name", "badge_type_rate", "job_id", "project_code",
+      ["clock_in_time", "clock_out_time", "clock_in_at", "clock_out_at", "clocked_in_at", "clocked_out_at", "started_at", "ended_at",
+       "badge_type_name", "badge_type_rate", "job_id", "project_code",
        "item_code", "item_description", "line_name", "payable_hours", "productive_hours", "availability", "performance"],
       ["line_name", "job_id", "project_code", "item_code", "item_description", "badge_type_name", "badge_type_rate", "payable_hours", "productive_hours"]
     ]

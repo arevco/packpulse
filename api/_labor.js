@@ -207,8 +207,26 @@ export function buildLaborEvents(rows, siteId, syncedAt, updatedBy) {
     var durationHours = parseDurationHours(pickFieldLoose(row, ["Duration", "duration"]));
     if (!(payableHours > 0) && !(productiveHours > 0) && !(durationHours > 0)) return;
 
-    var clockInRaw = pickFieldLoose(row, ["Clock in time", "clock_in_time"]);
-    var clockOutRaw = pickFieldLoose(row, ["Clock out time", "clock_out_time"]);
+    var clockInRaw = pickFieldLoose(row, [
+      "Clock in time",
+      "clock_in_time",
+      "Clock In At",
+      "clock_in_at",
+      "Clocked In At",
+      "clocked_in_at",
+      "Started At",
+      "started_at"
+    ]);
+    var clockOutRaw = pickFieldLoose(row, [
+      "Clock out time",
+      "clock_out_time",
+      "Clock Out At",
+      "clock_out_at",
+      "Clocked Out At",
+      "clocked_out_at",
+      "Ended At",
+      "ended_at"
+    ]);
     var clockInIso = toIso(clockInRaw);
     var clockOutIso = toIso(clockOutRaw);
     var eastern = toEasternParts(clockInIso || clockOutIso || syncedAt);
