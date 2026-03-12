@@ -430,10 +430,19 @@ function buildRawNulogySeries(rows) {
     var shift = "Unassigned";
     var dt = new Date(producedRaw || "");
     if (!isNaN(dt)) {
-      var hrFmt = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "2-digit", hour12: false });
-      var hour = parseInt(hrFmt.format(dt), 10);
+      var parts = {};
+      new Intl.DateTimeFormat("en-US", {
+        timeZone: "America/New_York",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false
+      }).formatToParts(dt).forEach(function(p) {
+        if (p.type !== "literal") parts[p.type] = p.value;
+      });
+      var hour = parseInt(parts.hour || "0", 10);
+      var minute = parseInt(parts.minute || "0", 10);
       if (hour >= 7 && hour < 15) shift = "Shift 1 (7a-3p)";
-      else if (hour >= 15 && hour < 23) shift = "Shift 2 (3p-11p)";
+      else if (hour >= 15 && (hour < 23 || (hour === 23 && minute <= 45))) shift = "Shift 2 (3p-11p)";
     }
     var line = String(pickFieldLooseLocal(row, ["Line", "line", "line_name", "Line Name"]) || "--").trim() || "--";
     var sku = String(pickFieldLooseLocal(row, ["Item Code", "item_code"]) || "").trim() || "UNKNOWN";

@@ -83,9 +83,9 @@ function normalizeShiftLabel(value) {
   return "";
 }
 
-function classifyShiftFromHour(hour) {
+function classifyShiftFromHour(hour, minute) {
   if (hour >= 7 && hour < 15) return "Shift 1 (7a-3p)";
-  if (hour >= 15 && hour < 23) return "Shift 2 (3p-11p)";
+  if (hour >= 15 && (hour < 23 || (hour === 23 && Number(minute || 0) <= 45))) return "Shift 2 (3p-11p)";
   return "Unassigned";
 }
 
@@ -124,7 +124,7 @@ function parseLaborWallClock(value) {
     if (meridiem === "AM" && hour === 12) hour = 0;
     return {
       date: year + "-" + String(monthIndex + 1).padStart(2, "0") + "-" + String(day).padStart(2, "0"),
-      shift: classifyShiftFromHour(hour)
+      shift: classifyShiftFromHour(hour, minute)
     };
   }
   if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {

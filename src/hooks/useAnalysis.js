@@ -157,8 +157,9 @@ function toEasternParts(value) {
 function classifyShiftET(parts) {
   if (!parts) return "";
   var hour = Number(parts.hour || 0);
+  var minute = Number(parts.minute || 0);
   if (hour >= 7 && hour < 15) return "Shift 1 (7a-3p)";
-  if (hour >= 15 && hour < 23) return "Shift 2 (3p-11p)";
+  if (hour >= 15 && (hour < 23 || (hour === 23 && minute <= 45))) return "Shift 2 (3p-11p)";
   // Keep rows visible even when source timestamps are date-only or off-window.
   return "Unassigned";
 }
