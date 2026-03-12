@@ -40,6 +40,86 @@ function statusLooksClosed(status) {
   return !!s && (s.includes("close") || s.includes("complete") || s.includes("cancel") || s.includes("archive") || s.includes("done"));
 }
 
+function renderInline(text) {
+  return String(text || "")
+    .split(/(\*\*[^*]+\*\*)/g)
+    .filter(Boolean)
+    .map(function(part, idx) {
+      if (/^\*\*[^*]+\*\*$/.test(part)) {
+        return <strong key={idx} className="font-semibold text-[rgb(var(--foreground))]">{part.slice(2, -2)}</strong>;
+      }
+      return <span key={idx}>{part}</span>;
+    });
+}
+
+function parseAiBrief(text) {
+  var lines = String(text || "").replace(/\r\n/g, "\n").split("\n");
+  var sections = [];
+  var current = null;
+
+  lines.forEach(function(rawLine) {
+    var line = String(rawLine || "").replace(/\t/g, "  ");
+    var trimmed = line.trim();
+    if (!trimmed) return;
+
+    var headingMatch = trimmed.match(/^\*\*(.+?)\*\*$/);
+    if (headingMatch) {
+      current = {
+        title: String(headingMatch[1] || "").replace(/:$/, "").trim(),
+        items: []
+      };
+      sections.push(current);
+      return;
+    }
+
+    if (!current) {
+      current = { title: "Summary", items: [] };
+      sections.push(current);
+    }
+
+    var listMatch = line.match(/^(\s*)([-*]|\d+\.)\s+(.*)$/);
+    if (listMatch) {
+      current.items.push({
+        type: "list",
+        level: listMatch[1] && listMatch[1].length >= 2 ? 1 : 0,
+        marker: listMatch[2],
+        text: listMatch[3]
+      });
+      return;
+    }
+
+    current.items.push({ type: "text", text: trimmed });
+  });
+
+  return sections;
+}
+
+function sectionTone(title) {
+  var raw = String(title || "").toLowerCase();
+  if (raw.includes("snapshot")) {
+    return {
+      panel: "border-[rgba(var(--accent-rgb),0.22)] bg-[rgba(var(--accent-rgb),0.06)]",
+      badge: "bg-[rgba(var(--accent-rgb),0.14)] text-[rgb(var(--accent))]"
+    };
+  }
+  if (raw.includes("risk")) {
+    return {
+      panel: "border-[rgba(var(--warning-rgb),0.24)] bg-[rgba(var(--warning-rgb),0.08)]",
+      badge: "bg-[rgba(var(--warning-rgb),0.14)] text-[rgb(var(--warning))]"
+    };
+  }
+  if (raw.includes("action")) {
+    return {
+      panel: "border-[rgba(var(--success-rgb),0.24)] bg-[rgba(var(--success-rgb),0.08)]",
+      badge: "bg-[rgba(var(--success-rgb),0.14)] text-[rgb(var(--success))]"
+    };
+  }
+  return {
+    panel: "border-[rgb(var(--border))] bg-[rgb(var(--surface))]",
+    badge: "bg-[rgb(var(--surface-2))] text-[rgb(var(--muted))]"
+  };
+}
+
 export default function AICopilotView(props) {
   var summary = props.summary || { total: 0, ready: 0, blocked: 0 };
   var criticalItems = Array.isArray(props.criticalItems) ? props.criticalItems : [];
@@ -213,6 +293,10 @@ export default function AICopilotView(props) {
     return list;
   }, [facts]);
 
+  var aiBriefSections = useMemo(function() {
+    return parseAiBrief(aiBrief);
+  }, [aiBrief]);
+
   async function generateBrief() {
     setAiLoading(true);
     setAiError("");
@@ -268,9 +352,60 @@ export default function AICopilotView(props) {
 
       {aiError ? <Card className="border-[rgb(var(--danger-line))] bg-[rgb(var(--danger-soft))] px-3 py-2 text-sm text-[rgb(var(--danger))]">{aiError}</Card> : null}
       {aiBrief ? (
-        <Card className="px-4 py-3">
-          <div className="mb-1 text-xs font-semibold uppercase tracking-[0.08em] text-[rgb(var(--muted))]">AI Brief</div>
-          <div className="whitespace-pre-wrap text-sm leading-relaxed">{aiBrief}</div>
+        <Card className="overflow-hidden border-[rgba(var(--accent-rgb),0.16)] bg-[linear-gradient(180deg,rgba(var(--accent-rgb),0.05),rgba(255,255,255,0))] px-4 py-4">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[rgb(var(--muted))]">AI Brief</div>
+              <div className="mt-1 text-sm text-[rgb(var(--muted))]">Standup-ready summary grouped into snapshot, risks, and actions.</div>
+            </div>
+            <div className="rounded-full border border-[rgba(var(--accent-rgb),0.18)] bg-[rgba(var(--accent-rgb),0.08)] px-2.5 py-1 text-[11px] font-semibold text-[rgb(var(--accent))]">
+              Structured Output
+            </div>
+          </div>
+          {aiBriefSections.length ? (
+            <div className="grid gap-3 xl:grid-cols-3">
+              {aiBriefSections.map(function(section, sectionIdx) {
+                var tone = sectionTone(section.title);
+                return (
+                  <div key={section.title + "-" + sectionIdx} className={"rounded-xl border px-4 py-3 shadow-sm " + tone.panel}>
+                    <div className="mb-3 flex items-center gap-2">
+                      <div className={"inline-flex min-w-[28px] items-center justify-center rounded-full px-2 py-1 text-[11px] font-semibold " + tone.badge}>
+                        {sectionIdx + 1}
+                      </div>
+                      <div className="text-sm font-semibold text-[rgb(var(--foreground))]">{section.title.replace(/^\d+\)\s*/, "")}</div>
+                    </div>
+                    <div className="space-y-2.5 text-sm leading-6 text-[rgb(var(--foreground))]">
+                      {section.items.map(function(item, itemIdx) {
+                        if (item.type === "text") {
+                          return (
+                            <div key={itemIdx} className="rounded-lg bg-white/70 px-3 py-2">
+                              {renderInline(item.text)}
+                            </div>
+                          );
+                        }
+                        var indentClass = item.level > 0 ? "ml-5" : "";
+                        var markerLabel = /^\d+\.$/.test(item.marker) ? item.marker.slice(0, -1) : item.level > 0 ? ">" : "-";
+                        return (
+                          <div key={itemIdx} className={"flex items-start gap-2 " + indentClass}>
+                            <div className={"mt-0.5 inline-flex h-6 min-w-[24px] items-center justify-center rounded-full text-[11px] font-semibold " + (item.level > 0 ? "bg-white/80 text-[rgb(var(--muted))]" : tone.badge)}>
+                              {markerLabel}
+                            </div>
+                            <div className="min-w-0 flex-1 rounded-lg bg-white/70 px-3 py-2">
+                              {renderInline(item.text)}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="whitespace-pre-wrap rounded-xl border border-[rgb(var(--border))] bg-white/80 px-4 py-3 text-sm leading-relaxed">
+              {aiBrief}
+            </div>
+          )}
         </Card>
       ) : null}
 
