@@ -6,6 +6,7 @@ import { Input } from "../components/ui/input";
 import TableShell from "../components/ui/table-shell";
 
 var MIN_TRUSTED_JOB_LABOR_HOURS = 0.25;
+var MAX_TOP_JOBS_PER_LINE = 3;
 
 function fmtMoneyWhole(value) {
   var rounded = Math.round(safeNum(value));
@@ -36,6 +37,7 @@ export default function ProductionView({ productionSegments, laborActuals, resol
   const [search, setSearch] = useState("");
   const [lineFilter, setLineFilter] = useState("all");
   const [shiftFilter, setShiftFilter] = useState("all");
+  const [lineExpansion, setLineExpansion] = useState({});
 
   var prodShiftRows = productionSegments && Array.isArray(productionSegments.shiftRows) ? productionSegments.shiftRows : [];
   var prodJobRows = productionSegments && Array.isArray(productionSegments.jobRows) ? productionSegments.jobRows : [];
@@ -253,12 +255,29 @@ export default function ProductionView({ productionSegments, laborActuals, resol
       return Object.assign({}, r, {
         shiftCount: Object.keys(r.shifts).length,
         casesPerPayableHour: r.laborPayableHours > 0 ? (r.unitsProduced / r.laborPayableHours) : 0,
+        casesPerMinute: r.laborPayableHours > 0 ? (r.unitsProduced / (r.laborPayableHours * 60)) : 0,
         laborCostPerCase: r.unitsProduced > 0 ? (r.laborCost / r.unitsProduced) : 0,
         revenueCoveragePct: r.unitsProduced > 0 ? Math.round((r.revenueCoveredUnits / r.unitsProduced) * 100) : 0,
         laborMarginPct: r.revenue > 0 ? (r.laborMargin / r.revenue) : null
       });
     }).sort(function(a, b) { return b.unitsProduced - a.unitsProduced; });
   }, [jobsWithLabor]);
+
+  var lineExecution = useMemo(function() {
+    var jobsByLine = {};
+    jobRollup.forEach(function(job) {
+      var line = String(job.line || "Unknown").trim() || "Unknown";
+      if (!jobsByLine[line]) jobsByLine[line] = [];
+      jobsByLine[line].push(job);
+    });
+    return lineLoad.map(function(line) {
+      var jobs = jobsByLine[line.line] || [];
+      return Object.assign({}, line, {
+        topJobs: jobs.slice(0, MAX_TOP_JOBS_PER_LINE),
+        hiddenJobCount: Math.max(0, jobs.length - MAX_TOP_JOBS_PER_LINE)
+      });
+    });
+  }, [lineLoad, jobRollup]);
 
   var totalUnitsProduced = jobsWithLabor.reduce(function(sum, r) { return sum + safeNum(r.unitsProduced); }, 0);
   var topLine = lineLoad[0] || null;
@@ -294,6 +313,16 @@ export default function ProductionView({ productionSegments, laborActuals, resol
   var laborRateText = function(hours, cases, cost) {
     if (!(hours > 0) || !(cases > 0)) return "labor not matched";
     return (cases / hours).toFixed(1) + " cs/lh · " + fmtMoneyWhole(cost / cases) + "/case";
+  };
+  var lineExpanded = function(lineName) {
+    return lineExpansion[lineName] !== false;
+  };
+  var toggleLineExpanded = function(lineName) {
+    setLineExpansion(function(prev) {
+      return Object.assign({}, prev, {
+        [lineName]: !(prev[lineName] !== false)
+      });
+    });
   };
 
   if (!prodShiftRows.length) {
@@ -355,97 +384,92 @@ export default function ProductionView({ productionSegments, laborActuals, resol
         </div>
       </div>
 
-      <div className="mb-3 grid gap-3 xl:grid-cols-2">
-        <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-3">
-          <div className="mb-2 text-sm font-semibold">Line Load</div>
-          <TableShell className="overflow-x-auto overflow-y-hidden">
-            <table style={{ width:"100%", minWidth:980, borderCollapse:"collapse" }}>
-              <thead>
-                <tr style={{ background:C.raised }}>
-                  <th style={thS}>Line</th>
-                  <th style={thS}>Share</th>
-                  <th style={thS}>Units</th>
-                  <th style={thS}>Revenue</th>
-                  <th style={thS}>Labor Hrs</th>
-                  <th style={thS}>Labor</th>
-                  <th style={thS}>Labor Margin</th>
-                  <th style={thS}>Margin %</th>
-                  <th style={thS}>Cases/Min</th>
-                </tr>
-              </thead>
-              <tbody>
-                {lineLoad.slice(0, 6).map(function(r) {
-                  return (
-                    <tr key={r.line} style={{ borderBottom:"1px solid "+C.border }}>
-                      <td style={tdM}>{r.line}</td>
-                      <td style={tdM}>{r.sharePct}%</td>
-                      <td style={Object.assign({}, tdM, { fontWeight:700, color:C.ok })}>{r.units.toLocaleString()}</td>
-                      <td style={tdM}>
-                        {r.revenue > 0 ? fmtMoneyWhole(r.revenue) : "--"}
-                        {r.revenue > 0 && r.revenueCoveragePct > 0 && r.revenueCoveragePct < 100 ? (
-                          <div style={{ fontSize:11, color:C.dim }}>{r.revenueCoveragePct}% cov</div>
-                        ) : null}
+      <div className="mb-3 rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-3">
+        <div className="mb-1 text-sm font-semibold">Line Execution</div>
+        <div className="mb-2 text-xs text-[rgb(var(--muted))]">Line summary rows with top jobs nested underneath. Click a line to collapse or expand its jobs.</div>
+        <TableShell className="overflow-x-auto overflow-y-hidden">
+          <table style={{ width:"100%", minWidth:1180, borderCollapse:"collapse" }}>
+            <thead>
+              <tr style={{ background:C.raised }}>
+                <th style={thS}>Line / Job</th>
+                <th style={thS}>Context</th>
+                <th style={thS}>Units</th>
+                <th style={thS}>Revenue</th>
+                <th style={thS}>Labor Hrs</th>
+                <th style={thS}>Labor</th>
+                <th style={thS}>Labor Margin</th>
+                <th style={thS}>Margin %</th>
+                <th style={thS}>Cases/Min</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lineExecution.map(function(r) {
+                var expanded = lineExpanded(r.line);
+                return [
+                  <tr key={r.line} style={{ borderBottom:"1px solid " + C.border, background:C.surface }}>
+                    <td style={tdM}>
+                      <button
+                        type="button"
+                        onClick={function() { toggleLineExpanded(r.line); }}
+                        style={{ display:"inline-flex", alignItems:"center", gap:8, border:"none", background:"transparent", padding:0, cursor:"pointer", color:C.text, font:"inherit" }}
+                      >
+                        <span style={{ fontFamily:mono, color:C.dim }}>{expanded ? "▾" : "▸"}</span>
+                        <span style={{ fontWeight:700 }}>{r.line}</span>
+                      </button>
+                    </td>
+                    <td style={tdM}>
+                      <div>{r.sharePct}% share · {r.jobs} jobs</div>
+                      {r.revenue > 0 && r.revenueCoveragePct > 0 && r.revenueCoveragePct < 100 ? (
+                        <div style={{ fontSize:11, color:C.dim }}>{r.revenueCoveragePct}% revenue coverage</div>
+                      ) : null}
+                    </td>
+                    <td style={Object.assign({}, tdM, { fontWeight:700, color:C.ok })}>{r.units.toLocaleString()}</td>
+                    <td style={tdM}>{r.revenue > 0 ? fmtMoneyWhole(r.revenue) : "--"}</td>
+                    <td style={tdM}>{r.laborPayableHours > 0 ? r.laborPayableHours.toFixed(1) : "--"}</td>
+                    <td style={tdM}>{r.laborCost > 0 ? fmtMoneyWhole(r.laborCost) : "--"}</td>
+                    <td style={tdM}>{r.revenue > 0 ? fmtMoneyWhole(r.laborMargin) : "--"}</td>
+                    <td style={tdM}>{r.revenue > 0 ? fmtPct(r.laborMarginPct) : "--"}</td>
+                    <td style={tdM}>{r.casesPerMinute > 0 ? r.casesPerMinute.toFixed(2) : "--"}</td>
+                  </tr>,
+                  expanded ? r.topJobs.map(function(job) {
+                    return (
+                      <tr key={job.key} style={{ borderBottom:"1px solid " + C.border, background:C.raised }}>
+                        <td style={Object.assign({}, tdM, { paddingLeft:"28px" })}>
+                          <div style={{ fontWeight:600, color:C.bright }}>{job.jobId}</div>
+                          <div style={{ fontSize:11, color:C.dim }}>{job.itemCode}</div>
+                        </td>
+                        <td style={tdM}>
+                          <div>{job.workOrder}</div>
+                          <div style={{ fontSize:11, color:C.dim, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", maxWidth:260 }}>{job.itemDesc}</div>
+                        </td>
+                        <td style={Object.assign({}, tdM, { fontWeight:700, color:C.ok })}>{job.unitsProduced.toLocaleString()}</td>
+                        <td style={tdM}>
+                          {job.revenue > 0 ? fmtMoneyWhole(job.revenue) : "--"}
+                          {job.revenue > 0 && job.revenueCoveragePct > 0 && job.revenueCoveragePct < 100 ? (
+                            <div style={{ fontSize:11, color:C.dim }}>{job.revenueCoveragePct}% cov</div>
+                          ) : null}
+                        </td>
+                        <td style={tdM}>{job.laborPayableHours > 0 ? job.laborPayableHours.toFixed(1) : "--"}</td>
+                        <td style={tdM}>{job.laborCost > 0 ? fmtMoneyWhole(job.laborCost) : "--"}</td>
+                        <td style={tdM}>{job.revenue > 0 ? fmtMoneyWhole(job.laborMargin) : "--"}</td>
+                        <td style={tdM}>{job.revenue > 0 ? fmtPct(job.laborMarginPct) : "--"}</td>
+                        <td style={tdM}>{job.casesPerMinute > 0 ? job.casesPerMinute.toFixed(2) : "--"}</td>
+                      </tr>
+                    );
+                  }) : null,
+                  expanded && r.hiddenJobCount > 0 ? (
+                    <tr key={r.line + "-more"} style={{ borderBottom:"1px solid " + C.border, background:C.raised }}>
+                      <td colSpan={9} style={Object.assign({}, tdN, { paddingLeft:"28px", color:C.dim })}>
+                        +{r.hiddenJobCount} more jobs on {r.line} are available below in Job Rows.
                       </td>
-                      <td style={tdM}>{r.laborPayableHours > 0 ? r.laborPayableHours.toFixed(1) : "--"}</td>
-                      <td style={tdM}>{r.laborCost > 0 ? fmtMoneyWhole(r.laborCost) : "--"}</td>
-                      <td style={tdM}>{r.revenue > 0 ? fmtMoneyWhole(r.laborMargin) : "--"}</td>
-                      <td style={tdM}>{r.revenue > 0 ? fmtPct(r.laborMarginPct) : "--"}</td>
-                      <td style={tdM}>{r.casesPerMinute > 0 ? r.casesPerMinute.toFixed(2) : "--"}</td>
                     </tr>
-                  );
-                })}
-                {!lineLoad.length && <tr><td colSpan={9} style={{ padding:20, textAlign:"center", color:C.dim }}>No line load for current filters.</td></tr>}
-              </tbody>
-            </table>
-          </TableShell>
-        </div>
-
-        <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-3">
-          <div className="mb-2 text-sm font-semibold">Top Jobs</div>
-          <TableShell>
-            <table style={{ width:"100%", borderCollapse:"collapse" }}>
-              <thead>
-                <tr style={{ background:C.raised }}>
-                  <th style={thS}>Job</th>
-                  <th style={thS}>WO#</th>
-                  <th style={thS}>Line</th>
-                  <th style={thS}>Units</th>
-                  <th style={thS}>Revenue</th>
-                  <th style={thS}>Labor</th>
-                  <th style={thS}>Labor Margin</th>
-                  <th style={thS}>Margin %</th>
-                  <th style={thS}>Cases/LH</th>
-                </tr>
-              </thead>
-              <tbody>
-                {jobRollup.slice(0, 6).map(function(r) {
-                  return (
-                    <tr key={r.key} style={{ borderBottom:"1px solid "+C.border }}>
-                      <td style={tdM}>
-                        <div style={{ fontWeight:600, color:C.bright }}>{r.jobId}</div>
-                        <div style={{ fontSize:11, color:C.dim }}>{r.itemCode}</div>
-                      </td>
-                      <td style={tdM}>{r.workOrder}</td>
-                      <td style={tdM}>{r.line}</td>
-                      <td style={Object.assign({}, tdM, { fontWeight:700, color:C.ok })}>{r.unitsProduced.toLocaleString()}</td>
-                      <td style={tdM}>
-                        {r.revenue > 0 ? fmtMoneyWhole(r.revenue) : "--"}
-                        {r.revenue > 0 && r.revenueCoveragePct > 0 && r.revenueCoveragePct < 100 ? (
-                          <div style={{ fontSize:11, color:C.dim }}>{r.revenueCoveragePct}% cov</div>
-                        ) : null}
-                      </td>
-                      <td style={tdM}>{r.laborCost > 0 ? fmtMoneyWhole(r.laborCost) : "--"}</td>
-                      <td style={tdM}>{r.revenue > 0 ? fmtMoneyWhole(r.laborMargin) : "--"}</td>
-                      <td style={tdM}>{r.revenue > 0 ? fmtPct(r.laborMarginPct) : "--"}</td>
-                      <td style={tdM}>{r.casesPerPayableHour > 0 ? r.casesPerPayableHour.toFixed(1) : "--"}</td>
-                    </tr>
-                  );
-                })}
-                {!jobRollup.length && <tr><td colSpan={9} style={{ padding:20, textAlign:"center", color:C.dim }}>No jobs for current filters.</td></tr>}
-              </tbody>
-            </table>
-          </TableShell>
-        </div>
+                  ) : null
+                ];
+              })}
+              {!lineExecution.length && <tr><td colSpan={9} style={{ padding:20, textAlign:"center", color:C.dim }}>No line or job rollups for current filters.</td></tr>}
+            </tbody>
+          </table>
+        </TableShell>
       </div>
 
       <div className="mb-2 flex items-center justify-between gap-2">
