@@ -1699,27 +1699,30 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     <div className="space-y-4">
       {err && <Card className="border-[rgb(var(--danger-line))] bg-[rgb(var(--danger-soft))] px-3 py-2 text-sm text-[rgb(var(--danger))]">{err}</Card>}
 
-      <div className="grid gap-2 lg:grid-cols-12">
-        <Card className="lg:col-span-8 px-3 py-3">
-          <div className="mb-2 flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
-            <div>
+      <div className="grid items-start gap-2 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <Card className="px-3 py-3">
+          <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-[280px] flex-1">
               <div className="text-sm font-semibold">Shift Command Board</div>
-              <div className="text-xs text-[rgb(var(--muted))]">
-                {commandBoard.selected.dayCount > 1
-                  ? ("Selected: " + commandBoard.selected.label + " · " + commandBoard.selected.range.start + " to " + commandBoard.selected.range.end + " · " + commandBoard.selected.dayCount + " production day" + (commandBoard.selected.dayCount === 1 ? "" : "s"))
-                  : commandBoard.selected.latestDate
-                    ? ("Selected: " + commandBoard.selected.label + " · " + commandBoard.selected.latestDate)
-                    : "No production day available yet"}
-              </div>
-              <div className="text-xs text-[rgb(var(--muted))]">
-                {commandBoard.selected.revenuePricedUnits > 0
-                  ? ("Revenue: " + fmtMoney(commandBoard.selected.revenueActual)
-                    + (commandBoard.selected.revenueDirectUnits === 0 && commandBoard.selected.revenueProxyUnits > 0 ? " · item cost proxy" : "")
-                    + (commandBoard.selected.revenueCoveragePct < 100 ? " · " + commandBoard.selected.revenueCoveragePct + "% covered" : ""))
-                  : "Revenue unavailable"}
+              <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-[rgb(var(--muted))]">
+                <span>
+                  {commandBoard.selected.dayCount > 1
+                    ? ("Selected: " + commandBoard.selected.label + " · " + commandBoard.selected.range.start + " to " + commandBoard.selected.range.end + " · " + commandBoard.selected.dayCount + " production day" + (commandBoard.selected.dayCount === 1 ? "" : "s"))
+                    : commandBoard.selected.latestDate
+                      ? ("Selected: " + commandBoard.selected.label + " · " + commandBoard.selected.latestDate)
+                      : "No production day available yet"}
+                </span>
+                <span className="text-[rgb(var(--border))]">•</span>
+                <span>
+                  {commandBoard.selected.revenuePricedUnits > 0
+                    ? ("Revenue: " + fmtMoney(commandBoard.selected.revenueActual)
+                      + (commandBoard.selected.revenueDirectUnits === 0 && commandBoard.selected.revenueProxyUnits > 0 ? " · item cost proxy" : "")
+                      + (commandBoard.selected.revenueCoveragePct < 100 ? " · " + commandBoard.selected.revenueCoveragePct + "% covered" : ""))
+                    : "Revenue unavailable"}
+                </span>
               </div>
             </div>
-            <div className="flex flex-wrap items-center gap-1.5 lg:justify-end">
+            <div className="flex flex-wrap items-center gap-1.5">
               <DatePicker value={range.start} onChange={setCustomStart} className="h-9 w-[132px]" />
               <span className="text-xs text-[rgb(var(--muted))] whitespace-nowrap">-</span>
               <DatePicker value={range.end} onChange={setCustomEnd} className="h-9 w-[132px]" />
@@ -1775,7 +1778,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
           </div>
         </Card>
 
-        <Card className="lg:col-span-4 px-3 py-3">
+        <Card className="self-start px-3 py-3">
           <div className="mb-2 text-sm font-semibold">Operations KPI</div>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1 2xl:grid-cols-2">
             <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
