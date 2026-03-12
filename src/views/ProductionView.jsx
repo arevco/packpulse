@@ -189,17 +189,33 @@ export default function ProductionView({ productionSegments, laborActuals, resol
     var totalUnits = jobsWithLabor.reduce(function(sum, r) { return sum + safeNum(r.unitsProduced); }, 0);
     jobsWithLabor.forEach(function(r) {
       var line = String(r.line || "Unknown").trim() || "Unknown";
-      if (!map[line]) map[line] = { line: line, units: 0, jobs: 0, laborPayableHours: 0, laborCost: 0 };
+      if (!map[line]) {
+        map[line] = {
+          line: line,
+          units: 0,
+          jobs: 0,
+          laborPayableHours: 0,
+          laborCost: 0,
+          revenue: 0,
+          revenueCoveredUnits: 0,
+          laborMargin: 0
+        };
+      }
       map[line].units += safeNum(r.unitsProduced);
       map[line].jobs += 1;
       map[line].laborPayableHours += safeNum(r.laborPayableHours);
       map[line].laborCost += safeNum(r.laborCost);
+      map[line].revenue += safeNum(r.revenue);
+      map[line].revenueCoveredUnits += safeNum(r.revenueCoveredUnits);
+      map[line].laborMargin += safeNum(r.laborMargin);
     });
     return Object.values(map).map(function(r) {
       return Object.assign({}, r, {
         sharePct: totalUnits > 0 ? Math.round((r.units / totalUnits) * 100) : 0,
-        casesPerPayableHour: r.laborPayableHours > 0 ? (r.units / r.laborPayableHours) : 0,
-        laborCostPerCase: r.units > 0 ? (r.laborCost / r.units) : 0
+        revenueCoveragePct: r.units > 0 ? Math.round((r.revenueCoveredUnits / r.units) * 100) : 0,
+        casesPerMinute: r.laborPayableHours > 0 ? (r.units / (r.laborPayableHours * 60)) : 0,
+        laborCostPerCase: r.units > 0 ? (r.laborCost / r.units) : 0,
+        laborMarginPct: r.revenue > 0 ? (r.laborMargin / r.revenue) : null
       });
     }).sort(function(a, b) { return b.units - a.units; });
   }, [jobsWithLabor]);
@@ -349,8 +365,12 @@ export default function ProductionView({ productionSegments, laborActuals, resol
                   <th style={thS}>Line</th>
                   <th style={thS}>Share</th>
                   <th style={thS}>Units</th>
+                  <th style={thS}>Revenue</th>
                   <th style={thS}>Labor Hrs</th>
-                  <th style={thS}>Cases/LH</th>
+                  <th style={thS}>Labor</th>
+                  <th style={thS}>Labor Margin</th>
+                  <th style={thS}>Margin %</th>
+                  <th style={thS}>Cases/Min</th>
                 </tr>
               </thead>
               <tbody>
@@ -360,12 +380,21 @@ export default function ProductionView({ productionSegments, laborActuals, resol
                       <td style={tdM}>{r.line}</td>
                       <td style={tdM}>{r.sharePct}%</td>
                       <td style={Object.assign({}, tdM, { fontWeight:700, color:C.ok })}>{r.units.toLocaleString()}</td>
+                      <td style={tdM}>
+                        {r.revenue > 0 ? fmtMoneyWhole(r.revenue) : "--"}
+                        {r.revenue > 0 && r.revenueCoveragePct > 0 && r.revenueCoveragePct < 100 ? (
+                          <div style={{ fontSize:11, color:C.dim }}>{r.revenueCoveragePct}% cov</div>
+                        ) : null}
+                      </td>
                       <td style={tdM}>{r.laborPayableHours > 0 ? r.laborPayableHours.toFixed(1) : "--"}</td>
-                      <td style={tdM}>{r.casesPerPayableHour > 0 ? r.casesPerPayableHour.toFixed(1) : "--"}</td>
+                      <td style={tdM}>{r.laborCost > 0 ? fmtMoneyWhole(r.laborCost) : "--"}</td>
+                      <td style={tdM}>{r.revenue > 0 ? fmtMoneyWhole(r.laborMargin) : "--"}</td>
+                      <td style={tdM}>{r.revenue > 0 ? fmtPct(r.laborMarginPct) : "--"}</td>
+                      <td style={tdM}>{r.casesPerMinute > 0 ? r.casesPerMinute.toFixed(2) : "--"}</td>
                     </tr>
                   );
                 })}
-                {!lineLoad.length && <tr><td colSpan={5} style={{ padding:20, textAlign:"center", color:C.dim }}>No line load for current filters.</td></tr>}
+                {!lineLoad.length && <tr><td colSpan={9} style={{ padding:20, textAlign:"center", color:C.dim }}>No line load for current filters.</td></tr>}
               </tbody>
             </table>
           </TableShell>
