@@ -15,6 +15,31 @@ function safeNum(v) {
   return Number.isFinite(n) ? n : 0;
 }
 
+var moneyCompactFormatter = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  notation: "compact",
+  maximumFractionDigits: 1
+});
+
+var moneyWholeFormatter = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  maximumFractionDigits: 0
+});
+
+function fmtMoneyCompact(v) {
+  return moneyCompactFormatter.format(safeNum(v));
+}
+
+function fmtMoney(v) {
+  return moneyWholeFormatter.format(safeNum(v));
+}
+
+function normalizeItemCode(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
 function businessDaysBetween(fromDate, toDate) {
   var from = new Date(fromDate);
   var to = new Date(toDate);
@@ -551,6 +576,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   const [trends, setTrends] = useState(null);
   const [breakdown, setBreakdown] = useState({ rowsLite: [], bySku: [], byLine: [], latestByLine: [], latestDate: null, totalRows: 0 });
   const [forecastPlans, setForecastPlans] = useState({});
+  const [opsSkuTargets, setOpsSkuTargets] = useState([]);
   const [laborActuals, setLaborActuals] = useState({ summary: {}, byDay: [], byShift: [], byLine: [], byRole: [], byWorkOrder: [], byJob: [], status: "idle", productionStatus: "ok" });
   const loadRequestRef = useRef(0);
   const [skuMixMode, setSkuMixMode] = useState("type");
@@ -616,13 +642,14 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       var forecastPlanReq = forecastPlanMonths.length
         ? fetch("/api/ops/forecast-plan?monthKeys=" + encodeURIComponent(forecastPlanMonths.join(",")), { credentials: "include" })
         : Promise.resolve({ ok: true, json: async function() { return { plans: {} }; } });
-      var [tr, br, fp, laborResp] = await Promise.all([
+      var [tr, br, fp, laborResp, configResp] = await Promise.all([
         fetch("/api/cache/production-trends?days=" + fetchDays, { credentials: "include" }),
         fetch("/api/ops/production-breakdown?days=" + fetchDays, { credentials: "include" }),
         forecastPlanReq,
         fetch("/api/ops/labor-actuals?start=" + encodeURIComponent(range.start) + "&end=" + encodeURIComponent(range.end), { credentials: "include" }),
+        fetch("/api/ops/config", { credentials: "include" }),
       ]);
-      var [trBody, brBody, fpBody, laborBody] = await Promise.all([tr.json(), br.json(), fp.json(), laborResp.json()]);
+      var [trBody, brBody, fpBody, laborBody, configBody] = await Promise.all([tr.json(), br.json(), fp.json(), laborResp.json(), configResp.json()]);
       if (!tr.ok) throw new Error(trBody.error || "Could not load production trends");
       if (!br.ok) throw new Error(brBody.error || "Could not load production breakdown");
       if (requestId !== loadRequestRef.current) return;
@@ -636,6 +663,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
         totalRows: safeNum(brBody.totalRows),
       });
       setForecastPlans(fp && fp.ok && fpBody && typeof fpBody.plans === "object" ? fpBody.plans : {});
+      setOpsSkuTargets(configResp.ok && configBody && Array.isArray(configBody.skuTargets) ? configBody.skuTargets : []);
       setLaborActuals(laborResp.ok && laborBody
         ? {
             summary: laborBody.summary || {},
@@ -784,6 +812,44 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
 
   var effectiveTrends = effectiveNulogySource.trends;
   var effectiveBreakdown = effectiveNulogySource.breakdown;
+
+  var revenueTargetsBySku = useMemo(function() {
+    var map = {};
+    (Array.isArray(opsSkuTargets) ? opsSkuTargets : []).forEach(function(row) {
+      var sku = normalizeItemCode(row && row.item_code);
+      if (!sku) return;
+      if (!map[sku]) map[sku] = [];
+      map[sku].push({
+        customer: String(row && row.customer || "").trim(),
+        revenue_per_case: safeNum(row && row.revenue_per_case),
+        active_from: String(row && row.active_from || "").slice(0, 10),
+        active_to: String(row && row.active_to || "").slice(0, 10)
+      });
+    });
+    Object.keys(map).forEach(function(sku) {
+      map[sku].sort(function(a, b) {
+        if (!!a.customer !== !!b.customer) return a.customer ? 1 : -1;
+        return String(b.active_from || "").localeCompare(String(a.active_from || ""));
+      });
+    });
+    return map;
+  }, [opsSkuTargets]);
+
+  var revenuePerCaseForRow = function(itemCode, dateIso) {
+    var sku = normalizeItemCode(itemCode);
+    if (!sku) return 0;
+    var pricingRows = revenueTargetsBySku[sku] || [];
+    if (!pricingRows.length) return 0;
+    var day = String(dateIso || "").slice(0, 10);
+    for (var i = 0; i < pricingRows.length; i += 1) {
+      var row = pricingRows[i];
+      if (!(safeNum(row.revenue_per_case) > 0)) continue;
+      if (day && row.active_from && day < row.active_from) continue;
+      if (day && row.active_to && day > row.active_to) continue;
+      return safeNum(row.revenue_per_case);
+    }
+    return 0;
+  };
 
   var effectiveRange = useMemo(function() {
     if (windowPreset !== "today") return range;
@@ -958,12 +1024,20 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       }
 
       var byLineMap = {};
+      var revenueActual = 0;
+      var pricedUnits = 0;
       allRows.forEach(function(r) {
         if (!inRange(String(r.produced_date_et || ""), summaryRange)) return;
         var line = String(r.line || "Unknown");
+        var unitsProduced = safeNum(r.units_produced);
         if (!byLineMap[line]) byLineMap[line] = { line: line, units: 0, rows: 0 };
-        byLineMap[line].units += safeNum(r.units_produced);
+        byLineMap[line].units += unitsProduced;
         byLineMap[line].rows += 1;
+        var revenuePerCase = revenuePerCaseForRow(r.item_code, r.produced_date_et);
+        if (revenuePerCase > 0 && unitsProduced > 0) {
+          revenueActual += unitsProduced * revenuePerCase;
+          pricedUnits += unitsProduced;
+        }
       });
       var topLine = Object.values(byLineMap).sort(function(a, b) { return b.units - a.units; })[0] || null;
       var compareInfo = comparableRangeForPreset(def.key, summaryRange);
@@ -972,11 +1046,15 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       var compareActual = compareByDay.reduce(function(sum, d) { return sum + safeNum(d.units); }, 0);
       var compareDelta = windowActual - compareActual;
       var compareDeltaPct = compareActual > 0 ? Math.round((compareDelta / compareActual) * 100) : 0;
+      var revenueCoveragePct = windowActual > 0 ? Math.round((pricedUnits / windowActual) * 100) : 0;
       return {
         label: label,
         range: summaryRange,
         latestDate: latest ? latest.date : null,
         latestUnits: windowActual,
+        revenueActual: Math.round(revenueActual),
+        revenuePricedUnits: pricedUnits,
+        revenueCoveragePct: revenueCoveragePct,
         latestRows: latestRows,
         dayCount: dayCount,
         planUnits: planUnits,
@@ -1007,7 +1085,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       presets: presetCards,
       selected: selectedSummary
     };
-  }, [effectiveTrends, effectiveBreakdown, commandBoardPreset, forecastPlans]);
+  }, [effectiveTrends, effectiveBreakdown, commandBoardPreset, forecastPlans, revenueTargetsBySku]);
 
   var shiftPlanVsActual = useMemo(function() {
     var rows = (filteredTrends.byShift || []).slice();
@@ -1584,6 +1662,11 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                     ? ("Selected: " + commandBoard.selected.label + " · " + commandBoard.selected.latestDate)
                     : "No production day available yet"}
               </div>
+              <div className="text-xs text-[rgb(var(--muted))]">
+                {commandBoard.selected.revenuePricedUnits > 0
+                  ? ("Revenue: " + fmtMoney(commandBoard.selected.revenueActual) + (commandBoard.selected.revenueCoveragePct < 100 ? " · " + commandBoard.selected.revenueCoveragePct + "% priced" : ""))
+                  : "Revenue unavailable"}
+              </div>
             </div>
             <div className="flex flex-wrap items-center gap-1.5 lg:justify-end">
               <DatePicker value={range.start} onChange={setCustomStart} className="h-9 w-[132px]" />
@@ -1614,6 +1697,15 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                   <div className="px-3 py-3">
                     <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[rgb(var(--muted))]">{card.label}</div>
                     <div className="mt-2 text-2xl font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{card.latestUnits.toLocaleString()}</div>
+                    <div
+                      className="mt-1 text-xs text-[rgb(var(--muted))]"
+                      title={card.revenuePricedUnits > 0
+                        ? ("Revenue " + fmtMoney(card.revenueActual) + (card.revenueCoveragePct < 100 ? " · " + card.revenueCoveragePct + "% of units priced" : ""))
+                        : "Revenue unavailable for this window"}
+                    >
+                      {card.revenuePricedUnits > 0 ? ("Rev " + fmtMoneyCompact(card.revenueActual)) : "Rev --"}
+                      {card.revenuePricedUnits > 0 && card.revenueCoveragePct < 100 ? " · " + card.revenueCoveragePct + "% priced" : ""}
+                    </div>
                     <div className={"mt-2 flex items-center gap-1.5 text-[11px] font-medium " + trendTone}>
                       <TrendIcon className="h-3.5 w-3.5 shrink-0" />
                       <span>
