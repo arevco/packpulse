@@ -45,7 +45,7 @@ function csvCell(value) {
   return text;
 }
 
-export default function WorkOrdersView({ analysis, woStatuses, woCustomers, recommendations, dispatchQueue, prefilterCustomer, prefilterNonce, initialFilters, onPermalinkChange }) {
+export default function WorkOrdersView({ analysis, woStatuses, woCustomers, recommendations, dispatchQueue, inboundCoverage, prefilterCustomer, prefilterNonce, initialFilters, onPermalinkChange }) {
   const { C, sans, mono } = useTheme();
   const { thC, tdN, tdM, thDS, tdDN, tdDM, truncate } = useStyles();
   var initial = initialFilters || {};
@@ -86,6 +86,11 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
   var normalizeSkuSearchValue = function(v) {
     var s = normalizeSearchValue(v);
     return s.replace(/^0+(?=\d)/, "");
+  };
+  var buildSkuLookupKeys = function(v) {
+    var raw = String(v || "").trim();
+    var keys = [raw.toLowerCase(), normalizeSearchValue(raw), normalizeSkuSearchValue(raw)].filter(Boolean);
+    return Array.from(new Set(keys));
   };
   var matchesWorkOrderSearch = function(wo, qRaw, qNorm, qSku) {
     var textFields = [
@@ -613,6 +618,24 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     return packMixBreakdown.reduce(function(sum, row) { return sum + Number(row.remainingUnits || 0); }, 0);
   }, [packMixBreakdown]);
 
+  var inboundCoverageMap = useMemo(function() {
+    var map = {};
+    var rows = inboundCoverage && Array.isArray(inboundCoverage.rows) ? inboundCoverage.rows : [];
+    rows.forEach(function(row) {
+      buildSkuLookupKeys(row && row.sku).forEach(function(key) {
+        if (key && !map[key]) map[key] = row;
+      });
+    });
+    return map;
+  }, [inboundCoverage]);
+  var inboundCoverageForSku = function(sku) {
+    var keys = buildSkuLookupKeys(sku);
+    for (var i = 0; i < keys.length; i++) {
+      if (inboundCoverageMap[keys[i]]) return inboundCoverageMap[keys[i]];
+    }
+    return null;
+  };
+
   var exportScopeLabel = useMemo(function() {
     var parts = [];
     if (searchTerm) parts.push('Search: "' + searchTerm + '"');
@@ -667,6 +690,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       shortageComponents.forEach(function(comp) {
         var compKey = normalizeStr(comp.sku || "");
         var compPressure = commitment.componentPressure ? commitment.componentPressure[compKey] : null;
+        var coverage = inboundCoverageForSku(comp.sku);
         var altOptions = (comp.optionDetails || []).map(function(opt) {
           return (opt.isSub ? "ALT " : "PRI ") + String(opt.sku || "") + " (" + fmtQty(opt.onHand || 0) + ")";
         }).join(" | ");
@@ -701,12 +725,25 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
           availableAtTurn: compPressure ? Number(compPressure.availableAtTurn || 0) : Number(comp.onHand || 0),
           turnMakeUnits: compPressure ? Number(compPressure.turnMakeUnits || 0) : 0,
           altOptions: altOptions,
-          vendorInboundAskQty: Number(comp.short || 0)
+          vendorInboundAskQty: Number(comp.short || 0),
+          inboundQty: coverage ? Number(coverage.inboundQty || 0) : 0,
+          scheduledQty: coverage ? Number(coverage.scheduledQty || 0) : 0,
+          unscheduledQty: coverage ? Number(coverage.unscheduledQty || 0) : 0,
+          uncoveredQty: coverage ? Number(coverage.uncoveredQty || 0) : Number(comp.short || 0),
+          coveragePct: coverage ? Number(coverage.coveragePct || 0) : 0,
+          scheduledCoveragePct: coverage ? Number(coverage.scheduledCoveragePct || 0) : 0,
+          inboundStatus: coverage ? String(coverage.status || "") : "missing",
+          recommendedAction: coverage ? String(coverage.recommendedAction || "") : "Create / Expedite PO",
+          earliestInboundDate: coverage ? String(coverage.earliestInboundDate || "") : "",
+          earliestScheduledDate: coverage ? String(coverage.earliestScheduledDate || "") : "",
+          openPOs: coverage && Array.isArray(coverage.openPOs) ? coverage.openPOs.join(", ") : "",
+          scheduledPOs: coverage && Array.isArray(coverage.scheduledPOs) ? coverage.scheduledPOs.join(", ") : "",
+          dockStatuses: coverage && Array.isArray(coverage.dockStatuses) ? coverage.dockStatuses.join(", ") : ""
         });
       });
     });
     return rows;
-  }, [filteredResults, commitmentMap, sharedComponentUsage]);
+  }, [filteredResults, commitmentMap, sharedComponentUsage, inboundCoverageMap]);
 
   var exportShortageSummary = useMemo(function() {
     var grouped = {};
@@ -749,13 +786,25 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
         customerList: Object.keys(row.customers).sort(),
         woList: Object.keys(row.woNums).sort(function(a, b) { return a.localeCompare(b, undefined, { numeric:true, sensitivity:"base" }); }),
         altOptions: Object.keys(row.altOptions),
-        sharedWoCount: row.sharedWoCount
+        sharedWoCount: row.sharedWoCount,
+        inboundQty: (inboundCoverageForSku(row.componentSku) && Number(inboundCoverageForSku(row.componentSku).inboundQty || 0)) || 0,
+        scheduledQty: (inboundCoverageForSku(row.componentSku) && Number(inboundCoverageForSku(row.componentSku).scheduledQty || 0)) || 0,
+        unscheduledQty: (inboundCoverageForSku(row.componentSku) && Number(inboundCoverageForSku(row.componentSku).unscheduledQty || 0)) || 0,
+        uncoveredQty: (inboundCoverageForSku(row.componentSku) && Number(inboundCoverageForSku(row.componentSku).uncoveredQty || 0)) || row.totalShortQty,
+        coveragePct: (inboundCoverageForSku(row.componentSku) && Number(inboundCoverageForSku(row.componentSku).coveragePct || 0)) || 0,
+        scheduledCoveragePct: (inboundCoverageForSku(row.componentSku) && Number(inboundCoverageForSku(row.componentSku).scheduledCoveragePct || 0)) || 0,
+        inboundStatus: (inboundCoverageForSku(row.componentSku) && String(inboundCoverageForSku(row.componentSku).status || "")) || "missing",
+        recommendedAction: (inboundCoverageForSku(row.componentSku) && String(inboundCoverageForSku(row.componentSku).recommendedAction || "")) || "Create / Expedite PO",
+        earliestInboundDate: (inboundCoverageForSku(row.componentSku) && String(inboundCoverageForSku(row.componentSku).earliestInboundDate || "")) || "",
+        earliestScheduledDate: (inboundCoverageForSku(row.componentSku) && String(inboundCoverageForSku(row.componentSku).earliestScheduledDate || "")) || "",
+        openPOs: (inboundCoverageForSku(row.componentSku) && Array.isArray(inboundCoverageForSku(row.componentSku).openPOs) ? inboundCoverageForSku(row.componentSku).openPOs : []),
+        scheduledPOs: (inboundCoverageForSku(row.componentSku) && Array.isArray(inboundCoverageForSku(row.componentSku).scheduledPOs) ? inboundCoverageForSku(row.componentSku).scheduledPOs : [])
       };
     }).sort(function(a, b) {
       if (b.totalShortQty !== a.totalShortQty) return b.totalShortQty - a.totalShortQty;
       return String(a.componentSku || "").localeCompare(String(b.componentSku || ""), undefined, { numeric:true, sensitivity:"base" });
     });
-  }, [exportShortageRows]);
+  }, [exportShortageRows, inboundCoverageMap]);
 
   var exportCSV = () => {
     if (!analysis || !filteredResults.length) return;
@@ -763,7 +812,9 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       "WO#","FG SKU","FG Description","Customer","WO Status","Run Status","Due Date","Planned Start","Planned End",
       "Order Qty","Produced","Remaining","Ready %","Make","Net","Gap","Est Hrs","Batch Count","Run Next Rank","Run Next Score",
       "Component SKU","Component Description","Qty/Unit","Needed","On Hand","Short","Fill %","Shared Component","Shared WO Count",
-      "Allocated Before This WO","Available At Turn","Turn Make Units","Alt Options","Vendor Inbound Ask Qty"
+      "Allocated Before This WO","Available At Turn","Turn Make Units","Alt Options","Vendor Inbound Ask Qty",
+      "EDR Inbound Qty","OpenDock Scheduled Qty","Unscheduled Qty","Uncovered Qty","Inbound Coverage %","Scheduled Coverage %",
+      "Inbound Status","Recommended Action","Earliest Inbound Date","Earliest Scheduled Date","Open POs","Scheduled POs","Dock Statuses"
     ];
     var detailRows = exportShortageRows.length ? exportShortageRows : exportWorkOrderRows.map(function(row) {
       return Object.assign({}, row, {
@@ -780,7 +831,20 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
         availableAtTurn: "",
         turnMakeUnits: "",
         altOptions: "",
-        vendorInboundAskQty: ""
+        vendorInboundAskQty: "",
+        inboundQty: "",
+        scheduledQty: "",
+        unscheduledQty: "",
+        uncoveredQty: "",
+        coveragePct: "",
+        scheduledCoveragePct: "",
+        inboundStatus: "",
+        recommendedAction: "",
+        earliestInboundDate: "",
+        earliestScheduledDate: "",
+        openPOs: "",
+        scheduledPOs: "",
+        dockStatuses: ""
       });
     });
     var csvRows = detailRows.map(function(row) {
@@ -818,7 +882,20 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
         row.availableAtTurn,
         row.turnMakeUnits,
         row.altOptions,
-        row.vendorInboundAskQty
+        row.vendorInboundAskQty,
+        row.inboundQty,
+        row.scheduledQty,
+        row.unscheduledQty,
+        row.uncoveredQty,
+        row.coveragePct,
+        row.scheduledCoveragePct,
+        row.inboundStatus,
+        row.recommendedAction,
+        row.earliestInboundDate,
+        row.earliestScheduledDate,
+        row.openPOs,
+        row.scheduledPOs,
+        row.dockStatuses
       ].map(csvCell).join(",");
     });
     triggerDownload(
@@ -830,6 +907,8 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
   var exportPDF = () => {
     if (!analysis || !filteredResults.length) return;
     var totalShortQty = exportShortageSummary.reduce(function(sum, row) { return sum + Number(row.totalShortQty || 0); }, 0);
+    var totalInboundQty = exportShortageSummary.reduce(function(sum, row) { return sum + Number(row.inboundQty || 0); }, 0);
+    var totalScheduledQty = exportShortageSummary.reduce(function(sum, row) { return sum + Number(row.scheduledQty || 0); }, 0);
     var affectedWOs = {};
     exportShortageRows.forEach(function(row) { if (row.woNum) affectedWOs[row.woNum] = true; });
     var summaryCards = [
@@ -837,7 +916,9 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       { label: "Shortage Lines", value: fmtNum(exportShortageRows.length) },
       { label: "Short Components", value: fmtNum(exportShortageSummary.length) },
       { label: "Total Short Qty", value: fmtNum(totalShortQty) },
-      { label: "Affected WOs", value: fmtNum(Object.keys(affectedWOs).length) }
+      { label: "Affected WOs", value: fmtNum(Object.keys(affectedWOs).length) },
+      { label: "EDR Inbound Qty", value: fmtNum(totalInboundQty) },
+      { label: "OpenDock Scheduled", value: fmtNum(totalScheduledQty) }
     ].map(function(card) {
       return '<div class="stat"><div class="stat-label">' + escapeHtml(card.label) + '</div><div class="stat-value">' + escapeHtml(card.value) + '</div></div>';
     }).join("");
@@ -861,12 +942,20 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
         "<td>" + escapeHtml(row.componentDesc || "--") + "</td>" +
         "<td>" + escapeHtml(fmtNum(row.totalShortQty)) + "</td>" +
         "<td>" + escapeHtml(fmtNum(row.maxOnHand)) + "</td>" +
+        "<td>" + escapeHtml(fmtNum(row.inboundQty)) + "</td>" +
+        "<td>" + escapeHtml(fmtNum(row.scheduledQty)) + "</td>" +
+        "<td>" + escapeHtml(fmtNum(row.uncoveredQty)) + "</td>" +
         "<td>" + escapeHtml(fmtDate(row.earliestDueDate)) + "</td>" +
+        "<td>" + escapeHtml(fmtDate(row.earliestScheduledDate)) + "</td>" +
+        "<td>" + escapeHtml(row.inboundStatus || "--") + "</td>" +
+        "<td>" + escapeHtml(row.recommendedAction || "--") + "</td>" +
         "<td>" + escapeHtml(row.customerList.join(", ") || "--") + "</td>" +
         "<td>" + escapeHtml(row.woList.join(", ") || "--") + "</td>" +
+        "<td>" + escapeHtml(row.openPOs.join(", ") || "--") + "</td>" +
+        "<td>" + escapeHtml(row.scheduledPOs.join(", ") || "--") + "</td>" +
         "<td>" + escapeHtml(row.altOptions.join(" | ") || "--") + "</td>" +
         "</tr>";
-    }).join("") : '<tr><td colspan="8">No component shortages in current scope.</td></tr>';
+    }).join("") : '<tr><td colspan="14">No component shortages in current scope.</td></tr>';
     var shortageDetailHtml = exportShortageRows.length ? exportShortageRows.map(function(row) {
       return "<tr>" +
         "<td>" + escapeHtml(row.woNum) + "</td>" +
@@ -878,10 +967,13 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
         "<td>" + escapeHtml(fmtNum(row.needed)) + "</td>" +
         "<td>" + escapeHtml(fmtNum(row.onHand)) + "</td>" +
         "<td>" + escapeHtml(fmtNum(row.shortQty)) + "</td>" +
-        "<td>" + escapeHtml((row.fillPct || 0) + "%") + "</td>" +
+        "<td>" + escapeHtml(fmtNum(row.inboundQty)) + "</td>" +
+        "<td>" + escapeHtml(fmtNum(row.scheduledQty)) + "</td>" +
+        "<td>" + escapeHtml(fmtDate(row.earliestScheduledDate)) + "</td>" +
+        "<td>" + escapeHtml(row.inboundStatus || "--") + "</td>" +
         "<td>" + escapeHtml(row.altOptions || "--") + "</td>" +
         "</tr>";
-    }).join("") : '<tr><td colspan="11">No component shortages in current scope.</td></tr>';
+    }).join("") : '<tr><td colspan="13">No component shortages in current scope.</td></tr>';
     var html = [
       "<!DOCTYPE html>",
       "<html><head><title>PackPulse Work Orders Vendor Packet</title><style>",
@@ -911,16 +1003,16 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       workOrderRowsHtml,
       "</tbody></table>",
       "<h2>Component Shortage Summary</h2>",
-      '<div class="note">Use this table with vendors to prioritize inbound scheduling by total shortage, earliest due date, and affected work orders.</div>',
+      '<div class="note">Use this table with vendors to prioritize inbound scheduling by total shortage, EDR inbound quantity, OpenDock scheduled quantity, earliest due date, and affected work orders.</div>',
       "<table><thead><tr>",
-      "<th>Component SKU</th><th>Description</th><th>Total Short</th><th>On Hand</th><th>Earliest Due</th><th>Customers</th><th>Affected WOs</th><th>Alternates / Options</th>",
+      "<th>Component SKU</th><th>Description</th><th>Total Short</th><th>On Hand</th><th>EDR Inbound</th><th>OpenDock Scheduled</th><th>Uncovered</th><th>Earliest Due</th><th>Earliest Scheduled</th><th>Status</th><th>Action</th><th>Customers</th><th>Open POs</th><th>Scheduled POs</th><th>Alternates / Options</th>",
       "</tr></thead><tbody>",
       shortageSummaryHtml,
       "</tbody></table>",
       "<h2>WO-Level Shortage Detail</h2>",
-      '<div class="note">Each row shows the specific WO / component shortage and the suggested inbound ask quantity.</div>',
+      '<div class="note">Each row shows the specific WO / component shortage plus the current EDR / OpenDock coverage state.</div>',
       "<table><thead><tr>",
-      "<th>WO#</th><th>FG SKU</th><th>Component SKU</th><th>Component Description</th><th>Due</th><th>Remaining</th><th>Needed</th><th>On Hand</th><th>Short</th><th>Fill %</th><th>Alternates / Options</th>",
+      "<th>WO#</th><th>FG SKU</th><th>Component SKU</th><th>Component Description</th><th>Due</th><th>Remaining</th><th>Needed</th><th>On Hand</th><th>Short</th><th>EDR Inbound</th><th>OpenDock Scheduled</th><th>Earliest Scheduled</th><th>Status</th><th>Alternates / Options</th>",
       "</tr></thead><tbody>",
       shortageDetailHtml,
       "</tbody></table>",
