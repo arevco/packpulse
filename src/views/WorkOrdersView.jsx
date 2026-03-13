@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { useTheme } from "../theme";
 import { useStyles } from "../hooks/useStyles";
-import { fmtDate, triggerDownload, buildExportHTML, normalizeStr, formatDescriptionForDisplay, detectPackType, safeNum } from "../utils";
+import { fmtDate, triggerDownload, normalizeStr, formatDescriptionForDisplay, detectPackType, safeNum } from "../utils";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Badge } from "../components/ui/badge";
@@ -28,6 +28,21 @@ function parseDateValue(value) {
 
   var parsed = new Date(raw);
   return isNaN(parsed) ? null : parsed;
+}
+
+function escapeHtml(value) {
+  return String(value == null ? "" : value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function csvCell(value) {
+  var text = String(value == null ? "" : value);
+  if (/[",\n]/.test(text)) return '"' + text.replace(/"/g, '""') + '"';
+  return text;
 }
 
 export default function WorkOrdersView({ analysis, woStatuses, woCustomers, recommendations, dispatchQueue, prefilterCustomer, prefilterNonce, initialFilters, onPermalinkChange }) {
@@ -598,8 +613,325 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     return packMixBreakdown.reduce(function(sum, row) { return sum + Number(row.remainingUnits || 0); }, 0);
   }, [packMixBreakdown]);
 
-  var exportCSV = () => { if (!analysis) return; var h = ["Work Order","Product SKU","Description","Customer","WO Status","Due Date","Planned Start","Planned End","Order Qty","Produced","Remaining","Complete %","Ready %","Can Make","Est Hours","Run Status","Reference"]; var rows = analysis.results.map(w => [w.woNum, w.productSkuRaw, '"'+(w.productDesc||"").replace(/"/g,'""')+'"', '"'+(w.customer||"")+'"', w.status||"", w.dueDate||"", w.plannedStart||"", w.plannedEnd||"", w.qtyToProduce, w.unitsProduced, w.unitsRemaining, w.prodPct, w.readiness<0?"N/A":Math.round(w.readiness), w.maxRunnable, w.estHours||"", w.runStatus, '"'+(w.reference1||"").replace(/"/g,'""')+'"']); triggerDownload([h.join(",")].concat(rows.map(r => r.join(","))).join("\n"), "packpulse_" + new Date().toISOString().slice(0,10) + ".csv", "text/csv"); };
-  var exportPDF = () => { if (!analysis) return; var th = ["WO#","Product","Customer","Qty","Produced","Remaining","Complete","Ready","Est Hrs","Status","Due"].map(h => "<th>"+h+"</th>").join(""); var tb = analysis.results.map(w => "<tr><td>"+w.woNum+"</td><td>"+w.productSkuRaw+"</td><td>"+(w.customer||"--")+"</td><td>"+w.qtyToProduce.toLocaleString()+"</td><td>"+w.unitsProduced.toLocaleString()+"</td><td>"+w.unitsRemaining.toLocaleString()+"</td><td>"+w.prodPct+"%</td><td>"+(w.readiness<0?"N/A":Math.round(w.readiness)+"%")+'</td><td>'+(w.estHours||"--")+'</td><td class="'+w.runStatus+'">'+w.runStatus+"</td><td>"+fmtDate(w.dueDate)+"</td></tr>").join(""); triggerDownload(buildExportHTML("PackPulse Report", th, tb), "packpulse_" + new Date().toISOString().slice(0,10) + ".html", "text/html"); };
+  var exportScopeLabel = useMemo(function() {
+    var parts = [];
+    if (searchTerm) parts.push('Search: "' + searchTerm + '"');
+    if (filterCustomer !== "all") parts.push("Customer: " + filterCustomer);
+    if (filterDueMonth !== "all") parts.push("Due month: " + filterDueMonth);
+    if (filterPackType !== "all") parts.push("Pack: " + filterPackType);
+    if (filterWoStatus !== "all") parts.push("WO status: " + filterWoStatus);
+    if (filterStatus !== "all") parts.push("Run status: " + filterStatus);
+    if (filterRunNext) parts.push("Run Next");
+    if (filterBatchable) parts.push("Batch");
+    if (filterShared) parts.push("Shared");
+    return parts.length ? parts.join(" • ") : "All work orders in current view";
+  }, [searchTerm, filterCustomer, filterDueMonth, filterPackType, filterWoStatus, filterStatus, filterRunNext, filterBatchable, filterShared]);
+
+  var exportWorkOrderRows = useMemo(function() {
+    return filteredResults.map(function(wo) {
+      var commitment = commitmentMap[woCommitKey(wo)] || { committedCanMake:0, commitmentGap:0 };
+      var batchMeta = batchOpportunityMap[woCommitKey(wo)] || null;
+      var runMeta = runNextMetaMap[String(wo.woNum || "")] || null;
+      return {
+        woNum: wo.woNum || "",
+        productSku: wo.productSkuRaw || wo.productSku || "",
+        description: formatDescriptionForDisplay(wo.productDesc) || "",
+        customer: wo.customer || "",
+        woStatus: wo.status || "",
+        runStatus: wo.runStatus || "",
+        dueDate: wo.dueDate || "",
+        plannedStart: wo.plannedStart || "",
+        plannedEnd: wo.plannedEnd || "",
+        orderQty: Number(wo.qtyToProduce || 0),
+        produced: Number(wo.unitsProduced || 0),
+        remaining: Number(wo.unitsRemaining || 0),
+        completePct: Number(wo.prodPct || 0),
+        readinessPct: wo.readiness < 0 ? null : Math.round(Number(wo.readiness || 0)),
+        makeUnits: Number(wo.maxRunnable || 0),
+        netUnits: Number(commitment.committedCanMake || 0),
+        gapUnits: Number(commitment.commitmentGap || 0),
+        estHours: Number(wo.estHours || 0),
+        reference: wo.reference1 || "",
+        batchCount: batchMeta ? Number(batchMeta.batchCount || 0) : 0,
+        runNextRank: runMeta ? Number(runMeta.rank || 0) : null,
+        runNextScore: runMeta ? Number(runMeta.score || 0) : null
+      };
+    });
+  }, [filteredResults, commitmentMap, batchOpportunityMap, runNextMetaMap]);
+
+  var exportShortageRows = useMemo(function() {
+    var rows = [];
+    filteredResults.forEach(function(wo) {
+      var commitment = commitmentMap[woCommitKey(wo)] || { committedCanMake:0, commitmentGap:0, componentPressure:{} };
+      var shortageComponents = (wo.components || []).filter(function(comp) { return Number(comp.short || 0) > 0; });
+      shortageComponents.forEach(function(comp) {
+        var compKey = normalizeStr(comp.sku || "");
+        var compPressure = commitment.componentPressure ? commitment.componentPressure[compKey] : null;
+        var altOptions = (comp.optionDetails || []).map(function(opt) {
+          return (opt.isSub ? "ALT " : "PRI ") + String(opt.sku || "") + " (" + fmtQty(opt.onHand || 0) + ")";
+        }).join(" | ");
+        rows.push({
+          woNum: wo.woNum || "",
+          productSku: wo.productSkuRaw || wo.productSku || "",
+          description: formatDescriptionForDisplay(wo.productDesc) || "",
+          customer: wo.customer || "",
+          woStatus: wo.status || "",
+          runStatus: wo.runStatus || "",
+          dueDate: wo.dueDate || "",
+          plannedStart: wo.plannedStart || "",
+          plannedEnd: wo.plannedEnd || "",
+          orderQty: Number(wo.qtyToProduce || 0),
+          produced: Number(wo.unitsProduced || 0),
+          remaining: Number(wo.unitsRemaining || 0),
+          readinessPct: wo.readiness < 0 ? null : Math.round(Number(wo.readiness || 0)),
+          makeUnits: Number(wo.maxRunnable || 0),
+          netUnits: Number(commitment.committedCanMake || 0),
+          gapUnits: Number(commitment.commitmentGap || 0),
+          estHours: Number(wo.estHours || 0),
+          componentSku: comp.sku || "",
+          componentDesc: formatDescriptionForDisplay(comp.desc) || "",
+          qtyPer: Number(comp.qtyPer || 0),
+          needed: Number(comp.needed || 0),
+          onHand: Number(comp.onHand || 0),
+          shortQty: Number(comp.short || 0),
+          fillPct: Math.round(Math.min(Number(comp.fillRate || 0), 100)),
+          sharedComponent: (sharedComponentUsage[compKey] || 0) > 1 ? "Yes" : "No",
+          sharedWoCount: Number(sharedComponentUsage[compKey] || 0),
+          allocatedBefore: compPressure ? Number(compPressure.consumedBefore || 0) : 0,
+          availableAtTurn: compPressure ? Number(compPressure.availableAtTurn || 0) : Number(comp.onHand || 0),
+          turnMakeUnits: compPressure ? Number(compPressure.turnMakeUnits || 0) : 0,
+          altOptions: altOptions,
+          vendorInboundAskQty: Number(comp.short || 0)
+        });
+      });
+    });
+    return rows;
+  }, [filteredResults, commitmentMap, sharedComponentUsage]);
+
+  var exportShortageSummary = useMemo(function() {
+    var grouped = {};
+    exportShortageRows.forEach(function(row) {
+      var key = normalizeStr(row.componentSku || "");
+      if (!key) return;
+      if (!grouped[key]) {
+        grouped[key] = {
+          componentSku: row.componentSku,
+          componentDesc: row.componentDesc,
+          totalShortQty: 0,
+          maxOnHand: 0,
+          earliestDueDate: row.dueDate || "",
+          customers: {},
+          woNums: {},
+          altOptions: {},
+          sharedWoCount: row.sharedWoCount || 0
+        };
+      }
+      var agg = grouped[key];
+      agg.totalShortQty += Number(row.shortQty || 0);
+      agg.maxOnHand = Math.max(agg.maxOnHand, Number(row.onHand || 0));
+      if (row.dueDate) {
+        var currentDue = parseDateValue(agg.earliestDueDate);
+        var nextDue = parseDateValue(row.dueDate);
+        if (!currentDue || (nextDue && nextDue.getTime() < currentDue.getTime())) agg.earliestDueDate = row.dueDate;
+      }
+      if (row.customer) agg.customers[row.customer] = true;
+      if (row.woNum) agg.woNums[row.woNum] = true;
+      if (row.altOptions) agg.altOptions[row.altOptions] = true;
+      agg.sharedWoCount = Math.max(agg.sharedWoCount, Number(row.sharedWoCount || 0));
+    });
+    return Object.values(grouped).map(function(row) {
+      return {
+        componentSku: row.componentSku,
+        componentDesc: row.componentDesc,
+        totalShortQty: row.totalShortQty,
+        maxOnHand: row.maxOnHand,
+        earliestDueDate: row.earliestDueDate,
+        customerList: Object.keys(row.customers).sort(),
+        woList: Object.keys(row.woNums).sort(function(a, b) { return a.localeCompare(b, undefined, { numeric:true, sensitivity:"base" }); }),
+        altOptions: Object.keys(row.altOptions),
+        sharedWoCount: row.sharedWoCount
+      };
+    }).sort(function(a, b) {
+      if (b.totalShortQty !== a.totalShortQty) return b.totalShortQty - a.totalShortQty;
+      return String(a.componentSku || "").localeCompare(String(b.componentSku || ""), undefined, { numeric:true, sensitivity:"base" });
+    });
+  }, [exportShortageRows]);
+
+  var exportCSV = () => {
+    if (!analysis || !filteredResults.length) return;
+    var headers = [
+      "WO#","FG SKU","FG Description","Customer","WO Status","Run Status","Due Date","Planned Start","Planned End",
+      "Order Qty","Produced","Remaining","Ready %","Make","Net","Gap","Est Hrs","Batch Count","Run Next Rank","Run Next Score",
+      "Component SKU","Component Description","Qty/Unit","Needed","On Hand","Short","Fill %","Shared Component","Shared WO Count",
+      "Allocated Before This WO","Available At Turn","Turn Make Units","Alt Options","Vendor Inbound Ask Qty"
+    ];
+    var detailRows = exportShortageRows.length ? exportShortageRows : exportWorkOrderRows.map(function(row) {
+      return Object.assign({}, row, {
+        componentSku: "",
+        componentDesc: "",
+        qtyPer: "",
+        needed: "",
+        onHand: "",
+        shortQty: "",
+        fillPct: "",
+        sharedComponent: "",
+        sharedWoCount: "",
+        allocatedBefore: "",
+        availableAtTurn: "",
+        turnMakeUnits: "",
+        altOptions: "",
+        vendorInboundAskQty: ""
+      });
+    });
+    var csvRows = detailRows.map(function(row) {
+      return [
+        row.woNum,
+        row.productSku,
+        row.description,
+        row.customer,
+        row.woStatus,
+        row.runStatus,
+        row.dueDate,
+        row.plannedStart,
+        row.plannedEnd,
+        row.orderQty,
+        row.produced,
+        row.remaining,
+        row.readinessPct == null ? "N/A" : row.readinessPct,
+        row.makeUnits,
+        row.netUnits,
+        row.gapUnits,
+        row.estHours || "",
+        row.batchCount || "",
+        row.runNextRank || "",
+        row.runNextScore || "",
+        row.componentSku,
+        row.componentDesc,
+        row.qtyPer,
+        row.needed,
+        row.onHand,
+        row.shortQty,
+        row.fillPct,
+        row.sharedComponent,
+        row.sharedWoCount,
+        row.allocatedBefore,
+        row.availableAtTurn,
+        row.turnMakeUnits,
+        row.altOptions,
+        row.vendorInboundAskQty
+      ].map(csvCell).join(",");
+    });
+    triggerDownload(
+      [headers.map(csvCell).join(",")].concat(csvRows).join("\n"),
+      "packpulse_work_orders_vendor_export_" + new Date().toISOString().slice(0, 10) + ".csv",
+      "text/csv"
+    );
+  };
+  var exportPDF = () => {
+    if (!analysis || !filteredResults.length) return;
+    var totalShortQty = exportShortageSummary.reduce(function(sum, row) { return sum + Number(row.totalShortQty || 0); }, 0);
+    var affectedWOs = {};
+    exportShortageRows.forEach(function(row) { if (row.woNum) affectedWOs[row.woNum] = true; });
+    var summaryCards = [
+      { label: "Scope", value: fmtNum(filteredResults.length) + " WOs" },
+      { label: "Shortage Lines", value: fmtNum(exportShortageRows.length) },
+      { label: "Short Components", value: fmtNum(exportShortageSummary.length) },
+      { label: "Total Short Qty", value: fmtNum(totalShortQty) },
+      { label: "Affected WOs", value: fmtNum(Object.keys(affectedWOs).length) }
+    ].map(function(card) {
+      return '<div class="stat"><div class="stat-label">' + escapeHtml(card.label) + '</div><div class="stat-value">' + escapeHtml(card.value) + '</div></div>';
+    }).join("");
+    var workOrderRowsHtml = exportWorkOrderRows.map(function(row) {
+      return "<tr>" +
+        "<td>" + escapeHtml(row.woNum) + "</td>" +
+        "<td>" + escapeHtml(row.productSku) + "</td>" +
+        "<td>" + escapeHtml(row.customer || "--") + "</td>" +
+        "<td>" + escapeHtml(fmtDate(row.dueDate)) + "</td>" +
+        "<td>" + escapeHtml(fmtNum(row.remaining)) + "</td>" +
+        "<td>" + escapeHtml(row.readinessPct == null ? "N/A" : (row.readinessPct + "%")) + "</td>" +
+        "<td>" + escapeHtml(fmtNum(row.makeUnits)) + "</td>" +
+        "<td>" + escapeHtml(fmtNum(row.netUnits)) + "</td>" +
+        "<td>" + escapeHtml(fmtNum(row.gapUnits)) + "</td>" +
+        "<td>" + escapeHtml(row.estHours > 0 ? (row.estHours + "h") : "--") + "</td>" +
+        "</tr>";
+    }).join("");
+    var shortageSummaryHtml = exportShortageSummary.length ? exportShortageSummary.map(function(row) {
+      return "<tr>" +
+        "<td>" + escapeHtml(row.componentSku) + "</td>" +
+        "<td>" + escapeHtml(row.componentDesc || "--") + "</td>" +
+        "<td>" + escapeHtml(fmtNum(row.totalShortQty)) + "</td>" +
+        "<td>" + escapeHtml(fmtNum(row.maxOnHand)) + "</td>" +
+        "<td>" + escapeHtml(fmtDate(row.earliestDueDate)) + "</td>" +
+        "<td>" + escapeHtml(row.customerList.join(", ") || "--") + "</td>" +
+        "<td>" + escapeHtml(row.woList.join(", ") || "--") + "</td>" +
+        "<td>" + escapeHtml(row.altOptions.join(" | ") || "--") + "</td>" +
+        "</tr>";
+    }).join("") : '<tr><td colspan="8">No component shortages in current scope.</td></tr>';
+    var shortageDetailHtml = exportShortageRows.length ? exportShortageRows.map(function(row) {
+      return "<tr>" +
+        "<td>" + escapeHtml(row.woNum) + "</td>" +
+        "<td>" + escapeHtml(row.productSku) + "</td>" +
+        "<td>" + escapeHtml(row.componentSku) + "</td>" +
+        "<td>" + escapeHtml(row.componentDesc || "--") + "</td>" +
+        "<td>" + escapeHtml(fmtDate(row.dueDate)) + "</td>" +
+        "<td>" + escapeHtml(fmtNum(row.remaining)) + "</td>" +
+        "<td>" + escapeHtml(fmtNum(row.needed)) + "</td>" +
+        "<td>" + escapeHtml(fmtNum(row.onHand)) + "</td>" +
+        "<td>" + escapeHtml(fmtNum(row.shortQty)) + "</td>" +
+        "<td>" + escapeHtml((row.fillPct || 0) + "%") + "</td>" +
+        "<td>" + escapeHtml(row.altOptions || "--") + "</td>" +
+        "</tr>";
+    }).join("") : '<tr><td colspan="11">No component shortages in current scope.</td></tr>';
+    var html = [
+      "<!DOCTYPE html>",
+      "<html><head><title>PackPulse Work Orders Vendor Packet</title><style>",
+      "body{font-family:Arial,sans-serif;margin:24px;color:#1f2937}",
+      "h1{font-size:22px;margin:0 0 6px} h2{font-size:16px;margin:28px 0 8px}",
+      ".sub{color:#6b7280;font-size:12px;margin-bottom:14px}",
+      ".stats{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0 18px}",
+      ".stat{border:1px solid #d1d5db;border-radius:10px;padding:10px 12px;min-width:120px;background:#f9fafb}",
+      ".stat-label{font-size:11px;text-transform:uppercase;color:#6b7280;margin-bottom:4px}",
+      ".stat-value{font-size:20px;font-weight:700;color:#111827}",
+      ".scope{margin:10px 0 16px;padding:10px 12px;border:1px solid #dbeafe;background:#eff6ff;border-radius:10px;color:#1d4ed8;font-size:12px}",
+      "table{width:100%;border-collapse:collapse;margin-top:10px;font-size:11px}",
+      "th{background:#f3f4f6;padding:8px;text-align:left;border-bottom:2px solid #d1d5db;font-size:10px;text-transform:uppercase;letter-spacing:.04em}",
+      "td{padding:8px;border-bottom:1px solid #e5e7eb;vertical-align:top}",
+      ".note{font-size:12px;color:#6b7280;margin-top:6px}",
+      "@media print{body{margin:12px}.stat{break-inside:avoid}table{page-break-inside:auto}tr{page-break-inside:avoid}}",
+      "</style></head><body>",
+      "<h1>PackPulse Work Orders Vendor Packet</h1>",
+      '<div class="sub">Generated ' + escapeHtml(new Date().toLocaleString()) + "</div>",
+      '<div class="scope"><strong>Current scope:</strong> ' + escapeHtml(exportScopeLabel) + "</div>",
+      '<div class="stats">' + summaryCards + "</div>",
+      "<h2>Work Orders In Scope</h2>",
+      '<div class="note">This section follows the current filters in the Work Orders view.</div>',
+      "<table><thead><tr>",
+      "<th>WO#</th><th>FG SKU</th><th>Customer</th><th>Due</th><th>Remaining</th><th>Ready</th><th>Make</th><th>Net</th><th>Gap</th><th>Est Hrs</th>",
+      "</tr></thead><tbody>",
+      workOrderRowsHtml,
+      "</tbody></table>",
+      "<h2>Component Shortage Summary</h2>",
+      '<div class="note">Use this table with vendors to prioritize inbound scheduling by total shortage, earliest due date, and affected work orders.</div>',
+      "<table><thead><tr>",
+      "<th>Component SKU</th><th>Description</th><th>Total Short</th><th>On Hand</th><th>Earliest Due</th><th>Customers</th><th>Affected WOs</th><th>Alternates / Options</th>",
+      "</tr></thead><tbody>",
+      shortageSummaryHtml,
+      "</tbody></table>",
+      "<h2>WO-Level Shortage Detail</h2>",
+      '<div class="note">Each row shows the specific WO / component shortage and the suggested inbound ask quantity.</div>',
+      "<table><thead><tr>",
+      "<th>WO#</th><th>FG SKU</th><th>Component SKU</th><th>Component Description</th><th>Due</th><th>Remaining</th><th>Needed</th><th>On Hand</th><th>Short</th><th>Fill %</th><th>Alternates / Options</th>",
+      "</tr></thead><tbody>",
+      shortageDetailHtml,
+      "</tbody></table>",
+      "</body></html>"
+    ].join("");
+    triggerDownload(
+      html,
+      "packpulse_work_orders_vendor_packet_" + new Date().toISOString().slice(0, 10) + ".html",
+      "text/html"
+    );
+  };
 
   var SortTh = function(props) {
     return (
