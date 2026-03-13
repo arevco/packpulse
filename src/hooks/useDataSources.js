@@ -80,21 +80,33 @@ export function useDataSources() {
   const edrRefreshRef = useCallback(n => { if (n) window.__edrR = n; }, []);
   const dockRefreshRef = useCallback(n => { if (n) window.__dockR = n; }, []);
 
-  const hydrateDataSet = useCallback(function(storedValue, setData, setFileName, setTimestamp, fallbackName) {
-    if (!storedValue) return false;
+  const readStoredDataSet = useCallback(function(storedValue) {
+    if (!storedValue) return null;
     var parsed = null;
     try {
       parsed = JSON.parse(storedValue);
     } catch (e) {
-      return false;
+      return null;
     }
-    if (!parsed || !Array.isArray(parsed.data)) return false;
-    if (!parsed.data.length && !parsed.timestamp) return false;
-    setData(parsed.data || []);
-    setFileName(parsed.fileName || fallbackName || "Saved Data");
-    setTimestamp(parsed.timestamp ? new Date(parsed.timestamp) : new Date());
-    return true;
+    if (!parsed || !Array.isArray(parsed.data)) return null;
+    if (!parsed.data.length && !parsed.timestamp) return null;
+    var ts = parsed.timestamp ? new Date(parsed.timestamp) : null;
+    if (ts && isNaN(ts)) ts = null;
+    return {
+      data: parsed.data || [],
+      fileName: parsed.fileName || "",
+      timestamp: ts
+    };
   }, []);
+
+  const hydrateDataSet = useCallback(function(storedValue, setData, setFileName, setTimestamp, fallbackName) {
+    var cached = readStoredDataSet(storedValue);
+    if (!cached) return false;
+    setData(cached.data);
+    setFileName(cached.fileName || fallbackName || "Saved Data");
+    setTimestamp(cached.timestamp || new Date());
+    return true;
+  }, [readStoredDataSet]);
 
   const persistDataSet = useCallback(async function(key, data, fileName, timestamp) {
     if (data == null) return;
@@ -151,22 +163,27 @@ export function useDataSources() {
       try {
         var sharedLoaded = false;
         var sharedProductionTruncated = false;
+        var sharedPayload = {};
+        var sharedMeta = {};
+        var sharedRowCounts = {};
+        var sharedDroppedDatasets = [];
         try {
           var sharedRes = await fetch("/api/cache/snapshot", { credentials: "include" });
           if (sharedRes.ok) {
             var sharedBody = await sharedRes.json();
             if (sharedBody && sharedBody.snapshot && sharedBody.snapshot.payload) {
-              var sharedRowCounts = sharedBody.snapshot.row_counts || {};
-              var sharedPayload = sharedBody.snapshot.payload || {};
+              sharedRowCounts = sharedBody.snapshot.row_counts || {};
+              sharedPayload = sharedBody.snapshot.payload || {};
+              sharedMeta = sharedPayload.meta && typeof sharedPayload.meta === "object" ? sharedPayload.meta : {};
               var sharedProdRows = Array.isArray(sharedPayload.productionData) ? sharedPayload.productionData.length : 0;
               var sharedProdCount = Number(sharedRowCounts.productionData || 0);
               var sharedLaborRows = Array.isArray(sharedPayload.laborData) ? sharedPayload.laborData.length : 0;
               var sharedLaborCount = Number(sharedRowCounts.laborData || 0);
-              var droppedSets = sharedPayload.meta && Array.isArray(sharedPayload.meta.cacheDroppedDatasets)
-                ? sharedPayload.meta.cacheDroppedDatasets
+              sharedDroppedDatasets = Array.isArray(sharedMeta.cacheDroppedDatasets)
+                ? sharedMeta.cacheDroppedDatasets
                 : [];
-              sharedProductionTruncated = droppedSets.indexOf("productionData") !== -1 || (sharedProdCount > 0 && sharedProdRows > 0 && sharedProdRows < sharedProdCount);
-              var sharedLaborTruncated = droppedSets.indexOf("laborData") !== -1 || (sharedLaborCount > 0 && sharedLaborRows > 0 && sharedLaborRows < sharedLaborCount);
+              sharedProductionTruncated = sharedDroppedDatasets.indexOf("productionData") !== -1 || (sharedProdCount > 0 && sharedProdRows > 0 && sharedProdRows < sharedProdCount);
+              var sharedLaborTruncated = sharedDroppedDatasets.indexOf("laborData") !== -1 || (sharedLaborCount > 0 && sharedLaborRows > 0 && sharedLaborRows < sharedLaborCount);
               sharedLoaded = hydrateFromPayloadObject(sharedBody.snapshot.payload, "shared");
               setSharedSnapshotMeta({
                 source: "shared",
@@ -200,6 +217,30 @@ export function useDataSources() {
         var map = {};
         keys.forEach(function(k, i) { map[k] = results[i] && results[i].value ? results[i].value : null; });
 
+        function preferFresherLocalData(storageKey, dataKey, setData, setName, setTs, fallbackLabel) {
+          var cached = readStoredDataSet(map[storageKey]);
+          if (!cached) return false;
+          var sharedRows = Array.isArray(sharedPayload[dataKey]) ? sharedPayload[dataKey].length : 0;
+          var sharedCount = Number(sharedRowCounts[dataKey] || 0);
+          var sharedTsRaw = sharedMeta[dataKey + "Timestamp"];
+          var sharedTs = sharedTsRaw ? new Date(sharedTsRaw) : null;
+          if (sharedTs && isNaN(sharedTs)) sharedTs = null;
+          var localTsMs = cached.timestamp ? cached.timestamp.getTime() : 0;
+          var sharedTsMs = sharedTs ? sharedTs.getTime() : 0;
+          var sharedTruncated = sharedDroppedDatasets.indexOf(dataKey) !== -1 || (sharedCount > 0 && sharedRows < sharedCount);
+          var preferLocal = false;
+          if (sharedTruncated && cached.data.length) {
+            preferLocal = true;
+          } else if (localTsMs && localTsMs > sharedTsMs) {
+            preferLocal = true;
+          }
+          if (!preferLocal) return false;
+          setData(cached.data);
+          setName(cached.fileName || fallbackLabel || "Saved Data");
+          setTs(cached.timestamp || new Date());
+          return true;
+        }
+
         if (!sharedLoaded) {
           hydrateDataSet(map[STORAGE_KEYS.inventory], setInventory, setInvFileName, setInvTimestamp, "Nulogy Sync (cached)");
           hydrateDataSet(map[STORAGE_KEYS.workOrders], setWorkOrders, setWoFileName, setWoTimestamp, "Nulogy Sync (cached)");
@@ -225,6 +266,10 @@ export function useDataSources() {
         if (sharedLoaded && sharedLaborTruncated) {
           hydrateDataSet(map[STORAGE_KEYS.labor], setLaborData, setLaborFileName, setLaborTimestamp, "Nulogy Labor (cached)");
         }
+        if (sharedLoaded) {
+          preferFresherLocalData(STORAGE_KEYS.edr, "edrData", setEdrData, setEdrFileName, setEdrTimestamp, "EDR (cached)");
+          preferFresherLocalData(STORAGE_KEYS.dock, "dockData", setDockData, setDockFileName, setDockTimestamp, "OpenDock API (cached)");
+        }
 
         if (map[STORAGE_KEYS.mappingConfirmed] === "1") {
           setMappingConfirmed(true);
@@ -235,7 +280,7 @@ export function useDataSources() {
         hydrateDoneRef.current = true;
       }
     })();
-  }, [hydrateDataSet, hydrateFromPayloadObject]);
+  }, [hydrateDataSet, hydrateFromPayloadObject, readStoredDataSet]);
 
   // Save datasets to persistent storage whenever they change
   useEffect(() => {
