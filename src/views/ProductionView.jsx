@@ -495,6 +495,13 @@ export default function ProductionView({ productionSegments, laborActuals, labor
   }, [lineLoad, jobRollup]);
 
   var totalUnitsProduced = jobsWithLabor.reduce(function(sum, r) { return sum + safeNum(r.unitsProduced); }, 0);
+  var totalRevenue = jobsWithLabor.reduce(function(sum, r) { return sum + safeNum(r.revenue); }, 0);
+  var totalLaborCost = jobsWithLabor.reduce(function(sum, r) { return sum + safeNum(r.laborCost); }, 0);
+  var totalLaborHours = jobsWithLabor.reduce(function(sum, r) { return sum + safeNum(r.laborPayableHours); }, 0);
+  var totalRevenueCoveredUnits = jobsWithLabor.reduce(function(sum, r) { return sum + safeNum(r.revenueCoveredUnits); }, 0);
+  var totalLaborMargin = totalRevenue - totalLaborCost;
+  var totalLaborMarginPct = totalRevenue > 0 ? (totalLaborMargin / totalRevenue) : null;
+  var totalRevenueCoveragePct = totalUnitsProduced > 0 ? Math.round((totalRevenueCoveredUnits / totalUnitsProduced) * 100) : 0;
   var topLine = lineLoad[0] || null;
   var topJob = jobRollup[0] || null;
   var shift1Total = shiftTotals.find(function(r) { return r.shift === "Shift 1 (7a-3p)"; }) || null;
@@ -570,6 +577,9 @@ export default function ProductionView({ productionSegments, laborActuals, labor
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(180px, 1fr))", gap:10, marginBottom:10 }}>
         {[
           { l:"Units", v:totalUnitsProduced.toLocaleString(), s:prodDate === "all" ? "all matching days" : (selectedProdDate || "selected day"), c:C.bright },
+          { l:"Total Revenue", v:fmtMoneyWhole(totalRevenue), s:totalRevenueCoveragePct > 0 ? (totalRevenueCoveragePct + "% revenue covered") : "revenue not matched", meta:totalRevenueCoveragePct > 0 && totalRevenueCoveragePct < 100 ? ((totalUnitsProduced - totalRevenueCoveredUnits).toLocaleString() + " units missing revenue") : null, c:C.ok },
+          { l:"Total Labor", v:fmtMoneyWhole(totalLaborCost), s:totalLaborHours > 0 ? (totalLaborHours.toFixed(1) + " labor hrs") : "labor not matched", c:C.accent },
+          { l:"Labor Margin", v:fmtMoneyWhole(totalLaborMargin), s:totalLaborMarginPct != null ? ("Margin " + fmtPct(totalLaborMarginPct)) : "revenue not matched", c:totalLaborMargin >= 0 ? C.ok : C.bad },
           { l:"Shift 1 Yield", v:shift1Units.toLocaleString(), s:"7a-3p · " + shift1Share + "% share", t:shiftCompareText(shift1Jobs, shift2Jobs, shift1Delta, "S2", shift1AvgPerJob), meta:laborRateText(safeNum(shift1Total && shift1Total.laborPayableHours), shift1Units, safeNum(shift1Total && shift1Total.laborCost)), c:C.ok },
           { l:"Shift 2 Yield", v:shift2Units.toLocaleString(), s:"3p-11p · " + shift2Share + "% share", t:shiftCompareText(shift2Jobs, shift1Jobs, shift2Delta, "S1", shift2AvgPerJob), meta:laborRateText(safeNum(shift2Total && shift2Total.laborPayableHours), shift2Units, safeNum(shift2Total && shift2Total.laborCost)), c:C.accent },
           { l:"Top Line", v:topLine ? topLine.line : "--", s:topLine ? (topLine.units.toLocaleString() + " cs · " + topLine.sharePct + "% share") : "no line data", meta:topLine ? laborRateText(topLine.laborPayableHours, topLine.units, topLine.laborCost) : "labor not matched", c:C.ok }
