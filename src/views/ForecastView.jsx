@@ -24,6 +24,10 @@ function fmtPctWhole(n) {
   return Math.round(safeNum(n) * 100).toLocaleString() + "%";
 }
 
+function hasExplicitValue(value) {
+  return value != null && String(value).trim() !== "";
+}
+
 function currentMonthKey() {
   return new Date().toISOString().slice(0, 7);
 }
@@ -633,6 +637,7 @@ export default function ForecastView(props) {
         wo_code: row.wo_code || "",
         sku: row.sku || "",
         line_name: row.line_name || "",
+        override_planned_cases: "",
         override_cases_per_min: "",
         override_line_name: "",
         override_pack_type: "",
@@ -760,6 +765,7 @@ export default function ForecastView(props) {
           wo_code: r.wo_code || "",
           sku: r.sku || "",
           line_name: r.line_name || "",
+          override_planned_cases: "",
           override_cases_per_min: "",
           override_line_name: "",
           override_pack_type: "",
@@ -1005,6 +1011,9 @@ export default function ForecastView(props) {
                 var isDirty = !!dirtyRows[rowKey];
                 var baseLaborCost = safeNum(baselineLaborCostByRowKey[rowKey]);
                 var deltaVsBase = safeNum(r.line_run_labor_cost) - baseLaborCost;
+                var casesValue = hasExplicitValue(ov && ov.override_planned_cases)
+                  ? String(ov.override_planned_cases)
+                  : String(Math.round(safeNum(r.planned_cases)));
                 var setRoleHeadcount = function(role, val) {
                   upsertOverrideForWo(r, function(base) {
                     var nextHc = Object.assign({}, base.override_headcount_by_role || {});
@@ -1020,6 +1029,7 @@ export default function ForecastView(props) {
                   var resetHc = normalizeLegacyHeadcountMap(baseHc);
                   upsertOverrideForWo(r, function(base) {
                     return Object.assign({}, base, {
+                      override_planned_cases: "",
                       override_cases_per_min: "",
                       override_line_name: "",
                       override_pack_type: "",
@@ -1072,7 +1082,20 @@ export default function ForecastView(props) {
                           <span className="rounded border border-[rgb(var(--border))] px-2 py-0.5 text-[11px]" style={{ color: deltaVsBase >= 0 ? C.bad : C.ok }}>Delta {fmtMoney(deltaVsBase)}</span>
                         </div>
                       </td>
-                      <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{safeNum(r.planned_cases).toLocaleString()}</td>
+                      <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={casesValue}
+                          onChange={function(e) {
+                            var v = e.target.value;
+                            upsertOverrideForWo(r, function(base) { return Object.assign({}, base, { override_planned_cases: v }); });
+                            markRowDirty(rowKey);
+                          }}
+                          className="h-8 w-28 text-xs text-right"
+                        />
+                      </td>
                       <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{fmtMoney(safeNum(r.revenue_per_case || 0))}</td>
                       <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{fmtMoney(r.line_run_labor_cost)}</td>
                       <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{fmtMoney(r.revenue)}</td>

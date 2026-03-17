@@ -90,6 +90,10 @@ function eachDayInclusive(startIso, endIso) {
   return out;
 }
 
+function hasExplicitValue(value) {
+  return value != null && String(value).trim() !== "";
+}
+
 function parseOverrides(overrides, monthKey) {
   var byWo = {};
   var bySkuLine = {};
@@ -377,8 +381,6 @@ export function runLaborForecast(input) {
     var plannedCases = unitsExpected;
     if (monthKey && isPriorOpenRollover) plannedCases = remainingCases;
     if (!(plannedCases > 0) && monthKey && isCurrentMonth && remainingCases > 0) plannedCases = remainingCases;
-    if (!(plannedCases > 0)) continue;
-    scopedTotalCases += plannedCases;
 
     var overrideKey = normalizeStr(sku) + "::" + normalizeStr(lineName);
     var override =
@@ -386,6 +388,11 @@ export function runLaborForecast(input) {
       overridesMaps.bySkuLine[overrideKey] ||
       overridesMaps.bySkuLine[normalizeStr(sku) + "::"] ||
       overridesMaps.bySku[normalizeStr(sku)];
+    if (override && hasExplicitValue(override.override_planned_cases)) {
+      plannedCases = Math.max(0, safeNum(override.override_planned_cases));
+    }
+    if (!(plannedCases > 0)) continue;
+    scopedTotalCases += plannedCases;
     var packType = resolvePackType(wo, override);
     var productFamily = String(pickValue(wo, ["Product Family", "product_family", "Item Family", "item_family"])).trim();
     if (override && override.override_line_name) lineName = String(override.override_line_name || lineName).trim() || lineName;
