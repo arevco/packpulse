@@ -22,7 +22,7 @@ async function fetchAllProductionRows(supabase, siteId, fromDate) {
     var to = from + pageSize - 1;
     var q = await supabase
       .from("production_events")
-      .select("event_key,produced_date_et,shift_label,item_code,units_produced,line,work_order_code,raw")
+      .select("event_key,produced_date_et,shift_label,job_id,item_code,units_produced,line,work_order_code,raw")
       .eq("site_id", siteId)
       .gte("produced_date_et", fromDate)
       .order("produced_date_et", { ascending: false })
@@ -89,6 +89,7 @@ export default async function handler(req, res) {
         return {
           produced_date_et: r.produced_date_et || null,
           shift_label: r.shift_label || null,
+          job_id: r.job_id || null,
           item_code: r.item_code || null,
           item_desc: itemDesc ? String(itemDesc) : null,
           units_produced: toNum(r.units_produced),

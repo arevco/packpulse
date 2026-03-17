@@ -649,6 +649,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   const [breakdown, setBreakdown] = useState({ rowsLite: [], bySku: [], byLine: [], latestByLine: [], latestDate: null, totalRows: 0 });
   const [forecastPlans, setForecastPlans] = useState({});
   const [opsSkuTargets, setOpsSkuTargets] = useState([]);
+  const [itemMasterCostBySku, setItemMasterCostBySku] = useState({});
   const [laborActuals, setLaborActuals] = useState({ summary: {}, byDay: [], byShift: [], byLine: [], byRole: [], byWorkOrder: [], byJob: [], status: "idle", productionStatus: "ok" });
   const loadRequestRef = useRef(0);
   const [skuMixMode, setSkuMixMode] = useState("type");
@@ -736,6 +737,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       });
       setForecastPlans(fp && fp.ok && fpBody && typeof fpBody.plans === "object" ? fpBody.plans : {});
       setOpsSkuTargets(configResp.ok && configBody && Array.isArray(configBody.skuTargets) ? configBody.skuTargets : []);
+      setItemMasterCostBySku(configResp.ok && configBody && configBody.itemMasterCostBySku && typeof configBody.itemMasterCostBySku === "object" ? configBody.itemMasterCostBySku : {});
       setLaborActuals(laborResp.ok && laborBody
         ? {
             summary: laborBody.summary || {},
@@ -843,36 +845,13 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     var cacheBreakdown = (breakdown && Array.isArray(breakdown.rowsLite) && breakdown.rowsLite.length)
       ? breakdown
       : { rowsLite: [], bySku: [], byLine: [], latestByLine: [], latestDate: null, totalRows: 0 };
-    var rawByDay = (localNulogySeries && localNulogySeries.trends && Array.isArray(localNulogySeries.trends.byDay)) ? localNulogySeries.trends.byDay : [];
-    var rawByShift = (localNulogySeries && localNulogySeries.trends && Array.isArray(localNulogySeries.trends.byShift)) ? localNulogySeries.trends.byShift : [];
-    var rawBreakdown = (localNulogySeries && localNulogySeries.breakdown)
-      ? localNulogySeries.breakdown
-      : { rowsLite: [], bySku: [], byLine: [], latestByLine: [], latestDate: null, totalRows: 0 };
-    var hasCache = cacheByDay.length > 0 || cacheByShift.length > 0;
-    var hasRaw = rawByDay.length > 0 || rawByShift.length > 0;
-    var serverRowCount = safeNum(trends && trends.diagnostics && trends.diagnostics.totalRowsInTable);
-    var localRowCount = Array.isArray(productionDataRaw) ? productionDataRaw.length : 0;
-    var serverLooksIncomplete = hasCache && localRowCount > 0 && serverRowCount > 0 && serverRowCount < Math.floor(localRowCount * 0.8);
-
-    if (serverLooksIncomplete && hasRaw) {
-      return {
-        source: "local_raw",
-        trends: { byDay: rawByDay, byShift: rawByShift },
-        breakdown: rawBreakdown
-      };
-    }
-    if (hasCache) {
+    var hasServerTrends = cacheByDay.length > 0 || cacheByShift.length > 0;
+    var hasServerBreakdown = cacheBreakdown.rowsLite.length > 0;
+    if (hasServerTrends || hasServerBreakdown) {
       return {
         source: "server",
         trends: { byDay: cacheByDay, byShift: cacheByShift },
-        breakdown: cacheBreakdown.rowsLite.length ? cacheBreakdown : rawBreakdown
-      };
-    }
-    if (hasRaw) {
-      return {
-        source: "local_raw",
-        trends: { byDay: rawByDay, byShift: rawByShift },
-        breakdown: rawBreakdown
+        breakdown: cacheBreakdown
       };
     }
     return {
@@ -880,7 +859,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       trends: { byDay: [], byShift: [] },
       breakdown: { rowsLite: [], bySku: [], byLine: [], latestByLine: [], latestDate: null, totalRows: 0 }
     };
-  }, [trends, breakdown, localNulogySeries, productionDataRaw]);
+  }, [trends, breakdown]);
 
   var effectiveTrends = effectiveNulogySource.trends;
   var effectiveBreakdown = effectiveNulogySource.breakdown;
@@ -907,18 +886,6 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     return map;
   }, [opsSkuTargets]);
 
-  var itemMasterValueBySku = useMemo(function() {
-    var map = {};
-    (Array.isArray(itemMaster) ? itemMaster : []).forEach(function(row) {
-      var sku = normalizeItemCode((row && (row["Item Code"] || row.Code || row.item_code || row.code)) || "");
-      if (!sku) return;
-      var value = pickItemMasterCostValue(row);
-      if (!(value > 0)) return;
-      if (!map[sku] || value > map[sku]) map[sku] = value;
-    });
-    return map;
-  }, [itemMaster]);
-
   var revenuePerCaseForRow = function(itemCode, dateIso) {
     var sku = normalizeItemCode(itemCode);
     if (!sku) return { value: 0, source: "missing" };
@@ -935,10 +902,66 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       if (safeNum(row.revenue_per_case) > best) best = safeNum(row.revenue_per_case);
     }
     if (best > 0) return { value: best, source: "pricing" };
-    var itemMasterValue = safeNum(itemMasterValueBySku[sku]);
+    var itemMasterValue = safeNum(itemMasterCostBySku[sku]);
     if (itemMasterValue > 0) return { value: itemMasterValue, source: "item_master_cost_per_unit" };
     return { value: 0, source: "missing" };
   };
+
+  var serverProductionSegments = useMemo(function() {
+    var rows = (effectiveBreakdown && Array.isArray(effectiveBreakdown.rowsLite)) ? effectiveBreakdown.rowsLite : [];
+    var byShiftDay = {};
+    var byJob = {};
+    var totalRows = rows.length;
+    var rowsWithShift = 0;
+
+    rows.forEach(function(r) {
+      var date = String(r && r.produced_date_et || "");
+      var shift = String(r && r.shift_label || "Unassigned");
+      var units = safeNum(r && r.units_produced);
+      if (!(units > 0) || !date) return;
+      rowsWithShift += 1;
+
+      var shiftKey = date + "|" + shift;
+      if (!byShiftDay[shiftKey]) byShiftDay[shiftKey] = { date: date, shift: shift, unitsProduced: 0, jobs: 0 };
+      byShiftDay[shiftKey].unitsProduced += units;
+      byShiftDay[shiftKey].jobs += 1;
+
+      var jobId = String(r && r.job_id || "").trim() || "Unknown Job";
+      var workOrder = String(r && r.work_order_code || "").trim();
+      var itemCode = String(r && r.item_code || "").trim();
+      var itemDesc = String(r && r.item_desc || "").trim();
+      var line = String(r && r.line || "Unknown").trim() || "Unknown";
+      var jobKey = [date, shift, jobId, workOrder, itemCode].join("|");
+      if (!byJob[jobKey]) {
+        byJob[jobKey] = {
+          date: date,
+          shift: shift,
+          jobId: jobId,
+          workOrder: workOrder || "--",
+          line: line,
+          itemCode: itemCode || "--",
+          itemDesc: itemDesc || "--",
+          unitsProduced: 0
+        };
+      }
+      byJob[jobKey].unitsProduced += units;
+      if ((!byJob[jobKey].itemDesc || byJob[jobKey].itemDesc === "--") && itemDesc) byJob[jobKey].itemDesc = itemDesc;
+      if ((!byJob[jobKey].line || byJob[jobKey].line === "Unknown") && line) byJob[jobKey].line = line;
+    });
+
+    return {
+      shiftRows: Object.values(byShiftDay).sort(function(a, b) {
+        if (a.date !== b.date) return String(b.date || "").localeCompare(String(a.date || ""));
+        return String(a.shift || "").localeCompare(String(b.shift || ""));
+      }),
+      jobRows: Object.values(byJob).sort(function(a, b) {
+        if (a.date !== b.date) return String(b.date || "").localeCompare(String(a.date || ""));
+        return safeNum(b.unitsProduced) - safeNum(a.unitsProduced);
+      }),
+      totalRows: totalRows,
+      rowsWithShift: rowsWithShift
+    };
+  }, [effectiveBreakdown]);
 
   var effectiveRange = useMemo(function() {
     if (windowPreset !== "today") return range;
@@ -1214,7 +1237,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       presets: presetCards,
       selected: selectedSummary
     };
-  }, [effectiveTrends, effectiveBreakdown, commandBoardPreset, forecastPlans, revenueTargetsBySku, itemMasterValueBySku]);
+  }, [effectiveTrends, effectiveBreakdown, commandBoardPreset, forecastPlans, revenueTargetsBySku, itemMasterCostBySku]);
 
   var shiftPlanVsActual = useMemo(function() {
     var rows = (filteredTrends.byShift || []).slice();
@@ -2318,9 +2341,9 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
           </div>
         )}
         <ProductionView
-          productionSegments={productionSegments}
+          productionSegments={serverProductionSegments}
           laborActuals={laborActuals}
-          laborDataRaw={laborDataRaw}
+          laborDataRaw={[]}
           resolveRevenueForRow={revenuePerCaseForRow}
         />
       </Card>

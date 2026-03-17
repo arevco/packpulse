@@ -21,6 +21,82 @@ function toDateIso(value) {
   return d.toISOString().slice(0, 10);
 }
 
+function normalizeLooseKey(value) {
+  return String(value || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+
+function pickFieldLoose(row, keys) {
+  if (!row || typeof row !== "object") return "";
+  var rowKeys = Object.keys(row);
+  for (var i = 0; i < keys.length; i += 1) {
+    var target = String(keys[i] || "").toLowerCase();
+    for (var j = 0; j < rowKeys.length; j += 1) {
+      var rowKey = rowKeys[j];
+      if (String(rowKey || "").toLowerCase() === target) return row[rowKey];
+    }
+  }
+  var wanted = {};
+  keys.forEach(function(key) {
+    wanted[normalizeLooseKey(key)] = true;
+  });
+  for (var x = 0; x < rowKeys.length; x += 1) {
+    var looseKey = rowKeys[x];
+    if (wanted[normalizeLooseKey(looseKey)]) return row[looseKey];
+  }
+  return "";
+}
+
+function normalizeSku(value) {
+  return normalizeLooseKey(String(value || "").trim());
+}
+
+function pickItemMasterCostValue(row) {
+  if (!row || typeof row !== "object") return 0;
+  var keys = [
+    "Cost Per Unit", "cost_per_unit", "Unit Cost", "unit_cost",
+    "Standard Cost", "standard_cost", "Cost Per Base Unit", "cost_per_base_unit"
+  ];
+  for (var i = 0; i < keys.length; i += 1) {
+    var value = pickFieldLoose(row, [keys[i]]);
+    if (value != null && value !== "") {
+      var numeric = toNum(value);
+      if (numeric > 0) return numeric;
+    }
+  }
+  var rowKeys = Object.keys(row);
+  for (var j = 0; j < rowKeys.length; j += 1) {
+    var rowKey = rowKeys[j];
+    var normalized = normalizeLooseKey(rowKey || "");
+    var hasCostToken = normalized.includes("cost") || normalized.includes("price");
+    var looksUnitish =
+      normalized.includes("unit") ||
+      normalized.includes("base") ||
+      normalized.includes("standard") ||
+      normalized.includes("average") ||
+      normalized.includes("avg") ||
+      normalized === "cost" ||
+      normalized === "price";
+    if (hasCostToken && looksUnitish && !normalized.includes("total") && !normalized.includes("extended") && !normalized.includes("amount")) {
+      var inferred = toNum(row[rowKey]);
+      if (inferred > 0) return inferred;
+    }
+  }
+  return 0;
+}
+
+function buildItemMasterCostBySku(payload) {
+  var itemMasterRows = payload && Array.isArray(payload.itemMaster) ? payload.itemMaster : [];
+  var map = {};
+  itemMasterRows.forEach(function(row) {
+    var sku = normalizeSku(pickFieldLoose(row, ["Item Code", "item_code", "Code", "code"]));
+    if (!sku) return;
+    var value = pickItemMasterCostValue(row);
+    if (!(value > 0)) return;
+    if (!map[sku] || value > map[sku]) map[sku] = value;
+  });
+  return map;
+}
+
 function buildHeadcountDefaults(rows) {
   var list = Array.isArray(rows) ? rows : [];
   if (!list.length) return { defaults: {}, rowsUsed: 0 };
@@ -176,9 +252,25 @@ export default async function handler(req, res) {
       if (!rates.length) rates = DEFAULT_RATES.map(function(r) { return Object.assign({ effective_from: "2000-01-01", effective_to: null }, r); });
       rates = mergeWithDefaultRates(rates);
 
+      var itemMasterCostBySku = {};
+      try {
+        var snapshotQ = await supabase
+          .from("cache_snapshots")
+          .select("payload")
+          .eq("site_id", CACHE_SITE_ID)
+          .maybeSingle();
+        if (!snapshotQ.error && snapshotQ.data && snapshotQ.data.payload && typeof snapshotQ.data.payload === "object") {
+          itemMasterCostBySku = buildItemMasterCostBySku(snapshotQ.data.payload);
+        }
+      } catch (snapshotErr) {
+        var snapshotMsg = String(snapshotErr && snapshotErr.message || "");
+        if (!snapshotMsg.includes("cache_snapshots")) throw snapshotErr;
+      }
+
       return res.status(200).json({
         rates: rates,
         skuTargets: Array.isArray(targetsQ.data) ? targetsQ.data : [],
+        itemMasterCostBySku: itemMasterCostBySku,
         headcountDefaults: hc.defaults,
         lineHeadcountDefaults: lineHc,
         headcountDefaultsMeta: {
