@@ -80,6 +80,11 @@ function hasAssignedShift(shiftLabel) {
   return !!shiftLabel && String(shiftLabel) !== "Unassigned";
 }
 
+function isSpecificShiftLabel(shiftLabel) {
+  var normalized = normalizeShiftLabel(shiftLabel);
+  return normalized === "Shift 1 (7a-3p)" || normalized === "Shift 2 (3p-11p)";
+}
+
 function normalizeShiftLabel(value) {
   var s = String(value || "").toLowerCase();
   if (!s) return "";
@@ -160,6 +165,15 @@ function rawLaborTiming(row) {
   };
 }
 
+function scaleLaborMetric(metric, ratio) {
+  var share = Number.isFinite(ratio) && ratio > 0 ? ratio : 0;
+  return {
+    payable_hours: safeNum(metric && metric.payable_hours) * share,
+    productive_hours: safeNum(metric && metric.productive_hours) * share,
+    labor_cost: safeNum(metric && metric.labor_cost) * share
+  };
+}
+
 export default function ProductionView({ productionSegments, laborActuals, laborDataRaw, resolveRevenueForRow }) {
   const { C, mono } = useTheme();
   const { thS, tdN, tdM } = useStyles();
@@ -208,6 +222,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
     var byLineItem = {};
     var byLine = {};
     laborJobRows.forEach(function(r) {
+      var shiftLabel = String(r && r.shift_label || "").trim();
       var exactKey = [
         normKey(r && r.job_id),
         normKey(r && r.date_et),
@@ -234,11 +249,11 @@ export default function ProductionView({ productionSegments, laborActuals, labor
       ].join("|");
       if (exactKey && !exact[exactKey]) exact[exactKey] = r;
       if (slimKey && !slim[slimKey]) slim[slimKey] = r;
-      if (lineItemKey) {
+      if (!isSpecificShiftLabel(shiftLabel) && lineItemKey) {
         if (!byLineItem[lineItemKey]) byLineItem[lineItemKey] = { payable_hours: 0, productive_hours: 0, labor_cost: 0 };
         mergeLaborMetric(byLineItem[lineItemKey], r);
       }
-      if (lineKey) {
+      if (!isSpecificShiftLabel(shiftLabel) && lineKey) {
         if (!byLine[lineKey]) byLine[lineKey] = { payable_hours: 0, productive_hours: 0, labor_cost: 0 };
         mergeLaborMetric(byLine[lineKey], r);
       }
@@ -293,15 +308,49 @@ export default function ProductionView({ productionSegments, laborActuals, labor
       ].join("|");
       if (!exact[exactKey]) exact[exactKey] = { payable_hours: 0, productive_hours: 0, labor_cost: 0 };
       if (!slim[slimKey]) slim[slimKey] = { payable_hours: 0, productive_hours: 0, labor_cost: 0 };
-      if (!byLineItem[lineItemKey]) byLineItem[lineItemKey] = { payable_hours: 0, productive_hours: 0, labor_cost: 0 };
-      if (!byLine[lineKey]) byLine[lineKey] = { payable_hours: 0, productive_hours: 0, labor_cost: 0 };
       mergeLaborMetric(exact[exactKey], metric);
       mergeLaborMetric(slim[slimKey], metric);
-      mergeLaborMetric(byLineItem[lineItemKey], metric);
-      mergeLaborMetric(byLine[lineKey], metric);
+      if (!isSpecificShiftLabel(shift) && lineItemKey) {
+        if (!byLineItem[lineItemKey]) byLineItem[lineItemKey] = { payable_hours: 0, productive_hours: 0, labor_cost: 0 };
+        mergeLaborMetric(byLineItem[lineItemKey], metric);
+      }
+      if (!isSpecificShiftLabel(shift) && lineKey) {
+        if (!byLine[lineKey]) byLine[lineKey] = { payable_hours: 0, productive_hours: 0, labor_cost: 0 };
+        mergeLaborMetric(byLine[lineKey], metric);
+      }
     });
     return { exact: exact, slim: slim, byLineItem: byLineItem, byLine: byLine };
   }, [laborRawRows]);
+
+  var productionFallbackGroups = useMemo(function() {
+    var byLineItem = {};
+    var byLine = {};
+    selectedJobRows.forEach(function(r) {
+      var unitsProduced = safeNum(r.unitsProduced);
+      var lineItemKey = [
+        normKey(r.jobId),
+        normKey(r.date),
+        normKey(r.line),
+        normKey(r.itemCode)
+      ].join("|");
+      var lineKey = [
+        normKey(r.jobId),
+        normKey(r.date),
+        normKey(r.line)
+      ].join("|");
+      if (lineItemKey) {
+        if (!byLineItem[lineItemKey]) byLineItem[lineItemKey] = { units: 0, rows: 0 };
+        byLineItem[lineItemKey].units += unitsProduced;
+        byLineItem[lineItemKey].rows += 1;
+      }
+      if (lineKey) {
+        if (!byLine[lineKey]) byLine[lineKey] = { units: 0, rows: 0 };
+        byLine[lineKey].units += unitsProduced;
+        byLine[lineKey].rows += 1;
+      }
+    });
+    return { byLineItem: byLineItem, byLine: byLine };
+  }, [selectedJobRows]);
 
   var jobsWithLabor = useMemo(function() {
     return filteredJobRows.map(function(r) {
@@ -329,16 +378,21 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         normKey(r.date),
         normKey(r.line)
       ].join("|");
-      var labor =
-        laborByJobKey.exact[exactKey] ||
-        laborByJobKey.slim[slimKey] ||
-        laborByJobKey.byLineItem[lineItemKey] ||
-        laborByJobKey.byLine[lineKey] ||
-        rawLaborByJobKey.exact[exactKey] ||
-        rawLaborByJobKey.slim[slimKey] ||
-        rawLaborByJobKey.byLineItem[lineItemKey] ||
-        rawLaborByJobKey.byLine[lineKey] ||
-        null;
+      var labor = laborByJobKey.exact[exactKey] || laborByJobKey.slim[slimKey] || rawLaborByJobKey.exact[exactKey] || rawLaborByJobKey.slim[slimKey] || null;
+      if (!labor) {
+        var aggregateLabor = laborByJobKey.byLineItem[lineItemKey] || rawLaborByJobKey.byLineItem[lineItemKey] || null;
+        var aggregateGroup = productionFallbackGroups.byLineItem[lineItemKey] || null;
+        if (!aggregateLabor) {
+          aggregateLabor = laborByJobKey.byLine[lineKey] || rawLaborByJobKey.byLine[lineKey] || null;
+          aggregateGroup = productionFallbackGroups.byLine[lineKey] || null;
+        }
+        if (aggregateLabor && aggregateGroup) {
+          var groupUnits = safeNum(aggregateGroup.units);
+          var groupRows = safeNum(aggregateGroup.rows);
+          var ratio = groupUnits > 0 ? (safeNum(r.unitsProduced) / groupUnits) : (groupRows > 0 ? (1 / groupRows) : 0);
+          labor = scaleLaborMetric(aggregateLabor, ratio);
+        }
+      }
       var rawPayableHours = safeNum(labor && labor.payable_hours);
       var payableHours = rawPayableHours >= MIN_TRUSTED_JOB_LABOR_HOURS ? rawPayableHours : 0;
       var productiveHours = payableHours > 0 ? safeNum(labor && labor.productive_hours) : 0;
@@ -371,7 +425,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         hasRevenue: revenue > 0
       });
     });
-  }, [filteredJobRows, laborByJobKey, rawLaborByJobKey, resolveRevenueForRow]);
+  }, [filteredJobRows, laborByJobKey, rawLaborByJobKey, productionFallbackGroups, resolveRevenueForRow]);
 
   var shiftTotals = useMemo(function() {
     var map = {};
