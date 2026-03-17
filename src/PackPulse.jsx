@@ -56,6 +56,7 @@ const AICopilotView = lazySafe(function() { return import("./views/AICopilotView
 export default function ProductionReadiness() {
   const { C, theme, setTheme, sans, mono } = useTheme();
   const AUTO_SYNC_MS = 15 * 60 * 1000;
+  const AUTO_SYNC_FRESH_MS = 30 * 60 * 1000;
   const ds = useDataSources();
   const { analysis, summary, criticalItems, woStatuses, woCustomers, timelineData, deliveriesV2, inboundCoverage, recommendations, dispatchQueue, productionSegments } = useAnalysis({
     mappingConfirmed: ds.mappingConfirmed, allUploaded: ds.allUploaded,
@@ -192,6 +193,22 @@ export default function ProductionReadiness() {
   }, []);
 
   var showAutoBootstrap = autoBootstrapEnabled;
+  var parseTimestampMs = function(ts) {
+    if (!ts) return 0;
+    if (typeof ts === "number") return Number.isFinite(ts) ? ts : 0;
+    var ms = ts instanceof Date ? ts.getTime() : new Date(ts).getTime();
+    return Number.isFinite(ms) ? ms : 0;
+  };
+  var isFreshForAutoSync = function(ts) {
+    var ms = parseTimestampMs(ts);
+    return !!ms && (Date.now() - ms) < AUTO_SYNC_FRESH_MS;
+  };
+  var freshestTimestampMs = function(list) {
+    return (list || []).reduce(function(max, ts) {
+      var ms = parseTimestampMs(ts);
+      return ms > max ? ms : max;
+    }, 0);
+  };
 
   var fmtTs = ts => { if (!ts) return "--"; var d = Date.now() - ts; return d < 60000 ? "now" : d < 3600000 ? Math.floor(d/60000) + "m" : d < 86400000 ? Math.floor(d/3600000) + "h" : Math.floor(d/86400000) + "d"; };
   var fmtClock = ts => {
@@ -228,6 +245,18 @@ export default function ProductionReadiness() {
   var sharedAgeMins = sharedMeta.syncedAt ? Math.max(0, Math.floor((Date.now() - new Date(sharedMeta.syncedAt).getTime()) / 60000)) : null;
   var sharedSeemsStale = !!(sharedAgeMins != null && sharedAgeMins > 30 && freshCount >= 3);
   var staleCount = Math.max(0, dataSourceStatus.length - freshCount);
+  var autoSyncHydrated = sharedMeta.source !== "unknown";
+  var latestNulogySyncMs = freshestTimestampMs([
+    ds.invTimestamp,
+    ds.woTimestamp,
+    ds.productionTimestamp,
+    ds.laborTimestamp,
+    ds.itemMasterTimestamp,
+    ds.bomTimestamp,
+  ]);
+  var nulogyAutoSyncFresh = !!latestNulogySyncMs && (Date.now() - latestNulogySyncMs) < AUTO_SYNC_FRESH_MS;
+  var dockAutoSyncFresh = isFreshForAutoSync(ds.dockTimestamp);
+  var evoconAutoSyncFresh = isFreshForAutoSync(ds.evoconTimestamp || evoconLastSyncAt);
   var freshnessVariant = freshCount === dataSourceStatus.length ? "success" : freshCount >= 3 ? "warning" : "danger";
   var freshnessLabel = freshCount === dataSourceStatus.length
     ? "Data Fresh"
@@ -297,30 +326,30 @@ export default function ProductionReadiness() {
     }
   }, []);
 
-  var shouldRunIntervalSync = ds.mappingConfirmed || showAutoBootstrap;
+  var shouldRunIntervalSync = autoSyncHydrated && (ds.mappingConfirmed || showAutoBootstrap);
 
   useEffect(() => {
-    if (!showAutoBootstrap) return;
-    // Kick off one initial Nulogy sync on page load so freshness reflects current data.
+    if (!showAutoBootstrap || !autoSyncHydrated || nulogyAutoSyncFresh) return;
+    // Kick off one initial Nulogy sync only when the cached/shared data is stale.
     setAutoSyncArmed(true);
     setSyncNonce(function(n) { return n + 1; });
-  }, [showAutoBootstrap]);
+  }, [showAutoBootstrap, autoSyncHydrated, nulogyAutoSyncFresh]);
 
   useEffect(() => {
     if (!shouldRunIntervalSync) return;
-    if (!evoconApiLoading && !ds.evoconTimestamp) {
+    if (!evoconApiLoading && !evoconAutoSyncFresh) {
       fetchEvoconApi();
     }
     var intervalId = setInterval(function() {
-      if (!dockApiLoading) fetchOpenDockApi();
-      if (!evoconApiLoading) fetchEvoconApi();
-      if (showAutoBootstrap && !(nulogySyncState && nulogySyncState.syncing)) {
+      if (!dockApiLoading && !dockAutoSyncFresh) fetchOpenDockApi();
+      if (!evoconApiLoading && !evoconAutoSyncFresh) fetchEvoconApi();
+      if (showAutoBootstrap && !nulogyAutoSyncFresh && !(nulogySyncState && nulogySyncState.syncing)) {
         setAutoSyncArmed(true);
         setSyncNonce(function(n) { return n + 1; });
       }
     }, AUTO_SYNC_MS);
     return function() { clearInterval(intervalId); };
-  }, [shouldRunIntervalSync, showAutoBootstrap, dockApiLoading, evoconApiLoading, nulogySyncState, fetchOpenDockApi, fetchEvoconApi, ds.evoconTimestamp]);
+  }, [shouldRunIntervalSync, showAutoBootstrap, dockApiLoading, evoconApiLoading, nulogySyncState, fetchOpenDockApi, fetchEvoconApi, dockAutoSyncFresh, evoconAutoSyncFresh, nulogyAutoSyncFresh]);
 
   var handleNulogyData = useCallback(function(results) {
     var ts = new Date();
