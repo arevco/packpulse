@@ -29,6 +29,13 @@ function fmtMoneyWhole(value) {
   return "$" + rounded.toLocaleString();
 }
 
+function fmtMoney(value) {
+  var amount = safeNum(value);
+  if (!Number.isFinite(amount)) return "--";
+  if (amount < 0) return "-$" + Math.abs(amount).toFixed(2);
+  return "$" + amount.toFixed(2);
+}
+
 function fmtPct(value) {
   if (value == null || !Number.isFinite(value)) return "--";
   return (safeNum(value) * 100).toFixed(1) + "%";
@@ -350,6 +357,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         laborCost: laborCost,
         revenue: revenue,
         revenueCoveredUnits: revenue > 0 ? unitsProduced : 0,
+        pricePerUnit: revenue > 0 && unitsProduced > 0 ? (revenue / unitsProduced) : null,
         laborMargin: laborMargin,
         laborMarginPct: laborMarginPct,
         missingRevenue: missingRevenue,
@@ -419,6 +427,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         shiftMinutes: shiftMinutes,
         revenueCoveragePct: r.units > 0 ? Math.round((r.revenueCoveredUnits / r.units) * 100) : 0,
         missingRevenueSkuCount: Object.keys(r.missingRevenueSkuKeys).length,
+        pricePerUnit: r.revenueCoveredUnits > 0 ? (r.revenue / r.revenueCoveredUnits) : null,
         casesPerMinute: shiftMinutes > 0 ? (r.units / shiftMinutes) : 0,
         laborCostPerCase: r.units > 0 ? (r.laborCost / r.units) : 0,
         laborMarginPct: r.revenue > 0 ? (r.laborMargin / r.revenue) : null
@@ -473,6 +482,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         laborCostPerCase: r.unitsProduced > 0 ? (r.laborCost / r.unitsProduced) : 0,
         revenueCoveragePct: r.unitsProduced > 0 ? Math.round((r.revenueCoveredUnits / r.unitsProduced) * 100) : 0,
         missingRevenueSkuCount: Object.keys(r.missingRevenueSkuKeys).length,
+        pricePerUnit: r.revenueCoveredUnits > 0 ? (r.revenue / r.revenueCoveredUnits) : null,
         laborMarginPct: r.revenue > 0 ? (r.laborMargin / r.revenue) : null
       });
     }).sort(function(a, b) { return b.unitsProduced - a.unitsProduced; });
@@ -613,13 +623,14 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         <div className="mb-1 text-sm font-semibold">Line Execution</div>
         <div className="mb-2 text-xs text-[rgb(var(--muted))]">Line summary rows with top jobs nested underneath. Click a line to collapse or expand its jobs.</div>
         <TableShell className="overflow-x-auto overflow-y-hidden">
-          <table style={{ width:"100%", minWidth:1180, borderCollapse:"collapse" }}>
+          <table style={{ width:"100%", minWidth:1300, borderCollapse:"collapse" }}>
             <thead>
               <tr style={{ background:C.raised }}>
                 <th style={thS}>Line / Job</th>
                 <th style={thS}>Context</th>
                 <th style={thS}>Units</th>
                 <th style={thS}>Revenue</th>
+                <th style={thS}>Price/Unit</th>
                 <th style={thS}>Labor Hrs</th>
                 <th style={thS}>Labor</th>
                 <th style={thS}>Labor Margin</th>
@@ -652,6 +663,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
                     </td>
                     <td style={Object.assign({}, tdM, { fontWeight:700, color:C.ok })}>{r.units.toLocaleString()}</td>
                     <td style={tdM}>{r.revenue > 0 ? fmtMoneyWhole(r.revenue) : "--"}</td>
+                    <td style={tdM}>{r.pricePerUnit != null ? fmtMoney(r.pricePerUnit) : "--"}</td>
                     <td style={tdM}>{r.laborPayableHours > 0 ? r.laborPayableHours.toFixed(1) : "--"}</td>
                     <td style={tdM}>{r.laborCost > 0 ? fmtMoneyWhole(r.laborCost) : "--"}</td>
                     <td style={tdM}>{r.revenue > 0 ? fmtMoneyWhole(r.laborMargin) : "--"}</td>
@@ -678,6 +690,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
                             </div>
                           ) : null}
                         </td>
+                        <td style={tdM}>{job.pricePerUnit != null ? fmtMoney(job.pricePerUnit) : "--"}</td>
                         <td style={tdM}>{job.laborPayableHours > 0 ? job.laborPayableHours.toFixed(1) : "--"}</td>
                         <td style={tdM}>{job.laborCost > 0 ? fmtMoneyWhole(job.laborCost) : "--"}</td>
                         <td style={tdM}>{job.revenue > 0 ? fmtMoneyWhole(job.laborMargin) : "--"}</td>
@@ -688,14 +701,14 @@ export default function ProductionView({ productionSegments, laborActuals, labor
                   }) : null,
                   expanded && r.hiddenJobCount > 0 ? (
                     <tr key={r.line + "-more"} style={{ borderBottom:"1px solid " + C.border, background:C.raised }}>
-                      <td colSpan={9} style={Object.assign({}, tdN, { paddingLeft:"28px", color:C.dim })}>
+                      <td colSpan={10} style={Object.assign({}, tdN, { paddingLeft:"28px", color:C.dim })}>
                         +{r.hiddenJobCount} more jobs on {r.line} are available below in Job Rows.
                       </td>
                     </tr>
                   ) : null
                 ];
               })}
-              {!lineExecution.length && <tr><td colSpan={9} style={{ padding:20, textAlign:"center", color:C.dim }}>No line or job rollups for current filters.</td></tr>}
+              {!lineExecution.length && <tr><td colSpan={10} style={{ padding:20, textAlign:"center", color:C.dim }}>No line or job rollups for current filters.</td></tr>}
             </tbody>
           </table>
         </TableShell>
@@ -716,6 +729,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
             <th style={thS}>Description</th>
             <th style={thS}>Units Produced</th>
             <th style={thS}>Revenue</th>
+            <th style={thS}>Price/Unit</th>
             <th style={thS}>Labor Hrs</th>
             <th style={thS}>Labor Cost</th>
             <th style={thS}>Labor Margin</th>
@@ -734,6 +748,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
                 <td style={tdM}>
                   {r.revenue > 0 ? fmtMoneyWhole(r.revenue) : <span style={{ color:C.bad, fontWeight:600 }}>Missing</span>}
                 </td>
+                <td style={tdM}>{r.pricePerUnit != null ? fmtMoney(r.pricePerUnit) : "--"}</td>
                 <td style={tdM}>{r.laborPayableHours > 0 ? r.laborPayableHours.toFixed(1) : "--"}</td>
                 <td style={tdM}>{r.laborCost > 0 ? fmtMoneyWhole(r.laborCost) : "--"}</td>
                 <td style={tdM}>{r.revenue > 0 ? fmtMoneyWhole(r.laborMargin) : "--"}</td>
@@ -741,7 +756,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
               </tr>;
             })}
             {jobsWithLabor.length === 0 && (
-              <tr><td colSpan={12} style={{ padding:24, textAlign:"center", color:C.dim }}>No production rows for the selected day/filters.</td></tr>
+              <tr><td colSpan={13} style={{ padding:24, textAlign:"center", color:C.dim }}>No production rows for the selected day/filters.</td></tr>
             )}
           </tbody>
         </table>
