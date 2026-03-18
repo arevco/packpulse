@@ -264,6 +264,8 @@ export default function ProductionView({ productionSegments, laborActuals, labor
     var slim = {};
     var byLineItem = {};
     var byLine = {};
+    var byJobDateItem = {};
+    var byJobDate = {};
     laborJobRows.forEach(function(r) {
       var shiftLabel = String(r && r.shift_label || "").trim();
       var exactKey = [
@@ -290,6 +292,15 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         normKey(r && r.date_et),
         normKey(r && r.line_name)
       ].join("|");
+      var jobDateItemKey = [
+        normKey(r && r.job_id),
+        normKey(r && r.date_et),
+        normKey(r && r.item_code)
+      ].join("|");
+      var jobDateKey = [
+        normKey(r && r.job_id),
+        normKey(r && r.date_et)
+      ].join("|");
       if (exactKey && !exact[exactKey]) exact[exactKey] = r;
       if (slimKey && !slim[slimKey]) slim[slimKey] = r;
       if (!isSpecificShiftLabel(shiftLabel) && lineItemKey) {
@@ -300,8 +311,16 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         if (!byLine[lineKey]) byLine[lineKey] = { payable_hours: 0, productive_hours: 0, labor_cost: 0 };
         mergeLaborMetric(byLine[lineKey], r);
       }
+      if (jobDateItemKey) {
+        if (!byJobDateItem[jobDateItemKey]) byJobDateItem[jobDateItemKey] = { payable_hours: 0, productive_hours: 0, labor_cost: 0 };
+        mergeLaborMetric(byJobDateItem[jobDateItemKey], r);
+      }
+      if (jobDateKey) {
+        if (!byJobDate[jobDateKey]) byJobDate[jobDateKey] = { payable_hours: 0, productive_hours: 0, labor_cost: 0 };
+        mergeLaborMetric(byJobDate[jobDateKey], r);
+      }
     });
-    return { exact: exact, slim: slim, byLineItem: byLineItem, byLine: byLine };
+    return { exact: exact, slim: slim, byLineItem: byLineItem, byLine: byLine, byJobDateItem: byJobDateItem, byJobDate: byJobDate };
   }, [laborJobRows]);
 
   var rawLaborByJobKey = useMemo(function() {
@@ -309,6 +328,8 @@ export default function ProductionView({ productionSegments, laborActuals, labor
     var slim = {};
     var byLineItem = {};
     var byLine = {};
+    var byJobDateItem = {};
+    var byJobDate = {};
     laborRawRows.forEach(function(row) {
       var jobId = String(pickFieldLoose(row, ["Job ID", "job_id", "Job"]) || "").trim();
       if (!jobId) return;
@@ -349,6 +370,15 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         normKey(date),
         normKey(line)
       ].join("|");
+      var jobDateItemKey = [
+        normKey(jobId),
+        normKey(date),
+        normKey(itemCode)
+      ].join("|");
+      var jobDateKey = [
+        normKey(jobId),
+        normKey(date)
+      ].join("|");
       if (!exact[exactKey]) exact[exactKey] = { payable_hours: 0, productive_hours: 0, labor_cost: 0 };
       if (!slim[slimKey]) slim[slimKey] = { payable_hours: 0, productive_hours: 0, labor_cost: 0 };
       mergeLaborMetric(exact[exactKey], metric);
@@ -361,13 +391,23 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         if (!byLine[lineKey]) byLine[lineKey] = { payable_hours: 0, productive_hours: 0, labor_cost: 0 };
         mergeLaborMetric(byLine[lineKey], metric);
       }
+      if (jobDateItemKey) {
+        if (!byJobDateItem[jobDateItemKey]) byJobDateItem[jobDateItemKey] = { payable_hours: 0, productive_hours: 0, labor_cost: 0 };
+        mergeLaborMetric(byJobDateItem[jobDateItemKey], metric);
+      }
+      if (jobDateKey) {
+        if (!byJobDate[jobDateKey]) byJobDate[jobDateKey] = { payable_hours: 0, productive_hours: 0, labor_cost: 0 };
+        mergeLaborMetric(byJobDate[jobDateKey], metric);
+      }
     });
-    return { exact: exact, slim: slim, byLineItem: byLineItem, byLine: byLine };
+    return { exact: exact, slim: slim, byLineItem: byLineItem, byLine: byLine, byJobDateItem: byJobDateItem, byJobDate: byJobDate };
   }, [laborRawRows]);
 
   var productionFallbackGroups = useMemo(function() {
     var byLineItem = {};
     var byLine = {};
+    var byJobDateItem = {};
+    var byJobDate = {};
     selectedJobRows.forEach(function(r) {
       var unitsProduced = safeNum(r.unitsProduced);
       var lineItemKey = [
@@ -381,6 +421,15 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         normKey(r.date),
         normKey(r.line)
       ].join("|");
+      var jobDateItemKey = [
+        normKey(r.jobId),
+        normKey(r.date),
+        normKey(r.itemCode)
+      ].join("|");
+      var jobDateKey = [
+        normKey(r.jobId),
+        normKey(r.date)
+      ].join("|");
       if (lineItemKey) {
         if (!byLineItem[lineItemKey]) byLineItem[lineItemKey] = { units: 0, rows: 0 };
         byLineItem[lineItemKey].units += unitsProduced;
@@ -391,8 +440,18 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         byLine[lineKey].units += unitsProduced;
         byLine[lineKey].rows += 1;
       }
+      if (jobDateItemKey) {
+        if (!byJobDateItem[jobDateItemKey]) byJobDateItem[jobDateItemKey] = { units: 0, rows: 0 };
+        byJobDateItem[jobDateItemKey].units += unitsProduced;
+        byJobDateItem[jobDateItemKey].rows += 1;
+      }
+      if (jobDateKey) {
+        if (!byJobDate[jobDateKey]) byJobDate[jobDateKey] = { units: 0, rows: 0 };
+        byJobDate[jobDateKey].units += unitsProduced;
+        byJobDate[jobDateKey].rows += 1;
+      }
     });
-    return { byLineItem: byLineItem, byLine: byLine };
+    return { byLineItem: byLineItem, byLine: byLine, byJobDateItem: byJobDateItem, byJobDate: byJobDate };
   }, [selectedJobRows]);
 
   var jobsWithLabor = useMemo(function() {
@@ -421,6 +480,15 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         normKey(r.date),
         normKey(r.line)
       ].join("|");
+      var jobDateItemKey = [
+        normKey(r.jobId),
+        normKey(r.date),
+        normKey(r.itemCode)
+      ].join("|");
+      var jobDateKey = [
+        normKey(r.jobId),
+        normKey(r.date)
+      ].join("|");
       var labor = laborByJobKey.exact[exactKey] || laborByJobKey.slim[slimKey] || rawLaborByJobKey.exact[exactKey] || rawLaborByJobKey.slim[slimKey] || null;
       if (!labor) {
         var aggregateLabor = laborByJobKey.byLineItem[lineItemKey] || rawLaborByJobKey.byLineItem[lineItemKey] || null;
@@ -428,6 +496,14 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         if (!aggregateLabor) {
           aggregateLabor = laborByJobKey.byLine[lineKey] || rawLaborByJobKey.byLine[lineKey] || null;
           aggregateGroup = productionFallbackGroups.byLine[lineKey] || null;
+        }
+        if (!aggregateLabor) {
+          aggregateLabor = laborByJobKey.byJobDateItem[jobDateItemKey] || rawLaborByJobKey.byJobDateItem[jobDateItemKey] || null;
+          aggregateGroup = productionFallbackGroups.byJobDateItem[jobDateItemKey] || null;
+        }
+        if (!aggregateLabor) {
+          aggregateLabor = laborByJobKey.byJobDate[jobDateKey] || rawLaborByJobKey.byJobDate[jobDateKey] || null;
+          aggregateGroup = productionFallbackGroups.byJobDate[jobDateKey] || null;
         }
         if (aggregateLabor && aggregateGroup) {
           var groupUnits = safeNum(aggregateGroup.units);
