@@ -144,9 +144,9 @@ function buildAllocatedLaborSegments(row, todayEt) {
     if (!(dayMs > 0)) continue;
 
     var shift1Start = easternWallClockToDate(dateKey, 7, 0, 0);
-    var shift1End = easternWallClockToDate(dateKey, 15, 0, 0);
-    var shift2Start = easternWallClockToDate(dateKey, 15, 0, 0);
-    var shift2End = easternWallClockToDate(dateKey, 23, 46, 0);
+    var shift1End = easternWallClockToDate(dateKey, 15, 6, 0);
+    var shift2Start = easternWallClockToDate(dateKey, 15, 6, 0);
+    var shift2End = easternWallClockToDate(addDaysIso(dateKey, 1), 0, 0, 0);
     var shift1Ms = overlapMillis(startMs, endMs, shift1Start.getTime(), shift1End.getTime());
     var shift2Ms = overlapMillis(startMs, endMs, shift2Start.getTime(), shift2End.getTime());
     var unassignedMs = Math.max(0, dayMs - shift1Ms - shift2Ms);

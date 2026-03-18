@@ -486,8 +486,9 @@ function buildRawNulogySeries(rows) {
       });
       var hour = parseInt(parts.hour || "0", 10);
       var minute = parseInt(parts.minute || "0", 10);
-      if (hour >= 7 && hour < 15) shift = "Shift 1 (7a-3p)";
-      else if (hour >= 15 && (hour < 23 || (hour === 23 && minute <= 45))) shift = "Shift 2 (3p-11p)";
+      var totalMinutes = (hour * 60) + minute;
+      if (totalMinutes >= (7 * 60) && totalMinutes <= ((15 * 60) + 5)) shift = "Shift 1 (7a-3p)";
+      else if (totalMinutes >= ((15 * 60) + 6) && totalMinutes <= ((23 * 60) + 59)) shift = "Shift 2 (3p-11p)";
     }
     var line = String(pickFieldLooseLocal(row, ["Line", "line", "line_name", "Line Name"]) || "--").trim() || "--";
     var sku = String(pickFieldLooseLocal(row, ["Item Code", "item_code"]) || "").trim() || "UNKNOWN";

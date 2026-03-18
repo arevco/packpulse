@@ -108,8 +108,9 @@ function normalizeShiftLabel(value) {
 }
 
 function classifyShiftFromHour(hour, minute) {
-  if (hour >= 7 && hour < 15) return "Shift 1 (7a-3p)";
-  if (hour >= 15 && (hour < 23 || (hour === 23 && Number(minute || 0) <= 45))) return "Shift 2 (3p-11p)";
+  var totalMinutes = (Number(hour || 0) * 60) + Number(minute || 0);
+  if (totalMinutes >= (7 * 60) && totalMinutes <= ((15 * 60) + 5)) return "Shift 1 (7a-3p)";
+  if (totalMinutes >= ((15 * 60) + 6) && totalMinutes <= ((23 * 60) + 59)) return "Shift 2 (3p-11p)";
   return "Unassigned";
 }
 
