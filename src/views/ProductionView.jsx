@@ -644,7 +644,8 @@ export default function ProductionView({ productionSegments, laborActuals, labor
     return lineLoad.map(function(line) {
       var jobs = jobsByLine[line.line] || [];
       return Object.assign({}, line, {
-        jobs: jobs
+        lineJobs: jobs,
+        jobCount: jobs.length
       });
     });
   }, [lineLoad, jobRollup, detailRowsByJobKey]);
@@ -833,7 +834,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
                       </button>
                     </td>
                     <td style={tdM}>
-                      <div>{r.sharePct}% share · {r.jobs} jobs</div>
+                      <div>{r.sharePct}% share · {r.jobCount} jobs</div>
                       {r.laborStatus !== "finalized" ? (
                         <div style={{ fontSize:11, color:C.warn }}>{laborStatusLabel(r.laborStatus)}</div>
                       ) : null}
@@ -852,7 +853,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
                     <td style={tdM}>{r.revenue > 0 ? fmtPct(r.laborMarginPct) : "--"}</td>
                     <td style={tdM}>{r.casesPerMinute > 0 ? r.casesPerMinute.toFixed(2) : "--"}</td>
                   </tr>,
-                  expanded ? r.jobs.map(function(job) {
+                  expanded ? r.lineJobs.map(function(job) {
                     var expandedJob = jobExpanded(job.key);
                     return [
                       <tr key={job.key} style={{ borderBottom:"1px solid " + C.border, background:C.raised }}>
