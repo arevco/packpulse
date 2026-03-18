@@ -223,6 +223,8 @@ export default function ProductionView({ productionSegments, laborActuals, labor
   const [lineFilter, setLineFilter] = useState("all");
   const [shiftFilter, setShiftFilter] = useState("all");
   const [lineExpansion, setLineExpansion] = useState({});
+  const [showLineExecution, setShowLineExecution] = useState(true);
+  const [showJobRows, setShowJobRows] = useState(true);
 
   var prodShiftRows = productionSegments && Array.isArray(productionSegments.shiftRows) ? productionSegments.shiftRows : [];
   var prodJobRows = productionSegments && Array.isArray(productionSegments.jobRows) ? productionSegments.jobRows : [];
@@ -746,8 +748,21 @@ export default function ProductionView({ productionSegments, laborActuals, labor
       ) : null}
 
       <div className="mb-3 rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-3">
-        <div className="mb-1 text-sm font-semibold">Line Execution</div>
-        <div className="mb-2 text-xs text-[rgb(var(--muted))]">Line summary rows with top jobs nested underneath. Click a line to collapse or expand its jobs.</div>
+        <div className="mb-2 flex items-start justify-between gap-3">
+          <div>
+            <div className="mb-1 text-sm font-semibold">Line Execution</div>
+            <div className="text-xs text-[rgb(var(--muted))]">Line summary rows with top jobs nested underneath. Click a line to collapse or expand its jobs.</div>
+          </div>
+          <button
+            type="button"
+            onClick={function() { setShowLineExecution(function(v) { return !v; }); }}
+            className="inline-flex h-9 items-center rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]"
+          >
+            <span className="mr-1">{showLineExecution ? "▾" : "▸"}</span>
+            {showLineExecution ? "Hide" : "Show"}
+          </button>
+        </div>
+        {showLineExecution ? (
         <TableShell className="overflow-x-auto overflow-y-hidden">
           <table style={{ width:"100%", minWidth:1300, borderCollapse:"collapse" }}>
             <thead>
@@ -842,12 +857,24 @@ export default function ProductionView({ productionSegments, laborActuals, labor
             </tbody>
           </table>
         </TableShell>
+        ) : null}
       </div>
 
       <div className="mb-2 flex items-center justify-between gap-2">
-        <div className="text-sm font-semibold">Job Rows</div>
+        <div className="flex items-center gap-3">
+          <div className="text-sm font-semibold">Job Rows</div>
+          <button
+            type="button"
+            onClick={function() { setShowJobRows(function(v) { return !v; }); }}
+            className="inline-flex h-8 items-center rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]"
+          >
+            <span className="mr-1">{showJobRows ? "▾" : "▸"}</span>
+            {showJobRows ? "Hide" : "Show"}
+          </button>
+        </div>
         <div className="text-xs text-[rgb(var(--muted))]">Showing {Math.min(filteredJobRows.length, 100)} of {filteredJobRows.length.toLocaleString()} rows</div>
       </div>
+      {showJobRows ? (
       <TableShell>
         <table style={{ width:"100%", borderCollapse:"collapse" }}>
           <thead><tr style={{ background:C.raised }}>
@@ -897,6 +924,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
           </tbody>
         </table>
       </TableShell>
+      ) : null}
     </div>
   );
 }
