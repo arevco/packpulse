@@ -1016,7 +1016,7 @@ export default function ProductionReadiness() {
         <TabsNav
           activeKey={activeView}
           onChange={setActiveView}
-          items={[{key:"overview",label:"Overview",count:null,alert:false},{key:"aicopilot",label:"AI Copilot",count:null,alert:false},{key:"operations",label:"Operations",count:(productionSegmentsForUI.jobRows || []).length,alert:false},{key:"forecast",label:"Forecast",count:null,alert:false},{key:"workorders",label:"Work Orders",count:summaryForUI.total},{key:"supplyrisk",label:"Supply Risk",count:criticalItemsForUI.length,alert:false}]
+          items={[{key:"overview",label:"Overview",count:null,alert:false},{key:"operations",label:"Operations",count:(productionSegmentsForUI.jobRows || []).length,alert:false},{key:"workorders",label:"Work Orders",count:summaryForUI.total},{key:"supplyrisk",label:"Supply Risk",count:criticalItemsForUI.length,alert:false},{key:"forecast",label:"Forecast",count:null,alert:false},{key:"aicopilot",label:"AI Copilot",count:null,alert:false}]
             .concat([{key:"sandbox",label:"Sandbox",count:null,alert:false}])}
         />
 
