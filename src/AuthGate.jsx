@@ -8,6 +8,8 @@ const DEV_BYPASS_USER = {
   name: import.meta.env.VITE_DEV_BYPASS_NAME || "PackPulse Dev",
   picture: "",
 };
+const SESSION_USAGE_HEARTBEAT_MS = 15 * 60 * 1000;
+const SESSION_USAGE_ACTIVE_WINDOW_MS = 5 * 60 * 1000;
 
 export default function AuthGate({ children }) {
   const [checking, setChecking] = useState(true);
@@ -15,6 +17,9 @@ export default function AuthGate({ children }) {
   const [error, setError] = useState("");
   const btnRef = useRef(null);
   const initializedRef = useRef(false);
+  const sessionUsageLoggedRef = useRef("");
+  const lastInteractionRef = useRef(Date.now());
+  const lastActivitySentRef = useRef(0);
 
   const checkSession = useCallback(async (opts = {}) => {
     const silent = !!opts.silent;
@@ -89,6 +94,21 @@ export default function AuthGate({ children }) {
     });
   }, [handleCredentialResponse]);
 
+  const postUsageEvent = useCallback(async function(eventType) {
+    if (DEV_BYPASS_AUTH) return;
+    try {
+      await fetch("/api/ops/user-logins", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        keepalive: eventType === "session_refresh",
+        body: JSON.stringify({ event_type: eventType }),
+      });
+    } catch (_) {
+      // Best effort only. Activity logging should never block app usage.
+    }
+  }, []);
+
   // Load Google Identity Services script
   useEffect(() => {
     if (user || checking || !GOOGLE_CLIENT_ID) return;
@@ -154,7 +174,72 @@ export default function AuthGate({ children }) {
     } catch (_) {}
     setUser(null);
     initializedRef.current = false;
+    sessionUsageLoggedRef.current = "";
+    lastActivitySentRef.current = 0;
   }, []);
+
+  useEffect(() => {
+    if (!user || DEV_BYPASS_AUTH) return;
+    var email = user && user.email ? String(user.email).trim().toLowerCase() : "";
+    if (!email) return;
+    if (sessionUsageLoggedRef.current === email) return;
+    sessionUsageLoggedRef.current = email;
+    lastInteractionRef.current = Date.now();
+    lastActivitySentRef.current = Date.now();
+    postUsageEvent("session_refresh");
+  }, [user, postUsageEvent]);
+
+  useEffect(() => {
+    if (!user || DEV_BYPASS_AUTH) return;
+
+    var markInteraction = function() {
+      lastInteractionRef.current = Date.now();
+    };
+
+    var maybeLogActivity = function(force) {
+      var now = Date.now();
+      if (!force) {
+        if (document.visibilityState === "hidden") return;
+        if ((now - lastInteractionRef.current) > SESSION_USAGE_ACTIVE_WINDOW_MS) return;
+        if ((now - lastActivitySentRef.current) < SESSION_USAGE_HEARTBEAT_MS) return;
+      }
+      lastActivitySentRef.current = now;
+      postUsageEvent("activity");
+    };
+
+    var handleVisible = function() {
+      if (document.visibilityState === "visible") {
+        markInteraction();
+        maybeLogActivity(false);
+      }
+    };
+
+    var handleFocus = function() {
+      markInteraction();
+      maybeLogActivity(false);
+    };
+
+    var interval = setInterval(function() {
+      maybeLogActivity(false);
+    }, 60000);
+
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisible);
+    window.addEventListener("pointerdown", markInteraction, { passive: true });
+    window.addEventListener("keydown", markInteraction, { passive: true });
+    window.addEventListener("scroll", markInteraction, { passive: true });
+    window.addEventListener("touchstart", markInteraction, { passive: true });
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisible);
+      window.removeEventListener("pointerdown", markInteraction);
+      window.removeEventListener("keydown", markInteraction);
+      window.removeEventListener("scroll", markInteraction);
+      window.removeEventListener("touchstart", markInteraction);
+    };
+  }, [user, postUsageEvent]);
 
   // Expose user/logout globally for PackPulse header
   useEffect(() => {

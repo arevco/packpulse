@@ -217,6 +217,13 @@ export default function ProductionReadiness() {
     if (isNaN(d)) return "--";
     return d.toLocaleString([], { month:"2-digit", day:"2-digit", hour:"numeric", minute:"2-digit" });
   };
+  var fmtUserActivityEvent = function(type) {
+    var t = String(type || "").toLowerCase();
+    if (t === "login") return "OAuth login";
+    if (t === "session_refresh") return "Site refresh";
+    if (t === "activity") return "Active use";
+    return t || "activity";
+  };
   var staleLevel = (ts, cad) => { if (!ts) return "stale"; var h = (Date.now()-ts)/3600000; if (cad==="daily") return h<8?"fresh":h<24?"stale":"old"; if (cad==="rare") return h<720?"fresh":"stale"; return h<168?"fresh":"stale"; };
   var dataSourceStatus = [
     { k:"inv", l:"Inventory", ts:ds.invTimestamp, cad:"daily", ref:() => window.__invR && window.__invR.click() },
@@ -938,13 +945,13 @@ export default function ProductionReadiness() {
                 Item Master (Debug)
               </Button>
               <Button onClick={() => setShowUserActivity(v => !v)} variant={showUserActivity ? "active" : "outline"} size="sm">
-                Recent Logins
+                Recent Activity
               </Button>
             </div>
             {showUserActivity && (
               <div className="mb-2 rounded-md border border-[rgb(var(--border))] bg-white px-2.5 py-2">
                 <div className="mb-1 flex items-center justify-between">
-                  <div className="text-xs font-semibold text-[rgb(var(--foreground))]">Recent Logins</div>
+                  <div className="text-xs font-semibold text-[rgb(var(--foreground))]">Recent Activity</div>
                   <Button variant="outline" size="sm" onClick={loadUserActivity} disabled={userActivityLoading}>
                     {userActivityLoading ? "Loading..." : "Refresh"}
                   </Button>
@@ -958,6 +965,7 @@ export default function ProductionReadiness() {
                         <div key={row.id} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-[rgb(var(--muted))]">
                           <span className="font-medium text-[rgb(var(--foreground))]">{row.user_email || "--"}</span>
                           <span>{fmtClock(row.created_at)}</span>
+                          <span>{fmtUserActivityEvent(row.event_type)}</span>
                           <span>{row.auth_provider || "auth"}</span>
                           <span className="opacity-70">{row.source || "--"}</span>
                         </div>
@@ -965,7 +973,7 @@ export default function ProductionReadiness() {
                     })}
                   </div>
                 ) : (
-                  <div className="text-xs text-[rgb(var(--muted))]">No login events yet.</div>
+                  <div className="text-xs text-[rgb(var(--muted))]">No activity events yet.</div>
                 )}
               </div>
             )}
