@@ -1190,9 +1190,20 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     var summarizeRange = function(def) {
       var label = def.label;
       var summaryRange = def.range;
-      var byDay = allDays.filter(function(d) { return inRangeIso(String(d.date || ""), summaryRange); });
+      var rowsInRange = allRows.filter(function(r) { return inRange(String(r.produced_date_et || ""), summaryRange); });
+      var byDayMap = {};
+      rowsInRange.forEach(function(r) {
+        var date = String(r && r.produced_date_et || "");
+        var units = safeNum(r && r.units_produced);
+        if (!date) return;
+        if (!byDayMap[date]) byDayMap[date] = { date: date, units: 0, rows: 0 };
+        byDayMap[date].units += units;
+        byDayMap[date].rows += 1;
+      });
+      var byDay = Object.values(byDayMap);
+      if (!byDay.length) byDay = allDays.filter(function(d) { return inRangeIso(String(d.date || ""), summaryRange); });
       var dayCount = byDay.length;
-      var latest = byDay.length ? byDay[0] : null;
+      var latest = byDay.slice().sort(function(a, b) { return String(b.date || "").localeCompare(String(a.date || "")); })[0] || null;
       var latestRows = latest ? safeNum(latest.rows) : 0;
       var windowActual = byDay.reduce(function(sum, d) { return sum + safeNum(d.units); }, 0);
       var avgDailyUnits = dayCount > 0 ? Math.round(windowActual / dayCount) : 0;
@@ -1220,8 +1231,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       var pricedUnits = 0;
       var missingRevenueUnits = 0;
       var missingRevenueBySku = {};
-      allRows.forEach(function(r) {
-        if (!inRange(String(r.produced_date_et || ""), summaryRange)) return;
+      rowsInRange.forEach(function(r) {
         var line = String(r.line || "Unknown");
         var unitsProduced = safeNum(r.units_produced);
         if (!byLineMap[line]) byLineMap[line] = { line: line, units: 0, rows: 0 };
@@ -1248,8 +1258,12 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       var topLine = Object.values(byLineMap).sort(function(a, b) { return b.units - a.units; })[0] || null;
       var compareInfo = comparableRangeForPreset(def.key, summaryRange);
       var compareRange = compareInfo.range;
-      var compareByDay = compareRange ? allDays.filter(function(d) { return inRangeIso(String(d.date || ""), compareRange); }) : [];
-      var compareActual = compareByDay.reduce(function(sum, d) { return sum + safeNum(d.units); }, 0);
+      var compareRows = compareRange ? allRows.filter(function(r) { return inRange(String(r.produced_date_et || ""), compareRange); }) : [];
+      var compareActual = compareRows.reduce(function(sum, r) { return sum + safeNum(r.units_produced); }, 0);
+      if (!(compareActual > 0) && compareRange) {
+        var compareByDay = allDays.filter(function(d) { return inRangeIso(String(d.date || ""), compareRange); });
+        compareActual = compareByDay.reduce(function(sum, d) { return sum + safeNum(d.units); }, 0);
+      }
       var compareDelta = windowActual - compareActual;
       var compareDeltaPct = compareActual > 0 ? Math.round((compareDelta / compareActual) * 100) : 0;
       var revenueCoveragePct = windowActual > 0 ? Math.round((pricedUnits / windowActual) * 100) : 0;
