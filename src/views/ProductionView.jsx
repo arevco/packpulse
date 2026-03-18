@@ -3,6 +3,7 @@ import { useTheme } from "../theme";
 import { useStyles } from "../hooks/useStyles";
 import { safeNum, formatDescriptionForDisplay } from "../utils";
 import { Input } from "../components/ui/input";
+import { DatePicker } from "../components/ui/date-picker";
 import TableShell from "../components/ui/table-shell";
 
 var MIN_TRUSTED_JOB_LABOR_HOURS = 0.25;
@@ -217,7 +218,8 @@ export default function ProductionView({ productionSegments, laborActuals, labor
   const { C, mono } = useTheme();
   const { thS, tdN, tdM } = useStyles();
 
-  const [prodDate, setProdDate] = useState("latest");
+  const [prodDateStart, setProdDateStart] = useState("");
+  const [prodDateEnd, setProdDateEnd] = useState("");
   const [search, setSearch] = useState("");
   const [lineFilter, setLineFilter] = useState("all");
   const [shiftFilter, setShiftFilter] = useState("all");
@@ -234,10 +236,25 @@ export default function ProductionView({ productionSegments, laborActuals, labor
   var totalRows = productionSegments && productionSegments.totalRows ? productionSegments.totalRows : 0;
   var rowsWithShift = productionSegments && productionSegments.rowsWithShift ? productionSegments.rowsWithShift : 0;
   var prodDates = Array.from(new Set(prodShiftRows.map(function(r) { return r.date; }))).sort().reverse();
-  var selectedProdDate = prodDate === "latest" ? (prodDates[0] || "") : prodDate;
-  var selectedJobRows = prodDate === "all"
-    ? prodJobRows
-    : (selectedProdDate ? prodJobRows.filter(function(r) { return r.date === selectedProdDate; }) : []);
+  var latestProdDate = prodDates[0] || "";
+  var earliestProdDate = prodDates.length ? prodDates[prodDates.length - 1] : "";
+  var rangeStart = prodDateStart || latestProdDate;
+  var rangeEnd = prodDateEnd || latestProdDate || rangeStart;
+  if (rangeEnd && rangeStart && rangeEnd < rangeStart) {
+    var tmpRangeDate = rangeStart;
+    rangeStart = rangeEnd;
+    rangeEnd = tmpRangeDate;
+  }
+  var isAllMatchingDays = !!rangeStart && !!rangeEnd && !!earliestProdDate && !!latestProdDate && rangeStart === earliestProdDate && rangeEnd === latestProdDate;
+  var selectedRangeLabel = !rangeStart
+    ? "selected day"
+    : (rangeStart === rangeEnd ? rangeStart : (rangeStart + " to " + rangeEnd));
+  var selectedJobRows = (rangeStart && rangeEnd)
+    ? prodJobRows.filter(function(r) {
+        var date = String(r.date || "");
+        return date && date >= rangeStart && date <= rangeEnd;
+      })
+    : [];
   var lineOptions = Array.from(new Set(selectedJobRows.map(function(r) { return String(r.line || "Unknown").trim() || "Unknown"; }))).sort();
   var shiftOptions = Array.from(new Set(selectedJobRows.map(function(r) { return String(r.shift || "Unassigned"); }))).sort();
   var filteredJobRows = useMemo(function() {
@@ -804,11 +821,9 @@ export default function ProductionView({ productionSegments, laborActuals, labor
     <div>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Input type="text" placeholder="Search WO / SKU / job / line" value={search} onChange={function(e) { setSearch(e.target.value); }} className="h-10 w-full text-sm sm:w-72" />
-        <select value={prodDate} onChange={function(e) { setProdDate(e.target.value); }} className="h-10 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]">
-          <option value="all">All Days</option>
-          <option value="latest">Latest Day</option>
-          {prodDates.map(function(d) { return <option key={d} value={d}>{d}</option>; })}
-        </select>
+        <DatePicker value={rangeStart} onChange={setProdDateStart} placeholder="Start date" className="h-10 w-[132px]" />
+        <span className="text-xs text-[rgb(var(--muted))] whitespace-nowrap">-</span>
+        <DatePicker value={rangeEnd} onChange={setProdDateEnd} placeholder="End date" className="h-10 w-[132px]" />
         <select value={lineFilter} onChange={function(e) { setLineFilter(e.target.value); }} className="h-10 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]">
           <option value="all">All Lines</option>
           {lineOptions.map(function(line) { return <option key={line} value={line}>{line}</option>; })}
@@ -821,7 +836,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
 
       <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
         {[
-          { l:"Units", v:totalUnitsProduced.toLocaleString(), s:prodDate === "all" ? "all matching days" : (selectedProdDate || "selected day"), c:C.bright },
+          { l:"Units", v:totalUnitsProduced.toLocaleString(), s:isAllMatchingDays ? "all matching days" : selectedRangeLabel, c:C.bright },
           { l:"Total Revenue", v:fmtMoneyWhole(totalRevenue), s:totalRevenueCoveragePct > 0 ? (totalRevenueCoveragePct + "% revenue covered") : "revenue not matched", meta:totalRevenueCoveragePct > 0 && totalRevenueCoveragePct < 100 ? ((totalUnitsProduced - totalRevenueCoveredUnits).toLocaleString() + " units missing revenue") : null, c:C.ok },
           { l:"Total Labor", v:fmtMoneyWhole(totalLaborCost), s:totalLaborHours > 0 ? (totalLaborHours.toFixed(1) + " labor hrs · " + laborStatusLabel(overallLaborStatus)) : "labor not matched", c:C.accent },
           { l:"Labor Margin", v:fmtMoneyWhole(totalLaborMargin), s:totalLaborMarginPct != null ? ("Margin " + fmtPct(totalLaborMarginPct) + " · " + laborStatusLabel(overallLaborStatus)) : "revenue not matched", c:totalLaborMargin >= 0 ? C.ok : C.bad },
