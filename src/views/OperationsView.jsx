@@ -682,9 +682,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   const { C, mono } = useTheme();
   var initial = initialFilters || {};
   var initialPreset = String(initial.preset || "last_14");
-  var initialBoardPreset = COMMAND_BOARD_PRESETS.some(function(def) { return def.key === initialPreset; }) ? initialPreset : "today";
   const [windowPreset, setWindowPreset] = useState(initialPreset);
-  const [commandBoardPreset, setCommandBoardPreset] = useState(initialBoardPreset);
   const initialRange = presetRange("last_14");
   const [rangeStart, setRangeStart] = useState(String(initial.start || initialRange.start));
   const [rangeEnd, setRangeEnd] = useState(String(initial.end || initialRange.end));
@@ -1132,10 +1130,6 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     };
   };
 
-  var commandBoardRange = useMemo(function() {
-    return presetRange(commandBoardPreset);
-  }, [commandBoardPreset]);
-
   var metrics = useMemo(function() {
     var allByDay = (effectiveTrends && Array.isArray(effectiveTrends.byDay)) ? effectiveTrends.byDay : [];
     var byDay = filteredTrends.byDay || [];
@@ -1311,13 +1305,10 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       });
       return Object.assign({ key: def.key }, summary);
     });
-    var selectedSummary = presetCards.find(function(card) { return card.key === commandBoardPreset; }) || presetCards[0] || summarizeRange({ key: "today", label: "Today", range: presetRange("today") });
-
     return {
-      presets: presetCards,
-      selected: selectedSummary
+      presets: presetCards
     };
-  }, [effectiveTrends, effectiveBreakdown, commandBoardPreset, forecastPlans, revenueTargetsBySku, itemMasterCostBySku]);
+  }, [effectiveTrends, effectiveBreakdown, forecastPlans, revenueTargetsBySku, itemMasterCostBySku]);
 
   var shiftPlanVsActual = useMemo(function() {
     var rows = (filteredTrends.byShift || []).slice();
@@ -1918,119 +1909,119 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     });
   }, [effectiveTrends, effectiveBreakdown, laborActuals, revenuePerCaseForRow, dailyPerfRange.start, dailyPerfRange.end]);
 
+  const topOperationsCards = useMemo(function() {
+    var byKey = {};
+    (commandBoard && Array.isArray(commandBoard.presets) ? commandBoard.presets : []).forEach(function(card) {
+      byKey[card.key] = card;
+    });
+    var revenueNote = function(card) {
+      if (!card || !(safeNum(card.revenuePricedUnits) > 0)) return "Rev --";
+      var note = "Rev " + fmtMoneyCompact(card.revenueActual);
+      if (safeNum(card.revenueCoveragePct) > 0 && safeNum(card.revenueCoveragePct) < 100) note += " · " + card.revenueCoveragePct + "% cov";
+      return note;
+    };
+    var compareTone = function(card) {
+      var delta = safeNum(card && card.displayDelta);
+      if (delta > 0) return "text-[rgb(var(--success))]";
+      if (delta < 0) return "text-[rgb(var(--danger))]";
+      return "text-[rgb(var(--muted))]";
+    };
+    var compareText = function(card) {
+      if (!card) return "No comparison available";
+      var delta = safeNum(card.displayDelta);
+      var pct = safeNum(card.displayDeltaPct);
+      var compareActual = safeNum(card.compareActual);
+      var prefix = delta > 0 ? "+" : "";
+      var pctText = compareActual > 0 ? " (" + (pct > 0 ? "+" : "") + pct + "%)" : "";
+      var label = String(card.displayLabel || card.compareLabel || "");
+      if (card.paceProjectedUnits != null) {
+        return "Pacing " + safeNum(card.paceProjectedUnits).toLocaleString() + " · " + prefix + delta.toLocaleString() + pctText + " " + label;
+      }
+      return prefix + delta.toLocaleString() + pctText + " " + label;
+    };
+    return [
+      {
+        key: "today",
+        label: "Today",
+        value: safeNum(byKey.today && byKey.today.latestUnits).toLocaleString(),
+        note: revenueNote(byKey.today),
+        detail: compareText(byKey.today),
+        tone: compareTone(byKey.today)
+      },
+      {
+        key: "this_week",
+        label: "This Week",
+        value: safeNum(byKey.this_week && byKey.this_week.latestUnits).toLocaleString(),
+        note: revenueNote(byKey.this_week),
+        detail: compareText(byKey.this_week),
+        tone: compareTone(byKey.this_week)
+      },
+      {
+        key: "this_month",
+        label: "This Month",
+        value: safeNum(byKey.this_month && byKey.this_month.latestUnits).toLocaleString(),
+        note: revenueNote(byKey.this_month),
+        detail: compareText(byKey.this_month),
+        tone: compareTone(byKey.this_month)
+      },
+      {
+        key: "avg_daily",
+        label: "Avg / Day",
+        value: safeNum(metrics.avgDailyUnits).toLocaleString(),
+        note: metrics.latestProductionDate ? ("Latest day " + metrics.latestProductionDate) : "No production day yet",
+        detail: metrics.trailingProductionDays
+          ? ("Trailing velocity " + safeNum(metrics.trailingDailyVelocity).toLocaleString() + "/day")
+          : "No trailing production history",
+        tone: "text-[rgb(var(--muted))]"
+      },
+      {
+        key: "weekly_run_rate",
+        label: "Weekly Run Rate",
+        value: safeNum(metrics.weeklyRunRate).toLocaleString(),
+        note: "Trailing " + safeNum(metrics.trailingProductionDays).toLocaleString() + " production days",
+        detail: "Current weekly yield pace",
+        tone: "text-[rgb(var(--muted))]"
+      },
+      {
+        key: "month_end",
+        label: "Month-End Yield",
+        value: safeNum(metrics.monthlyRunRate).toLocaleString(),
+        note: safeNum(metrics.remainingBusinessDays).toLocaleString() + " business days remaining",
+        detail: "Projected month-end yield",
+        tone: "text-[rgb(var(--muted))]"
+      }
+    ];
+  }, [commandBoard, metrics]);
+
   return (
     <div className="space-y-4">
       {err && <Card className="border-[rgb(var(--danger-line))] bg-[rgb(var(--danger-soft))] px-3 py-2 text-sm text-[rgb(var(--danger))]">{err}</Card>}
 
-      <div className="grid items-start gap-2 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <Card className="px-3 py-3">
-          <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
-            <div className="min-w-[280px] flex-1">
-              <div className="text-sm font-semibold">Shift Command Board</div>
-              <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-[rgb(var(--muted))]">
-                <span>
-                  {commandBoard.selected.dayCount > 1
-                    ? ("Selected: " + commandBoard.selected.label + " · " + commandBoard.selected.range.start + " to " + commandBoard.selected.range.end + " · " + commandBoard.selected.dayCount + " production day" + (commandBoard.selected.dayCount === 1 ? "" : "s"))
-                    : commandBoard.selected.latestDate
-                      ? ("Selected: " + commandBoard.selected.label + " · " + commandBoard.selected.latestDate)
-                      : "No production day available yet"}
-                </span>
-                <span className="text-[rgb(var(--border))]">•</span>
-                <span>
-                  {commandBoard.selected.revenuePricedUnits > 0
-                    ? ("Revenue: " + fmtMoney(commandBoard.selected.revenueActual)
-                      + (commandBoard.selected.revenueCoveragePct < 100 ? " · " + commandBoard.selected.revenueCoveragePct + "% covered" : "")
-                      + (commandBoard.selected.missingRevenueSkuCount > 0 ? " · " + fmtMissingRevenueSkuCount(commandBoard.selected.missingRevenueSkuCount) : ""))
-                    : (commandBoard.selected.missingRevenueSkuCount > 0
-                      ? ("Revenue unavailable · " + fmtMissingRevenueSkuCount(commandBoard.selected.missingRevenueSkuCount))
-                      : "Revenue unavailable")}
-                </span>
+      <Card className="px-3 py-3">
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <div className="text-sm font-semibold">Operations Snapshot</div>
+            <div className="mt-0.5 text-xs text-[rgb(var(--muted))]">
+              Today vs yesterday, this week vs last week, this month vs last month, plus current run-rate estimates.
+            </div>
+          </div>
+          <div className="text-xs text-[rgb(var(--muted))]">
+            Latest production day {metrics.latestProductionDate || "unavailable"}
+          </div>
+        </div>
+        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-6">
+          {topOperationsCards.map(function(card) {
+            return (
+              <div key={card.key} className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-3">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[rgb(var(--muted))]">{card.label}</div>
+                <div className="mt-2 text-2xl font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{card.value}</div>
+                <div className="mt-1 text-xs text-[rgb(var(--muted))]">{card.note}</div>
+                <div className={"mt-2 text-[11px] font-medium " + card.tone}>{card.detail}</div>
               </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-1.5">
-              <DatePicker value={range.start} onChange={setCustomStart} className="h-9 w-[132px]" />
-              <span className="text-xs text-[rgb(var(--muted))] whitespace-nowrap">-</span>
-              <DatePicker value={range.end} onChange={setCustomEnd} className="h-9 w-[132px]" />
-              <Button variant="outline" size="sm" onClick={loadAll} disabled={loading}>Refresh</Button>
-            </div>
-          </div>
-          <div className="mb-3 grid grid-cols-2 gap-2 lg:grid-cols-3 2xl:grid-cols-6">
-            {commandBoard.presets.map(function(card) {
-              var active = commandBoardPreset === card.key;
-              var displayDelta = safeNum(card.displayDelta);
-              var displayPct = safeNum(card.displayDeltaPct);
-              var missingSkuLabel = card.missingRevenueSkuCount > 0 ? fmtMissingRevenueSkuCount(card.missingRevenueSkuCount) : "";
-              var missingSkuNames = Array.isArray(card.missingRevenueSkus)
-                ? card.missingRevenueSkus.map(function(entry) { return entry.itemCode; }).filter(Boolean)
-                : [];
-              var trendTone = displayDelta > 0
-                ? "text-[rgb(var(--success))]"
-                : displayDelta < 0
-                  ? "text-[rgb(var(--danger))]"
-                  : "text-[rgb(var(--muted))]";
-              var TrendIcon = displayDelta > 0 ? TrendingUp : displayDelta < 0 ? TrendingDown : Minus;
-              return (
-                <button
-                  key={card.key}
-                  type="button"
-                  onClick={function() { setCommandBoardPreset(card.key); }}
-                  className={"group overflow-hidden rounded-xl border text-left transition-all " + (active
-                    ? "border-[rgb(var(--accent))] bg-[color-mix(in_oklab,rgb(var(--accent))_7%,white)] shadow-[0_8px_24px_rgba(15,23,42,0.08)]"
-                    : "border-[rgb(var(--border))] bg-[rgb(var(--surface))] hover:border-[rgb(var(--accent))] hover:bg-white")}
-                >
-                  <div className={"h-1 w-full " + (active ? "bg-[rgb(var(--accent))]" : "bg-[rgb(var(--border))] group-hover:bg-[rgb(var(--accent))]")} />
-                  <div className="px-3 py-3">
-                    <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[rgb(var(--muted))]">{card.label}</div>
-                    <div className="mt-2 text-2xl font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{card.latestUnits.toLocaleString()}</div>
-                    <div
-                      className="mt-1 text-xs text-[rgb(var(--muted))]"
-                      title={card.revenuePricedUnits > 0
-                        ? ("Revenue " + fmtMoney(card.revenueActual)
-                          + (card.revenueCoveragePct < 100 ? " · " + card.revenueCoveragePct + "% of units covered" : "")
-                          + (missingSkuLabel ? " · " + missingSkuLabel : "")
-                          + (missingSkuNames.length ? " · Missing: " + missingSkuNames.join(", ") : ""))
-                        : (missingSkuLabel
-                          ? ("Revenue unavailable · " + missingSkuLabel + (missingSkuNames.length ? " · Missing: " + missingSkuNames.join(", ") : ""))
-                          : "Revenue unavailable for this window")}
-                    >
-                      {card.revenuePricedUnits > 0 ? ("Rev " + fmtMoneyCompact(card.revenueActual)) : "Rev --"}
-                      {card.revenuePricedUnits > 0 && card.revenueCoveragePct < 100 ? " · " + card.revenueCoveragePct + "% cov" : ""}
-                      {card.missingRevenueSkuCount > 0 ? " · " + card.missingRevenueSkuCount + " miss" : ""}
-                    </div>
-                    <div className={"mt-2 flex items-center gap-1.5 text-[11px] font-medium " + trendTone}>
-                      <TrendIcon className="h-3.5 w-3.5 shrink-0" />
-                      <span>
-                        {card.paceProjectedUnits != null ? ("Pacing " + card.paceProjectedUnits.toLocaleString() + " · ") : ""}
-                        {displayDelta > 0 ? "+" : ""}{displayDelta.toLocaleString()}
-                        {card.compareActual > 0 ? " (" + (displayPct > 0 ? "+" : "") + displayPct + "%)" : ""}
-                        {" "}{(card.displayLabel || card.compareLabel)}
-                      </span>
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </Card>
-
-        <Card className="self-start px-3 py-3">
-          <div className="mb-2 text-sm font-semibold">Operations KPI</div>
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1 2xl:grid-cols-2">
-            <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
-              <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{metrics.avgDailyUnits.toLocaleString()}</div>
-              <div className="text-xs text-[rgb(var(--muted))]">Avg Cases / Day</div>
-            </div>
-            <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
-              <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{metrics.weeklyRunRate.toLocaleString()}</div>
-              <div className="text-xs text-[rgb(var(--muted))]">Weekly Yield Run Rate (trailing {metrics.trailingProductionDays} production days)</div>
-            </div>
-            <div className="rounded-md border border-[rgb(var(--border))] px-3 py-2">
-              <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{metrics.monthlyRunRate.toLocaleString()}</div>
-              <div className="text-xs text-[rgb(var(--muted))]">Projected Month-End Yield ({metrics.remainingBusinessDays} business days remaining)</div>
-            </div>
-          </div>
-        </Card>
-      </div>
+            );
+          })}
+        </div>
+      </Card>
 
       <Card className="px-4 py-4">
         <div className="mb-2 text-sm font-semibold">Production Jobs</div>
