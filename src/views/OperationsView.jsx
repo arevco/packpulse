@@ -40,6 +40,51 @@ function fmtMissingRevenueSkuCount(count) {
   return count + " SKU" + (count === 1 ? "" : "s") + " missing revenue";
 }
 
+function OperationsDailyTotalTooltipContent(props) {
+  var active = props.active;
+  var payload = props.payload;
+  var label = props.label;
+  var config = props.config || {};
+  if (!active || !payload || !payload.length) return null;
+  var rows = payload.filter(function(item) { return String(item && item.dataKey || "") !== "plan"; });
+  if (!rows.length) return null;
+  var sourceRow = rows[0] && rows[0].payload ? rows[0].payload : {};
+  var total = safeNum(sourceRow.total);
+  return (
+    <div className="min-w-[170px] rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2.5 py-2 text-xs shadow-md">
+      <div className="mb-1 font-semibold text-[rgb(var(--foreground))]">{label}</div>
+      <div className="space-y-1">
+        {rows.map(function(item, idx) {
+          var key = String(item.dataKey || "");
+          var cfg = config[key] || {};
+          var name = cfg.label || item.name || key;
+          var color = item.color || cfg.color || "rgb(var(--muted))";
+          return (
+            <div key={key + "-" + idx} className="flex items-center justify-between gap-3">
+              <span className="inline-flex items-center gap-1.5 text-[rgb(var(--muted))]">
+                <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: color }} />
+                {name}
+              </span>
+              <span className="font-semibold text-[rgb(var(--foreground))] [font-variant-numeric:tabular-nums]">
+                {Math.round(safeNum(item.value)).toLocaleString()}
+              </span>
+            </div>
+          );
+        })}
+        <div className="flex items-center justify-between gap-3">
+          <span className="inline-flex items-center gap-1.5 text-[rgb(var(--muted))]">
+            <span className="h-2 w-2 rounded-sm bg-[rgb(var(--foreground))]" />
+            Daily Total
+          </span>
+          <span className="font-semibold text-[rgb(var(--foreground))] [font-variant-numeric:tabular-nums]">
+            {Math.round(total).toLocaleString()}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function normalizeItemCode(value) {
   return normalizeStr(String(value || "").trim());
 }
@@ -1938,9 +1983,8 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                   <ChartTooltip
                     cursor={{ fill: "rgb(var(--surface))" }}
                     content={
-                      <ChartTooltipContent
-                        labelFormatter={function(value) { return value; }}
-                        formatter={function(value) { return Math.round(safeNum(value)); }}
+                      <OperationsDailyTotalTooltipContent
+                        config={dailyChartConfig}
                       />
                     }
                   />
@@ -2009,9 +2053,8 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                   <ChartTooltip
                     cursor={{ fill: "rgb(var(--surface))" }}
                     content={
-                      <ChartTooltipContent
-                        labelFormatter={function(value) { return value; }}
-                        formatter={function(value) { return Math.round(safeNum(value)); }}
+                      <OperationsDailyTotalTooltipContent
+                        config={shiftChartConfig}
                       />
                     }
                   />
