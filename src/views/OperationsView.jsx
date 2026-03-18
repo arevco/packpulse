@@ -759,6 +759,8 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     setErr("");
     try {
       var fetchDays = range.fetchDays;
+      var laborFetchEnd = toIsoDateET(new Date());
+      var laborFetchStart = shiftDays(laborFetchEnd, -(fetchDays - 1));
       var forecastPlanReq = forecastPlanMonths.length
         ? fetch("/api/ops/forecast-plan?monthKeys=" + encodeURIComponent(forecastPlanMonths.join(",")), { credentials: "include" })
         : Promise.resolve({ ok: true, json: async function() { return { plans: {} }; } });
@@ -766,7 +768,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
         fetch("/api/cache/production-trends?days=" + fetchDays, { credentials: "include" }),
         fetch("/api/ops/production-breakdown?days=" + fetchDays, { credentials: "include" }),
         forecastPlanReq,
-        fetch("/api/ops/labor-actuals?start=" + encodeURIComponent(range.start) + "&end=" + encodeURIComponent(range.end), { credentials: "include" }),
+        fetch("/api/ops/labor-actuals?start=" + encodeURIComponent(laborFetchStart) + "&end=" + encodeURIComponent(laborFetchEnd), { credentials: "include" }),
         fetch("/api/ops/config", { credentials: "include" }),
       ]);
       var [trBody, brBody, fpBody, laborBody, configBody] = await Promise.all([tr.json(), br.json(), fp.json(), laborResp.json(), configResp.json()]);
