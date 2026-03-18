@@ -2111,7 +2111,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                       labelFormatter={function(value) { return value; }}
                       formatter={function(value, _name, item) {
                         var key = String(item && item.dataKey || "");
-                        if (key === "revenue" || key === "labor") return fmtMoneyWhole(value);
+                        if (key === "revenue" || key === "labor") return fmtMoney(value);
                         return Math.round(safeNum(value)).toLocaleString();
                       }}
                     />
