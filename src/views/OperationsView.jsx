@@ -700,6 +700,8 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   const [skuMixMode, setSkuMixMode] = useState("type");
   const [showProductionLines, setShowProductionLines] = useState(false);
   const [showLossPriorities, setShowLossPriorities] = useState(false);
+  const [dailyPerfStart, setDailyPerfStart] = useState("");
+  const [dailyPerfEnd, setDailyPerfEnd] = useState("");
 
   var range = useMemo(function() {
     if (windowPreset === "custom") {
@@ -713,6 +715,35 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     }
     return presetRange(windowPreset);
   }, [windowPreset, rangeStart, rangeEnd, initialRange.start, initialRange.end]);
+
+  var todayEt = useMemo(function() {
+    return toIsoDateET(new Date());
+  }, []);
+
+  var defaultDailyPerfEnd = useMemo(function() {
+    var dates = (trends && Array.isArray(trends.byDay) ? trends.byDay : [])
+      .map(function(row) { return String(row && row.date || ""); })
+      .filter(Boolean)
+      .sort();
+    return dates.length ? dates[dates.length - 1] : todayEt;
+  }, [trends, todayEt]);
+
+  var dailyPerfRange = useMemo(function() {
+    var start = dailyPerfStart || shiftDays(defaultDailyPerfEnd, -29);
+    var end = dailyPerfEnd || defaultDailyPerfEnd;
+    if (end < start) {
+      var tmp = start;
+      start = end;
+      end = tmp;
+    }
+    return { start: start, end: end };
+  }, [dailyPerfStart, dailyPerfEnd, defaultDailyPerfEnd]);
+
+  var dailyPerfFetchDays = useMemo(function() {
+    var fetchStart = dailyPerfRange.start || shiftDays(todayEt, -29);
+    if (!fetchStart || fetchStart > todayEt) return 30;
+    return Math.max(30, daysInclusive(fetchStart, todayEt));
+  }, [dailyPerfRange.start, todayEt]);
 
   useEffect(function() {
     if (!onPermalinkChange) return;
@@ -758,7 +789,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     setLoading(true);
     setErr("");
     try {
-      var fetchDays = range.fetchDays;
+      var fetchDays = Math.max(range.fetchDays, dailyPerfFetchDays);
       var laborFetchEnd = toIsoDateET(new Date());
       var laborFetchStart = shiftDays(laborFetchEnd, -(fetchDays - 1));
       var forecastPlanReq = forecastPlanMonths.length
@@ -810,7 +841,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
 
   useEffect(function() {
     loadAll();
-  }, [windowPreset, rangeStart, rangeEnd, forecastPlanMonths.join(",")]);
+  }, [windowPreset, rangeStart, rangeEnd, forecastPlanMonths.join(","), dailyPerfFetchDays]);
 
   var localNulogySeries = useMemo(function() {
     var shiftRows = (productionSegments && Array.isArray(productionSegments.shiftRows)) ? productionSegments.shiftRows : [];
@@ -1847,6 +1878,46 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     };
   }, []);
 
+  const dailyEconomicsChartConfig = useMemo(function() {
+    return {
+      cases: { label: "Cases Produced", color: "rgb(var(--accent))" },
+      revenue: { label: "Revenue", color: "rgb(var(--success))" },
+      labor: { label: "Labor Cost", color: "rgb(var(--danger))" }
+    };
+  }, []);
+
+  const dailyEconomicsRows = useMemo(function() {
+    var dayMap = {};
+    var trendDays = (effectiveTrends && Array.isArray(effectiveTrends.byDay)) ? effectiveTrends.byDay : [];
+    trendDays.forEach(function(row) {
+      var date = String(row && row.date || "");
+      if (!date) return;
+      if (!dayMap[date]) dayMap[date] = { date: date, cases: 0, revenue: 0, labor: 0 };
+      dayMap[date].cases += safeNum(row && row.units);
+    });
+    var breakdownRows = (effectiveBreakdown && Array.isArray(effectiveBreakdown.rowsLite)) ? effectiveBreakdown.rowsLite : [];
+    breakdownRows.forEach(function(row) {
+      var date = String(row && row.produced_date_et || "");
+      var itemCode = String(row && row.item_code || "");
+      var units = safeNum(row && row.units_produced);
+      if (!date || !(units > 0)) return;
+      if (!dayMap[date]) dayMap[date] = { date: date, cases: 0, revenue: 0, labor: 0 };
+      var revenueMatch = revenuePerCaseForRow(itemCode, date);
+      var revenuePerCase = safeNum(revenueMatch && revenueMatch.value);
+      if (revenuePerCase > 0) dayMap[date].revenue += units * revenuePerCase;
+    });
+    var laborByDay = (laborActuals && Array.isArray(laborActuals.byDay)) ? laborActuals.byDay : [];
+    laborByDay.forEach(function(row) {
+      var date = String(row && row.date_et || "");
+      if (!date) return;
+      if (!dayMap[date]) dayMap[date] = { date: date, cases: 0, revenue: 0, labor: 0 };
+      dayMap[date].labor += safeNum(row && row.labor_cost);
+    });
+    return eachDayIsoBetween(dailyPerfRange.start, dailyPerfRange.end).map(function(date) {
+      return dayMap[date] || { date: date, cases: 0, revenue: 0, labor: 0 };
+    });
+  }, [effectiveTrends, effectiveBreakdown, laborActuals, revenuePerCaseForRow, dailyPerfRange.start, dailyPerfRange.end]);
+
   return (
     <div className="space-y-4">
       {err && <Card className="border-[rgb(var(--danger-line))] bg-[rgb(var(--danger-soft))] px-3 py-2 text-sm text-[rgb(var(--danger))]">{err}</Card>}
@@ -1977,6 +2048,113 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
           laborDataRaw={[]}
           resolveRevenueForRow={revenuePerCaseForRow}
         />
+      </Card>
+
+      <Card className="px-4 py-4">
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold">Daily Output & Economics</div>
+            <div className="text-xs text-[rgb(var(--muted))]">
+              Cases produced, revenue, and labor cost by day. Default window is the latest 30 days.
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <DatePicker value={dailyPerfRange.start} onChange={setDailyPerfStart} className="h-9 w-[132px]" />
+            <span className="text-xs text-[rgb(var(--muted))] whitespace-nowrap">-</span>
+            <DatePicker value={dailyPerfRange.end} onChange={setDailyPerfEnd} className="h-9 w-[132px]" />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={function() {
+                setDailyPerfStart("");
+                setDailyPerfEnd("");
+              }}
+            >
+              Last 30D
+            </Button>
+          </div>
+        </div>
+        {dailyEconomicsRows.length ? (
+          <ChartContainer config={dailyEconomicsChartConfig} className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={dailyEconomicsRows} margin={{ top: 8, right: 8, left: 4, bottom: 8 }}>
+                <CartesianGrid vertical={false} stroke="rgb(var(--border))" strokeOpacity={0.4} />
+                <XAxis
+                  dataKey="date"
+                  tickFormatter={function(v) { return String(v || "").slice(5); }}
+                  tickLine={false}
+                  axisLine={false}
+                  minTickGap={16}
+                  tick={{ fill: "rgb(var(--muted))", fontSize: 11 }}
+                />
+                <YAxis
+                  yAxisId="cases"
+                  width={62}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={function(v) { return Math.round(safeNum(v)).toLocaleString(); }}
+                  tick={{ fill: "rgb(var(--muted))", fontSize: 11 }}
+                />
+                <YAxis
+                  yAxisId="dollars"
+                  orientation="right"
+                  width={72}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={function(v) { return fmtMoneyCompact(v); }}
+                  tick={{ fill: "rgb(var(--muted))", fontSize: 11 }}
+                />
+                <ChartTooltip
+                  cursor={{ stroke: "rgb(var(--border))", strokeDasharray: "3 3" }}
+                  content={
+                    <ChartTooltipContent
+                      labelFormatter={function(value) { return value; }}
+                      formatter={function(value, _name, item) {
+                        var key = String(item && item.dataKey || "");
+                        if (key === "revenue" || key === "labor") return fmtMoneyWhole(value);
+                        return Math.round(safeNum(value)).toLocaleString();
+                      }}
+                    />
+                  }
+                />
+                <Line
+                  yAxisId="cases"
+                  type="monotone"
+                  dataKey="cases"
+                  stroke="var(--color-cases)"
+                  strokeWidth={2.5}
+                  dot={false}
+                  activeDot={{ r: 4 }}
+                />
+                <Line
+                  yAxisId="dollars"
+                  type="monotone"
+                  dataKey="revenue"
+                  stroke="var(--color-revenue)"
+                  strokeWidth={2.25}
+                  dot={false}
+                  activeDot={{ r: 4 }}
+                />
+                <Line
+                  yAxisId="dollars"
+                  type="monotone"
+                  dataKey="labor"
+                  stroke="var(--color-labor)"
+                  strokeWidth={2.25}
+                  dot={false}
+                  activeDot={{ r: 4 }}
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </ChartContainer>
+        ) : (
+          <div className="h-60 w-full self-center text-center text-sm text-[rgb(var(--muted))] leading-[15rem]">No daily production or labor data in selected window.</div>
+        )}
+        <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-[rgb(var(--muted))]">
+          <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-[rgb(var(--accent))]" />Cases Produced</span>
+          <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-[rgb(var(--success))]" />Revenue</span>
+          <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-[rgb(var(--danger))]" />Labor Cost</span>
+        </div>
       </Card>
 
       <div className="grid gap-3 xl:grid-cols-3">
