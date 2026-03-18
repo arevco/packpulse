@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import Sentry from "../_sentry.js";
+import { classifyShiftET, toEasternParts, toIso } from "../_labor.js";
 
 const SESSION_SECRET = process.env.SESSION_SECRET || "packpulse-default-secret-change-me";
 const CACHE_SITE_ID = process.env.CACHE_SITE_ID || "default";
@@ -75,46 +76,6 @@ function pickFieldLoose(row, keys) {
     if (wanted[normalizeKey(rowKey)]) return row[rowKey];
   }
   return "";
-}
-
-function toIso(value) {
-  if (!value) return null;
-  var d = value instanceof Date ? value : new Date(value);
-  if (isNaN(d)) return null;
-  return d.toISOString();
-}
-
-function toEasternParts(value) {
-  if (!value) return null;
-  var d = value instanceof Date ? value : new Date(value);
-  if (isNaN(d)) return null;
-  var dtf = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false
-  });
-  var out = {};
-  dtf.formatToParts(d).forEach(function(p) {
-    if (p.type !== "literal") out[p.type] = p.value;
-  });
-  if (!out.year || !out.month || !out.day) return null;
-  return {
-    dateKey: out.year + "-" + out.month + "-" + out.day,
-    hour: parseInt(out.hour || "0", 10)
-  };
-}
-
-function classifyShiftET(parts) {
-  if (!parts) return "Unassigned";
-  var hour = Number(parts.hour || 0);
-  var minute = Number(parts.minute || 0);
-  if (hour >= 7 && hour < 15) return "Shift 1 (7a-3p)";
-  if (hour >= 15 && (hour < 23 || (hour === 23 && minute <= 45))) return "Shift 2 (3p-11p)";
-  return "Unassigned";
 }
 
 function buildProductionEvents(rows, siteId, syncedAt, updatedBy) {

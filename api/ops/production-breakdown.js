@@ -1,5 +1,6 @@
 import Sentry from "../_sentry.js";
 import { CACHE_SITE_ID, getAuthenticatedUser, getSupabaseAdmin, toDateEt, toNum, withCors } from "./_common.js";
+import { classifyShiftET, toEasternParts, toIso } from "../_labor.js";
 
 function pickFieldLoose(row, keys) {
   if (!row || typeof row !== "object") return "";
@@ -12,6 +13,20 @@ function pickFieldLoose(row, keys) {
     }
   }
   return "";
+}
+
+function resolveProductionTiming(row) {
+  var producedRaw = pickFieldLoose(row && row.raw, [
+    "Produced date", "producedAt",
+    "Produced At", "produced_at",
+    "Actual Job End", "actual_job_end_at"
+  ]);
+  var producedIso = toIso(producedRaw);
+  var eastern = toEasternParts(producedIso || producedRaw);
+  return {
+    date: eastern && eastern.dateKey ? eastern.dateKey : String(row && row.produced_date_et || ""),
+    shift: eastern ? classifyShiftET(eastern) : String(row && row.shift_label || "Unassigned")
+  };
 }
 
 async function fetchAllProductionRows(supabase, siteId, fromDate) {
@@ -59,10 +74,11 @@ export default async function handler(req, res) {
     const byDate = {};
 
     rows.forEach(function(r) {
+      const timing = resolveProductionTiming(r);
       const sku = String(r.item_code || "UNKNOWN");
       const units = toNum(r.units_produced);
       const line = String(r.line || "Unknown");
-      const dateKey = String(r.produced_date_et || "");
+      const dateKey = String(timing.date || r.produced_date_et || "");
       if (!bySku[sku]) bySku[sku] = { item_code: sku, units: 0, rows: 0 };
       bySku[sku].units += units;
       bySku[sku].rows += 1;
@@ -85,10 +101,11 @@ export default async function handler(req, res) {
       fromDate: fromDate,
       totalRows: rows.length,
       rowsLite: rows.map(function(r) {
+        var timing = resolveProductionTiming(r);
         var itemDesc = pickFieldLoose(r.raw, ["item_description", "Item Description", "Description", "description"]);
         return {
-          produced_date_et: r.produced_date_et || null,
-          shift_label: r.shift_label || null,
+          produced_date_et: timing.date || r.produced_date_et || null,
+          shift_label: timing.shift || r.shift_label || null,
           job_id: r.job_id || null,
           item_code: r.item_code || null,
           item_desc: itemDesc ? String(itemDesc) : null,

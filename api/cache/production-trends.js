@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import Sentry from "../_sentry.js";
+import { classifyShiftET, pickFieldLoose, toEasternParts, toIso } from "../_labor.js";
 
 const SESSION_SECRET = process.env.SESSION_SECRET || "packpulse-default-secret-change-me";
 const CACHE_SITE_ID = process.env.CACHE_SITE_ID || "default";
@@ -63,63 +64,19 @@ function stableRowHash(row) {
   return crypto.createHash("sha1").update(JSON.stringify(out)).digest("hex");
 }
 
-function pickFieldLoose(row, keys) {
-  if (!row || typeof row !== "object") return "";
-  var rowKeys = Object.keys(row);
-  for (var i = 0; i < keys.length; i++) {
-    var target = String(keys[i]).toLowerCase();
-    for (var j = 0; j < rowKeys.length; j++) {
-      var rk = rowKeys[j];
-      if (String(rk).toLowerCase() === target) return row[rk];
-    }
-  }
-  var wanted = {};
-  keys.forEach(function(k) { wanted[normalizeKey(k)] = true; });
-  for (var x = 0; x < rowKeys.length; x++) {
-    var rowKey = rowKeys[x];
-    if (wanted[normalizeKey(rowKey)]) return row[rowKey];
-  }
-  return "";
-}
-
-function toIso(value) {
-  if (!value) return null;
-  const d = value instanceof Date ? value : new Date(value);
-  if (isNaN(d)) return null;
-  return d.toISOString();
-}
-
-function toEasternParts(value) {
-  if (!value) return null;
-  const d = value instanceof Date ? value : new Date(value);
-  if (isNaN(d)) return null;
-  const dtf = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-  const out = {};
-  dtf.formatToParts(d).forEach(function(p) {
-    if (p.type !== "literal") out[p.type] = p.value;
-  });
-  if (!out.year || !out.month || !out.day) return null;
+function resolveProductionTiming(row) {
+  var raw = row && row.raw && typeof row.raw === "object" ? row.raw : null;
+  var producedRaw = raw ? pickFieldLoose(raw, [
+    "Produced date", "producedAt",
+    "Produced At", "produced_at",
+    "Actual Job End", "actual_job_end_at"
+  ]) : "";
+  var producedIso = toIso(producedRaw || row && row.produced_at_utc);
+  var eastern = toEasternParts(producedIso || producedRaw || row && row.produced_at_utc || row && row.source_snapshot_at);
   return {
-    dateKey: out.year + "-" + out.month + "-" + out.day,
-    hour: parseInt(out.hour || "0", 10),
+    date: eastern && eastern.dateKey ? eastern.dateKey : String(row && row.produced_date_et || ""),
+    shift: eastern ? classifyShiftET(eastern) : String(row && row.shift_label || "Unassigned")
   };
-}
-
-function classifyShiftET(parts) {
-  if (!parts) return "Unassigned";
-  var hour = Number(parts.hour || 0);
-  var minute = Number(parts.minute || 0);
-  if (hour >= 7 && hour < 15) return "Shift 1 (7a-3p)";
-  if (hour >= 15 && (hour < 23 || (hour === 23 && minute <= 45))) return "Shift 2 (3p-11p)";
-  return "Unassigned";
 }
 
 function buildProductionEventsFromSnapshotRows(rows, siteId, syncedAt, updatedBy) {
@@ -201,7 +158,7 @@ async function fetchAllProductionEvents(supabase, siteId) {
     var to = from + pageSize - 1;
     var q = await supabase
       .from("production_events")
-      .select("event_key,produced_date_et,produced_at_utc,source_snapshot_at,shift_label,units_produced,job_id,work_order_code,line,item_code")
+      .select("event_key,produced_date_et,produced_at_utc,source_snapshot_at,shift_label,units_produced,job_id,work_order_code,line,item_code,raw")
       .eq("site_id", siteId)
       .order("source_snapshot_at", { ascending: false })
       .range(from, to);
@@ -296,13 +253,14 @@ export default async function handler(req, res) {
     let rowsMissingProducedDate = 0;
     let rowsInWindow = 0;
     rows.forEach(function(r) {
-      const fromProducedDate = String(r.produced_date_et || "");
+      const timing = resolveProductionTiming(r);
+      const fromProducedDate = String(timing.date || r.produced_date_et || "");
       const fallbackDate = toEasternDateKey(r.produced_at_utc) || toEasternDateKey(r.source_snapshot_at);
       const d = fromProducedDate || fallbackDate;
       if (!fromProducedDate) rowsMissingProducedDate += 1;
       if (!d || d < fromDate) return;
       rowsInWindow += 1;
-      const s = String(r.shift_label || "Unassigned");
+      const s = String(timing.shift || r.shift_label || "Unassigned");
       const u = toNum(r.units_produced);
       if (!byDay[d]) byDay[d] = { date: d, units: 0, rows: 0 };
       byDay[d].units += u;
