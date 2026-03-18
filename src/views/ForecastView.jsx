@@ -560,7 +560,7 @@ export default function ForecastView(props) {
     productionData.forEach(function(r) {
       var sku = String(pick(r, ["Item Code", "item_code", "Code", "code"])).trim();
       if (!sku) return;
-      var dt = dayIso(pick(r, ["Actual Job End", "actual_job_end_at", "Produced At", "produced_at", "Actual Job Start", "actual_job_start_at"]));
+      var dt = dayIso(pick(r, ["Produced date", "producedAt", "Produced At", "produced_at", "Actual Job End", "actual_job_end_at", "Actual Job Start", "actual_job_start_at"]));
       if (!dt || dt.slice(0, 7) !== monthKey) return;
       var units = safeNum(pick(r, ["Units Produced", "units_produced", "Produced", "produced"]));
       if (!(units > 0)) return;

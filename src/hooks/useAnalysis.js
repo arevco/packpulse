@@ -191,11 +191,12 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       totalRows += 1;
       var units = safeNum(firstValueLoose(row, ["Units Produced", "units_produced", "unitsProduced", "Produced Units", "Quantity Produced", "Qty Produced"]));
       if (!(units > 0)) return;
-      // Canonical production timestamp for daily close reporting.
-      // Do not use job start as a shift fallback because open jobs can span both shifts.
+      // Prefer the row-level produced timestamp for shift attribution.
+      // Fall back to job close only when the produced event time is unavailable.
       var producedAt = firstValueLoose(row, [
-        "Actual Job End", "actual_job_end_at",
-        "Produced At", "produced_at", "Produced date", "producedAt"
+        "Produced date", "producedAt",
+        "Produced At", "produced_at",
+        "Actual Job End", "actual_job_end_at"
       ]);
       var parts = toEasternParts(producedAt);
       var shift = classifyShiftET(parts);

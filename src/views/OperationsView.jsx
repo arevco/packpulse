@@ -466,8 +466,9 @@ function buildRawNulogySeries(rows) {
     var units = safeNum(pickFieldLooseLocal(row, ["Units Produced", "units_produced", "unitsProduced", "Produced Units", "Quantity Produced", "Qty Produced"]));
     if (!(units > 0)) return;
     var producedRaw = pickFieldLooseLocal(row, [
-      "Actual Job End", "actual_job_end_at",
-      "Produced At", "produced_at", "Produced date", "producedAt"
+      "Produced date", "producedAt",
+      "Produced At", "produced_at",
+      "Actual Job End", "actual_job_end_at"
     ]);
     var date = toIsoDateET(producedRaw || new Date());
     if (!date) return;

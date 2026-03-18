@@ -259,10 +259,11 @@ function buildProductionEvents(payload, siteId, syncedAt, updatedBy) {
     var units = toNum(pickFieldLoose(row, ["Units Produced", "units_produced", "unitsProduced", "Produced Units", "Quantity Produced", "Qty Produced"]));
     if (!(units > 0)) return;
     var producedRaw = pickFieldLoose(row, [
-      // Canonical production timestamp: completed job time aligns with close reporting.
-      // Avoid job start as a shift fallback because a single job can span both shifts.
-      "Actual Job End", "actual_job_end_at",
-      "Produced At", "produced_at", "Produced date", "producedAt"
+      // Prefer the row-level produced timestamp for shift attribution.
+      // Fall back to job close only when the produced event time is unavailable.
+      "Produced date", "producedAt",
+      "Produced At", "produced_at",
+      "Actual Job End", "actual_job_end_at"
     ]);
     var producedIso = toIso(producedRaw);
     var eastern = toEasternParts(producedIso || producedRaw);
