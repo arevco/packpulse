@@ -1959,6 +1959,24 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
         </Card>
       </div>
 
+      <Card className="px-4 py-4">
+        <div className="mb-2 text-sm font-semibold">Production Jobs</div>
+        <div className="text-xs text-[rgb(var(--muted))] mb-3">
+          Job-level production detail is now consolidated here for shift execution and performance review.
+        </div>
+        {laborActuals.status === "missing_labor_events_table" && (
+          <div className="mb-3 text-xs text-[rgb(var(--muted))]">
+            Labor actuals are not enabled yet. Run `docs/supabase-labor-events.sql` in Supabase.
+          </div>
+        )}
+        <ProductionView
+          productionSegments={serverProductionSegments}
+          laborActuals={laborActuals}
+          laborDataRaw={[]}
+          resolveRevenueForRow={revenuePerCaseForRow}
+        />
+      </Card>
+
       <div className="grid gap-3 xl:grid-cols-3">
         <Card className="px-4 py-4">
           <div className="mb-2 text-sm font-semibold">Daily Production Yield</div>
@@ -2391,23 +2409,6 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
         </Card>
       </div>
 
-      <Card className="px-4 py-4">
-        <div className="mb-2 text-sm font-semibold">Production Jobs</div>
-        <div className="text-xs text-[rgb(var(--muted))] mb-3">
-          Job-level production detail is now consolidated here for shift execution and performance review.
-        </div>
-        {laborActuals.status === "missing_labor_events_table" && (
-          <div className="mb-3 text-xs text-[rgb(var(--muted))]">
-            Labor actuals are not enabled yet. Run `docs/supabase-labor-events.sql` in Supabase.
-          </div>
-        )}
-        <ProductionView
-          productionSegments={serverProductionSegments}
-          laborActuals={laborActuals}
-          laborDataRaw={[]}
-          resolveRevenueForRow={revenuePerCaseForRow}
-        />
-      </Card>
     </div>
   );
 }
