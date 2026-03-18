@@ -74,6 +74,18 @@ function mergeLaborMetric(target, row) {
   target.payable_hours += safeNum(row && row.payable_hours);
   target.productive_hours += safeNum(row && row.productive_hours);
   target.labor_cost += safeNum(row && row.labor_cost);
+  var provisionalRows = safeNum(row && row.provisional_rows);
+  var finalizedRows = safeNum(row && row.finalized_rows);
+  var status = String(row && row.labor_status || "").trim();
+  if (!(provisionalRows > 0) && !(finalizedRows > 0)) {
+    if (status === "provisional") provisionalRows = 1;
+    else if (status === "mixed") {
+      provisionalRows = 1;
+      finalizedRows = 1;
+    } else if (status === "finalized") finalizedRows = 1;
+  }
+  target.provisional_rows = safeNum(target.provisional_rows) + provisionalRows;
+  target.finalized_rows = safeNum(target.finalized_rows) + finalizedRows;
 }
 
 function hasAssignedShift(shiftLabel) {
@@ -170,8 +182,36 @@ function scaleLaborMetric(metric, ratio) {
   return {
     payable_hours: safeNum(metric && metric.payable_hours) * share,
     productive_hours: safeNum(metric && metric.productive_hours) * share,
-    labor_cost: safeNum(metric && metric.labor_cost) * share
+    labor_cost: safeNum(metric && metric.labor_cost) * share,
+    provisional_rows: safeNum(metric && metric.provisional_rows) * share,
+    finalized_rows: safeNum(metric && metric.finalized_rows) * share,
+    labor_status: String(metric && metric.labor_status || "")
   };
+}
+
+function deriveLaborStatus(finalizedRows, provisionalRows) {
+  if (provisionalRows > 0 && finalizedRows > 0) return "mixed";
+  if (provisionalRows > 0) return "provisional";
+  if (finalizedRows > 0) return "finalized";
+  return "unknown";
+}
+
+function laborStatusFromMetric(metric) {
+  var provisionalRows = safeNum(metric && metric.provisional_rows);
+  var finalizedRows = safeNum(metric && metric.finalized_rows);
+  if (provisionalRows > 0 || finalizedRows > 0) return deriveLaborStatus(finalizedRows, provisionalRows);
+  return String(metric && metric.labor_status || "unknown");
+}
+
+function isProvisionalLabor(status) {
+  return status === "provisional" || status === "mixed";
+}
+
+function laborStatusLabel(status) {
+  if (status === "provisional") return "provisional labor";
+  if (status === "mixed") return "mixed finalized/provisional labor";
+  if (status === "finalized") return "finalized labor";
+  return "labor status unknown";
 }
 
 export default function ProductionView({ productionSegments, laborActuals, laborDataRaw, resolveRevenueForRow }) {
@@ -188,6 +228,8 @@ export default function ProductionView({ productionSegments, laborActuals, labor
   var prodJobRows = productionSegments && Array.isArray(productionSegments.jobRows) ? productionSegments.jobRows : [];
   var laborJobRows = laborActuals && Array.isArray(laborActuals.byJob) ? laborActuals.byJob : [];
   var laborRawRows = Array.isArray(laborDataRaw) ? laborDataRaw : [];
+  var laborSummary = laborActuals && laborActuals.summary ? laborActuals.summary : {};
+  var laborFinalizedThroughDate = String(laborSummary.finalized_through_date || "").trim();
   var totalRows = productionSegments && productionSegments.totalRows ? productionSegments.totalRows : 0;
   var rowsWithShift = productionSegments && productionSegments.rowsWithShift ? productionSegments.rowsWithShift : 0;
   var prodDates = Array.from(new Set(prodShiftRows.map(function(r) { return r.date; }))).sort().reverse();
@@ -397,6 +439,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
       var payableHours = rawPayableHours >= MIN_TRUSTED_JOB_LABOR_HOURS ? rawPayableHours : 0;
       var productiveHours = payableHours > 0 ? safeNum(labor && labor.productive_hours) : 0;
       var laborCost = payableHours > 0 ? safeNum(labor && labor.labor_cost) : 0;
+      var laborStatus = payableHours > 0 ? laborStatusFromMetric(labor) : "unknown";
       var unitsProduced = safeNum(r.unitsProduced);
       var revenueMatch = typeof resolveRevenueForRow === "function" ? resolveRevenueForRow(r.itemCode, r.date) : null;
       var revenuePerCase = safeNum(revenueMatch && revenueMatch.value);
@@ -422,7 +465,9 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         casesPerPayableHour: payableHours > 0 ? (unitsProduced / payableHours) : 0,
         laborCostPerCase: unitsProduced > 0 ? (laborCost / unitsProduced) : 0,
         hasLabor: payableHours > 0,
-        hasRevenue: revenue > 0
+        hasRevenue: revenue > 0,
+        laborStatus: laborStatus,
+        laborIsProvisional: payableHours > 0 && isProvisionalLabor(laborStatus)
       });
     });
   }, [filteredJobRows, laborByJobKey, rawLaborByJobKey, productionFallbackGroups, resolveRevenueForRow]);
@@ -431,14 +476,20 @@ export default function ProductionView({ productionSegments, laborActuals, labor
     var map = {};
     jobsWithLabor.forEach(function(r) {
       var shift = String(r.shift || "Unassigned");
-      if (!map[shift]) map[shift] = { shift: shift, units: 0, jobs: 0, laborPayableHours: 0, laborCost: 0, laborJobs: 0 };
+      if (!map[shift]) map[shift] = { shift: shift, units: 0, jobs: 0, laborPayableHours: 0, laborCost: 0, laborJobs: 0, provisionalLaborRows: 0, finalizedLaborRows: 0 };
       map[shift].units += safeNum(r.unitsProduced);
       map[shift].jobs += 1;
       map[shift].laborPayableHours += safeNum(r.laborPayableHours);
       map[shift].laborCost += safeNum(r.laborCost);
       if (r.hasLabor) map[shift].laborJobs += 1;
+      if (r.hasLabor && isProvisionalLabor(r.laborStatus)) map[shift].provisionalLaborRows += 1;
+      if (r.hasLabor && (r.laborStatus === "finalized" || r.laborStatus === "mixed")) map[shift].finalizedLaborRows += 1;
     });
-    return Object.values(map).sort(function(a, b) { return b.units - a.units; });
+    return Object.values(map).map(function(row) {
+      return Object.assign({}, row, {
+        laborStatus: deriveLaborStatus(row.finalizedLaborRows, row.provisionalLaborRows)
+      });
+    }).sort(function(a, b) { return b.units - a.units; });
   }, [jobsWithLabor]);
 
   var lineLoad = useMemo(function() {
@@ -458,7 +509,9 @@ export default function ProductionView({ productionSegments, laborActuals, labor
           laborMargin: 0,
           shiftSlots: {},
           missingRevenueUnits: 0,
-          missingRevenueSkuKeys: {}
+          missingRevenueSkuKeys: {},
+          provisionalLaborRows: 0,
+          finalizedLaborRows: 0
         };
       }
       map[line].units += safeNum(r.unitsProduced);
@@ -471,6 +524,8 @@ export default function ProductionView({ productionSegments, laborActuals, labor
       map[line].missingRevenueUnits += safeNum(r.missingRevenueUnits);
       if (r.missingRevenue) map[line].missingRevenueSkuKeys[r.missingRevenueSkuKey] = r.itemCode || "Unknown SKU";
       if (hasAssignedShift(r.shift) && r.date) map[line].shiftSlots[String(r.date) + "|" + String(r.shift)] = true;
+      if (r.hasLabor && isProvisionalLabor(r.laborStatus)) map[line].provisionalLaborRows += 1;
+      if (r.hasLabor && (r.laborStatus === "finalized" || r.laborStatus === "mixed")) map[line].finalizedLaborRows += 1;
     });
     return Object.values(map).map(function(r) {
       var shiftSlotCount = Object.keys(r.shiftSlots).length;
@@ -484,7 +539,8 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         pricePerUnit: r.revenueCoveredUnits > 0 ? (r.revenue / r.revenueCoveredUnits) : null,
         casesPerMinute: shiftMinutes > 0 ? (r.units / shiftMinutes) : 0,
         laborCostPerCase: r.units > 0 ? (r.laborCost / r.units) : 0,
-        laborMarginPct: r.revenue > 0 ? (r.laborMargin / r.revenue) : null
+        laborMarginPct: r.revenue > 0 ? (r.laborMargin / r.revenue) : null,
+        laborStatus: deriveLaborStatus(r.finalizedLaborRows, r.provisionalLaborRows)
       });
     }).sort(function(a, b) { return b.units - a.units; });
   }, [jobsWithLabor]);
@@ -510,7 +566,9 @@ export default function ProductionView({ productionSegments, laborActuals, labor
           shifts: {},
           shiftSlots: {},
           missingRevenueUnits: 0,
-          missingRevenueSkuKeys: {}
+          missingRevenueSkuKeys: {},
+          provisionalLaborRows: 0,
+          finalizedLaborRows: 0
         };
       }
       map[key].unitsProduced += safeNum(r.unitsProduced);
@@ -523,6 +581,8 @@ export default function ProductionView({ productionSegments, laborActuals, labor
       if (r.missingRevenue) map[key].missingRevenueSkuKeys[r.missingRevenueSkuKey] = r.itemCode || "Unknown SKU";
       map[key].shifts[String(r.shift || "Unassigned")] = true;
       if (hasAssignedShift(r.shift) && r.date) map[key].shiftSlots[String(r.date) + "|" + String(r.shift)] = true;
+      if (r.hasLabor && isProvisionalLabor(r.laborStatus)) map[key].provisionalLaborRows += 1;
+      if (r.hasLabor && (r.laborStatus === "finalized" || r.laborStatus === "mixed")) map[key].finalizedLaborRows += 1;
     });
     return Object.values(map).map(function(r) {
       var shiftSlotCount = Object.keys(r.shiftSlots).length;
@@ -537,7 +597,8 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         revenueCoveragePct: r.unitsProduced > 0 ? Math.round((r.revenueCoveredUnits / r.unitsProduced) * 100) : 0,
         missingRevenueSkuCount: Object.keys(r.missingRevenueSkuKeys).length,
         pricePerUnit: r.revenueCoveredUnits > 0 ? (r.revenue / r.revenueCoveredUnits) : null,
-        laborMarginPct: r.revenue > 0 ? (r.laborMargin / r.revenue) : null
+        laborMarginPct: r.revenue > 0 ? (r.laborMargin / r.revenue) : null,
+        laborStatus: deriveLaborStatus(r.finalizedLaborRows, r.provisionalLaborRows)
       });
     }).sort(function(a, b) { return b.unitsProduced - a.unitsProduced; });
   }, [jobsWithLabor]);
@@ -563,9 +624,12 @@ export default function ProductionView({ productionSegments, laborActuals, labor
   var totalLaborCost = jobsWithLabor.reduce(function(sum, r) { return sum + safeNum(r.laborCost); }, 0);
   var totalLaborHours = jobsWithLabor.reduce(function(sum, r) { return sum + safeNum(r.laborPayableHours); }, 0);
   var totalRevenueCoveredUnits = jobsWithLabor.reduce(function(sum, r) { return sum + safeNum(r.revenueCoveredUnits); }, 0);
+  var totalProvisionalLaborRows = jobsWithLabor.reduce(function(sum, r) { return sum + (r.hasLabor && isProvisionalLabor(r.laborStatus) ? 1 : 0); }, 0);
+  var totalFinalizedLaborRows = jobsWithLabor.reduce(function(sum, r) { return sum + (r.hasLabor && (r.laborStatus === "finalized" || r.laborStatus === "mixed") ? 1 : 0); }, 0);
   var totalLaborMargin = totalRevenue - totalLaborCost;
   var totalLaborMarginPct = totalRevenue > 0 ? (totalLaborMargin / totalRevenue) : null;
   var totalRevenueCoveragePct = totalUnitsProduced > 0 ? Math.round((totalRevenueCoveredUnits / totalUnitsProduced) * 100) : 0;
+  var overallLaborStatus = deriveLaborStatus(totalFinalizedLaborRows, totalProvisionalLaborRows);
   var topLine = lineLoad[0] || null;
   var topJob = jobRollup[0] || null;
   var shift1Total = shiftTotals.find(function(r) { return r.shift === "Shift 1 (7a-3p)"; }) || null;
@@ -642,11 +706,11 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         {[
           { l:"Units", v:totalUnitsProduced.toLocaleString(), s:prodDate === "all" ? "all matching days" : (selectedProdDate || "selected day"), c:C.bright },
           { l:"Total Revenue", v:fmtMoneyWhole(totalRevenue), s:totalRevenueCoveragePct > 0 ? (totalRevenueCoveragePct + "% revenue covered") : "revenue not matched", meta:totalRevenueCoveragePct > 0 && totalRevenueCoveragePct < 100 ? ((totalUnitsProduced - totalRevenueCoveredUnits).toLocaleString() + " units missing revenue") : null, c:C.ok },
-          { l:"Total Labor", v:fmtMoneyWhole(totalLaborCost), s:totalLaborHours > 0 ? (totalLaborHours.toFixed(1) + " labor hrs") : "labor not matched", c:C.accent },
-          { l:"Labor Margin", v:fmtMoneyWhole(totalLaborMargin), s:totalLaborMarginPct != null ? ("Margin " + fmtPct(totalLaborMarginPct)) : "revenue not matched", c:totalLaborMargin >= 0 ? C.ok : C.bad },
-          { l:"Shift 1 Yield", v:shift1Units.toLocaleString(), s:"7a-3p · " + shift1Share + "% share", t:shiftCompareText(shift1Jobs, shift2Jobs, shift1Delta, "S2", shift1AvgPerJob), meta:laborRateText(safeNum(shift1Total && shift1Total.laborPayableHours), shift1Units, safeNum(shift1Total && shift1Total.laborCost)), c:C.ok },
-          { l:"Shift 2 Yield", v:shift2Units.toLocaleString(), s:"3p-11p · " + shift2Share + "% share", t:shiftCompareText(shift2Jobs, shift1Jobs, shift2Delta, "S1", shift2AvgPerJob), meta:laborRateText(safeNum(shift2Total && shift2Total.laborPayableHours), shift2Units, safeNum(shift2Total && shift2Total.laborCost)), c:C.accent },
-          { l:"Top Line", v:topLine ? topLine.line : "--", s:topLine ? (topLine.units.toLocaleString() + " cs · " + topLine.sharePct + "% share") : "no line data", meta:topLine ? laborRateText(topLine.laborPayableHours, topLine.units, topLine.laborCost) : "labor not matched", c:C.ok }
+          { l:"Total Labor", v:fmtMoneyWhole(totalLaborCost), s:totalLaborHours > 0 ? (totalLaborHours.toFixed(1) + " labor hrs · " + laborStatusLabel(overallLaborStatus)) : "labor not matched", c:C.accent },
+          { l:"Labor Margin", v:fmtMoneyWhole(totalLaborMargin), s:totalLaborMarginPct != null ? ("Margin " + fmtPct(totalLaborMarginPct) + " · " + laborStatusLabel(overallLaborStatus)) : "revenue not matched", c:totalLaborMargin >= 0 ? C.ok : C.bad },
+          { l:"Shift 1 Yield", v:shift1Units.toLocaleString(), s:"7a-3p · " + shift1Share + "% share", t:shiftCompareText(shift1Jobs, shift2Jobs, shift1Delta, "S2", shift1AvgPerJob), meta:laborRateText(safeNum(shift1Total && shift1Total.laborPayableHours), shift1Units, safeNum(shift1Total && shift1Total.laborCost)) + ((shift1Total && shift1Total.laborStatus && shift1Total.laborStatus !== "finalized") ? (" · " + laborStatusLabel(shift1Total.laborStatus)) : ""), c:C.ok },
+          { l:"Shift 2 Yield", v:shift2Units.toLocaleString(), s:"3p-11p · " + shift2Share + "% share", t:shiftCompareText(shift2Jobs, shift1Jobs, shift2Delta, "S1", shift2AvgPerJob), meta:laborRateText(safeNum(shift2Total && shift2Total.laborPayableHours), shift2Units, safeNum(shift2Total && shift2Total.laborCost)) + ((shift2Total && shift2Total.laborStatus && shift2Total.laborStatus !== "finalized") ? (" · " + laborStatusLabel(shift2Total.laborStatus)) : ""), c:C.accent },
+          { l:"Top Line", v:topLine ? topLine.line : "--", s:topLine ? (topLine.units.toLocaleString() + " cs · " + topLine.sharePct + "% share") : "no line data", meta:topLine ? (laborRateText(topLine.laborPayableHours, topLine.units, topLine.laborCost) + (topLine.laborStatus !== "finalized" ? (" · " + laborStatusLabel(topLine.laborStatus)) : "")) : "labor not matched", c:C.ok }
         ].map(function(s) {
           return <div key={s.l} style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, padding:"12px 14px" }}>
             <div style={{ fontSize:20, fontWeight:700, fontFamily:mono, color:s.c, lineHeight:1 }}>{s.v}</div>
@@ -672,6 +736,14 @@ export default function ProductionView({ productionSegments, laborActuals, labor
           </div>
         </div>
       </div>
+
+      {totalLaborHours > 0 && overallLaborStatus !== "finalized" ? (
+        <div style={{ marginBottom:10, background:C.surface, border:"1px solid " + C.border, borderRadius:8, padding:"10px 12px", fontSize:12, color:C.dim }}>
+          Labor actuals in this view are <span style={{ fontWeight:700, color:C.text }}>{laborStatusLabel(overallLaborStatus)}</span>.
+          {laborFinalizedThroughDate ? (" Finalized through " + laborFinalizedThroughDate + ".") : ""}
+          {" "}Current-day labor can shift after end-of-day Nulogy edits.
+        </div>
+      ) : null}
 
       <div className="mb-3 rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-3">
         <div className="mb-1 text-sm font-semibold">Line Execution</div>
@@ -709,6 +781,9 @@ export default function ProductionView({ productionSegments, laborActuals, labor
                     </td>
                     <td style={tdM}>
                       <div>{r.sharePct}% share · {r.jobs} jobs</div>
+                      {r.laborStatus !== "finalized" ? (
+                        <div style={{ fontSize:11, color:C.warn }}>{laborStatusLabel(r.laborStatus)}</div>
+                      ) : null}
                       {r.missingRevenueSkuCount > 0 ? (
                         <div style={{ fontSize:11, color:C.bad }}>
                           {r.revenueCoveragePct}% priced · {r.missingRevenueSkuCount} SKU{r.missingRevenueSkuCount === 1 ? "" : "s"} missing revenue
@@ -733,6 +808,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
                         </td>
                         <td style={tdM}>
                           <div>{job.workOrder}</div>
+                          {job.laborStatus !== "finalized" ? <div style={{ fontSize:11, color:C.warn }}>{laborStatusLabel(job.laborStatus)}</div> : null}
                           <div style={{ fontSize:11, color:C.dim, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", maxWidth:260 }}>{job.itemDesc}</div>
                         </td>
                         <td style={Object.assign({}, tdM, { fontWeight:700, color:C.ok })}>{job.unitsProduced.toLocaleString()}</td>
@@ -803,8 +879,14 @@ export default function ProductionView({ productionSegments, laborActuals, labor
                   {r.revenue > 0 ? fmtMoneyWhole(r.revenue) : <span style={{ color:C.bad, fontWeight:600 }}>Missing</span>}
                 </td>
                 <td style={tdM}>{r.pricePerUnit != null ? fmtMoney(r.pricePerUnit) : "--"}</td>
-                <td style={tdM}>{r.laborPayableHours > 0 ? r.laborPayableHours.toFixed(1) : "--"}</td>
-                <td style={tdM}>{r.laborCost > 0 ? fmtMoneyWhole(r.laborCost) : "--"}</td>
+	                <td style={tdM}>
+                    <div>{r.laborPayableHours > 0 ? r.laborPayableHours.toFixed(1) : "--"}</div>
+                    {r.hasLabor && r.laborStatus !== "finalized" ? <div style={{ fontSize:11, color:C.warn }}>{laborStatusLabel(r.laborStatus)}</div> : null}
+                  </td>
+	                <td style={tdM}>
+                    <div>{r.laborCost > 0 ? fmtMoneyWhole(r.laborCost) : "--"}</div>
+                    {r.hasLabor && r.laborStatus !== "finalized" ? <div style={{ fontSize:11, color:C.warn }}>provisional</div> : null}
+                  </td>
                 <td style={tdM}>{r.revenue > 0 ? fmtMoneyWhole(r.laborMargin) : "--"}</td>
                 <td style={tdM}>{r.revenue > 0 ? fmtPct(r.laborMarginPct) : "--"}</td>
               </tr>;

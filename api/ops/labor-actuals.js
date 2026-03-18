@@ -2,6 +2,8 @@ import Sentry from "../_sentry.js";
 import { CACHE_SITE_ID, getAuthenticatedUser, getSupabaseAdmin, toNum, withCors } from "./_common.js";
 import { normalizeLaborRoleKey } from "../_labor.js";
 
+var ET_TIME_ZONE = "America/New_York";
+
 function sanitizeDate(value) {
   var s = String(value || "").trim();
   return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : "";
@@ -23,6 +25,151 @@ function monthRange(monthKey) {
     start: start,
     end: endDate.toISOString().slice(0, 10)
   };
+}
+
+function addDaysIso(dateKey, deltaDays) {
+  var s = sanitizeDate(dateKey);
+  if (!s) return "";
+  var d = new Date(s + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + Number(deltaDays || 0));
+  return d.toISOString().slice(0, 10);
+}
+
+function timeZoneParts(date, timeZone) {
+  if (!(date instanceof Date) || isNaN(date)) return null;
+  var out = {};
+  new Intl.DateTimeFormat("en-US", {
+    timeZone: timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  }).formatToParts(date).forEach(function(part) {
+    if (part.type !== "literal") out[part.type] = part.value;
+  });
+  if (!out.year || !out.month || !out.day) return null;
+  return {
+    year: parseInt(out.year, 10),
+    month: parseInt(out.month, 10),
+    day: parseInt(out.day, 10),
+    hour: parseInt(out.hour || "0", 10),
+    minute: parseInt(out.minute || "0", 10),
+    second: parseInt(out.second || "0", 10)
+  };
+}
+
+function timeZoneOffsetMillis(date, timeZone) {
+  var parts = timeZoneParts(date, timeZone);
+  if (!parts) return 0;
+  var asUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+  return asUtc - date.getTime();
+}
+
+function easternWallClockToDate(dateKey, hour24, minute, second) {
+  var s = sanitizeDate(dateKey);
+  if (!s) return null;
+  var year = parseInt(s.slice(0, 4), 10);
+  var monthIndex = parseInt(s.slice(5, 7), 10) - 1;
+  var day = parseInt(s.slice(8, 10), 10);
+  var utcGuess = Date.UTC(year, monthIndex, day, hour24, minute || 0, second || 0);
+  var offset = timeZoneOffsetMillis(new Date(utcGuess), ET_TIME_ZONE);
+  var actual = utcGuess - offset;
+  var resolvedOffset = timeZoneOffsetMillis(new Date(actual), ET_TIME_ZONE);
+  if (resolvedOffset !== offset) actual = utcGuess - resolvedOffset;
+  return new Date(actual);
+}
+
+function toEasternDateKey(value) {
+  if (!value) return "";
+  var date = value instanceof Date ? value : new Date(value);
+  if (isNaN(date)) return "";
+  var parts = timeZoneParts(date, ET_TIME_ZONE);
+  if (!parts) return "";
+  return String(parts.year) + "-" + String(parts.month).padStart(2, "0") + "-" + String(parts.day).padStart(2, "0");
+}
+
+function parseUtcMillis(value) {
+  if (!value) return 0;
+  var ms = value instanceof Date ? value.getTime() : new Date(value).getTime();
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function overlapMillis(startA, endA, startB, endB) {
+  var start = Math.max(startA, startB);
+  var end = Math.min(endA, endB);
+  return end > start ? (end - start) : 0;
+}
+
+function deriveLaborStatus(finalizedRows, provisionalRows) {
+  if (provisionalRows > 0 && finalizedRows > 0) return "mixed";
+  if (provisionalRows > 0) return "provisional";
+  if (finalizedRows > 0) return "finalized";
+  return "unknown";
+}
+
+function buildAllocatedLaborSegments(row, todayEt) {
+  var payableHours = toNum(row && row.payable_hours);
+  var productiveHours = toNum(row && row.productive_hours);
+  var startMs = parseUtcMillis(row && row.clock_in_at_utc);
+  var endMs = parseUtcMillis(row && row.clock_out_at_utc);
+  var fallbackDate = sanitizeDate(row && row.worked_date_et);
+  var fallbackShift = textKey(row && row.shift_label, "Unassigned");
+  var fallbackFinalized = fallbackDate ? (fallbackDate < todayEt) : false;
+
+  var buildFallback = function() {
+    return [Object.assign({}, row, {
+      worked_date_et: fallbackDate || "",
+      shift_label: fallbackShift,
+      is_finalized: fallbackFinalized,
+      allocation_method: "stored_bucket"
+    })];
+  };
+
+  if (!(startMs > 0) || !(endMs > startMs)) return buildFallback();
+
+  var startDateEt = toEasternDateKey(new Date(startMs));
+  var endDateEt = toEasternDateKey(new Date(Math.max(startMs, endMs - 1)));
+  if (!startDateEt || !endDateEt) return buildFallback();
+
+  var totalMs = endMs - startMs;
+  var segments = [];
+  for (var dateKey = startDateEt; dateKey && dateKey <= endDateEt; dateKey = addDaysIso(dateKey, 1)) {
+    var dayStart = easternWallClockToDate(dateKey, 0, 0, 0);
+    var nextDayStart = easternWallClockToDate(addDaysIso(dateKey, 1), 0, 0, 0);
+    if (!dayStart || !nextDayStart || isNaN(dayStart) || isNaN(nextDayStart)) continue;
+    var dayMs = overlapMillis(startMs, endMs, dayStart.getTime(), nextDayStart.getTime());
+    if (!(dayMs > 0)) continue;
+
+    var shift1Start = easternWallClockToDate(dateKey, 7, 0, 0);
+    var shift1End = easternWallClockToDate(dateKey, 15, 0, 0);
+    var shift2Start = easternWallClockToDate(dateKey, 15, 0, 0);
+    var shift2End = easternWallClockToDate(dateKey, 23, 46, 0);
+    var shift1Ms = overlapMillis(startMs, endMs, shift1Start.getTime(), shift1End.getTime());
+    var shift2Ms = overlapMillis(startMs, endMs, shift2Start.getTime(), shift2End.getTime());
+    var unassignedMs = Math.max(0, dayMs - shift1Ms - shift2Ms);
+
+    [
+      { shift: "Shift 1 (7a-3p)", ms: shift1Ms },
+      { shift: "Shift 2 (3p-11p)", ms: shift2Ms },
+      { shift: "Unassigned", ms: unassignedMs }
+    ].forEach(function(bucket) {
+      if (!(bucket.ms > 0)) return;
+      var share = bucket.ms / totalMs;
+      segments.push(Object.assign({}, row, {
+        worked_date_et: dateKey,
+        shift_label: bucket.shift,
+        payable_hours: payableHours * share,
+        productive_hours: productiveHours * share,
+        is_finalized: dateKey < todayEt,
+        allocation_method: "interval_overlap"
+      }));
+    });
+  }
+
+  return segments.length ? segments : buildFallback();
 }
 
 function isMissingTableError(tableName, err) {
@@ -75,6 +222,8 @@ function makeMetricRow(base) {
     productive_hours: 0,
     labor_cost: 0,
     rows: 0,
+    finalized_rows: 0,
+    provisional_rows: 0,
     availability_sum: 0,
     availability_weight: 0,
     performance_sum: 0,
@@ -109,6 +258,8 @@ function addLaborToRow(target, laborRow) {
   target.productive_hours += productive;
   target.labor_cost += laborCost;
   target.rows += 1;
+  if (laborRow && laborRow.is_finalized) target.finalized_rows += 1;
+  else target.provisional_rows += 1;
   addWeightedPct(target, payable || productive || 0, toNum(laborRow.availability_pct), toNum(laborRow.performance_pct), toNum(laborRow.line_efficiency_pct));
   return laborCost;
 }
@@ -123,6 +274,7 @@ function finalizeMetricRow(row, casesProduced) {
     availability_pct: avgPct(row.availability_sum, row.availability_weight),
     performance_pct: avgPct(row.performance_sum, row.performance_weight),
     line_efficiency_pct: avgPct(row.line_efficiency_sum, row.line_efficiency_weight),
+    labor_status: deriveLaborStatus(toNum(row.finalized_rows), toNum(row.provisional_rows)),
   });
   delete out.availability_sum;
   delete out.availability_weight;
@@ -251,15 +403,29 @@ export default async function handler(req, res) {
     }
 
     var supabase = getSupabaseAdmin();
+    var todayEt = toEasternDateKey(new Date());
+    var finalizedThroughDate = addDaysIso(todayEt, -1);
+    var laborColumns = "worked_date_et,worked_at_utc,clock_in_at_utc,clock_out_at_utc,source_snapshot_at,shift_label,line_name,job_id,work_order_code,work_order_id,item_code,item_description,item_family_name,role_name,role_key,payable_hours,productive_hours,hourly_rate,availability_pct,performance_pct,line_efficiency_pct";
+    var laborLegacyColumns = "worked_date_et,source_snapshot_at,shift_label,line_name,job_id,work_order_code,work_order_id,item_code,item_description,item_family_name,role_name,role_key,payable_hours,productive_hours,hourly_rate,availability_pct,performance_pct,line_efficiency_pct";
     var laborQueryMode = "worked_date";
     var laborQ = await fetchAllRows(
       supabase,
       "labor_events",
-      "worked_date_et,source_snapshot_at,shift_label,line_name,job_id,work_order_code,work_order_id,item_code,item_description,item_family_name,role_name,role_key,payable_hours,productive_hours,hourly_rate,availability_pct,performance_pct,line_efficiency_pct",
+      laborColumns,
       "worked_date_et",
-      startDate,
+      addDaysIso(startDate, -1),
       endDate
     );
+    if (laborQ.error && !isMissingTableError("labor_events", laborQ.error)) {
+      laborQ = await fetchAllRows(
+        supabase,
+        "labor_events",
+        laborLegacyColumns,
+        "worked_date_et",
+        addDaysIso(startDate, -1),
+        endDate
+      );
+    }
     if (laborQ.error) {
       if (isMissingTableError("labor_events", laborQ.error)) {
         return res.status(200).json({
@@ -276,22 +442,41 @@ export default async function handler(req, res) {
       }
       throw laborQ.error;
     }
-    var laborRows = Array.isArray(laborQ.data) ? laborQ.data : [];
-    if (!laborRows.length) {
+    var fetchedLaborRows = Array.isArray(laborQ.data) ? laborQ.data : [];
+    if (!fetchedLaborRows.length) {
       laborQueryMode = "all_rows_fallback";
       var laborAllQ = await fetchAllRows(
         supabase,
         "labor_events",
-        "worked_date_et,source_snapshot_at,shift_label,line_name,job_id,work_order_code,work_order_id,item_code,item_description,item_family_name,role_name,role_key,payable_hours,productive_hours,hourly_rate,availability_pct,performance_pct,line_efficiency_pct",
+        laborColumns,
         "source_snapshot_at",
         "",
         ""
       );
+      if (laborAllQ.error && !isMissingTableError("labor_events", laborAllQ.error)) {
+        laborAllQ = await fetchAllRows(
+          supabase,
+          "labor_events",
+          laborLegacyColumns,
+          "source_snapshot_at",
+          "",
+          ""
+        );
+      }
       if (laborAllQ.error) {
         throw laborAllQ.error;
       }
-      laborRows = Array.isArray(laborAllQ.data) ? laborAllQ.data : [];
+      fetchedLaborRows = Array.isArray(laborAllQ.data) ? laborAllQ.data : [];
     }
+    var rawLaborRowsInRange = 0;
+    var laborRows = [];
+    fetchedLaborRows.forEach(function(row) {
+      var segments = buildAllocatedLaborSegments(row, todayEt).filter(function(segment) {
+        return dateInRange(segment && segment.worked_date_et, startDate, endDate);
+      });
+      if (segments.length) rawLaborRowsInRange += 1;
+      Array.prototype.push.apply(laborRows, segments);
+    });
 
     var prodQ = await fetchAllRows(
       supabase,
@@ -363,7 +548,7 @@ export default async function handler(req, res) {
     var byJobMap = {};
     var inferredTimingRows = 0;
     var crossShiftTimingRows = 0;
-    var laborRowsInRange = 0;
+    var laborSegmentsInRange = 0;
 
     laborRows.forEach(function(r) {
       var jobId = textKey(r.job_id);
@@ -376,7 +561,7 @@ export default async function handler(req, res) {
         if (sanitizeDate(fallbackDate)) date = fallbackDate;
       }
       if (!dateInRange(date, startDate, endDate)) return;
-      laborRowsInRange += 1;
+      laborSegmentsInRange += 1;
       var storedShift = textKey(r.shift_label);
       var shift = textKey(
         (storedShift && storedShift !== "Unassigned")
@@ -520,10 +705,14 @@ export default async function handler(req, res) {
     summaryFinal.cross_shift_job_rows = crossShiftTimingRows;
     summaryFinal.duplicate_match_suppressed_rows = duplicateMatchSuppressedRows;
     summaryFinal.labor_query_mode = laborQueryMode;
-    summaryFinal.labor_rows_fetched = laborRows.length;
-    summaryFinal.labor_rows_in_range = laborRowsInRange;
+    summaryFinal.labor_rows_fetched = fetchedLaborRows.length;
+    summaryFinal.labor_rows_in_range = rawLaborRowsInRange;
+    summaryFinal.labor_segments_in_range = laborSegmentsInRange;
     summaryFinal.days_with_labor = byDay.length;
     summaryFinal.latest_date = byDay.length ? byDay[0].date_et : null;
+    summaryFinal.today_et = todayEt;
+    summaryFinal.finalized_through_date = finalizedThroughDate || null;
+    summaryFinal.has_provisional_labor = summaryFinal.labor_status !== "finalized";
     delete summaryFinal.unique_jobs;
     delete summaryFinal.unique_work_orders;
     delete summaryFinal.availability_sum;
