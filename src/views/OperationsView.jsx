@@ -1934,6 +1934,10 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       if (safeNum(card.revenueCoveragePct) > 0 && safeNum(card.revenueCoveragePct) < 100) note += " · " + card.revenueCoveragePct + "% cov";
       return note;
     };
+    var referenceNote = function(label, card) {
+      if (!card) return "";
+      return label + " " + safeNum(card.latestUnits).toLocaleString();
+    };
     var compareTone = function(card) {
       var delta = safeNum(card && card.displayDelta);
       if (delta > 0) return "text-[rgb(var(--success))]";
@@ -1959,6 +1963,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
         label: "Today",
         value: safeNum(byKey.today && byKey.today.latestUnits).toLocaleString(),
         note: revenueNote(byKey.today),
+        subnote: referenceNote("Yesterday", byKey.yesterday),
         detail: compareText(byKey.today),
         tone: compareTone(byKey.today)
       },
@@ -1967,6 +1972,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
         label: "This Week",
         value: safeNum(byKey.this_week && byKey.this_week.latestUnits).toLocaleString(),
         note: revenueNote(byKey.this_week),
+        subnote: referenceNote("Last Week", byKey.last_week),
         detail: compareText(byKey.this_week),
         tone: compareTone(byKey.this_week)
       },
@@ -1975,6 +1981,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
         label: "This Month",
         value: safeNum(byKey.this_month && byKey.this_month.latestUnits).toLocaleString(),
         note: revenueNote(byKey.this_month),
+        subnote: referenceNote("Last Month", byKey.last_month),
         detail: compareText(byKey.this_month),
         tone: compareTone(byKey.this_month)
       },
@@ -1983,6 +1990,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
         label: "Avg / Day",
         value: safeNum(metrics.avgDailyUnits).toLocaleString(),
         note: metrics.latestProductionDate ? ("Latest day " + metrics.latestProductionDate) : "No production day yet",
+        subnote: "",
         detail: metrics.trailingProductionDays
           ? ("Trailing velocity " + safeNum(metrics.trailingDailyVelocity).toLocaleString() + "/day")
           : "No trailing production history",
@@ -1993,6 +2001,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
         label: "Weekly Run Rate",
         value: safeNum(metrics.weeklyRunRate).toLocaleString(),
         note: "Trailing " + safeNum(metrics.trailingProductionDays).toLocaleString() + " production days",
+        subnote: "",
         detail: "Current weekly yield pace",
         tone: "text-[rgb(var(--muted))]"
       },
@@ -2001,6 +2010,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
         label: "Month-End Yield",
         value: safeNum(metrics.monthlyRunRate).toLocaleString(),
         note: safeNum(metrics.remainingBusinessDays).toLocaleString() + " business days remaining",
+        subnote: "",
         detail: "Projected month-end yield",
         tone: "text-[rgb(var(--muted))]"
       }
@@ -2030,6 +2040,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                 <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[rgb(var(--muted))]">{card.label}</div>
                 <div className="mt-2 text-2xl font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{card.value}</div>
                 <div className="mt-1 text-xs text-[rgb(var(--muted))]">{card.note}</div>
+                {card.subnote ? <div className="mt-0.5 text-[11px] text-[rgb(var(--muted))]">{card.subnote}</div> : null}
                 <div className={"mt-2 text-[11px] font-medium " + card.tone}>{card.detail}</div>
               </div>
             );
