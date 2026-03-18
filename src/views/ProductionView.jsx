@@ -6,7 +6,6 @@ import { Input } from "../components/ui/input";
 import TableShell from "../components/ui/table-shell";
 
 var MIN_TRUSTED_JOB_LABOR_HOURS = 0.25;
-var MAX_TOP_JOBS_PER_LINE = 3;
 var SHIFT_MINUTES = 480;
 var MONTH_INDEX = {
   jan: 0,
@@ -224,7 +223,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
   const [shiftFilter, setShiftFilter] = useState("all");
   const [lineExpansion, setLineExpansion] = useState({});
   const [showLineExecution, setShowLineExecution] = useState(true);
-  const [showJobRows, setShowJobRows] = useState(true);
+  const [jobExpansion, setJobExpansion] = useState({});
 
   var prodShiftRows = productionSegments && Array.isArray(productionSegments.shiftRows) ? productionSegments.shiftRows : [];
   var prodJobRows = productionSegments && Array.isArray(productionSegments.jobRows) ? productionSegments.jobRows : [];
@@ -605,21 +604,50 @@ export default function ProductionView({ productionSegments, laborActuals, labor
     }).sort(function(a, b) { return b.unitsProduced - a.unitsProduced; });
   }, [jobsWithLabor]);
 
+  var detailRowsByJobKey = useMemo(function() {
+    var map = {};
+    var shiftRank = function(shiftLabel) {
+      var normalized = String(shiftLabel || "");
+      if (normalized === "Shift 1 (7a-3p)") return 1;
+      if (normalized === "Shift 2 (3p-11p)") return 2;
+      if (normalized === "Unassigned") return 3;
+      return 4;
+    };
+    jobsWithLabor.forEach(function(r) {
+      var key = [r.jobId || "", r.workOrder || "", r.line || "", r.itemCode || ""].join("|");
+      if (!map[key]) map[key] = [];
+      map[key].push(r);
+    });
+    Object.keys(map).forEach(function(key) {
+      map[key].sort(function(a, b) {
+        var dateA = String(a.date || "");
+        var dateB = String(b.date || "");
+        if (dateA !== dateB) return dateA.localeCompare(dateB);
+        var rankA = shiftRank(a.shift);
+        var rankB = shiftRank(b.shift);
+        if (rankA !== rankB) return rankA - rankB;
+        return safeNum(b.unitsProduced) - safeNum(a.unitsProduced);
+      });
+    });
+    return map;
+  }, [jobsWithLabor]);
+
   var lineExecution = useMemo(function() {
     var jobsByLine = {};
     jobRollup.forEach(function(job) {
       var line = String(job.line || "Unknown").trim() || "Unknown";
       if (!jobsByLine[line]) jobsByLine[line] = [];
-      jobsByLine[line].push(job);
+      jobsByLine[line].push(Object.assign({}, job, {
+        detailRows: detailRowsByJobKey[job.key] || []
+      }));
     });
     return lineLoad.map(function(line) {
       var jobs = jobsByLine[line.line] || [];
       return Object.assign({}, line, {
-        topJobs: jobs.slice(0, MAX_TOP_JOBS_PER_LINE),
-        hiddenJobCount: Math.max(0, jobs.length - MAX_TOP_JOBS_PER_LINE)
+        jobs: jobs
       });
     });
-  }, [lineLoad, jobRollup]);
+  }, [lineLoad, jobRollup, detailRowsByJobKey]);
 
   var totalUnitsProduced = jobsWithLabor.reduce(function(sum, r) { return sum + safeNum(r.unitsProduced); }, 0);
   var totalRevenue = jobsWithLabor.reduce(function(sum, r) { return sum + safeNum(r.revenue); }, 0);
@@ -673,6 +701,16 @@ export default function ProductionView({ productionSegments, laborActuals, labor
     setLineExpansion(function(prev) {
       return Object.assign({}, prev, {
         [lineName]: !(prev[lineName] !== false)
+      });
+    });
+  };
+  var jobExpanded = function(jobKey) {
+    return jobExpansion[jobKey] === true;
+  };
+  var toggleJobExpanded = function(jobKey) {
+    setJobExpansion(function(prev) {
+      return Object.assign({}, prev, {
+        [jobKey]: !prev[jobKey]
       });
     });
   };
@@ -750,8 +788,8 @@ export default function ProductionView({ productionSegments, laborActuals, labor
       <div className="mb-3 rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-3">
         <div className="mb-2 flex items-start justify-between gap-3">
           <div>
-            <div className="mb-1 text-sm font-semibold">Line Execution</div>
-            <div className="text-xs text-[rgb(var(--muted))]">Line summary rows with top jobs nested underneath. Click a line to collapse or expand its jobs.</div>
+            <div className="mb-1 text-sm font-semibold">Execution Detail</div>
+            <div className="text-xs text-[rgb(var(--muted))]">One master view: line totals, then job totals, then shift/detail rows. Expand a line to see jobs, then expand a job to see shift rows.</div>
           </div>
           <button
             type="button"
@@ -767,7 +805,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
           <table style={{ width:"100%", minWidth:1300, borderCollapse:"collapse" }}>
             <thead>
               <tr style={{ background:C.raised }}>
-                <th style={thS}>Line / Job</th>
+                <th style={thS}>Line / Job / Shift</th>
                 <th style={thS}>Context</th>
                 <th style={thS}>Units</th>
                 <th style={thS}>Revenue</th>
@@ -814,15 +852,24 @@ export default function ProductionView({ productionSegments, laborActuals, labor
                     <td style={tdM}>{r.revenue > 0 ? fmtPct(r.laborMarginPct) : "--"}</td>
                     <td style={tdM}>{r.casesPerMinute > 0 ? r.casesPerMinute.toFixed(2) : "--"}</td>
                   </tr>,
-                  expanded ? r.topJobs.map(function(job) {
-                    return (
+                  expanded ? r.jobs.map(function(job) {
+                    var expandedJob = jobExpanded(job.key);
+                    return [
                       <tr key={job.key} style={{ borderBottom:"1px solid " + C.border, background:C.raised }}>
                         <td style={Object.assign({}, tdM, { paddingLeft:"28px" })}>
-                          <div style={{ fontWeight:600, color:C.bright }}>{job.jobId}</div>
-                          <div style={{ fontSize:11, color:C.dim }}>{job.itemCode}</div>
+                          <button
+                            type="button"
+                            onClick={function() { toggleJobExpanded(job.key); }}
+                            style={{ display:"inline-flex", alignItems:"center", gap:8, border:"none", background:"transparent", padding:0, cursor:"pointer", color:C.text, font:"inherit" }}
+                          >
+                            <span style={{ fontFamily:mono, color:C.dim }}>{expandedJob ? "▾" : "▸"}</span>
+                            <span style={{ fontWeight:600, color:C.bright }}>{job.jobId}</span>
+                          </button>
+                          <div style={{ fontSize:11, color:C.dim, paddingLeft:"20px" }}>{job.itemCode}</div>
                         </td>
                         <td style={tdM}>
                           <div>{job.workOrder}</div>
+                          <div style={{ fontSize:11, color:C.dim }}>{job.shiftCount} shift bucket{job.shiftCount === 1 ? "" : "s"}</div>
                           {job.laborStatus !== "finalized" ? <div style={{ fontSize:11, color:C.warn }}>{laborStatusLabel(job.laborStatus)}</div> : null}
                           <div style={{ fontSize:11, color:C.dim, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", maxWidth:260 }}>{job.itemDesc}</div>
                         </td>
@@ -841,16 +888,40 @@ export default function ProductionView({ productionSegments, laborActuals, labor
                         <td style={tdM}>{job.revenue > 0 ? fmtMoneyWhole(job.laborMargin) : "--"}</td>
                         <td style={tdM}>{job.revenue > 0 ? fmtPct(job.laborMarginPct) : "--"}</td>
                         <td style={tdM}>{job.casesPerMinute > 0 ? job.casesPerMinute.toFixed(2) : "--"}</td>
-                      </tr>
-                    );
-                  }) : null,
-                  expanded && r.hiddenJobCount > 0 ? (
-                    <tr key={r.line + "-more"} style={{ borderBottom:"1px solid " + C.border, background:C.raised }}>
-                      <td colSpan={10} style={Object.assign({}, tdN, { paddingLeft:"28px", color:C.dim })}>
-                        +{r.hiddenJobCount} more jobs on {r.line} are available below in Job Rows.
-                      </td>
-                    </tr>
-                  ) : null
+                      </tr>,
+                      expandedJob ? job.detailRows.map(function(detail, idx) {
+                        return (
+                          <tr key={job.key + "-detail-" + idx} style={{ borderBottom:"1px solid " + C.border, background:"#fbfcfe" }}>
+                            <td style={Object.assign({}, tdM, { paddingLeft:"56px" })}>
+                              <div style={{ fontWeight:600 }}>{shortShift(detail.shift)}</div>
+                              <div style={{ fontSize:11, color:C.dim }}>{detail.date || "--"}</div>
+                            </td>
+                            <td style={tdM}>
+                              <div>{detail.workOrder}</div>
+                              {detail.hasLabor && detail.laborStatus !== "finalized" ? <div style={{ fontSize:11, color:C.warn }}>{laborStatusLabel(detail.laborStatus)}</div> : null}
+                              <div style={{ fontSize:11, color:C.dim, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", maxWidth:260 }}>{formatDescriptionForDisplay(detail.itemDesc) || "--"}</div>
+                            </td>
+                            <td style={Object.assign({}, tdM, { fontWeight:700, color:C.ok })}>{detail.unitsProduced.toLocaleString()}</td>
+                            <td style={tdM}>
+                              {detail.revenue > 0 ? fmtMoneyWhole(detail.revenue) : <span style={{ color:C.bad, fontWeight:600 }}>Missing</span>}
+                            </td>
+                            <td style={tdM}>{detail.pricePerUnit != null ? fmtMoney(detail.pricePerUnit) : "--"}</td>
+                            <td style={tdM}>
+                              <div>{detail.laborPayableHours > 0 ? detail.laborPayableHours.toFixed(1) : "--"}</div>
+                              {detail.hasLabor && detail.laborStatus !== "finalized" ? <div style={{ fontSize:11, color:C.warn }}>{laborStatusLabel(detail.laborStatus)}</div> : null}
+                            </td>
+                            <td style={tdM}>
+                              <div>{detail.laborCost > 0 ? fmtMoneyWhole(detail.laborCost) : "--"}</div>
+                              {detail.hasLabor && detail.laborStatus !== "finalized" ? <div style={{ fontSize:11, color:C.warn }}>provisional</div> : null}
+                            </td>
+                            <td style={tdM}>{detail.revenue > 0 ? fmtMoneyWhole(detail.laborMargin) : "--"}</td>
+                            <td style={tdM}>{detail.revenue > 0 ? fmtPct(detail.laborMarginPct) : "--"}</td>
+                            <td style={tdM}>{detail.casesPerMinute > 0 ? detail.casesPerMinute.toFixed(2) : "--"}</td>
+                          </tr>
+                        );
+                      }) : null
+                    ];
+                  }) : null
                 ];
               })}
               {!lineExecution.length && <tr><td colSpan={10} style={{ padding:20, textAlign:"center", color:C.dim }}>No line or job rollups for current filters.</td></tr>}
@@ -859,72 +930,6 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         </TableShell>
         ) : null}
       </div>
-
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-3">
-          <div className="text-sm font-semibold">Job Rows</div>
-          <button
-            type="button"
-            onClick={function() { setShowJobRows(function(v) { return !v; }); }}
-            className="inline-flex h-8 items-center rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]"
-          >
-            <span className="mr-1">{showJobRows ? "▾" : "▸"}</span>
-            {showJobRows ? "Hide" : "Show"}
-          </button>
-        </div>
-        <div className="text-xs text-[rgb(var(--muted))]">Showing {Math.min(filteredJobRows.length, 100)} of {filteredJobRows.length.toLocaleString()} rows</div>
-      </div>
-      {showJobRows ? (
-      <TableShell>
-        <table style={{ width:"100%", borderCollapse:"collapse" }}>
-          <thead><tr style={{ background:C.raised }}>
-            <th style={thS}>Shift</th>
-            <th style={thS}>Job ID</th>
-            <th style={thS}>WO#</th>
-            <th style={thS}>Line</th>
-            <th style={thS}>Item</th>
-            <th style={thS}>Description</th>
-            <th style={thS}>Units Produced</th>
-            <th style={thS}>Revenue</th>
-            <th style={thS}>Price/Unit</th>
-            <th style={thS}>Labor Hrs</th>
-            <th style={thS}>Labor Cost</th>
-            <th style={thS}>Labor Margin</th>
-            <th style={thS}>Margin %</th>
-          </tr></thead>
-          <tbody>
-            {jobsWithLabor.slice(0, 100).map(function(r, i) {
-              return <tr key={i} style={{ borderBottom:"1px solid "+C.border }}>
-                <td style={tdM}>{shortShift(r.shift)}</td>
-                <td style={Object.assign({}, tdM, { fontWeight:600, color:C.bright })}>{r.jobId}</td>
-                <td style={tdM}>{r.workOrder}</td>
-                <td style={tdM}>{r.line}</td>
-                <td style={tdM}>{r.itemCode}</td>
-                <td style={Object.assign({}, tdN, { color:C.dim, maxWidth:260, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" })}>{formatDescriptionForDisplay(r.itemDesc) || "--"}</td>
-                <td style={Object.assign({}, tdM, { fontWeight:700, color:C.ok })}>{r.unitsProduced.toLocaleString()}</td>
-                <td style={tdM}>
-                  {r.revenue > 0 ? fmtMoneyWhole(r.revenue) : <span style={{ color:C.bad, fontWeight:600 }}>Missing</span>}
-                </td>
-                <td style={tdM}>{r.pricePerUnit != null ? fmtMoney(r.pricePerUnit) : "--"}</td>
-	                <td style={tdM}>
-                    <div>{r.laborPayableHours > 0 ? r.laborPayableHours.toFixed(1) : "--"}</div>
-                    {r.hasLabor && r.laborStatus !== "finalized" ? <div style={{ fontSize:11, color:C.warn }}>{laborStatusLabel(r.laborStatus)}</div> : null}
-                  </td>
-	                <td style={tdM}>
-                    <div>{r.laborCost > 0 ? fmtMoneyWhole(r.laborCost) : "--"}</div>
-                    {r.hasLabor && r.laborStatus !== "finalized" ? <div style={{ fontSize:11, color:C.warn }}>provisional</div> : null}
-                  </td>
-                <td style={tdM}>{r.revenue > 0 ? fmtMoneyWhole(r.laborMargin) : "--"}</td>
-                <td style={tdM}>{r.revenue > 0 ? fmtPct(r.laborMarginPct) : "--"}</td>
-              </tr>;
-            })}
-            {jobsWithLabor.length === 0 && (
-              <tr><td colSpan={13} style={{ padding:24, textAlign:"center", color:C.dim }}>No production rows for the selected day/filters.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </TableShell>
-      ) : null}
     </div>
   );
 }
