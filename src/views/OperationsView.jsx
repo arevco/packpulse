@@ -643,6 +643,35 @@ function mergeDaySeries(baseRows, extraRows) {
   return Object.values(map).sort(function(a, b) { return String(b.date || "").localeCompare(String(a.date || "")); });
 }
 
+function aggregateBreakdownByDay(rowsLite) {
+  var byDay = {};
+  (Array.isArray(rowsLite) ? rowsLite : []).forEach(function(r) {
+    var date = String(r && r.produced_date_et || "");
+    var units = safeNum(r && r.units_produced);
+    if (!date || !(units > 0)) return;
+    if (!byDay[date]) byDay[date] = { date: date, units: 0, rows: 0 };
+    byDay[date].units += units;
+    byDay[date].rows += 1;
+  });
+  return Object.values(byDay).sort(function(a, b) { return String(a.date || "").localeCompare(String(b.date || "")); });
+}
+
+function aggregateBreakdownShiftMix(rowsLite) {
+  var byDate = {};
+  (Array.isArray(rowsLite) ? rowsLite : []).forEach(function(r) {
+    var date = String(r && r.produced_date_et || "");
+    var shift = String(r && r.shift_label || "Unassigned");
+    var units = safeNum(r && r.units_produced);
+    if (!date || !(units > 0)) return;
+    if (!byDate[date]) byDate[date] = { date: date, s1: 0, s2: 0, un: 0, total: 0 };
+    if (shift.indexOf("Shift 1") !== -1) byDate[date].s1 += units;
+    else if (shift.indexOf("Shift 2") !== -1) byDate[date].s2 += units;
+    else byDate[date].un += units;
+    byDate[date].total += units;
+  });
+  return Object.values(byDate).sort(function(a, b) { return String(a.date || "").localeCompare(String(b.date || "")); });
+}
+
 function preferHigherDaySeries(primaryRows, fallbackRows) {
   var map = {};
   var add = function(row) {
@@ -1327,24 +1356,33 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   }, [effectiveTrends, effectiveBreakdown, forecastPlans, revenueTargetsBySku, itemMasterCostBySku]);
 
   var shiftPlanVsActual = useMemo(function() {
-    var rows = (filteredTrends.byShift || []).slice();
-    var byDate = {};
-    rows.forEach(function(r) {
-      var date = String(r.date || "");
-      if (!date) return;
-      var shift = String(r.shift || "Unassigned");
-      if (!byDate[date]) byDate[date] = { date: date, s1: 0, s2: 0, un: 0, total: 0 };
-      var units = safeNum(r.units);
-      if (shift.indexOf("Shift 1") !== -1) byDate[date].s1 += units;
-      else if (shift.indexOf("Shift 2") !== -1) byDate[date].s2 += units;
-      else byDate[date].un += units;
-      byDate[date].total += units;
-    });
-    var dayRows = Object.values(byDate).sort(function(a, b) { return a.date.localeCompare(b.date); });
-    var priorDays = (effectiveTrends && Array.isArray(effectiveTrends.byDay)) ? effectiveTrends.byDay.filter(function(d) {
+    var dayRows = aggregateBreakdownShiftMix(filteredBreakdown.rowsLite || []);
+    if (!dayRows.length) {
+      var fallbackRows = (filteredTrends.byShift || []).slice();
+      var fallbackByDate = {};
+      fallbackRows.forEach(function(r) {
+        var date = String(r.date || "");
+        if (!date) return;
+        var shift = String(r.shift || "Unassigned");
+        if (!fallbackByDate[date]) fallbackByDate[date] = { date: date, s1: 0, s2: 0, un: 0, total: 0 };
+        var units = safeNum(r.units);
+        if (shift.indexOf("Shift 1") !== -1) fallbackByDate[date].s1 += units;
+        else if (shift.indexOf("Shift 2") !== -1) fallbackByDate[date].s2 += units;
+        else fallbackByDate[date].un += units;
+        fallbackByDate[date].total += units;
+      });
+      dayRows = Object.values(fallbackByDate).sort(function(a, b) { return String(a.date || "").localeCompare(String(b.date || "")); });
+    }
+    var priorDays = aggregateBreakdownByDay((effectiveBreakdown && effectiveBreakdown.rowsLite) || []).filter(function(d) {
       var date = String(d.date || "");
       return date && date < range.start;
-    }) : [];
+    });
+    if (!priorDays.length) {
+      priorDays = (effectiveTrends && Array.isArray(effectiveTrends.byDay)) ? effectiveTrends.byDay.filter(function(d) {
+        var date = String(d.date || "");
+        return date && date < range.start;
+      }) : [];
+    }
     var baselineDaily = priorDays.length
       ? Math.round(priorDays.reduce(function(sum, d) { return sum + safeNum(d.units); }, 0) / priorDays.length)
       : (metrics.avgDailyUnits || 0);
@@ -1386,16 +1424,25 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       }),
       max: max
     };
-  }, [filteredTrends.byShift, effectiveTrends, range.start, metrics.avgDailyUnits, forecastPlans]);
+  }, [filteredBreakdown.rowsLite, filteredTrends.byShift, effectiveBreakdown, effectiveTrends, range.start, metrics.avgDailyUnits, forecastPlans]);
 
   var dailyPlanVsActual = useMemo(function() {
-    var dayRows = (filteredTrends.byDay || []).slice().sort(function(a, b) { return String(a.date || "").localeCompare(String(b.date || "")); });
+    var dayRows = aggregateBreakdownByDay(filteredBreakdown.rowsLite || []);
+    if (!dayRows.length) {
+      dayRows = (filteredTrends.byDay || []).slice().sort(function(a, b) { return String(a.date || "").localeCompare(String(b.date || "")); });
+    }
     if (!dayRows.length) return { rows: [], lineSeries: [] };
 
-    var priorDays = (effectiveTrends && Array.isArray(effectiveTrends.byDay)) ? effectiveTrends.byDay.filter(function(d) {
+    var priorDays = aggregateBreakdownByDay((effectiveBreakdown && effectiveBreakdown.rowsLite) || []).filter(function(d) {
       var date = String(d.date || "");
       return date && date < range.start;
-    }) : [];
+    });
+    if (!priorDays.length) {
+      priorDays = (effectiveTrends && Array.isArray(effectiveTrends.byDay)) ? effectiveTrends.byDay.filter(function(d) {
+        var date = String(d.date || "");
+        return date && date < range.start;
+      }) : [];
+    }
     var baselineDaily = priorDays.length
       ? Math.round(priorDays.reduce(function(sum, d) { return sum + safeNum(d.units); }, 0) / priorDays.length)
       : (metrics.avgDailyUnits || 0);
@@ -1435,7 +1482,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     });
 
     return { rows: rowData, lineSeries: lineSeries };
-  }, [filteredTrends.byDay, effectiveTrends, range.start, metrics.avgDailyUnits, filteredBreakdown.rowsLite, forecastPlans]);
+  }, [filteredBreakdown.rowsLite, filteredTrends.byDay, effectiveBreakdown, effectiveTrends, range.start, metrics.avgDailyUnits, forecastPlans]);
 
   var lineScoreboard = useMemo(function() {
     var compareInfo = comparableRangeForPreset(windowPreset, effectiveRange);
