@@ -792,6 +792,26 @@ export default function ProductionView({ productionSegments, laborActuals, labor
   var lineExpanded = function(lineName) {
     return lineExpansion[lineName] !== false;
   };
+  var handleProdDateStartChange = function(nextDate) {
+    var next = String(nextDate || "").trim();
+    if (!next) {
+      setProdDateStart("");
+      return;
+    }
+    var currentEnd = rangeEnd || next;
+    setProdDateStart(next);
+    if (currentEnd && next > currentEnd) setProdDateEnd(next);
+  };
+  var handleProdDateEndChange = function(nextDate) {
+    var next = String(nextDate || "").trim();
+    if (!next) {
+      setProdDateEnd("");
+      return;
+    }
+    var currentStart = rangeStart || next;
+    if (currentStart && next < currentStart) setProdDateStart(next);
+    setProdDateEnd(next);
+  };
   var toggleLineExpanded = function(lineName) {
     setLineExpansion(function(prev) {
       return Object.assign({}, prev, {
@@ -822,9 +842,9 @@ export default function ProductionView({ productionSegments, laborActuals, labor
     <div>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Input type="text" placeholder="Search WO / SKU / job / line" value={search} onChange={function(e) { setSearch(e.target.value); }} className="h-10 w-full text-sm sm:w-72" />
-        <DatePicker value={rangeStart} onChange={setProdDateStart} placeholder="Start date" className="h-10 w-[132px]" />
+        <DatePicker value={rangeStart} onChange={handleProdDateStartChange} placeholder="Start date" className="h-10 w-[132px]" />
         <span className="text-xs text-[rgb(var(--muted))] whitespace-nowrap">-</span>
-        <DatePicker value={rangeEnd} onChange={setProdDateEnd} placeholder="End date" className="h-10 w-[132px]" />
+        <DatePicker value={rangeEnd} onChange={handleProdDateEndChange} placeholder="End date" className="h-10 w-[132px]" />
         <select value={lineFilter} onChange={function(e) { setLineFilter(e.target.value); }} className="h-10 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]">
           <option value="all">All Lines</option>
           {lineOptions.map(function(line) { return <option key={line} value={line}>{line}</option>; })}
