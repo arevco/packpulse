@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import Sentry from "../_sentry.js";
 import { buildLaborEvents } from "../_labor.js";
