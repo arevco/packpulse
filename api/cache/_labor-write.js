@@ -41,6 +41,40 @@ function clampRatio(value, fallback) {
   return Math.max(0, Math.min(1, n));
 }
 
+function sleep(ms) {
+  return new Promise(function(resolve) {
+    setTimeout(resolve, Math.max(0, Number(ms || 0)));
+  });
+}
+
+function isTransientFetchError(error) {
+  var msg = String(error && error.message || "").toLowerCase();
+  return (
+    msg.indexOf("fetch failed") !== -1 ||
+    msg.indexOf("etimedout") !== -1 ||
+    msg.indexOf("econnreset") !== -1 ||
+    msg.indexOf("enotfound") !== -1 ||
+    msg.indexOf("network") !== -1 ||
+    msg.indexOf("socket") !== -1
+  );
+}
+
+async function withRetry(fn, options) {
+  var attempts = Math.max(1, Number(options && options.attempts || 2));
+  var delayMs = Math.max(0, Number(options && options.delayMs || 150));
+  var lastErr;
+  for (var attempt = 0; attempt < attempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (!isTransientFetchError(err) || attempt === attempts - 1) throw err;
+      await sleep(delayMs * (attempt + 1));
+    }
+  }
+  throw lastErr || new Error("retry_failed");
+}
+
 function groupEventsByDate(events, dateField) {
   var out = {
     byDate: {},
@@ -64,14 +98,16 @@ async function fetchExistingLaborStatsByDate(supabase, siteId, startDate, endDat
   var from = 0;
   while (true) {
     var to = from + pageSize - 1;
-    var q = await supabase
-      .from("labor_events")
-      .select("worked_date_et,payable_hours")
-      .eq("site_id", siteId)
-      .gte("worked_date_et", startDate)
-      .lte("worked_date_et", endDate)
-      .order("worked_date_et", { ascending: false })
-      .range(from, to);
+    var q = await withRetry(function() {
+      return supabase
+        .from("labor_events")
+        .select("worked_date_et,payable_hours")
+        .eq("site_id", siteId)
+        .gte("worked_date_et", startDate)
+        .lte("worked_date_et", endDate)
+        .order("worked_date_et", { ascending: false })
+        .range(from, to);
+    }, { attempts: 3, delayMs: 200 });
     if (q.error) throw q.error;
     var rows = Array.isArray(q.data) ? q.data : [];
     rows.forEach(function(row) {
@@ -96,17 +132,21 @@ async function replaceLaborEventsByDate(supabase, siteId, events) {
 
   for (var i = 0; i < datedKeys.length; i++) {
     var dateKey = datedKeys[i];
-    var del = await supabase
-      .from("labor_events")
-      .delete()
-      .eq("site_id", siteId)
-      .eq("worked_date_et", dateKey);
+    var del = await withRetry(function() {
+      return supabase
+        .from("labor_events")
+        .delete()
+        .eq("site_id", siteId)
+        .eq("worked_date_et", dateKey);
+    }, { attempts: 3, delayMs: 200 });
     if (del.error) throw del.error;
 
     var rows = grouped.byDate[dateKey] || [];
     for (var x = 0; x < rows.length; x += chunkSize) {
       var chunk = rows.slice(x, x + chunkSize);
-      var up = await supabase.from("labor_events").upsert(chunk, { onConflict: "site_id,event_key" });
+      var up = await withRetry(function() {
+        return supabase.from("labor_events").upsert(chunk, { onConflict: "site_id,event_key" });
+      }, { attempts: 3, delayMs: 200 });
       if (up.error) throw up.error;
       written += chunk.length;
     }
@@ -114,7 +154,9 @@ async function replaceLaborEventsByDate(supabase, siteId, events) {
 
   for (var u = 0; u < grouped.undated.length; u += chunkSize) {
     var undatedChunk = grouped.undated.slice(u, u + chunkSize);
-    var undatedUp = await supabase.from("labor_events").upsert(undatedChunk, { onConflict: "site_id,event_key" });
+    var undatedUp = await withRetry(function() {
+      return supabase.from("labor_events").upsert(undatedChunk, { onConflict: "site_id,event_key" });
+    }, { attempts: 3, delayMs: 200 });
     if (undatedUp.error) throw undatedUp.error;
     written += undatedChunk.length;
   }
@@ -157,12 +199,21 @@ async function protectRecentSparseDates(supabase, siteId, events) {
     };
   }
 
-  var existingByDate = await fetchExistingLaborStatsByDate(
-    supabase,
-    siteId,
-    candidateDates[0],
-    candidateDates[candidateDates.length - 1]
-  );
+  var existingByDate = {};
+  try {
+    existingByDate = await fetchExistingLaborStatsByDate(
+      supabase,
+      siteId,
+      candidateDates[0],
+      candidateDates[candidateDates.length - 1]
+    );
+  } catch (guardErr) {
+    if (!isTransientFetchError(guardErr)) throw guardErr;
+    return {
+      events: grouped.undated.concat(dateKeys.flatMap(function(dateKey) { return grouped.byDate[dateKey] || []; })),
+      guardedDates: []
+    };
+  }
   var minHoursRatio = clampRatio(process.env.LABOR_EVENT_GUARD_MIN_HOURS_RATIO, 0.75);
   var minCountRatio = clampRatio(process.env.LABOR_EVENT_GUARD_MIN_COUNT_RATIO, 0.75);
   var minExistingHours = Math.max(0, Number(process.env.LABOR_EVENT_GUARD_MIN_EXISTING_HOURS || 40));
@@ -222,7 +273,9 @@ export async function writeLaborEventsSafely(supabase, options) {
   var allEvents = Array.isArray(options && options.events) ? options.events : [];
   var correctionDays = Math.max(1, Number(options && options.correctionDays || 60));
 
-  var hasExistingRows = await siteTableHasRows(supabase, "labor_events", siteId);
+  var hasExistingRows = await withRetry(function() {
+    return siteTableHasRows(supabase, "labor_events", siteId);
+  }, { attempts: 3, delayMs: 200 });
   var writePlan = selectEventsForWrite(allEvents, {
     dateField: "worked_date_et",
     hasExistingRows: hasExistingRows,
