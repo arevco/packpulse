@@ -117,6 +117,7 @@ export default function ProductionReadiness() {
   const [workOrdersPermalinkState, setWorkOrdersPermalinkState] = useState(function() { return parseInitialPermalink().wo; });
   const [forecastPermalinkState, setForecastPermalinkState] = useState(function() { return parseInitialPermalink().forecast || {}; });
   const [operationsPermalinkState, setOperationsPermalinkState] = useState(function() { return parseInitialPermalink().operations || {}; });
+  const [operationsServerSyncVersion, setOperationsServerSyncVersion] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
   const [showDataSetup, setShowDataSetup] = useState(false);
   const [showDataControlsPanel, setShowDataControlsPanel] = useState(false);
@@ -377,8 +378,9 @@ export default function ProductionReadiness() {
     return function() { clearInterval(intervalId); };
   }, [shouldRunIntervalSync, showAutoBootstrap, dockApiLoading, evoconApiLoading, nulogySyncState, fetchOpenDockApi, fetchEvoconApi, dockAutoSyncFresh, evoconAutoSyncFresh, nulogyAutoSyncFresh]);
 
-  var handleNulogyData = useCallback(function(results) {
+  var handleNulogyData = useCallback(async function(results) {
     var ts = new Date();
+    var serverWrites = [];
     var getRows = function(payload) {
       if (!payload) return [];
       if (Array.isArray(payload)) return payload;
@@ -401,30 +403,32 @@ export default function ProductionReadiness() {
       ds.setItemMasterTimestamp(ts);
     }
     if (results.production) {
-      ds.setProductionData(getRows(results.production));
+      var productionRows = getRows(results.production);
+      ds.setProductionData(productionRows);
       ds.setProductionFileName("Nulogy Sync");
       ds.setProductionTimestamp(ts);
-      fetch("/api/cache/production-events", {
+      serverWrites.push(fetch("/api/cache/production-events", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows: getRows(results.production), syncedAt: ts.toISOString() })
+        body: JSON.stringify({ rows: productionRows, syncedAt: ts.toISOString() })
       }).catch(function() {
-        // Non-blocking: local dashboard still works even if trend ingest fails.
-      });
+        // Non-blocking: shared snapshot repair can still recover production events.
+      }));
     }
     if (results.labor) {
-      ds.setLaborData(getRows(results.labor));
+      var laborRows = getRows(results.labor);
+      ds.setLaborData(laborRows);
       ds.setLaborFileName("Nulogy Sync");
       ds.setLaborTimestamp(ts);
-      fetch("/api/cache/labor-events", {
+      serverWrites.push(fetch("/api/cache/labor-events", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows: getRows(results.labor), syncedAt: ts.toISOString() })
+        body: JSON.stringify({ rows: laborRows, syncedAt: ts.toISOString() })
       }).catch(function() {
-        // Non-blocking: UI can still work once shared snapshot repairs the labor table.
-      });
+        // Non-blocking: shared snapshot repair can still recover labor events.
+      }));
     }
     if (results.bom) {
       ds.setBoms(getRows(results.bom));
@@ -443,6 +447,10 @@ export default function ProductionReadiness() {
           if (el && el.scrollIntoView) el.scrollIntoView({ behavior:"smooth", block:"start" });
         }, 0);
       }, 1500);
+    }
+    if (serverWrites.length) {
+      await Promise.allSettled(serverWrites);
+      setOperationsServerSyncVersion(function(v) { return v + 1; });
     }
   }, []);
   var analysisForUI = analysis || { results:[], flags:[], diagnostics:{} };
@@ -1081,7 +1089,7 @@ export default function ProductionReadiness() {
         <Suspense fallback={<Card className="mt-3 p-4 text-sm text-[rgb(var(--muted))]">Loading view...</Card>}>
           {activeView === "overview" && <OverviewView analysis={analysisForUI} woStatuses={woStatusesForUI} onSelectCustomer={openWorkOrdersForCustomer} />}
           {activeView === "aicopilot" && <AICopilotView summary={summaryForUI} criticalItems={criticalItemsForUI} dispatchQueue={dispatchQueue || []} productionSegments={productionSegmentsForUI} evoconData={ds.evoconData || []} workOrders={analysisForUI.results || []} onNavigate={setActiveView} />}
-          {activeView === "operations" && <OperationsView productionSegments={productionSegmentsForUI} productionDataRaw={ds.productionData || []} laborDataRaw={ds.laborData || []} evoconData={ds.evoconData || []} evoconTimestamp={ds.evoconTimestamp || evoconLastSyncAt} itemMaster={ds.itemMaster || []} initialFilters={operationsPermalinkState} onPermalinkChange={handleOperationsPermalinkChange} />}
+          {activeView === "operations" && <OperationsView productionSegments={productionSegmentsForUI} productionDataRaw={ds.productionData || []} laborDataRaw={ds.laborData || []} evoconData={ds.evoconData || []} evoconTimestamp={ds.evoconTimestamp || evoconLastSyncAt} itemMaster={ds.itemMaster || []} initialFilters={operationsPermalinkState} onPermalinkChange={handleOperationsPermalinkChange} serverSyncVersion={operationsServerSyncVersion} />}
           {activeView === "forecast" && <ForecastView workOrders={ds.workOrders || []} itemMaster={ds.itemMaster || []} productionData={ds.productionData || []} laborData={ds.laborData || []} initialFilters={forecastPermalinkState} onPermalinkChange={handleForecastPermalinkChange} />}
           {activeView === "workorders" && <WorkOrdersView analysis={analysisForUI} woStatuses={woStatusesForUI} woCustomers={woCustomersForUI} recommendations={recommendationsForUI} dispatchQueue={dispatchQueue || []} inboundCoverage={inboundCoverage} prefilterCustomer={workOrdersPrefilterCustomer} prefilterNonce={workOrdersPrefilterNonce} initialFilters={workOrdersPermalinkState} onPermalinkChange={handleWorkOrdersPermalinkChange} />}
           {activeView === "itemmaster" && <ItemMasterView itemMaster={ds.itemMaster || []} inventory={ds.inventory || []} />}

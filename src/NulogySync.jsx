@@ -209,7 +209,7 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
 
     // Deliver core data ASAP so dashboard can open quickly.
     if (Object.keys(coreResults).length > 0) {
-      onDataLoaded(coreResults);
+      await Promise.resolve(onDataLoaded(coreResults));
     }
 
     // End blocking sync stage.
@@ -225,7 +225,7 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
       updateReportState(type, { progress: "Queued (optional background sync)..." });
       const result = await syncReport(type);
       if (result) {
-        onDataLoaded({ [type]: result });
+        await Promise.resolve(onDataLoaded({ [type]: result }));
       }
       if (!abortRef.current) await waitBriefly();
     }

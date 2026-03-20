@@ -709,7 +709,7 @@ function preferHigherShiftSeries(primaryRows, fallbackRows) {
   });
 }
 
-export default function OperationsView({ productionSegments, productionDataRaw, laborDataRaw, evoconData, evoconTimestamp, itemMaster, initialFilters, onPermalinkChange }) {
+export default function OperationsView({ productionSegments, productionDataRaw, laborDataRaw, evoconData, evoconTimestamp, itemMaster, initialFilters, onPermalinkChange, serverSyncVersion }) {
   const { C, mono } = useTheme();
   var initial = initialFilters || {};
   var initialPreset = String(initial.preset || "last_14");
@@ -870,7 +870,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
 
   useEffect(function() {
     loadAll();
-  }, [windowPreset, rangeStart, rangeEnd, forecastPlanMonths.join(","), dailyPerfFetchDays]);
+  }, [windowPreset, rangeStart, rangeEnd, forecastPlanMonths.join(","), dailyPerfFetchDays, serverSyncVersion]);
 
   var localNulogySeries = useMemo(function() {
     var shiftRows = (productionSegments && Array.isArray(productionSegments.shiftRows)) ? productionSegments.shiftRows : [];
