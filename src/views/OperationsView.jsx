@@ -395,12 +395,12 @@ function toSeriesKey(prefix, label) {
 
 function lineColor(index) {
   var palette = [
-    "rgb(var(--accent))",
-    "color-mix(in oklab, rgb(var(--accent)) 80%, white)",
-    "color-mix(in oklab, rgb(var(--success)) 85%, white)",
-    "color-mix(in oklab, rgb(var(--warning)) 85%, white)",
-    "color-mix(in oklab, rgb(var(--danger)) 85%, white)",
-    "color-mix(in oklab, rgb(var(--muted)) 55%, white)",
+    "#3b6fd8",
+    "#6f96ea",
+    "#1c9858",
+    "#b88510",
+    "#cc3838",
+    "#95a0b5",
   ];
   return palette[index % palette.length];
 }
@@ -1936,29 +1936,29 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   }, [evoconData, range, windowPreset]);
 
   const dailyChartConfig = useMemo(function() {
-    var cfg = { plan: { label: "Baseline daily plan", color: "rgb(var(--muted))" } };
+    var cfg = { plan: { label: "Baseline daily plan", color: C.dim } };
     (dailyPlanVsActual.lineSeries || []).forEach(function(line) {
       cfg[line.key] = { label: line.label, color: line.color };
     });
     return cfg;
-  }, [dailyPlanVsActual.lineSeries]);
+  }, [C.dim, dailyPlanVsActual.lineSeries]);
 
   const shiftChartConfig = useMemo(function() {
     return {
-      s1: { label: "Shift 1", color: "rgb(var(--accent))" },
-      s2: { label: "Shift 2", color: "color-mix(in oklab, rgb(var(--accent)) 78%, white)" },
-      un: { label: "Unassigned", color: "color-mix(in oklab, rgb(var(--muted)) 45%, white)" },
-      plan: { label: "Baseline daily plan", color: "rgb(var(--muted))" }
+      s1: { label: "Shift 1", color: C.accent },
+      s2: { label: "Shift 2", color: "#6f96ea" },
+      un: { label: "Unassigned", color: "#c3cad7" },
+      plan: { label: "Baseline daily plan", color: C.dim }
     };
-  }, []);
+  }, [C.accent, C.dim]);
 
   const dailyEconomicsChartConfig = useMemo(function() {
     return {
-      cases: { label: "Cases Produced", color: "rgb(var(--accent))" },
-      revenue: { label: "Revenue", color: "rgb(var(--success))" },
-      labor: { label: "Labor Cost", color: "rgb(var(--danger))" }
+      cases: { label: "Cases Produced", color: C.accent },
+      revenue: { label: "Revenue", color: C.ok },
+      labor: { label: "Labor Cost", color: C.bad }
     };
-  }, []);
+  }, [C.accent, C.bad, C.ok]);
 
   const dailyEconomicsRows = useMemo(function() {
     var dayMap = {};
@@ -2213,7 +2213,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                   yAxisId="cases"
                   type="monotone"
                   dataKey="cases"
-                  stroke="var(--color-cases)"
+                  stroke={dailyEconomicsChartConfig.cases.color}
                   strokeWidth={2.5}
                   dot={false}
                   activeDot={{ r: 4 }}
@@ -2222,7 +2222,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                   yAxisId="dollars"
                   type="monotone"
                   dataKey="revenue"
-                  stroke="var(--color-revenue)"
+                  stroke={dailyEconomicsChartConfig.revenue.color}
                   strokeWidth={2.25}
                   dot={false}
                   activeDot={{ r: 4 }}
@@ -2231,7 +2231,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                   yAxisId="dollars"
                   type="monotone"
                   dataKey="labor"
-                  stroke="var(--color-labor)"
+                  stroke={dailyEconomicsChartConfig.labor.color}
                   strokeWidth={2.25}
                   dot={false}
                   activeDot={{ r: 4 }}
@@ -2288,7 +2288,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                         key={line.key}
                         stackId="line"
                         dataKey={line.key}
-                        fill={"var(--color-" + line.key + ")"}
+                        fill={line.color}
                         radius={radius}
                         maxBarSize={26}
                       />
@@ -2297,7 +2297,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                   <Line
                     type="monotone"
                     dataKey="plan"
-                    stroke="var(--color-plan)"
+                    stroke={dailyChartConfig.plan.color}
                     strokeDasharray="4 4"
                     strokeWidth={2}
                     dot={false}
@@ -2358,7 +2358,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                         key={key}
                         stackId="shift"
                         dataKey={key}
-                        fill={"var(--color-" + key + ")"}
+                        fill={shiftChartConfig[key].color}
                         radius={radius}
                         maxBarSize={26}
                       />
@@ -2367,7 +2367,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                   <Line
                     type="monotone"
                     dataKey="plan"
-                    stroke="var(--color-plan)"
+                    stroke={shiftChartConfig.plan.color}
                     strokeDasharray="4 4"
                     strokeWidth={2}
                     dot={false}
@@ -2434,7 +2434,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                         key={s.key}
                         stackId="skuMix"
                         dataKey={s.key}
-                        fill={"var(--color-" + s.key + ")"}
+                        fill={s.color}
                         radius={radius}
                         maxBarSize={30}
                       />
