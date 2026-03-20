@@ -8,6 +8,23 @@ import AuthGate from "./AuthGate.jsx";
 import App from "./App.jsx";
 import { initSupabaseClient } from "./lib/supabaseClient.js";
 
+function isHeapNetworkFailure(event, hint) {
+  var value = String(
+    event &&
+    event.exception &&
+    Array.isArray(event.exception.values) &&
+    event.exception.values[0] &&
+    event.exception.values[0].value || ""
+  );
+  var message = String(event && event.message || "");
+  var original = hint && hint.originalException;
+  var originalMessage = String(
+    original && (original.message || original.toString && original.toString()) || ""
+  );
+  var combined = [value, message, originalMessage].join(" ").toLowerCase();
+  return combined.indexOf("heap-api.com") !== -1 || combined.indexOf(" heap ") !== -1 && combined.indexOf("failed to fetch") !== -1;
+}
+
 window.addEventListener("vite:preloadError", function(event) {
   if (event && typeof event.preventDefault === "function") event.preventDefault();
   var key = "__pp_chunk_reload_once__";
@@ -29,6 +46,10 @@ if (import.meta.env.VITE_SENTRY_DSN) {
     enabled: import.meta.env.PROD,
     sampleRate: 1.0,
     tracesSampleRate: 0.2,
+    beforeSend: function(event, hint) {
+      if (isHeapNetworkFailure(event, hint)) return null;
+      return event;
+    },
   });
 }
 
