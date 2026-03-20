@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import Sentry from "../_sentry.js";
 import { buildLaborEvents, classifyShiftET, toEasternParts, toIso } from "../_labor.js";
 import { isMissingTableError, replaceSiteEventsInWindow, selectEventsForWrite, siteTableHasRows } from "../_event-window.js";
+import { writeLaborEventsSafely } from "./_labor-write.js";
 
 const SESSION_SECRET = process.env.SESSION_SECRET || "packpulse-default-secret-change-me";
 const CACHE_SITE_ID = process.env.CACHE_SITE_ID || "default";
@@ -360,6 +361,7 @@ export default async function handler(req, res) {
       var laborCorrectionStart = null;
       var laborDeletedWindowStart = null;
       var laborDeletedWindowEnd = null;
+      var laborGuardedDateKeys = [];
       if (productionEvents.length > 0) {
         try {
           var hasProductionRows = await siteTableHasRows(supabase, "production_events", CACHE_SITE_ID);
@@ -390,23 +392,17 @@ export default async function handler(req, res) {
       }
       if (laborEvents.length > 0) {
         try {
-          var hasLaborRows = await siteTableHasRows(supabase, "labor_events", CACHE_SITE_ID);
-          var laborPlan = selectEventsForWrite(laborEvents, {
-            dateField: "worked_date_et",
-            hasExistingRows: hasLaborRows,
+          var laborWrite = await writeLaborEventsSafely(supabase, {
+            siteId: CACHE_SITE_ID,
+            events: laborEvents,
             correctionDays: Number(process.env.LABOR_EVENT_CORRECTION_DAYS || process.env.NULOGY_EVENT_CORRECTION_DAYS || 60)
           });
-          laborWriteMode = laborPlan.mode;
-          laborCorrectionStart = laborPlan.cutoffDate;
-          var laborWrite = await replaceSiteEventsInWindow(supabase, {
-            table: "labor_events",
-            siteId: CACHE_SITE_ID,
-            dateField: "worked_date_et",
-            events: laborPlan.events
-          });
+          laborWriteMode = laborWrite.writeMode;
+          laborCorrectionStart = laborWrite.correctionStart;
           laborWritten = laborWrite.written;
           laborDeletedWindowStart = laborWrite.deletedWindowStart;
           laborDeletedWindowEnd = laborWrite.deletedWindowEnd;
+          laborGuardedDateKeys = laborWrite.guardedDateKeys || [];
         } catch (laborErr) {
           if (isMissingTableError("labor_events", laborErr)) {
             laborStatus = "missing_labor_events_table";
@@ -441,6 +437,7 @@ export default async function handler(req, res) {
           laborCorrectionStart: laborCorrectionStart,
           laborDeletedWindowStart: laborDeletedWindowStart,
           laborDeletedWindowEnd: laborDeletedWindowEnd,
+          laborGuardedDateKeys: laborGuardedDateKeys,
           snapshotVersion: snapshotVersion,
           cachePayloadBytes: compacted.bytes,
           cacheDroppedDatasets: compacted.dropped
@@ -469,6 +466,7 @@ export default async function handler(req, res) {
         laborCorrectionStart: laborCorrectionStart,
         laborDeletedWindowStart: laborDeletedWindowStart,
         laborDeletedWindowEnd: laborDeletedWindowEnd,
+        laborGuardedDateKeys: laborGuardedDateKeys,
         syncRunStatus: syncRun.status,
         cachePayloadBytes: compacted.bytes,
         cacheDroppedDatasets: compacted.dropped
