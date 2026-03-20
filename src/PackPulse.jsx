@@ -286,15 +286,16 @@ export default function ProductionReadiness() {
   var latestProductionSyncMs = freshestTimestampMs([ds.productionTimestamp]);
   var nulogyAutoSyncFresh = !!latestNulogySyncMs && (Date.now() - latestNulogySyncMs) < FULL_AUTO_SYNC_FRESH_MS;
   var productionAutoSyncFresh = !!latestProductionSyncMs && (Date.now() - latestProductionSyncMs) < PRODUCTION_AUTO_SYNC_FRESH_MS;
+  var hiddenSyncBusy = !!(nulogySyncState && (nulogySyncState.syncing || nulogySyncState.deferredSyncing));
   var dockAutoSyncFresh = isFreshForAutoSync(ds.dockTimestamp);
   var evoconAutoSyncFresh = isFreshForAutoSync(ds.evoconTimestamp || evoconLastSyncAt);
   var triggerHiddenNulogySync = useCallback(function(mode) {
-    if (nulogySyncState && nulogySyncState.syncing) return;
+    if (hiddenSyncBusy) return;
     var nextMode = mode === "production_only" ? "production_only" : "full";
     setHiddenNulogySyncMode(nextMode);
     setAutoSyncArmed(true);
     setSyncNonce(function(n) { return n + 1; });
-  }, [nulogySyncState]);
+  }, [hiddenSyncBusy]);
   var triggerFullNulogySync = useCallback(function() {
     triggerHiddenNulogySync("full");
   }, [triggerHiddenNulogySync]);
@@ -328,7 +329,7 @@ export default function ProductionReadiness() {
     } finally {
       setDockApiLoading(false);
     }
-  }, [ds]);
+  }, [ds.setDockData, ds.setDockFileName, ds.setDockTimestamp]);
   var fetchEvoconApi = useCallback(async () => {
     setEvoconApiLoading(true);
     setEvoconApiError("");
@@ -351,7 +352,7 @@ export default function ProductionReadiness() {
     } finally {
       setEvoconApiLoading(false);
     }
-  }, [ds]);
+  }, [ds.setEvoconData, ds.setEvoconFileName, ds.setEvoconTimestamp]);
   var loadUserActivity = useCallback(async function() {
     setUserActivityLoading(true);
     setUserActivityError("");
@@ -385,13 +386,16 @@ export default function ProductionReadiness() {
 
   useEffect(() => {
     if (!shouldRunIntervalSync) return;
-    if (!evoconApiLoading && !evoconAutoSyncFresh) {
+    if (!dockApiLoading && !dockAutoSyncFresh && !dockApiError) {
+      fetchOpenDockApi();
+    }
+    if (!evoconApiLoading && !evoconAutoSyncFresh && !evoconApiError) {
       fetchEvoconApi();
     }
     var intervalId = setInterval(function() {
       if (!dockApiLoading && !dockAutoSyncFresh) fetchOpenDockApi();
       if (!evoconApiLoading && !evoconAutoSyncFresh) fetchEvoconApi();
-      if (showAutoBootstrap && !(nulogySyncState && nulogySyncState.syncing)) {
+      if (showAutoBootstrap && !hiddenSyncBusy) {
         if (!nulogyAutoSyncFresh) {
           triggerFullNulogySync();
         } else if (!productionAutoSyncFresh) {
@@ -400,7 +404,7 @@ export default function ProductionReadiness() {
       }
     }, AUTO_SYNC_MS);
     return function() { clearInterval(intervalId); };
-  }, [shouldRunIntervalSync, showAutoBootstrap, dockApiLoading, evoconApiLoading, nulogySyncState, fetchOpenDockApi, fetchEvoconApi, dockAutoSyncFresh, evoconAutoSyncFresh, nulogyAutoSyncFresh, productionAutoSyncFresh, triggerFullNulogySync, triggerProductionRefresh]);
+  }, [shouldRunIntervalSync, showAutoBootstrap, dockApiLoading, dockApiError, evoconApiLoading, evoconApiError, hiddenSyncBusy, fetchOpenDockApi, fetchEvoconApi, dockAutoSyncFresh, evoconAutoSyncFresh, nulogyAutoSyncFresh, productionAutoSyncFresh, triggerFullNulogySync, triggerProductionRefresh]);
 
   var handleNulogyData = useCallback(async function(results) {
     var ts = new Date();
@@ -428,7 +432,16 @@ export default function ProductionReadiness() {
     }
     if (results.production) {
       var productionRows = getRows(results.production);
-      ds.setProductionData(productionRows);
+      if (hiddenNulogySyncMode === "production_only") {
+        ds.setProductionData(function(prev) {
+          // Keep the fuller client-side history; the recent production refresh exists
+          // to refresh server aggregates and freshness, not to truncate the local cache.
+          if (Array.isArray(prev) && prev.length > productionRows.length) return prev;
+          return productionRows;
+        });
+      } else {
+        ds.setProductionData(productionRows);
+      }
       ds.setProductionFileName("Nulogy Sync");
       ds.setProductionTimestamp(ts);
       serverWrites.push(fetch("/api/cache/production-events", {
@@ -476,7 +489,7 @@ export default function ProductionReadiness() {
       await Promise.allSettled(serverWrites);
       setOperationsServerSyncVersion(function(v) { return v + 1; });
     }
-  }, []);
+  }, [hiddenNulogySyncMode]);
   var analysisForUI = analysis || { results:[], flags:[], diagnostics:{} };
   var summaryForUI = summary || { total:0, ready:0, partial:0, blocked:0, nobom:0 };
   var criticalItemsForUI = criticalItems || [];
