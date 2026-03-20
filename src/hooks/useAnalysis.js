@@ -11,6 +11,14 @@ function normalizePoKey(value) {
   return normalizeStr(s);
 }
 
+function normalizeWorkOrderKey(value) {
+  var s = (value || "").toString().trim();
+  if (!s) return "";
+  s = s.replace(/\.0+$/, "");
+  s = s.replace(/[^a-zA-Z0-9]/g, "");
+  return normalizeStr(s);
+}
+
 function buildSkuMatchKeys(value) {
   var raw = (value || "").toString().trim();
   if (!raw) return [];
@@ -99,6 +107,22 @@ function firstValue(row, keys) {
   return "";
 }
 
+function firstValueLoose(row, keys) {
+  var direct = firstValue(row, keys);
+  if (direct) return direct;
+  if (!row || !keys || !keys.length) return "";
+  var wanted = {};
+  keys.forEach(function(k) { wanted[normalizeStr(k)] = true; });
+  var rowKeys = Object.keys(row);
+  for (var i = 0; i < rowKeys.length; i++) {
+    var rk = rowKeys[i];
+    if (!wanted[normalizeStr(rk)]) continue;
+    var v = row[rk];
+    if (v != null && v !== "") return v;
+  }
+  return "";
+}
+
 function firstCostValue(row) {
   var direct = firstValue(row, [
     "Cost Per Unit", "cost_per_unit", "Unit Cost", "unit_cost",
@@ -168,21 +192,6 @@ function classifyShiftET(parts) {
 export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMaster, boms, workOrders, productionData, invMapping, bomMapping, woMapping, poData, poMapping, edrData, dockData }) {
 
   var productionSegments = useMemo(function() {
-    function firstValueLoose(row, keys) {
-      var direct = firstValue(row, keys);
-      if (direct) return direct;
-      if (!row || !keys || !keys.length) return "";
-      var wanted = {};
-      keys.forEach(function(k) { wanted[normalizeStr(k)] = true; });
-      var rowKeys = Object.keys(row);
-      for (var i = 0; i < rowKeys.length; i++) {
-        var rk = rowKeys[i];
-        if (!wanted[normalizeStr(rk)]) continue;
-        var v = row[rk];
-        if (v != null && v !== "") return v;
-      }
-      return "";
-    }
     var productionRows = Array.isArray(productionData) ? productionData : [];
     var byShiftDay = {};
     var byJob = {};
@@ -244,6 +253,18 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
   /* ====== ANALYSIS ENGINE ====== */
   var analysis = useMemo(() => {
     if (!mappingConfirmed || !allUploaded) return null;
+    var productionByWorkOrder = {};
+    var productionBySkuAttributed = {};
+    (Array.isArray(productionData) ? productionData : []).forEach(function(row) {
+      var units = safeNum(firstValueLoose(row, ["Units Produced", "units_produced", "unitsProduced", "Produced Units", "Quantity Produced", "Qty Produced"]));
+      if (!(units > 0)) return;
+      var woRaw = firstValueLoose(row, ["Work Order Code", "project_code", "Project Code"]);
+      var woKey = normalizeWorkOrderKey(woRaw);
+      var skuRaw = firstValueLoose(row, ["Item Code", "item_code"]);
+      var skuKey = normalizeStr(String(skuRaw || "").trim());
+      if (woKey) productionByWorkOrder[woKey] = (productionByWorkOrder[woKey] || 0) + units;
+      if (woKey && skuKey) productionBySkuAttributed[skuKey] = (productionBySkuAttributed[skuKey] || 0) + units;
+    });
     var invMap = {}; var itemMasterBySku = {};
     (itemMaster || []).forEach(function(row) {
       var skuRaw = firstValue(row, ["Item Code", "Code", "item_code", "code"]).toString().trim();
@@ -332,8 +353,26 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       var woNum = (wo[woMapping.woNumber]||"").toString().trim(); var productSku = normalizeStr(wo[woMapping.productSku]); var productSkuRaw = (wo[woMapping.productSku]||"").toString().trim();
       var qtyToProduce = safeNum(wo[woMapping.qtyToProduce]); var dueDate = woMapping.dueDate ? (wo[woMapping.dueDate]||"").toString().trim() : ""; var status = woMapping.status ? (wo[woMapping.status]||"").toString().trim() : "";
       var customer = woMapping.customer ? (wo[woMapping.customer]||"").toString().trim() : "";
-      var unitsProduced = woMapping.unitsProduced ? safeNum(wo[woMapping.unitsProduced]) : 0;
-      var unitsRemaining = woMapping.unitsRemaining ? safeNum(wo[woMapping.unitsRemaining]) : Math.max(0, qtyToProduce - unitsProduced);
+      var statusNorm = normalizeStr(status);
+      var isStatusClosed =
+        statusNorm.includes("closed") ||
+        statusNorm.includes("complete") ||
+        statusNorm.includes("completed") ||
+        statusNorm.includes("done") ||
+        statusNorm.includes("cancelled") ||
+        statusNorm.includes("canceled") ||
+        statusNorm.includes("archived");
+      var snapshotUnitsProduced = woMapping.unitsProduced ? safeNum(wo[woMapping.unitsProduced]) : 0;
+      var snapshotUnitsRemaining = woMapping.unitsRemaining ? safeNum(wo[woMapping.unitsRemaining]) : Math.max(0, qtyToProduce - snapshotUnitsProduced);
+      var woKey = normalizeWorkOrderKey(woNum);
+      var hasAttributedSkuProduction = !isStatusClosed && safeNum(productionBySkuAttributed[productSku]) > 0;
+      var hasAttributedWoProduction = !!(woKey && Object.prototype.hasOwnProperty.call(productionByWorkOrder, woKey));
+      var unitsProduced = hasAttributedSkuProduction
+        ? (hasAttributedWoProduction ? safeNum(productionByWorkOrder[woKey]) : 0)
+        : snapshotUnitsProduced;
+      var unitsRemaining = hasAttributedSkuProduction
+        ? Math.max(0, qtyToProduce - unitsProduced)
+        : snapshotUnitsRemaining;
       var unitsPerHour = woMapping.unitsPerHour ? safeNum(wo[woMapping.unitsPerHour]) : 0;
       var standardPeople = woMapping.standardPeople ? safeNum(wo[woMapping.standardPeople]) : 0;
       var plannedStart = woMapping.plannedStart ? (wo[woMapping.plannedStart]||"").toString().trim() : "";
@@ -341,7 +380,20 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       var reference1 = woMapping.reference1 ? (wo[woMapping.reference1]||"").toString().trim() : "";
       var estHours = unitsPerHour > 0 && unitsRemaining > 0 ? Math.round(unitsRemaining / unitsPerHour * 10) / 10 : 0;
       var prodPct = qtyToProduce > 0 ? Math.round(unitsProduced / qtyToProduce * 100) : 0;
-      var extra = { customer:customer, unitsProduced:unitsProduced, unitsRemaining:unitsRemaining, unitsPerHour:unitsPerHour, standardPeople:standardPeople, plannedStart:plannedStart, plannedEnd:plannedEnd, reference1:reference1, estHours:estHours, prodPct:prodPct };
+      var extra = {
+        customer:customer,
+        unitsProduced:unitsProduced,
+        unitsRemaining:unitsRemaining,
+        unitsPerHour:unitsPerHour,
+        standardPeople:standardPeople,
+        plannedStart:plannedStart,
+        plannedEnd:plannedEnd,
+        reference1:reference1,
+        estHours:estHours,
+        prodPct:prodPct,
+        unitsProducedSource: hasAttributedSkuProduction ? "production_events" : "workorders_snapshot",
+        snapshotUnitsProduced: snapshotUnitsProduced
+      };
       var bom = bomMap[productSku];
       if (!bom) return Object.assign({ woNum:woNum, productSkuRaw:productSkuRaw, productDesc:resolveItemDescription(productSku, productSkuRaw, ""), qtyToProduce:qtyToProduce, dueDate:dueDate, status:status, readiness:-1, runStatus:"nobom", components:[], maxRunnable:0, couldMake:0, zeroStockCount:0, normalizedSku:productSku }, extra);
       var demandUnits = Math.max(0, unitsRemaining);
@@ -361,7 +413,27 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       return Object.assign({ woNum:woNum, productSkuRaw:productSkuRaw, productDesc:resolveItemDescription(productSku, productSkuRaw, ""), qtyToProduce:qtyToProduce, dueDate:dueDate, status:status, readiness:readiness, runStatus:runStatus, components:components, maxRunnable:Math.min(maxRun, demandUnits), couldMake:Math.min(couldMk, demandUnits), zeroStockCount:zeroCount, normalizedSku:productSku }, extra);
     });
     var costPerUnitCount = Object.values(itemMasterBySku).filter(function(it) { return safeNum(it && it.costPerUnit) > 0; }).length;
-    var diag = { invCount:inventory.length, invStatusColumn:invStatusCol || "", invRowsIncluded:invRowsIncluded, invRowsExcludedByStatus:invRowsExcludedByStatus, invUniqueSkus:Object.keys(invMap).length, itemMasterRows:(itemMaster||[]).length, itemMasterSkus:Object.keys(itemMasterBySku).length, itemMasterCostPerUnitSkus:costPerUnitCount, invSampleQtys:Object.entries(invMap).slice(0,6).map(function(e){return{key:e[0],qty:e[1]}}), bomParentCount:Object.keys(bomMap).length, bomSampleParents:Object.keys(bomMap).slice(0,8), bomTotalLines:boms?boms.length:0, woCount:workOrders.length, woUniqueSkus:[...new Set(results.map(r=>r.normalizedSku))], woUnmatched:[...new Set(results.filter(r=>r.runStatus==="nobom").map(r=>({raw:r.productSkuRaw,norm:r.normalizedSku})))].slice(0,10), woMatchedCount:results.filter(r=>r.runStatus!=="nobom").length };
+    var diag = {
+      invCount:inventory.length,
+      invStatusColumn:invStatusCol || "",
+      invRowsIncluded:invRowsIncluded,
+      invRowsExcludedByStatus:invRowsExcludedByStatus,
+      invUniqueSkus:Object.keys(invMap).length,
+      itemMasterRows:(itemMaster||[]).length,
+      itemMasterSkus:Object.keys(itemMasterBySku).length,
+      itemMasterCostPerUnitSkus:costPerUnitCount,
+      invSampleQtys:Object.entries(invMap).slice(0,6).map(function(e){return{key:e[0],qty:e[1]}}),
+      bomParentCount:Object.keys(bomMap).length,
+      bomSampleParents:Object.keys(bomMap).slice(0,8),
+      bomTotalLines:boms?boms.length:0,
+      woCount:workOrders.length,
+      woUniqueSkus:[...new Set(results.map(r=>r.normalizedSku))],
+      woUnmatched:[...new Set(results.filter(r=>r.runStatus==="nobom").map(r=>({raw:r.productSkuRaw,norm:r.normalizedSku})))].slice(0,10),
+      woMatchedCount:results.filter(r=>r.runStatus!=="nobom").length,
+      productionEventWorkOrders:Object.keys(productionByWorkOrder).length,
+      productionEventSkus:Object.keys(productionBySkuAttributed).length,
+      producedOverridesCount:results.filter(function(r) { return r.unitsProducedSource === "production_events"; }).length
+    };
 
     /* ====== DATA FLAGS ====== */
     var flags = [];
