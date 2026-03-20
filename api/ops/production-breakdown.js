@@ -29,19 +29,26 @@ function resolveProductionTiming(row) {
   };
 }
 
-async function fetchAllProductionRows(supabase, siteId, fromDate) {
+function sanitizeIsoDate(value) {
+  var s = String(value || "").trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : "";
+}
+
+async function fetchAllProductionRows(supabase, siteId, fromDate, toDate) {
   var pageSize = 1000;
   var from = 0;
   var out = [];
   while (true) {
     var to = from + pageSize - 1;
-    var q = await supabase
+    var query = supabase
       .from("production_events")
       .select("event_key,produced_date_et,shift_label,job_id,item_code,units_produced,line,work_order_code,raw")
       .eq("site_id", siteId)
       .gte("produced_date_et", fromDate)
       .order("produced_date_et", { ascending: false })
       .range(from, to);
+    if (toDate) query = query.lte("produced_date_et", toDate);
+    var q = await query;
     if (q.error) return { error: q.error, data: out };
     var rows = Array.isArray(q.data) ? q.data : [];
     out = out.concat(rows);
@@ -63,15 +70,21 @@ export default async function handler(req, res) {
     if (!user) return res.status(401).json({ error: "Unauthorized" });
     const supabase = getSupabaseAdmin();
 
-    const days = Math.max(1, Math.min(120, Number(req.query.days || 30)));
-    const fromDate = toDateEt(days);
+    const hasRange = !!(sanitizeIsoDate(req.query.start) && sanitizeIsoDate(req.query.end));
+    const days = hasRange ? 0 : Math.max(1, Math.min(120, Number(req.query.days || 30)));
+    const fromDate = hasRange ? sanitizeIsoDate(req.query.start) : toDateEt(days);
+    const toDate = hasRange ? sanitizeIsoDate(req.query.end) : "";
+    if (!fromDate || (hasRange && (!toDate || toDate < fromDate))) {
+      return res.status(400).json({ error: "Invalid start/end date range" });
+    }
 
-    const q = await fetchAllProductionRows(supabase, CACHE_SITE_ID, fromDate);
+    const q = await fetchAllProductionRows(supabase, CACHE_SITE_ID, fromDate, toDate);
     if (q.error) throw q.error;
     const rows = Array.isArray(q.data) ? q.data : [];
     const bySku = {};
     const byLine = {};
     const byDate = {};
+    const byDaySku = {};
 
     rows.forEach(function(r) {
       const timing = resolveProductionTiming(r);
@@ -90,6 +103,9 @@ export default async function handler(req, res) {
         if (!byDate[dateKey][line]) byDate[dateKey][line] = { line: line, units: 0, rows: 0 };
         byDate[dateKey][line].units += units;
         byDate[dateKey][line].rows += 1;
+        if (!byDaySku[dateKey]) byDaySku[dateKey] = {};
+        if (!byDaySku[dateKey][sku]) byDaySku[dateKey][sku] = { day_key: dateKey, item_code: sku, units: 0 };
+        byDaySku[dateKey][sku].units += units;
       }
     });
 
@@ -99,6 +115,7 @@ export default async function handler(req, res) {
     return res.status(200).json({
       days: days,
       fromDate: fromDate,
+      toDate: toDate || null,
       totalRows: rows.length,
       rowsLite: rows.map(function(r) {
         var timing = resolveProductionTiming(r);
@@ -114,6 +131,11 @@ export default async function handler(req, res) {
           work_order_code: r.work_order_code || null
         };
       }),
+      byDaySku: Object.keys(byDaySku).sort().reduce(function(out, dayKey) {
+        return out.concat(Object.values(byDaySku[dayKey]).sort(function(a, b) {
+          return b.units - a.units;
+        }));
+      }, []),
       bySku: Object.values(bySku).sort(function(a, b) { return b.units - a.units; }).slice(0, 200),
       byLine: Object.values(byLine).sort(function(a, b) { return b.units - a.units; }),
       latestDate: latestDate,

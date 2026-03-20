@@ -1,5 +1,6 @@
 import Sentry from "../_sentry.js";
 import { CACHE_SITE_ID, getAuthenticatedUser, getSupabaseAdmin, toNum, withCors } from "./_common.js";
+import { fetchProductionTotalsForWorkOrders } from "./_production.js";
 import { runLaborForecast } from "../../src/lib/laborForecast.js";
 
 function sanitizeMonthKey(v) {
@@ -113,6 +114,7 @@ export default async function handler(req, res) {
         var payload = snapshot && snapshot.payload ? snapshot.payload : {};
         var workOrders = Array.isArray(payload.workOrders) ? payload.workOrders : [];
         var itemMaster = Array.isArray(payload.itemMaster) ? payload.itemMaster : [];
+        var productionActuals = await fetchProductionTotalsForWorkOrders(supabase, workOrders);
         var pricing = await getPricingRows(supabase);
         assumptionsMonths.forEach(function(monthKey) {
           var row = assumptionsByMonth[monthKey] || {};
@@ -121,6 +123,8 @@ export default async function handler(req, res) {
             workOrders: workOrders,
             itemMaster: itemMaster,
             pricing: pricing,
+            productionActualsByWorkOrder: productionActuals.byWorkOrder,
+            productionActualsBySku: productionActuals.bySku,
             laborTemplates: Array.isArray(row.labor_templates) ? row.labor_templates : [],
             globalAssumptions: row.global_assumptions && typeof row.global_assumptions === "object" ? row.global_assumptions : {},
             overrides: Array.isArray(row.overrides) ? row.overrides : []

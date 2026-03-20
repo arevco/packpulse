@@ -44,16 +44,22 @@ function buildProductionFilters() {
   var shiftHours = Number(process.env.NULOGY_SHIFT_HOURS || 8);
   var shiftsPerDay = Number(process.env.NULOGY_SHIFTS_PER_DAY || 2);
   var lookbackShifts = Number(process.env.NULOGY_PRODUCTION_LOOKBACK_SHIFTS || 60);
-  var fixedFromEnv = String(process.env.NULOGY_PRODUCTION_FROM_DATE || "2026-01-01").trim();
+  var fixedFromEnv = String(process.env.NULOGY_PRODUCTION_FROM_DATE || "").trim();
+  var correctionDays = Number(process.env.PRODUCTION_EVENT_CORRECTION_DAYS || process.env.NULOGY_EVENT_CORRECTION_DAYS || 60);
+  var explicitLookbackDays = Number(process.env.NULOGY_PRODUCTION_LOOKBACK_DAYS || 0);
   var now = new Date();
   // Convert "shifts" to wall-clock hours using shifts/day.
   // Example: 60 shifts at 2 shifts/day => 30 calendar days => 720 hours.
   var hoursPerShiftWindow = (24 / Math.max(1, shiftsPerDay)) * Math.max(1, lookbackShifts);
   var lookbackHours = Math.max(1, shiftHours, hoursPerShiftWindow);
+  if (explicitLookbackDays > 0) lookbackHours = Math.max(lookbackHours, explicitLookbackDays * 24);
+  if (!(explicitLookbackDays > 0) && correctionDays > 0) lookbackHours = Math.max(lookbackHours, correctionDays * 24);
   var from = new Date(now.getTime() - lookbackHours * 3600000);
-  // Long-term baseline: default production pull starts at 2026-01-01 unless explicitly overridden.
-  var fixedFrom = new Date(fixedFromEnv + "T00:00:00");
-  if (!isNaN(fixedFrom)) from = fixedFrom;
+  // Explicit env override still supports one-off historical backfills.
+  if (fixedFromEnv) {
+    var fixedFrom = new Date(fixedFromEnv + "T00:00:00");
+    if (!isNaN(fixedFrom)) from = fixedFrom;
+  }
   // Date-only "between" filters can be interpreted as midnight boundaries by upstream APIs.
   // Query through tomorrow so today's intraday production is not dropped.
   var toInclusive = new Date(now);

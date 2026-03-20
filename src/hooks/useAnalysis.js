@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { safeNum, normalizeStr } from "../utils";
 
 function normalizePoKey(value) {
@@ -190,6 +190,56 @@ function classifyShiftET(parts) {
 }
 
 export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMaster, boms, workOrders, productionData, invMapping, bomMapping, woMapping, poData, poMapping, edrData, dockData }) {
+  var [productionAttribution, setProductionAttribution] = useState({ status: "idle", byWorkOrder: {}, bySku: {} });
+
+  useEffect(function() {
+    var cancelled = false;
+    if (!mappingConfirmed || !allUploaded || !Array.isArray(workOrders) || !workOrders.length) {
+      setProductionAttribution({ status: "idle", byWorkOrder: {}, bySku: {} });
+      return;
+    }
+    var requested = workOrders.map(function(wo) {
+      return {
+        woNum: (wo && wo[woMapping.woNumber]) || "",
+        sku: (wo && wo[woMapping.productSku]) || "",
+        status: woMapping.status ? ((wo && wo[woMapping.status]) || "") : ""
+      };
+    }).filter(function(row) {
+      return !!(String(row.woNum || "").trim() || String(row.sku || "").trim());
+    });
+    if (!requested.length) {
+      setProductionAttribution({ status: "ok", byWorkOrder: {}, bySku: {} });
+      return;
+    }
+    (async function() {
+      try {
+        var res = await fetch("/api/ops/workorder-production", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ workOrders: requested })
+        });
+        var body = await res.json();
+        if (cancelled) return;
+        if (!res.ok) throw new Error((body && body.error) || "Could not load work order production attribution");
+        setProductionAttribution({
+          status: "ok",
+          byWorkOrder: body && body.byWorkOrder && typeof body.byWorkOrder === "object" ? body.byWorkOrder : {},
+          bySku: body && body.bySku && typeof body.bySku === "object" ? body.bySku : {},
+          matchedRows: Number(body && body.matchedRows) || 0
+        });
+      } catch (err) {
+        if (cancelled) return;
+        setProductionAttribution({
+          status: "error",
+          byWorkOrder: {},
+          bySku: {},
+          error: err && err.message ? err.message : "Could not load work order production attribution"
+        });
+      }
+    })();
+    return function() { cancelled = true; };
+  }, [mappingConfirmed, allUploaded, workOrders, woMapping.woNumber, woMapping.productSku, woMapping.status]);
 
   var productionSegments = useMemo(function() {
     var productionRows = Array.isArray(productionData) ? productionData : [];
@@ -255,16 +305,21 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
     if (!mappingConfirmed || !allUploaded) return null;
     var productionByWorkOrder = {};
     var productionBySkuAttributed = {};
-    (Array.isArray(productionData) ? productionData : []).forEach(function(row) {
-      var units = safeNum(firstValueLoose(row, ["Units Produced", "units_produced", "unitsProduced", "Produced Units", "Quantity Produced", "Qty Produced"]));
-      if (!(units > 0)) return;
-      var woRaw = firstValueLoose(row, ["Work Order Code", "project_code", "Project Code"]);
-      var woKey = normalizeWorkOrderKey(woRaw);
-      var skuRaw = firstValueLoose(row, ["Item Code", "item_code"]);
-      var skuKey = normalizeStr(String(skuRaw || "").trim());
-      if (woKey) productionByWorkOrder[woKey] = (productionByWorkOrder[woKey] || 0) + units;
-      if (woKey && skuKey) productionBySkuAttributed[skuKey] = (productionBySkuAttributed[skuKey] || 0) + units;
-    });
+    if (productionAttribution.status === "ok") {
+      productionByWorkOrder = Object.assign({}, productionAttribution.byWorkOrder || {});
+      productionBySkuAttributed = Object.assign({}, productionAttribution.bySku || {});
+    } else {
+      (Array.isArray(productionData) ? productionData : []).forEach(function(row) {
+        var units = safeNum(firstValueLoose(row, ["Units Produced", "units_produced", "unitsProduced", "Produced Units", "Quantity Produced", "Qty Produced"]));
+        if (!(units > 0)) return;
+        var woRaw = firstValueLoose(row, ["Work Order Code", "project_code", "Project Code"]);
+        var woKey = normalizeWorkOrderKey(woRaw);
+        var skuRaw = firstValueLoose(row, ["Item Code", "item_code"]);
+        var skuKey = normalizeStr(String(skuRaw || "").trim());
+        if (woKey) productionByWorkOrder[woKey] = (productionByWorkOrder[woKey] || 0) + units;
+        if (woKey && skuKey) productionBySkuAttributed[skuKey] = (productionBySkuAttributed[skuKey] || 0) + units;
+      });
+    }
     var invMap = {}; var itemMasterBySku = {};
     (itemMaster || []).forEach(function(row) {
       var skuRaw = firstValue(row, ["Item Code", "Code", "item_code", "code"]).toString().trim();
@@ -432,7 +487,8 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       woMatchedCount:results.filter(r=>r.runStatus!=="nobom").length,
       productionEventWorkOrders:Object.keys(productionByWorkOrder).length,
       productionEventSkus:Object.keys(productionBySkuAttributed).length,
-      producedOverridesCount:results.filter(function(r) { return r.unitsProducedSource === "production_events"; }).length
+      producedOverridesCount:results.filter(function(r) { return r.unitsProducedSource === "production_events"; }).length,
+      productionAttributionSource: productionAttribution.status === "ok" ? "server" : "local_raw_fallback"
     };
 
     /* ====== DATA FLAGS ====== */
@@ -486,7 +542,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
     } }); });
 
     return { results:results, diagnostics:diag, flags:flags };
-  }, [mappingConfirmed, allUploaded, inventory, itemMaster, boms, workOrders, invMapping, bomMapping, woMapping]);
+  }, [mappingConfirmed, allUploaded, inventory, itemMaster, boms, workOrders, productionData, productionAttribution, invMapping, bomMapping, woMapping]);
 
   var summary = useMemo(() => { if (!analysis) return null; var r = analysis.results; return { total:r.length, ready:r.filter(w=>w.runStatus==="ready").length, partial:r.filter(w=>w.runStatus==="partial").length, blocked:r.filter(w=>w.runStatus==="blocked").length, nobom:r.filter(w=>w.runStatus==="nobom").length }; }, [analysis]);
 

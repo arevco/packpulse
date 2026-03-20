@@ -32,6 +32,17 @@ function currentMonthKey() {
   return new Date().toISOString().slice(0, 7);
 }
 
+function monthRange(monthKey) {
+  var s = String(monthKey || "").trim();
+  if (!/^\d{4}-\d{2}$/.test(s)) return { start: "", end: "" };
+  var year = Number(s.slice(0, 4));
+  var month = Number(s.slice(5, 7));
+  var start = s + "-01";
+  var endDate = new Date(Date.UTC(year, month, 0));
+  var end = endDate.toISOString().slice(0, 10);
+  return { start: start, end: end };
+}
+
 function statusLooksClosed(status) {
   var s = String(status || "").toLowerCase();
   if (!s) return false;
@@ -113,6 +124,7 @@ export default function ForecastView(props) {
   var [versionsMsg, setVersionsMsg] = useState("");
   var [publishLoading, setPublishLoading] = useState(false);
   var [laborActuals, setLaborActuals] = useState({ status: "idle", summary: {} });
+  var [productionActuals, setProductionActuals] = useState({ status: "idle", byDaySku: [] });
   var didLoadMonthRef = useRef({});
   var [expandedRows, setExpandedRows] = useState({});
   var [dirtyRows, setDirtyRows] = useState({});
@@ -468,6 +480,38 @@ export default function ForecastView(props) {
   }, [monthKey, laborData]);
 
   useEffect(function() {
+    var cancelled = false;
+    if (!monthKey) return;
+    var range = monthRange(monthKey);
+    if (!range.start || !range.end) {
+      setProductionActuals({ status: "error", byDaySku: [], error: "Invalid month range" });
+      return;
+    }
+    (async function() {
+      try {
+        var url = "/api/ops/production-breakdown?start=" + encodeURIComponent(range.start) + "&end=" + encodeURIComponent(range.end);
+        var res = await fetch(url, { credentials: "include" });
+        var body = await res.json();
+        if (cancelled) return;
+        if (!res.ok) throw new Error((body && body.error) || "Could not load production actuals");
+        setProductionActuals({
+          status: "ok",
+          byDaySku: Array.isArray(body.byDaySku) ? body.byDaySku : [],
+          totalRows: Number(body.totalRows || 0)
+        });
+      } catch (err) {
+        if (cancelled) return;
+        setProductionActuals({
+          status: "error",
+          byDaySku: [],
+          error: err && err.message ? err.message : "Could not load production actuals"
+        });
+      }
+    })();
+    return function() { cancelled = true; };
+  }, [monthKey]);
+
+  useEffect(function() {
     if (!monthKey) return;
     if (assumptionsLoading) return;
     if (!didLoadMonthRef.current[monthKey]) return;
@@ -522,23 +566,6 @@ export default function ForecastView(props) {
     return out;
   }, [itemMaster]);
   var actualByDay = useMemo(function() {
-    var pick = function(row, keys) {
-      var rowKeys = Object.keys(row || {});
-      for (var i = 0; i < keys.length; i++) {
-        var target = String(keys[i] || "").toLowerCase();
-        for (var j = 0; j < rowKeys.length; j++) {
-          var key = rowKeys[j];
-          if (String(key).toLowerCase() === target) return row[key];
-        }
-      }
-      return "";
-    };
-    var dayIso = function(value) {
-      if (!value) return "";
-      var d = new Date(value);
-      if (isNaN(d)) return "";
-      return d.toISOString().slice(0, 10);
-    };
     var skuRate = {};
     bySku.forEach(function(s) {
       var sku = String(s.sku || "").trim();
@@ -557,12 +584,13 @@ export default function ForecastView(props) {
     });
 
     var out = {};
-    productionData.forEach(function(r) {
-      var sku = String(pick(r, ["Item Code", "item_code", "Code", "code"])).trim();
+    var rows = Array.isArray(productionActuals.byDaySku) ? productionActuals.byDaySku : [];
+    rows.forEach(function(r) {
+      var sku = String((r && r.item_code) || "").trim();
       if (!sku) return;
-      var dt = dayIso(pick(r, ["Produced date", "producedAt", "Produced At", "produced_at", "Actual Job End", "actual_job_end_at", "Actual Job Start", "actual_job_start_at"]));
+      var dt = String((r && r.day_key) || "").trim();
       if (!dt || dt.slice(0, 7) !== monthKey) return;
-      var units = safeNum(pick(r, ["Units Produced", "units_produced", "Produced", "produced"]));
+      var units = safeNum((r && (r.units || r.units_produced)) || 0);
       if (!(units > 0)) return;
       var rate = safeNum(skuRate[sku.toLowerCase()]);
       if (!out[dt]) out[dt] = { day_key: dt, actual_cases: 0, actual_revenue: 0 };
@@ -570,7 +598,7 @@ export default function ForecastView(props) {
       out[dt].actual_revenue += units * rate;
     });
     return out;
-  }, [productionData, bySku, itemMaster, monthKey]);
+  }, [productionActuals, bySku, itemMaster, monthKey]);
 
   var normKey = function(v) {
     return String(v || "").trim().toLowerCase();

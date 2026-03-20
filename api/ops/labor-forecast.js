@@ -1,5 +1,6 @@
 import Sentry from "../_sentry.js";
 import { CACHE_SITE_ID, getAuthenticatedUser, getSupabaseAdmin, toNum, withCors } from "./_common.js";
+import { fetchProductionTotalsForWorkOrders } from "./_production.js";
 import { runLaborForecast } from "../../src/lib/laborForecast.js";
 
 function buildTemplatesFromRates(rates, headcountByRole) {
@@ -71,6 +72,7 @@ export default async function handler(req, res) {
     var payload = snapshot && snapshot.payload ? snapshot.payload : {};
     var workOrders = Array.isArray(body.workOrders) ? body.workOrders : (Array.isArray(payload.workOrders) ? payload.workOrders : []);
     var itemMaster = Array.isArray(body.itemMaster) ? body.itemMaster : (Array.isArray(payload.itemMaster) ? payload.itemMaster : []);
+    var productionActuals = await fetchProductionTotalsForWorkOrders(supabase, workOrders);
 
     var pricing = Array.isArray(body.pricing) ? body.pricing : await getPricingRows(supabase);
     var laborTemplates = Array.isArray(body.laborTemplates) ? body.laborTemplates : [];
@@ -87,6 +89,8 @@ export default async function handler(req, res) {
       workOrders: workOrders,
       itemMaster: itemMaster,
       pricing: pricing,
+      productionActualsByWorkOrder: productionActuals.byWorkOrder,
+      productionActualsBySku: productionActuals.bySku,
       laborTemplates: laborTemplates,
       globalAssumptions: globalAssumptions,
       overrides: overrides
@@ -98,6 +102,7 @@ export default async function handler(req, res) {
       source: {
         snapshotSyncedAt: snapshot && snapshot.synced_at ? snapshot.synced_at : null,
         workOrders: workOrders.length,
+        attributedWorkOrders: Object.keys(productionActuals.byWorkOrder || {}).length,
         itemMaster: itemMaster.length,
         pricing: pricing.length,
         laborTemplates: laborTemplates.length
@@ -112,4 +117,3 @@ export default async function handler(req, res) {
     });
   }
 }
-

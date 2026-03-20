@@ -115,6 +115,13 @@ function parseOverrides(overrides, monthKey) {
   return { byWo: byWo, bySkuLine: bySkuLine, bySku: bySku };
 }
 
+function normalizeWorkOrderCode(value) {
+  var s = String(value || "").trim();
+  if (!s) return "";
+  s = s.replace(/\.0+$/, "");
+  return normalizeStr(s);
+}
+
 function resolveRevenuePerCase(sku, woDateIso, pricingRows, itemMasterCostMap) {
   var skuNorm = normalizeStr(sku);
   var best = 0;
@@ -343,6 +350,12 @@ export function runLaborForecast(input) {
   var pricing = Array.isArray(payload.pricing) ? payload.pricing : [];
   var templateRows = normalizeTemplateRows(payload.laborTemplates);
   var overridesMaps = parseOverrides(payload.overrides, monthKey);
+  var productionActualsByWorkOrder = payload.productionActualsByWorkOrder && typeof payload.productionActualsByWorkOrder === "object"
+    ? payload.productionActualsByWorkOrder
+    : {};
+  var productionActualsBySku = payload.productionActualsBySku && typeof payload.productionActualsBySku === "object"
+    ? payload.productionActualsBySku
+    : {};
   var globalAssumptions = payload.globalAssumptions || {};
   var overheadGlobal = safeNum(globalAssumptions.overhead_global);
   var cogsNonLabor = safeNum(globalAssumptions.cogs_non_labor);
@@ -368,9 +381,18 @@ export function runLaborForecast(input) {
     var status = String(pickValue(wo, ["Work Order Status", "project_status", "status"])).trim();
     var isClosed = statusLooksClosed(status);
     var unitsExpected = safeNum(pickValue(wo, ["Units Expected", "units_expected", "Order Qty", "qtyToProduce", "quantity"]));
-    var unitsProduced = safeNum(pickValue(wo, ["Units Produced", "units_produced", "produced"]));
+    var snapshotUnitsProduced = safeNum(pickValue(wo, ["Units Produced", "units_produced", "produced"]));
     var explicitRemaining = safeNum(pickValue(wo, ["Units Remaining", "units_remaining", "remaining"]));
-    var remainingCases = explicitRemaining > 0 ? explicitRemaining : Math.max(0, unitsExpected - unitsProduced);
+    var skuKey = normalizeStr(sku);
+    var woKey = normalizeWorkOrderCode(woCode);
+    var hasAttributedSkuProduction = !isClosed && safeNum(productionActualsBySku[skuKey]) > 0;
+    var hasAttributedWoProduction = !!(woKey && Object.prototype.hasOwnProperty.call(productionActualsByWorkOrder, woKey));
+    var unitsProduced = hasAttributedSkuProduction
+      ? (hasAttributedWoProduction ? safeNum(productionActualsByWorkOrder[woKey]) : 0)
+      : snapshotUnitsProduced;
+    var remainingCases = hasAttributedSkuProduction
+      ? Math.max(0, unitsExpected - unitsProduced)
+      : (explicitRemaining > 0 ? explicitRemaining : Math.max(0, unitsExpected - snapshotUnitsProduced));
     var isPriorOpenRollover = !!(monthKey && woMonth && woMonth < monthKey && statusLooksBooked(status) && remainingCases > 0);
     var isCurrentMonth = !!(monthKey && woMonth === monthKey);
     if (monthKey && !isCurrentMonth && !isPriorOpenRollover) continue;
