@@ -56,7 +56,8 @@ const AICopilotView = lazySafe(function() { return import("./views/AICopilotView
 export default function ProductionReadiness() {
   const { C, theme, setTheme, sans, mono } = useTheme();
   const AUTO_SYNC_MS = 15 * 60 * 1000;
-  const AUTO_SYNC_FRESH_MS = 30 * 60 * 1000;
+  const FULL_AUTO_SYNC_FRESH_MS = 30 * 60 * 1000;
+  const PRODUCTION_AUTO_SYNC_FRESH_MS = 15 * 60 * 1000;
   const ds = useDataSources();
   const { analysis, summary, criticalItems, woStatuses, woCustomers, timelineData, deliveriesV2, inboundCoverage, recommendations, dispatchQueue, productionSegments } = useAnalysis({
     mappingConfirmed: ds.mappingConfirmed, allUploaded: ds.allUploaded,
@@ -125,6 +126,7 @@ export default function ProductionReadiness() {
   const [workOrdersPrefilterNonce, setWorkOrdersPrefilterNonce] = useState(0);
   const [autoBootstrapEnabled, setAutoBootstrapEnabled] = useState(true);
   const [autoSyncArmed, setAutoSyncArmed] = useState(false);
+  const [hiddenNulogySyncMode, setHiddenNulogySyncMode] = useState("full");
   const [syncNonce, setSyncNonce] = useState(0);
   const [nulogySyncState, setNulogySyncState] = useState(null);
   const [dockApiLoading, setDockApiLoading] = useState(false);
@@ -202,7 +204,7 @@ export default function ProductionReadiness() {
   };
   var isFreshForAutoSync = function(ts) {
     var ms = parseTimestampMs(ts);
-    return !!ms && (Date.now() - ms) < AUTO_SYNC_FRESH_MS;
+    return !!ms && (Date.now() - ms) < FULL_AUTO_SYNC_FRESH_MS;
   };
   var freshestTimestampMs = function(list) {
     return (list || []).reduce(function(max, ts) {
@@ -281,9 +283,24 @@ export default function ProductionReadiness() {
     ds.itemMasterTimestamp,
     ds.bomTimestamp,
   ]);
-  var nulogyAutoSyncFresh = !!latestNulogySyncMs && (Date.now() - latestNulogySyncMs) < AUTO_SYNC_FRESH_MS;
+  var latestProductionSyncMs = freshestTimestampMs([ds.productionTimestamp]);
+  var nulogyAutoSyncFresh = !!latestNulogySyncMs && (Date.now() - latestNulogySyncMs) < FULL_AUTO_SYNC_FRESH_MS;
+  var productionAutoSyncFresh = !!latestProductionSyncMs && (Date.now() - latestProductionSyncMs) < PRODUCTION_AUTO_SYNC_FRESH_MS;
   var dockAutoSyncFresh = isFreshForAutoSync(ds.dockTimestamp);
   var evoconAutoSyncFresh = isFreshForAutoSync(ds.evoconTimestamp || evoconLastSyncAt);
+  var triggerHiddenNulogySync = useCallback(function(mode) {
+    if (nulogySyncState && nulogySyncState.syncing) return;
+    var nextMode = mode === "production_only" ? "production_only" : "full";
+    setHiddenNulogySyncMode(nextMode);
+    setAutoSyncArmed(true);
+    setSyncNonce(function(n) { return n + 1; });
+  }, [nulogySyncState]);
+  var triggerFullNulogySync = useCallback(function() {
+    triggerHiddenNulogySync("full");
+  }, [triggerHiddenNulogySync]);
+  var triggerProductionRefresh = useCallback(function() {
+    triggerHiddenNulogySync("production_only");
+  }, [triggerHiddenNulogySync]);
   var freshnessVariant = freshCount === dataSourceStatus.length ? "success" : freshCount >= 3 ? "warning" : "danger";
   var freshnessLabel = freshCount === dataSourceStatus.length
     ? "Data Fresh"
@@ -356,11 +373,15 @@ export default function ProductionReadiness() {
   var shouldRunIntervalSync = autoSyncHydrated && (ds.mappingConfirmed || showAutoBootstrap);
 
   useEffect(() => {
-    if (!showAutoBootstrap || !autoSyncHydrated || nulogyAutoSyncFresh) return;
-    // Kick off one initial Nulogy sync only when the cached/shared data is stale.
-    setAutoSyncArmed(true);
-    setSyncNonce(function(n) { return n + 1; });
-  }, [showAutoBootstrap, autoSyncHydrated, nulogyAutoSyncFresh]);
+    if (!showAutoBootstrap || !autoSyncHydrated) return;
+    if (!nulogyAutoSyncFresh) {
+      triggerFullNulogySync();
+      return;
+    }
+    if (!productionAutoSyncFresh) {
+      triggerProductionRefresh();
+    }
+  }, [showAutoBootstrap, autoSyncHydrated, nulogyAutoSyncFresh, productionAutoSyncFresh, triggerFullNulogySync, triggerProductionRefresh]);
 
   useEffect(() => {
     if (!shouldRunIntervalSync) return;
@@ -370,13 +391,16 @@ export default function ProductionReadiness() {
     var intervalId = setInterval(function() {
       if (!dockApiLoading && !dockAutoSyncFresh) fetchOpenDockApi();
       if (!evoconApiLoading && !evoconAutoSyncFresh) fetchEvoconApi();
-      if (showAutoBootstrap && !nulogyAutoSyncFresh && !(nulogySyncState && nulogySyncState.syncing)) {
-        setAutoSyncArmed(true);
-        setSyncNonce(function(n) { return n + 1; });
+      if (showAutoBootstrap && !(nulogySyncState && nulogySyncState.syncing)) {
+        if (!nulogyAutoSyncFresh) {
+          triggerFullNulogySync();
+        } else if (!productionAutoSyncFresh) {
+          triggerProductionRefresh();
+        }
       }
     }, AUTO_SYNC_MS);
     return function() { clearInterval(intervalId); };
-  }, [shouldRunIntervalSync, showAutoBootstrap, dockApiLoading, evoconApiLoading, nulogySyncState, fetchOpenDockApi, fetchEvoconApi, dockAutoSyncFresh, evoconAutoSyncFresh, nulogyAutoSyncFresh]);
+  }, [shouldRunIntervalSync, showAutoBootstrap, dockApiLoading, evoconApiLoading, nulogySyncState, fetchOpenDockApi, fetchEvoconApi, dockAutoSyncFresh, evoconAutoSyncFresh, nulogyAutoSyncFresh, productionAutoSyncFresh, triggerFullNulogySync, triggerProductionRefresh]);
 
   var handleNulogyData = useCallback(async function(results) {
     var ts = new Date();
@@ -733,13 +757,15 @@ export default function ProductionReadiness() {
       <main className="mx-auto max-w-[1440px] px-3 py-2.5 sm:px-4 sm:py-3 md:px-7">
       {showAutoBootstrap && (
         <NulogySync
-          key={"auto-sync-" + syncNonce}
+          key={"auto-sync-" + hiddenNulogySyncMode + "-" + syncNonce}
           onDataLoaded={handleNulogyData}
           theme={C}
           autoStart={autoSyncArmed}
           hideToggle
           silent
           onSyncStateChange={setNulogySyncState}
+          defaultSyncTypes={hiddenNulogySyncMode === "production_only" ? ["production"] : undefined}
+          syncProfile={hiddenNulogySyncMode === "production_only" ? "recent_production" : "full"}
         />
       )}
 
@@ -770,7 +796,7 @@ export default function ProductionReadiness() {
             {dockApiError && <Badge variant="danger">OpenDock: {dockApiError}</Badge>}
             {nulogySyncState && nulogySyncState.errorCount > 0 && <Badge variant="danger">Nulogy sync has errors</Badge>}
             {!dockApiLoading && (!nulogySyncState || !nulogySyncState.syncing) && (
-              <Button onClick={() => { setDockApiInfo(""); setDockApiError(""); setAutoSyncArmed(true); setSyncNonce(n => n + 1); fetchOpenDockApi(); fetchEvoconApi(); }} variant="outline" size="sm">
+            <Button onClick={() => { setDockApiInfo(""); setDockApiError(""); triggerFullNulogySync(); fetchOpenDockApi(); fetchEvoconApi(); }} variant="outline" size="sm">
                 Retry Sync
               </Button>
             )}
@@ -898,7 +924,7 @@ export default function ProductionReadiness() {
             {dockApiError && <Badge variant="danger">OpenDock: {dockApiError}</Badge>}
             {nulogySyncState && nulogySyncState.errorCount > 0 && <Badge variant="danger">Nulogy sync has errors</Badge>}
             {!dockApiLoading && (!nulogySyncState || !nulogySyncState.syncing) && !ds.mappingConfirmed && (
-              <Button variant="outline" size="sm" onClick={() => { setDockApiInfo(""); setDockApiError(""); setAutoSyncArmed(true); setSyncNonce(n => n + 1); fetchOpenDockApi(); fetchEvoconApi(); }}>
+              <Button variant="outline" size="sm" onClick={() => { setDockApiInfo(""); setDockApiError(""); triggerFullNulogySync(); fetchOpenDockApi(); fetchEvoconApi(); }}>
                 Retry
               </Button>
             )}
@@ -953,7 +979,7 @@ export default function ProductionReadiness() {
           <div className="mb-2 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-2">
             <div className="mb-2 flex flex-wrap items-center gap-1.5">
             <Button
-              onClick={() => { setAutoSyncArmed(true); setSyncNonce(n => n + 1); }}
+              onClick={triggerFullNulogySync}
               disabled={!!(nulogySyncState && nulogySyncState.syncing)}
               variant={nulogySyncState && nulogySyncState.syncing ? "soft" : "outline"}
               size="sm"
@@ -1089,7 +1115,7 @@ export default function ProductionReadiness() {
         <Suspense fallback={<Card className="mt-3 p-4 text-sm text-[rgb(var(--muted))]">Loading view...</Card>}>
           {activeView === "overview" && <OverviewView analysis={analysisForUI} woStatuses={woStatusesForUI} onSelectCustomer={openWorkOrdersForCustomer} />}
           {activeView === "aicopilot" && <AICopilotView summary={summaryForUI} criticalItems={criticalItemsForUI} dispatchQueue={dispatchQueue || []} productionSegments={productionSegmentsForUI} evoconData={ds.evoconData || []} workOrders={analysisForUI.results || []} onNavigate={setActiveView} />}
-          {activeView === "operations" && <OperationsView productionSegments={productionSegmentsForUI} productionDataRaw={ds.productionData || []} laborDataRaw={ds.laborData || []} evoconData={ds.evoconData || []} evoconTimestamp={ds.evoconTimestamp || evoconLastSyncAt} itemMaster={ds.itemMaster || []} initialFilters={operationsPermalinkState} onPermalinkChange={handleOperationsPermalinkChange} serverSyncVersion={operationsServerSyncVersion} />}
+          {activeView === "operations" && <OperationsView productionSegments={productionSegmentsForUI} productionDataRaw={ds.productionData || []} laborDataRaw={ds.laborData || []} evoconData={ds.evoconData || []} evoconTimestamp={ds.evoconTimestamp || evoconLastSyncAt} itemMaster={ds.itemMaster || []} initialFilters={operationsPermalinkState} onPermalinkChange={handleOperationsPermalinkChange} serverSyncVersion={operationsServerSyncVersion} onRefreshProduction={triggerProductionRefresh} refreshingProduction={!!(nulogySyncState && nulogySyncState.syncing && hiddenNulogySyncMode === "production_only")} />}
           {activeView === "forecast" && <ForecastView workOrders={ds.workOrders || []} itemMaster={ds.itemMaster || []} productionData={ds.productionData || []} laborData={ds.laborData || []} initialFilters={forecastPermalinkState} onPermalinkChange={handleForecastPermalinkChange} />}
           {activeView === "workorders" && <WorkOrdersView analysis={analysisForUI} woStatuses={woStatusesForUI} woCustomers={woCustomersForUI} recommendations={recommendationsForUI} dispatchQueue={dispatchQueue || []} inboundCoverage={inboundCoverage} prefilterCustomer={workOrdersPrefilterCustomer} prefilterNonce={workOrdersPrefilterNonce} initialFilters={workOrdersPermalinkState} onPermalinkChange={handleWorkOrdersPermalinkChange} />}
           {activeView === "itemmaster" && <ItemMasterView itemMaster={ds.itemMaster || []} inventory={ds.inventory || []} />}

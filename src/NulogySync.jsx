@@ -24,7 +24,7 @@ const POLL_INTERVAL = 4000; // 4 seconds between polls
 const MAX_POLLS = 60; // max ~4 minutes of polling
 const BETWEEN_REPORT_DELAY_MS = 450;
 
-export default function NulogySync({ onDataLoaded, theme, autoStart = false, hideToggle = false, silent = false, onSyncStateChange }) {
+export default function NulogySync({ onDataLoaded, theme, autoStart = false, hideToggle = false, silent = false, onSyncStateChange, defaultSyncTypes, syncProfile = "full" }) {
   const C = theme;
   const sans = "'Inter', -apple-system, sans-serif";
   const mono = "'Roboto Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
@@ -41,7 +41,9 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
     production: { status: IDLE, progress: "", error: null, rowCount: 0 },
     labor: { status: IDLE, progress: "", error: null, rowCount: 0 }
   });
-  const [syncTypes, setSyncTypes] = useState(["inventory", "workorders", "itemmaster", "bom", "production", "labor"]);
+  const [syncTypes, setSyncTypes] = useState(Array.isArray(defaultSyncTypes) && defaultSyncTypes.length
+    ? defaultSyncTypes.slice()
+    : ["inventory", "workorders", "itemmaster", "bom", "production", "labor"]);
   const abortRef = useRef(false);
   const autoStartedRef = useRef(false);
 
@@ -89,7 +91,7 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
       const createRes = await fetch("/api/nulogy/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reportType: type })
+        body: JSON.stringify({ reportType: type, syncProfile: syncProfile })
       });
       if (!createRes.ok) {
         const err = await createRes.json();

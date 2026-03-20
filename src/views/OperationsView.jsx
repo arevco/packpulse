@@ -656,6 +656,24 @@ function aggregateBreakdownByDay(rowsLite) {
   return Object.values(byDay).sort(function(a, b) { return String(a.date || "").localeCompare(String(b.date || "")); });
 }
 
+function aggregateBreakdownByShift(rowsLite) {
+  var byShift = {};
+  (Array.isArray(rowsLite) ? rowsLite : []).forEach(function(r) {
+    var date = String(r && r.produced_date_et || "");
+    var shift = String(r && r.shift_label || "Unassigned");
+    var units = safeNum(r && r.units_produced);
+    if (!date || !(units > 0)) return;
+    var key = date + "|" + shift;
+    if (!byShift[key]) byShift[key] = { date: date, shift: shift, units: 0, rows: 0 };
+    byShift[key].units += units;
+    byShift[key].rows += 1;
+  });
+  return Object.values(byShift).sort(function(a, b) {
+    if (a.date !== b.date) return String(b.date || "").localeCompare(String(a.date || ""));
+    return String(a.shift || "").localeCompare(String(b.shift || ""));
+  });
+}
+
 function aggregateBreakdownShiftMix(rowsLite) {
   var byDate = {};
   (Array.isArray(rowsLite) ? rowsLite : []).forEach(function(r) {
@@ -709,7 +727,7 @@ function preferHigherShiftSeries(primaryRows, fallbackRows) {
   });
 }
 
-export default function OperationsView({ productionSegments, productionDataRaw, laborDataRaw, evoconData, evoconTimestamp, itemMaster, initialFilters, onPermalinkChange, serverSyncVersion }) {
+export default function OperationsView({ productionSegments, productionDataRaw, laborDataRaw, evoconData, evoconTimestamp, itemMaster, initialFilters, onPermalinkChange, serverSyncVersion, onRefreshProduction, refreshingProduction }) {
   const { C, mono } = useTheme();
   var initial = initialFilters || {};
   var initialPreset = String(initial.preset || "last_14");
@@ -824,20 +842,22 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       var forecastPlanReq = forecastPlanMonths.length
         ? fetch("/api/ops/forecast-plan?monthKeys=" + encodeURIComponent(forecastPlanMonths.join(",")), { credentials: "include" })
         : Promise.resolve({ ok: true, json: async function() { return { plans: {} }; } });
-      var [tr, br, fp, laborResp, configResp] = await Promise.all([
-        fetch("/api/cache/production-trends?days=" + fetchDays, { credentials: "include" }),
+      var [br, fp, laborResp, configResp] = await Promise.all([
         fetch("/api/ops/production-breakdown?days=" + fetchDays, { credentials: "include" }),
         forecastPlanReq,
         fetch("/api/ops/labor-actuals?start=" + encodeURIComponent(laborFetchStart) + "&end=" + encodeURIComponent(laborFetchEnd), { credentials: "include" }),
         fetch("/api/ops/config", { credentials: "include" }),
       ]);
-      var [trBody, brBody, fpBody, laborBody, configBody] = await Promise.all([tr.json(), br.json(), fp.json(), laborResp.json(), configResp.json()]);
-      if (!tr.ok) throw new Error(trBody.error || "Could not load production trends");
+      var [brBody, fpBody, laborBody, configBody] = await Promise.all([br.json(), fp.json(), laborResp.json(), configResp.json()]);
       if (!br.ok) throw new Error(brBody.error || "Could not load production breakdown");
       if (requestId !== loadRequestRef.current) return;
-      setTrends(trBody.trends || null);
+      var breakdownRows = Array.isArray(brBody.rowsLite) ? brBody.rowsLite : [];
+      setTrends({
+        byDay: aggregateBreakdownByDay(breakdownRows).slice().sort(function(a, b) { return String(b.date || "").localeCompare(String(a.date || "")); }),
+        byShift: aggregateBreakdownByShift(breakdownRows)
+      });
       setBreakdown({
-        rowsLite: Array.isArray(brBody.rowsLite) ? brBody.rowsLite : [],
+        rowsLite: breakdownRows,
         bySku: Array.isArray(brBody.bySku) ? brBody.bySku : [],
         byLine: Array.isArray(brBody.byLine) ? brBody.byLine : [],
         latestByLine: Array.isArray(brBody.latestByLine) ? brBody.latestByLine : [],
@@ -2078,8 +2098,15 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
               Today vs yesterday, this week vs last week, this month vs last month, plus current run-rate estimates.
             </div>
           </div>
-          <div className="text-xs text-[rgb(var(--muted))]">
-            Latest production day {metrics.latestProductionDate || "unavailable"}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="text-xs text-[rgb(var(--muted))]">
+              Latest production day {metrics.latestProductionDate || "unavailable"}
+            </div>
+            {onRefreshProduction ? (
+              <Button variant="outline" size="sm" onClick={onRefreshProduction} disabled={!!refreshingProduction}>
+                {refreshingProduction ? "Refreshing..." : "Refresh Production"}
+              </Button>
+            ) : null}
           </div>
         </div>
         <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-6">

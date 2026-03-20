@@ -152,18 +152,20 @@ function businessDateDaysAgo(days) {
   return d;
 }
 
-async function fetchAllProductionEvents(supabase, siteId) {
+async function fetchAllProductionEvents(supabase, siteId, fromDate) {
   var pageSize = 1000;
   var from = 0;
   var out = [];
   while (true) {
     var to = from + pageSize - 1;
-    var q = await supabase
+    var query = supabase
       .from("production_events")
       .select("event_key,produced_date_et,produced_at_utc,source_snapshot_at,shift_label,units_produced,job_id,work_order_code,line,item_code,raw")
       .eq("site_id", siteId)
-      .order("source_snapshot_at", { ascending: false })
+      .order("produced_date_et", { ascending: false })
       .range(from, to);
+    if (fromDate) query = query.gte("produced_date_et", fromDate);
+    var q = await query;
     if (q.error) return { error: q.error, data: out };
     var rows = Array.isArray(q.data) ? q.data : [];
     out = out.concat(rows);
@@ -196,7 +198,7 @@ export default async function handler(req, res) {
     })();
     const fromDate = toEasternDateKey(from);
 
-    const q = await fetchAllProductionEvents(supabase, CACHE_SITE_ID);
+    const q = await fetchAllProductionEvents(supabase, CACHE_SITE_ID, fromDate);
 
     if (q.error) {
       const msg = String(q.error.message || "").toLowerCase();

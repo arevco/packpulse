@@ -1,6 +1,6 @@
 // POST /api/nulogy/create
 // Creates a Nulogy report job with automatic column name discovery
-// Body: { reportType: "inventory" | "workorders" | "bom" | "itemmaster" | "production" | "labor" }
+// Body: { reportType: "inventory" | "workorders" | "bom" | "itemmaster" | "production" | "labor", syncProfile?: "full" | "recent_production" }
 
 import Sentry from "../_sentry.js";
 
@@ -40,23 +40,29 @@ function parseMissingColumns(errorText) {
     .filter(Boolean);
 }
 
-function buildProductionFilters() {
+function buildProductionFilters(options) {
+  var syncProfile = String(options && options.syncProfile || "full");
   var shiftHours = Number(process.env.NULOGY_SHIFT_HOURS || 8);
   var shiftsPerDay = Number(process.env.NULOGY_SHIFTS_PER_DAY || 2);
   var lookbackShifts = Number(process.env.NULOGY_PRODUCTION_LOOKBACK_SHIFTS || 60);
   var fixedFromEnv = String(process.env.NULOGY_PRODUCTION_FROM_DATE || "").trim();
   var correctionDays = Number(process.env.PRODUCTION_EVENT_CORRECTION_DAYS || process.env.NULOGY_EVENT_CORRECTION_DAYS || 60);
   var explicitLookbackDays = Number(process.env.NULOGY_PRODUCTION_LOOKBACK_DAYS || 0);
+  var recentProductionLookbackDays = Number(process.env.NULOGY_RECENT_PRODUCTION_LOOKBACK_DAYS || 3);
   var now = new Date();
   // Convert "shifts" to wall-clock hours using shifts/day.
   // Example: 60 shifts at 2 shifts/day => 30 calendar days => 720 hours.
   var hoursPerShiftWindow = (24 / Math.max(1, shiftsPerDay)) * Math.max(1, lookbackShifts);
   var lookbackHours = Math.max(1, shiftHours, hoursPerShiftWindow);
-  if (explicitLookbackDays > 0) lookbackHours = Math.max(lookbackHours, explicitLookbackDays * 24);
-  if (!(explicitLookbackDays > 0) && correctionDays > 0) lookbackHours = Math.max(lookbackHours, correctionDays * 24);
+  if (syncProfile === "recent_production") {
+    lookbackHours = Math.max(shiftHours, Math.max(1, recentProductionLookbackDays) * 24);
+  } else {
+    if (explicitLookbackDays > 0) lookbackHours = Math.max(lookbackHours, explicitLookbackDays * 24);
+    if (!(explicitLookbackDays > 0) && correctionDays > 0) lookbackHours = Math.max(lookbackHours, correctionDays * 24);
+  }
   var from = new Date(now.getTime() - lookbackHours * 3600000);
   // Explicit env override still supports one-off historical backfills.
-  if (fixedFromEnv) {
+  if (fixedFromEnv && syncProfile !== "recent_production") {
     var fixedFrom = new Date(fixedFromEnv + "T00:00:00");
     if (!isNaN(fixedFrom)) from = fixedFrom;
   }
@@ -202,6 +208,7 @@ export default async function handler(req, res) {
 
   const auth = Buffer.from(`${user}:${pass}`).toString("base64");
   const errors = [];
+  const filterOptions = { syncProfile: req.body && req.body.syncProfile ? req.body.syncProfile : "full" };
 
   for (let attempt = 0; attempt < config.columnSets.length; attempt++) {
     const columns = config.columnSets[attempt];
@@ -212,7 +219,7 @@ export default async function handler(req, res) {
       locale: "en_US"
     };
     if (config.filters) {
-      body.filters = typeof config.filters === "function" ? config.filters() : config.filters;
+      body.filters = typeof config.filters === "function" ? config.filters(filterOptions) : config.filters;
     }
     if (siteUuid) body.site_uuid = siteUuid;
 
@@ -276,7 +283,7 @@ export default async function handler(req, res) {
                 locale: "en_US"
               };
               if (config.filters) {
-                prunedBody.filters = typeof config.filters === "function" ? config.filters() : config.filters;
+                prunedBody.filters = typeof config.filters === "function" ? config.filters(filterOptions) : config.filters;
               }
               if (siteUuid) prunedBody.site_uuid = siteUuid;
 
