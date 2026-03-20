@@ -246,11 +246,30 @@ export default function ProductionReadiness() {
   }, 0);
   var summaryStamp = newestTs ? fmtTs(new Date(newestTs)) : "--";
   var sharedMeta = ds.sharedSnapshotMeta || { source: "unknown", syncedAt: null, updatedBy: "" };
-  var sharedWrite = ds.sharedSnapshotWrite || { status:"idle", attemptedAt:null, succeededAt:null, error:"", snapshotVersion:"" };
+  var sharedWrite = ds.sharedSnapshotWrite || {
+    status:"idle",
+    attemptedAt:null,
+    succeededAt:null,
+    error:"",
+    snapshotVersion:"",
+    productionWriteMode:"",
+    laborWriteMode:"",
+    productionCorrectionStart:"",
+    laborCorrectionStart:""
+  };
   var sharedSourceLabel = sharedMeta.source === "shared" ? "Shared cache" : sharedMeta.source === "local" ? "Local cache" : sharedMeta.source === "empty" ? "Shared cache empty" : "Shared cache unavailable";
   var sharedStamp = sharedMeta.syncedAt ? fmtTs(sharedMeta.syncedAt) : "--";
   var sharedAgeMins = sharedMeta.syncedAt ? Math.max(0, Math.floor((Date.now() - new Date(sharedMeta.syncedAt).getTime()) / 60000)) : null;
   var sharedSeemsStale = !!(sharedAgeMins != null && sharedAgeMins > 30 && freshCount >= 3);
+  var productionWriteLabel = sharedWrite.productionWriteMode ? String(sharedWrite.productionWriteMode).replace(/_/g, " ") : "";
+  var laborWriteLabel = sharedWrite.laborWriteMode ? String(sharedWrite.laborWriteMode).replace(/_/g, " ") : "";
+  var hasSnapshotWriteDiagnostics = !!(
+    sharedWrite.productionWriteMode ||
+    sharedWrite.laborWriteMode ||
+    sharedWrite.snapshotVersion ||
+    sharedWrite.succeededAt ||
+    sharedWrite.error
+  );
   var staleCount = Math.max(0, dataSourceStatus.length - freshCount);
   var autoSyncHydrated = sharedMeta.source !== "unknown";
   var latestNulogySyncMs = freshestTimestampMs([
@@ -894,6 +913,8 @@ export default function ProductionReadiness() {
               </span>
               {sharedWrite.status === "writing" && <Badge variant="secondary">Saving shared snapshot…</Badge>}
               {sharedWrite.status === "error" && <Badge variant="danger">Shared snapshot save failed</Badge>}
+              {sharedWrite.productionWriteMode && <Badge variant="outline">Prod write: {productionWriteLabel}</Badge>}
+              {sharedWrite.laborWriteMode && <Badge variant="outline">Labor write: {laborWriteLabel}</Badge>}
             </div>
           </div>
         )}
@@ -908,6 +929,8 @@ export default function ProductionReadiness() {
           </span>
           {sharedWrite.status === "writing" && <Badge variant="secondary">Saving shared snapshot…</Badge>}
           {sharedWrite.status === "error" && <Badge variant="danger">Shared snapshot save failed</Badge>}
+          {sharedWrite.productionWriteMode && <Badge variant="outline">Prod write: {productionWriteLabel}</Badge>}
+          {sharedWrite.laborWriteMode && <Badge variant="outline">Labor write: {laborWriteLabel}</Badge>}
         </div>
         )}
         {sharedSeemsStale && (
@@ -991,6 +1014,33 @@ export default function ProductionReadiness() {
                 <span style={{ opacity:0.6 }}>{sharedStamp}</span>
               </span>
             </div>
+            {hasSnapshotWriteDiagnostics && (
+              <div className="mt-2 rounded-md border border-[rgb(var(--border))] bg-white px-2.5 py-2 text-xs text-[rgb(var(--muted))]">
+                <div className="font-medium text-[rgb(var(--foreground))]">Last shared snapshot write</div>
+                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span>Status: <span className="font-medium text-[rgb(var(--foreground))]">{sharedWrite.status || "idle"}</span></span>
+                  {sharedWrite.succeededAt && <span>Saved: <span className="font-medium text-[rgb(var(--foreground))]">{fmtTs(sharedWrite.succeededAt)}</span></span>}
+                  {sharedWrite.snapshotVersion && <span>Version: <span className="font-medium text-[rgb(var(--foreground))]">{sharedWrite.snapshotVersion}</span></span>}
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                  {sharedWrite.productionWriteMode && (
+                    <span>
+                      Production: <span className="font-medium text-[rgb(var(--foreground))]">{productionWriteLabel}</span>
+                      {sharedWrite.productionCorrectionStart ? " from " + sharedWrite.productionCorrectionStart : ""}
+                    </span>
+                  )}
+                  {sharedWrite.laborWriteMode && (
+                    <span>
+                      Labor: <span className="font-medium text-[rgb(var(--foreground))]">{laborWriteLabel}</span>
+                      {sharedWrite.laborCorrectionStart ? " from " + sharedWrite.laborCorrectionStart : ""}
+                    </span>
+                  )}
+                </div>
+                {sharedWrite.error && (
+                  <div className="mt-1 text-[rgb(var(--danger))]">{sharedWrite.error}</div>
+                )}
+              </div>
+            )}
           </div>
         )}
         {showDataControlsPanel && (!syncHealthy || showQuickControls) && (

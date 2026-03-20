@@ -70,7 +70,11 @@ export function useDataSources() {
     attemptedAt: null,
     succeededAt: null,
     error: "",
-    snapshotVersion: ""
+    snapshotVersion: "",
+    productionWriteMode: "",
+    laborWriteMode: "",
+    productionCorrectionStart: "",
+    laborCorrectionStart: ""
   });
   const hydrateDoneRef = useRef(false);
 
@@ -376,7 +380,11 @@ export function useDataSources() {
           attemptedAt: new Date(),
           succeededAt: prev.succeededAt,
           error: "",
-          snapshotVersion: prev.snapshotVersion || ""
+          snapshotVersion: prev.snapshotVersion || "",
+          productionWriteMode: prev.productionWriteMode || "",
+          laborWriteMode: prev.laborWriteMode || "",
+          productionCorrectionStart: prev.productionCorrectionStart || "",
+          laborCorrectionStart: prev.laborCorrectionStart || ""
         };
       });
       fetch("/api/cache/snapshot", {
@@ -395,7 +403,11 @@ export function useDataSources() {
               attemptedAt: prev.attemptedAt || new Date(),
               succeededAt: prev.succeededAt,
               error: "Snapshot write returned no payload.",
-              snapshotVersion: prev.snapshotVersion || ""
+              snapshotVersion: prev.snapshotVersion || "",
+              productionWriteMode: prev.productionWriteMode || "",
+              laborWriteMode: prev.laborWriteMode || "",
+              productionCorrectionStart: prev.productionCorrectionStart || "",
+              laborCorrectionStart: prev.laborCorrectionStart || ""
             };
           });
           return;
@@ -410,7 +422,11 @@ export function useDataSources() {
           attemptedAt: new Date(),
           succeededAt: body.snapshot.synced_at ? new Date(body.snapshot.synced_at) : new Date(),
           error: "",
-          snapshotVersion: body.snapshot.snapshot_version || ""
+          snapshotVersion: body.snapshot.snapshot_version || "",
+          productionWriteMode: String(body.productionWriteMode || ""),
+          laborWriteMode: String(body.laborWriteMode || ""),
+          productionCorrectionStart: String(body.productionCorrectionStart || ""),
+          laborCorrectionStart: String(body.laborCorrectionStart || "")
         });
       }).catch(function() {
         // Local cache still works; shared cache sync is best effort.
@@ -420,7 +436,11 @@ export function useDataSources() {
             attemptedAt: prev.attemptedAt || new Date(),
             succeededAt: prev.succeededAt,
             error: "Shared snapshot write failed.",
-            snapshotVersion: prev.snapshotVersion || ""
+            snapshotVersion: prev.snapshotVersion || "",
+            productionWriteMode: prev.productionWriteMode || "",
+            laborWriteMode: prev.laborWriteMode || "",
+            productionCorrectionStart: prev.productionCorrectionStart || "",
+            laborCorrectionStart: prev.laborCorrectionStart || ""
           };
         });
       });
