@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import Sentry from "../_sentry.js";
 import { classifyShiftET, toEasternParts, toIso } from "../_labor.js";
+import { isMissingTableError, replaceSiteEventsInWindow, selectEventsForWrite, siteTableHasRows } from "../_event-window.js";
 
 const SESSION_SECRET = process.env.SESSION_SECRET || "packpulse-default-secret-change-me";
 const CACHE_SITE_ID = process.env.CACHE_SITE_ID || "default";
@@ -80,7 +81,8 @@ function pickFieldLoose(row, keys) {
 
 function buildProductionEvents(rows, siteId, syncedAt, updatedBy) {
   var dedup = {};
-  (Array.isArray(rows) ? rows : []).forEach(function(row, idx) {
+  var hashOccurrences = {};
+  (Array.isArray(rows) ? rows : []).forEach(function(row) {
     var units = toNum(pickFieldLoose(row, ["Units Produced", "units_produced", "unitsProduced", "Produced Units", "Quantity Produced", "Qty Produced"]));
     if (!(units > 0)) return;
     var producedRaw = pickFieldLoose(row, [
@@ -98,8 +100,9 @@ function buildProductionEvents(rows, siteId, syncedAt, updatedBy) {
     var itemCode = String(pickFieldLoose(row, ["Item Code", "item_code"]) || "").trim();
     var line = String(pickFieldLoose(row, ["Line", "line", "line_name", "Line Name"]) || "").trim();
     var rowHash = stableRowHash(row);
-    // Production rows are replaced per sync; keep row-level identity to avoid collapsing valid events.
-    var keyBase = [siteId, rowHash, String(idx)].join("|");
+    var occurrence = (hashOccurrences[rowHash] || 0) + 1;
+    hashOccurrences[rowHash] = occurrence;
+    var keyBase = [siteId, rowHash, String(occurrence)].join("|");
     var eventKey = crypto.createHash("sha1").update(keyBase).digest("hex");
     dedup[eventKey] = {
       site_id: siteId,
@@ -138,29 +141,51 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, submitted: rows.length, written: 0, note: "no_positive_unit_rows" });
     }
     const supabase = getSupabaseAdmin();
-    var del = await supabase.from("production_events").delete().eq("site_id", CACHE_SITE_ID);
-    if (del.error) {
-      var dmsg = String(del.error.message || "").toLowerCase();
-      if (dmsg.includes("production_events") && dmsg.includes("schema cache")) {
+    var hasExistingRows;
+    try {
+      hasExistingRows = await siteTableHasRows(supabase, "production_events", CACHE_SITE_ID);
+    } catch (tableErr) {
+      if (isMissingTableError("production_events", tableErr)) {
         return res.status(200).json({ ok: false, productionStatus: "missing_production_events_table", submitted: rows.length, written: 0 });
       }
-      throw del.error;
+      throw tableErr;
     }
-    var written = 0;
-    var chunkSize = 500;
-    for (var i = 0; i < events.length; i += chunkSize) {
-      var chunk = events.slice(i, i + chunkSize);
-      var up = await supabase.from("production_events").upsert(chunk, { onConflict: "site_id,event_key" });
-      if (up.error) {
-        var msg = String(up.error.message || "").toLowerCase();
-        if (msg.includes("production_events") && msg.includes("schema cache")) {
-          return res.status(200).json({ ok: false, productionStatus: "missing_production_events_table", submitted: rows.length, written: written });
-        }
-        throw up.error;
+    var writePlan = selectEventsForWrite(events, {
+      dateField: "produced_date_et",
+      hasExistingRows: hasExistingRows,
+      correctionDays: Number(process.env.PRODUCTION_EVENT_CORRECTION_DAYS || process.env.NULOGY_EVENT_CORRECTION_DAYS || 60)
+    });
+    try {
+      var writeResult = await replaceSiteEventsInWindow(supabase, {
+        table: "production_events",
+        siteId: CACHE_SITE_ID,
+        dateField: "produced_date_et",
+        events: writePlan.events
+      });
+      return res.status(200).json({
+        ok: true,
+        submitted: rows.length,
+        submittedEvents: events.length,
+        writeMode: writePlan.mode,
+        correctionStart: writePlan.cutoffDate,
+        written: writeResult.written,
+        deletedWindowStart: writeResult.deletedWindowStart,
+        deletedWindowEnd: writeResult.deletedWindowEnd
+      });
+    } catch (writeErr) {
+      if (isMissingTableError("production_events", writeErr)) {
+        return res.status(200).json({
+          ok: false,
+          productionStatus: "missing_production_events_table",
+          submitted: rows.length,
+          submittedEvents: events.length,
+          writeMode: writePlan.mode,
+          correctionStart: writePlan.cutoffDate,
+          written: 0
+        });
       }
-      written += chunk.length;
+      throw writeErr;
     }
-    return res.status(200).json({ ok: true, submitted: rows.length, written: written });
   } catch (err) {
     Sentry.captureException(err);
     return res.status(500).json({ error: "Production event ingest failed", details: err && err.message ? err.message : "unknown" });

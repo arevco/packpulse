@@ -1,7 +1,7 @@
-import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import Sentry from "../_sentry.js";
 import { buildLaborEvents } from "../_labor.js";
+import { isMissingTableError, replaceSiteEventsInWindow, selectEventsForWrite, siteTableHasRows } from "../_event-window.js";
 
 const SESSION_SECRET = process.env.SESSION_SECRET || "packpulse-default-secret-change-me";
 const CACHE_SITE_ID = process.env.CACHE_SITE_ID || "default";
@@ -58,29 +58,51 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, submitted: rows.length, written: 0, note: "no_positive_labor_rows" });
     }
     const supabase = getSupabaseAdmin();
-    var del = await supabase.from("labor_events").delete().eq("site_id", CACHE_SITE_ID);
-    if (del.error) {
-      var dmsg = String(del.error.message || "").toLowerCase();
-      if (dmsg.includes("labor_events") && dmsg.includes("schema cache")) {
+    var hasExistingRows;
+    try {
+      hasExistingRows = await siteTableHasRows(supabase, "labor_events", CACHE_SITE_ID);
+    } catch (tableErr) {
+      if (isMissingTableError("labor_events", tableErr)) {
         return res.status(200).json({ ok: false, laborStatus: "missing_labor_events_table", submitted: rows.length, written: 0 });
       }
-      throw del.error;
+      throw tableErr;
     }
-    var written = 0;
-    var chunkSize = 500;
-    for (var i = 0; i < events.length; i += chunkSize) {
-      var chunk = events.slice(i, i + chunkSize);
-      var up = await supabase.from("labor_events").upsert(chunk, { onConflict: "site_id,event_key" });
-      if (up.error) {
-        var msg = String(up.error.message || "").toLowerCase();
-        if (msg.includes("labor_events") && msg.includes("schema cache")) {
-          return res.status(200).json({ ok: false, laborStatus: "missing_labor_events_table", submitted: rows.length, written: written });
-        }
-        throw up.error;
+    var writePlan = selectEventsForWrite(events, {
+      dateField: "worked_date_et",
+      hasExistingRows: hasExistingRows,
+      correctionDays: Number(process.env.LABOR_EVENT_CORRECTION_DAYS || process.env.NULOGY_EVENT_CORRECTION_DAYS || 60)
+    });
+    try {
+      var writeResult = await replaceSiteEventsInWindow(supabase, {
+        table: "labor_events",
+        siteId: CACHE_SITE_ID,
+        dateField: "worked_date_et",
+        events: writePlan.events
+      });
+      return res.status(200).json({
+        ok: true,
+        submitted: rows.length,
+        submittedEvents: events.length,
+        writeMode: writePlan.mode,
+        correctionStart: writePlan.cutoffDate,
+        written: writeResult.written,
+        deletedWindowStart: writeResult.deletedWindowStart,
+        deletedWindowEnd: writeResult.deletedWindowEnd
+      });
+    } catch (writeErr) {
+      if (isMissingTableError("labor_events", writeErr)) {
+        return res.status(200).json({
+          ok: false,
+          laborStatus: "missing_labor_events_table",
+          submitted: rows.length,
+          submittedEvents: events.length,
+          writeMode: writePlan.mode,
+          correctionStart: writePlan.cutoffDate,
+          written: 0
+        });
       }
-      written += chunk.length;
+      throw writeErr;
     }
-    return res.status(200).json({ ok: true, submitted: rows.length, written: written });
   } catch (err) {
     Sentry.captureException(err);
     return res.status(500).json({ error: "Labor event ingest failed", details: err && err.message ? err.message : "unknown" });

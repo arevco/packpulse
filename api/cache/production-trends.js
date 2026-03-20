@@ -81,6 +81,7 @@ function resolveProductionTiming(row) {
 
 function buildProductionEventsFromSnapshotRows(rows, siteId, syncedAt, updatedBy) {
   var dedup = {};
+  var hashOccurrences = {};
   (Array.isArray(rows) ? rows : []).forEach(function(row) {
     var units = toNumLoose(pickFieldLoose(row, ["Units Produced", "units_produced", "unitsProduced", "Produced Units", "Quantity Produced", "Qty Produced"]));
     if (!(units > 0)) return;
@@ -99,8 +100,9 @@ function buildProductionEventsFromSnapshotRows(rows, siteId, syncedAt, updatedBy
     var itemCode = String(pickFieldLoose(row, ["Item Code", "item_code"]) || "").trim();
     var line = String(pickFieldLoose(row, ["Line", "line", "line_name", "Line Name"]) || "").trim();
     var rowHash = stableRowHash(row);
-    var keyDisambiguator = (producedIso || producedRaw) ? "" : rowHash;
-    var keyBase = [siteId, producedIso || producedRaw || syncedAt || "", jobId, wo, itemCode, line, units, keyDisambiguator].join("|");
+    var occurrence = (hashOccurrences[rowHash] || 0) + 1;
+    hashOccurrences[rowHash] = occurrence;
+    var keyBase = [siteId, rowHash, String(occurrence)].join("|");
     var eventKey = crypto.createHash("sha1").update(keyBase).digest("hex");
     dedup[eventKey] = {
       site_id: siteId,

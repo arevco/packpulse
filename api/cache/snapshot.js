@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import Sentry from "../_sentry.js";
 import { buildLaborEvents, classifyShiftET, toEasternParts, toIso } from "../_labor.js";
+import { isMissingTableError, replaceSiteEventsInWindow, selectEventsForWrite, siteTableHasRows } from "../_event-window.js";
 
 const SESSION_SECRET = process.env.SESSION_SECRET || "packpulse-default-secret-change-me";
 const CACHE_SITE_ID = process.env.CACHE_SITE_ID || "default";
@@ -215,7 +216,8 @@ function pickFieldLoose(row, keys) {
 function buildProductionEvents(payload, siteId, syncedAt, updatedBy) {
   var rows = Array.isArray(payload && payload.productionData) ? payload.productionData : [];
   var dedup = {};
-  rows.forEach(function(row, idx) {
+  var hashOccurrences = {};
+  rows.forEach(function(row) {
     var units = toNum(pickFieldLoose(row, ["Units Produced", "units_produced", "unitsProduced", "Produced Units", "Quantity Produced", "Qty Produced"]));
     if (!(units > 0)) return;
     var producedRaw = pickFieldLoose(row, [
@@ -233,8 +235,9 @@ function buildProductionEvents(payload, siteId, syncedAt, updatedBy) {
     var itemCode = String(pickFieldLoose(row, ["Item Code", "item_code"]) || "").trim();
     var line = String(pickFieldLoose(row, ["Line", "line", "line_name", "Line Name"]) || "").trim();
     var rowHash = stableRowHash(row);
-    // Snapshot rows are replaced per sync; preserve row-level granularity and avoid accidental merges.
-    var keyBase = [siteId, rowHash, String(idx)].join("|");
+    var occurrence = (hashOccurrences[rowHash] || 0) + 1;
+    hashOccurrences[rowHash] = occurrence;
+    var keyBase = [siteId, rowHash, String(occurrence)].join("|");
     var eventKey = crypto.createHash("sha1").update(keyBase).digest("hex");
     dedup[eventKey] = {
       site_id: siteId,
@@ -347,70 +350,70 @@ export default async function handler(req, res) {
       var laborEvents = buildLaborEvents(incomingPayload && incomingPayload.laborData, CACHE_SITE_ID, syncedAt, user.email);
       var productionStatus = "ok";
       var productionWritten = 0;
+      var productionWriteMode = "noop";
+      var productionCorrectionStart = null;
+      var productionDeletedWindowStart = null;
+      var productionDeletedWindowEnd = null;
       var laborStatus = "ok";
       var laborWritten = 0;
+      var laborWriteMode = "noop";
+      var laborCorrectionStart = null;
+      var laborDeletedWindowStart = null;
+      var laborDeletedWindowEnd = null;
       if (productionEvents.length > 0) {
-        var del = await supabase.from("production_events").delete().eq("site_id", CACHE_SITE_ID);
-        if (del.error) {
-          var delMsg = String(del.error.message || "").toLowerCase();
-          if (delMsg.includes("production_events") && delMsg.includes("schema cache")) {
+        try {
+          var hasProductionRows = await siteTableHasRows(supabase, "production_events", CACHE_SITE_ID);
+          var productionPlan = selectEventsForWrite(productionEvents, {
+            dateField: "produced_date_et",
+            hasExistingRows: hasProductionRows,
+            correctionDays: Number(process.env.PRODUCTION_EVENT_CORRECTION_DAYS || process.env.NULOGY_EVENT_CORRECTION_DAYS || 60)
+          });
+          productionWriteMode = productionPlan.mode;
+          productionCorrectionStart = productionPlan.cutoffDate;
+          var productionWrite = await replaceSiteEventsInWindow(supabase, {
+            table: "production_events",
+            siteId: CACHE_SITE_ID,
+            dateField: "produced_date_et",
+            events: productionPlan.events
+          });
+          productionWritten = productionWrite.written;
+          productionDeletedWindowStart = productionWrite.deletedWindowStart;
+          productionDeletedWindowEnd = productionWrite.deletedWindowEnd;
+        } catch (productionErr) {
+          if (isMissingTableError("production_events", productionErr)) {
             productionStatus = "missing_production_events_table";
           } else {
-            productionStatus = "production_events_delete_failed";
-            Sentry.captureException(del.error);
+            productionStatus = "production_events_write_failed";
+            Sentry.captureException(productionErr);
           }
         }
       }
       if (laborEvents.length > 0) {
-        var laborDel = await supabase.from("labor_events").delete().eq("site_id", CACHE_SITE_ID);
-        if (laborDel.error) {
-          var laborDelMsg = String(laborDel.error.message || "").toLowerCase();
-          if (laborDelMsg.includes("labor_events") && laborDelMsg.includes("schema cache")) {
+        try {
+          var hasLaborRows = await siteTableHasRows(supabase, "labor_events", CACHE_SITE_ID);
+          var laborPlan = selectEventsForWrite(laborEvents, {
+            dateField: "worked_date_et",
+            hasExistingRows: hasLaborRows,
+            correctionDays: Number(process.env.LABOR_EVENT_CORRECTION_DAYS || process.env.NULOGY_EVENT_CORRECTION_DAYS || 60)
+          });
+          laborWriteMode = laborPlan.mode;
+          laborCorrectionStart = laborPlan.cutoffDate;
+          var laborWrite = await replaceSiteEventsInWindow(supabase, {
+            table: "labor_events",
+            siteId: CACHE_SITE_ID,
+            dateField: "worked_date_et",
+            events: laborPlan.events
+          });
+          laborWritten = laborWrite.written;
+          laborDeletedWindowStart = laborWrite.deletedWindowStart;
+          laborDeletedWindowEnd = laborWrite.deletedWindowEnd;
+        } catch (laborErr) {
+          if (isMissingTableError("labor_events", laborErr)) {
             laborStatus = "missing_labor_events_table";
           } else {
-            laborStatus = "labor_events_delete_failed";
-            Sentry.captureException(laborDel.error);
+            laborStatus = "labor_events_write_failed";
+            Sentry.captureException(laborErr);
           }
-        }
-      }
-      if (productionEvents.length > 0 && productionStatus === "ok") {
-        var chunkSize = 500;
-        for (var i = 0; i < productionEvents.length; i += chunkSize) {
-          var chunk = productionEvents.slice(i, i + chunkSize);
-          var pe = await supabase
-            .from("production_events")
-            .upsert(chunk, { onConflict: "site_id,event_key" });
-          if (pe.error) {
-            var peMsg = String(pe.error.message || "").toLowerCase();
-            if (peMsg.includes("production_events") && peMsg.includes("schema cache")) {
-              productionStatus = "missing_production_events_table";
-            } else {
-              productionStatus = "production_events_upsert_failed";
-              Sentry.captureException(pe.error);
-            }
-            break;
-          }
-          productionWritten += chunk.length;
-        }
-      }
-      if (laborEvents.length > 0 && laborStatus === "ok") {
-        var laborChunkSize = 500;
-        for (var l = 0; l < laborEvents.length; l += laborChunkSize) {
-          var laborChunk = laborEvents.slice(l, l + laborChunkSize);
-          var le = await supabase
-            .from("labor_events")
-            .upsert(laborChunk, { onConflict: "site_id,event_key" });
-          if (le.error) {
-            var leMsg = String(le.error.message || "").toLowerCase();
-            if (leMsg.includes("labor_events") && leMsg.includes("schema cache")) {
-              laborStatus = "missing_labor_events_table";
-            } else {
-              laborStatus = "labor_events_upsert_failed";
-              Sentry.captureException(le.error);
-            }
-            break;
-          }
-          laborWritten += laborChunk.length;
         }
       }
       var syncRun = await logSyncRun(supabase, {
@@ -427,9 +430,17 @@ export default async function handler(req, res) {
           productionStatus: productionStatus,
           productionRowsSubmitted: productionEvents.length,
           productionRowsWritten: productionWritten,
+          productionWriteMode: productionWriteMode,
+          productionCorrectionStart: productionCorrectionStart,
+          productionDeletedWindowStart: productionDeletedWindowStart,
+          productionDeletedWindowEnd: productionDeletedWindowEnd,
           laborStatus: laborStatus,
           laborRowsSubmitted: laborEvents.length,
           laborRowsWritten: laborWritten,
+          laborWriteMode: laborWriteMode,
+          laborCorrectionStart: laborCorrectionStart,
+          laborDeletedWindowStart: laborDeletedWindowStart,
+          laborDeletedWindowEnd: laborDeletedWindowEnd,
           snapshotVersion: snapshotVersion,
           cachePayloadBytes: compacted.bytes,
           cacheDroppedDatasets: compacted.dropped
@@ -447,9 +458,17 @@ export default async function handler(req, res) {
         productionStatus: productionStatus,
         productionRowsSubmitted: productionEvents.length,
         productionRowsWritten: productionWritten,
+        productionWriteMode: productionWriteMode,
+        productionCorrectionStart: productionCorrectionStart,
+        productionDeletedWindowStart: productionDeletedWindowStart,
+        productionDeletedWindowEnd: productionDeletedWindowEnd,
         laborStatus: laborStatus,
         laborRowsSubmitted: laborEvents.length,
         laborRowsWritten: laborWritten,
+        laborWriteMode: laborWriteMode,
+        laborCorrectionStart: laborCorrectionStart,
+        laborDeletedWindowStart: laborDeletedWindowStart,
+        laborDeletedWindowEnd: laborDeletedWindowEnd,
         syncRunStatus: syncRun.status,
         cachePayloadBytes: compacted.bytes,
         cacheDroppedDatasets: compacted.dropped

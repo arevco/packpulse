@@ -281,7 +281,8 @@ export function normalizeLaborRoleKey(value) {
 
 export function buildLaborEvents(rows, siteId, syncedAt, updatedBy) {
   var dedup = {};
-  (Array.isArray(rows) ? rows : []).forEach(function(row, idx) {
+  var hashOccurrences = {};
+  (Array.isArray(rows) ? rows : []).forEach(function(row) {
     var payableHours = toNum(pickFieldLoose(row, ["Payable hours", "payable_hours"]));
     var productiveHours = toNum(pickFieldLoose(row, ["Productive hours", "productive_hours"]));
     var durationHours = parseDurationHours(pickFieldLoose(row, ["Duration", "duration"]));
@@ -341,7 +342,9 @@ export function buildLaborEvents(rows, siteId, syncedAt, updatedBy) {
     var itemFamilyName = String(pickFieldLoose(row, ["Item family name", "item_family_name"]) || "").trim();
     var lineName = String(pickFieldLoose(row, ["Line name", "line_name", "Line"]) || "").trim();
     var rowHash = stableRowHash(row);
-    var keyBase = [siteId, rowHash, String(idx)].join("|");
+    var occurrence = (hashOccurrences[rowHash] || 0) + 1;
+    hashOccurrences[rowHash] = occurrence;
+    var keyBase = [siteId, rowHash, String(occurrence)].join("|");
     var eventKey = crypto.createHash("sha1").update(keyBase).digest("hex");
 
     dedup[eventKey] = {
