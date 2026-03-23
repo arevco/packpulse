@@ -2,7 +2,8 @@ import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import Sentry from "../_sentry.js";
 import { classifyShiftET, toEasternParts, toIso } from "../_labor.js";
-import { isMissingTableError, replaceSiteEventsInWindow, selectEventsForWrite, siteTableHasRows } from "../_event-window.js";
+import { isMissingTableError } from "../_event-window.js";
+import { writeProductionEventsSafely } from "./_production-write.js";
 
 const SESSION_SECRET = process.env.SESSION_SECRET || "packpulse-default-secret-change-me";
 const CACHE_SITE_ID = process.env.CACHE_SITE_ID || "default";
@@ -141,36 +142,22 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, submitted: rows.length, written: 0, note: "no_positive_unit_rows" });
     }
     const supabase = getSupabaseAdmin();
-    var hasExistingRows;
     try {
-      hasExistingRows = await siteTableHasRows(supabase, "production_events", CACHE_SITE_ID);
-    } catch (tableErr) {
-      if (isMissingTableError("production_events", tableErr)) {
-        return res.status(200).json({ ok: false, productionStatus: "missing_production_events_table", submitted: rows.length, written: 0 });
-      }
-      throw tableErr;
-    }
-    var writePlan = selectEventsForWrite(events, {
-      dateField: "produced_date_et",
-      hasExistingRows: hasExistingRows,
-      correctionDays: Number(process.env.PRODUCTION_EVENT_CORRECTION_DAYS || process.env.NULOGY_EVENT_CORRECTION_DAYS || 60)
-    });
-    try {
-      var writeResult = await replaceSiteEventsInWindow(supabase, {
-        table: "production_events",
+      var writeResult = await writeProductionEventsSafely(supabase, {
         siteId: CACHE_SITE_ID,
-        dateField: "produced_date_et",
-        events: writePlan.events
+        events: events,
+        correctionDays: Number(process.env.PRODUCTION_EVENT_CORRECTION_DAYS || process.env.NULOGY_EVENT_CORRECTION_DAYS || 60)
       });
       return res.status(200).json({
         ok: true,
         submitted: rows.length,
         submittedEvents: events.length,
-        writeMode: writePlan.mode,
-        correctionStart: writePlan.cutoffDate,
+        writeMode: writeResult.writeMode,
+        correctionStart: writeResult.correctionStart,
         written: writeResult.written,
         deletedWindowStart: writeResult.deletedWindowStart,
-        deletedWindowEnd: writeResult.deletedWindowEnd
+        deletedWindowEnd: writeResult.deletedWindowEnd,
+        guardedDateKeys: writeResult.guardedDateKeys || []
       });
     } catch (writeErr) {
       if (isMissingTableError("production_events", writeErr)) {
@@ -179,8 +166,8 @@ export default async function handler(req, res) {
           productionStatus: "missing_production_events_table",
           submitted: rows.length,
           submittedEvents: events.length,
-          writeMode: writePlan.mode,
-          correctionStart: writePlan.cutoffDate,
+          writeMode: "missing_table",
+          correctionStart: null,
           written: 0
         });
       }

@@ -2,8 +2,9 @@ import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import Sentry from "../_sentry.js";
 import { buildLaborEvents, classifyShiftET, toEasternParts, toIso } from "../_labor.js";
-import { isMissingTableError, replaceSiteEventsInWindow, selectEventsForWrite, siteTableHasRows } from "../_event-window.js";
+import { isMissingTableError } from "../_event-window.js";
 import { writeLaborEventsSafely } from "./_labor-write.js";
+import { writeProductionEventsSafely } from "./_production-write.js";
 
 const SESSION_SECRET = process.env.SESSION_SECRET || "packpulse-default-secret-change-me";
 const CACHE_SITE_ID = process.env.CACHE_SITE_ID || "default";
@@ -229,7 +230,7 @@ function buildProductionEvents(payload, siteId, syncedAt, updatedBy) {
       "Actual Job End", "actual_job_end_at"
     ]);
     var producedIso = toIso(producedRaw);
-    var eastern = toEasternParts(producedIso || producedRaw);
+    var eastern = toEasternParts(producedIso || producedRaw || syncedAt);
     var shift = classifyShiftET(eastern);
     var jobId = String(pickFieldLoose(row, ["Job ID", "job_id", "Job"]) || "").trim();
     var wo = String(pickFieldLoose(row, ["Work Order Code", "project_code", "Project Code"]) || "").trim();
@@ -355,6 +356,7 @@ export default async function handler(req, res) {
       var productionCorrectionStart = null;
       var productionDeletedWindowStart = null;
       var productionDeletedWindowEnd = null;
+      var productionGuardedDateKeys = [];
       var laborStatus = "ok";
       var laborWritten = 0;
       var laborWriteMode = "noop";
@@ -364,23 +366,17 @@ export default async function handler(req, res) {
       var laborGuardedDateKeys = [];
       if (productionEvents.length > 0) {
         try {
-          var hasProductionRows = await siteTableHasRows(supabase, "production_events", CACHE_SITE_ID);
-          var productionPlan = selectEventsForWrite(productionEvents, {
-            dateField: "produced_date_et",
-            hasExistingRows: hasProductionRows,
+          var productionWrite = await writeProductionEventsSafely(supabase, {
+            siteId: CACHE_SITE_ID,
+            events: productionEvents,
             correctionDays: Number(process.env.PRODUCTION_EVENT_CORRECTION_DAYS || process.env.NULOGY_EVENT_CORRECTION_DAYS || 60)
           });
-          productionWriteMode = productionPlan.mode;
-          productionCorrectionStart = productionPlan.cutoffDate;
-          var productionWrite = await replaceSiteEventsInWindow(supabase, {
-            table: "production_events",
-            siteId: CACHE_SITE_ID,
-            dateField: "produced_date_et",
-            events: productionPlan.events
-          });
+          productionWriteMode = productionWrite.writeMode;
+          productionCorrectionStart = productionWrite.correctionStart;
           productionWritten = productionWrite.written;
           productionDeletedWindowStart = productionWrite.deletedWindowStart;
           productionDeletedWindowEnd = productionWrite.deletedWindowEnd;
+          productionGuardedDateKeys = productionWrite.guardedDateKeys || [];
         } catch (productionErr) {
           if (isMissingTableError("production_events", productionErr)) {
             productionStatus = "missing_production_events_table";
@@ -430,6 +426,7 @@ export default async function handler(req, res) {
           productionCorrectionStart: productionCorrectionStart,
           productionDeletedWindowStart: productionDeletedWindowStart,
           productionDeletedWindowEnd: productionDeletedWindowEnd,
+          productionGuardedDateKeys: productionGuardedDateKeys,
           laborStatus: laborStatus,
           laborRowsSubmitted: laborEvents.length,
           laborRowsWritten: laborWritten,
@@ -459,6 +456,7 @@ export default async function handler(req, res) {
         productionCorrectionStart: productionCorrectionStart,
         productionDeletedWindowStart: productionDeletedWindowStart,
         productionDeletedWindowEnd: productionDeletedWindowEnd,
+        productionGuardedDateKeys: productionGuardedDateKeys,
         laborStatus: laborStatus,
         laborRowsSubmitted: laborEvents.length,
         laborRowsWritten: laborWritten,
