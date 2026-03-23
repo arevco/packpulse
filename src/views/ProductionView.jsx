@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { useTheme } from "../theme";
 import { useStyles } from "../hooks/useStyles";
-import { safeNum, formatDescriptionForDisplay } from "../utils";
+import { safeNum, formatDescriptionForDisplay, triggerDownload } from "../utils";
+import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { DatePicker } from "../components/ui/date-picker";
 import TableShell from "../components/ui/table-shell";
@@ -213,6 +214,18 @@ function laborStatusLabel(status) {
   if (status === "mixed") return "mixed finalized/provisional labor";
   if (status === "finalized") return "finalized labor";
   return "labor status unknown";
+}
+
+function csvCell(value) {
+  var text = String(value == null ? "" : value);
+  if (/[",\n]/.test(text)) return '"' + text.replace(/"/g, '""') + '"';
+  return text;
+}
+
+function csvNumber(value, digits) {
+  var amount = Number(value);
+  if (!Number.isFinite(amount)) return "";
+  return digits > 0 ? amount.toFixed(digits) : String(Math.round(amount));
 }
 
 export default function ProductionView({ productionSegments, laborActuals, laborDataRaw, resolveRevenueForRow }) {
@@ -829,6 +842,75 @@ export default function ProductionView({ productionSegments, laborActuals, labor
       });
     });
   };
+  var exportLaborCsv = function() {
+    if (!jobsWithLabor.length) return;
+    var headers = [
+      "date",
+      "shift",
+      "line",
+      "job_id",
+      "work_order",
+      "item_code",
+      "item_description",
+      "units_produced",
+      "revenue",
+      "price_per_unit",
+      "revenue_covered_units",
+      "revenue_coverage_pct",
+      "labor_payable_hours",
+      "labor_productive_hours",
+      "labor_cost",
+      "labor_cost_per_case",
+      "labor_margin",
+      "labor_margin_pct",
+      "cases_per_minute",
+      "cases_per_payable_hour",
+      "shift_minutes",
+      "has_labor",
+      "labor_status",
+      "labor_is_provisional",
+      "has_revenue",
+      "missing_revenue"
+    ];
+    var rows = jobsWithLabor.map(function(row) {
+      return [
+        row.date || "",
+        row.shift || "",
+        row.line || "",
+        row.jobId || "",
+        row.workOrder || "",
+        row.itemCode || "",
+        formatDescriptionForDisplay(row.itemDesc) || "",
+        csvNumber(row.unitsProduced, 0),
+        csvNumber(row.revenue, 2),
+        csvNumber(row.pricePerUnit, 2),
+        csvNumber(row.revenueCoveredUnits, 0),
+        csvNumber(row.revenueCoveragePct, 1),
+        csvNumber(row.laborPayableHours, 2),
+        csvNumber(row.laborProductiveHours, 2),
+        csvNumber(row.laborCost, 2),
+        csvNumber(row.laborCostPerCase, 2),
+        csvNumber(row.laborMargin, 2),
+        csvNumber(row.laborMarginPct != null ? row.laborMarginPct * 100 : null, 1),
+        csvNumber(row.casesPerMinute, 2),
+        csvNumber(row.casesPerPayableHour, 2),
+        csvNumber(row.shiftMinutes, 0),
+        row.hasLabor ? "yes" : "no",
+        row.laborStatus || "",
+        row.laborIsProvisional ? "yes" : "no",
+        row.hasRevenue ? "yes" : "no",
+        row.missingRevenue ? "yes" : "no"
+      ].map(csvCell).join(",");
+    });
+    var stamp = rangeStart && rangeEnd
+      ? (rangeStart === rangeEnd ? rangeStart : (rangeStart + "_to_" + rangeEnd))
+      : new Date().toISOString().slice(0, 10);
+    triggerDownload(
+      [headers.map(csvCell).join(",")].concat(rows).join("\n"),
+      "production_jobs_labor_" + stamp + ".csv",
+      "text/csv"
+    );
+  };
 
   if (!prodShiftRows.length) {
     return <div className="rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-4 text-sm text-[rgb(var(--muted))]">
@@ -853,6 +935,9 @@ export default function ProductionView({ productionSegments, laborActuals, labor
           <option value="all">All Shifts</option>
           {shiftOptions.map(function(shift) { return <option key={shift} value={shift}>{shortShift(shift)}</option>; })}
         </select>
+        <Button onClick={exportLaborCsv} variant="outline" size="default" className="h-10 shrink-0" disabled={!jobsWithLabor.length}>
+          Export Labor CSV
+        </Button>
       </div>
 
       <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
