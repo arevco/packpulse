@@ -787,7 +787,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
   };
   var laborRateText = function(hours, cases, cost) {
     if (!(hours > 0) || !(cases > 0)) return "labor not matched";
-    return (cases / hours).toFixed(1) + " cs/lh · " + fmtMoneyWhole(cost / cases) + "/case";
+    return (cases / hours).toFixed(1) + " cs/lh · " + fmtMoney(cost / cases) + "/case";
   };
   var lineExpanded = function(lineName) {
     return lineExpansion[lineName] !== false;
