@@ -1238,6 +1238,17 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   var commandBoard = useMemo(function() {
     var allDays = (effectiveTrends && Array.isArray(effectiveTrends.byDay)) ? effectiveTrends.byDay : [];
     var allRows = (effectiveBreakdown && Array.isArray(effectiveBreakdown.rowsLite)) ? effectiveBreakdown.rowsLite : [];
+    var findPreviousProductionDay = function(beforeIso) {
+      var match = null;
+      allDays.forEach(function(day) {
+        var dayIso = String(day && day.date || "");
+        if (!dayIso || !beforeIso || dayIso >= beforeIso || !(safeNum(day && day.units) > 0)) return;
+        if (!match || dayIso > String(match.date || "")) {
+          match = day;
+        }
+      });
+      return match;
+    };
     var summarizeRange = function(def) {
       var label = def.label;
       var summaryRange = def.range;
@@ -1308,6 +1319,25 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       });
       var topLine = Object.values(byLineMap).sort(function(a, b) { return b.units - a.units; })[0] || null;
       var compareInfo = comparableRangeForPreset(def.key, summaryRange);
+      var compareReferenceLabel = def.key === "today" ? "Last Production Day" : "";
+      var compareReferenceUnits = 0;
+      var compareReferenceDate = "";
+      if (def.key === "today") {
+        var previousProductionDay = findPreviousProductionDay(summaryRange && summaryRange.start);
+        if (previousProductionDay && previousProductionDay.date) {
+          compareInfo = {
+            label: "vs last production day",
+            range: {
+              start: String(previousProductionDay.date || ""),
+              end: String(previousProductionDay.date || "")
+            }
+          };
+          compareReferenceUnits = safeNum(previousProductionDay.units);
+          compareReferenceDate = String(previousProductionDay.date || "");
+        } else {
+          compareReferenceLabel = "Yesterday";
+        }
+      }
       var compareRange = compareInfo.range;
       var compareRows = compareRange ? allRows.filter(function(r) { return inRange(String(r.produced_date_et || ""), compareRange); }) : [];
       var compareActual = compareRows.reduce(function(sum, r) { return sum + safeNum(r.units_produced); }, 0);
@@ -1328,7 +1358,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
           paceProjectedUnits = Math.round((windowActual / elapsedMinutes) * 960);
           displayDelta = paceProjectedUnits - compareActual;
           displayDeltaPct = compareActual > 0 ? Math.round((displayDelta / compareActual) * 100) : (paceProjectedUnits > 0 ? 100 : 0);
-          displayLabel = "pace vs yesterday";
+          displayLabel = compareReferenceDate ? "pace vs last production day" : "pace vs yesterday";
         }
       }
       return {
@@ -1353,6 +1383,9 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
         compareLabel: compareInfo.label,
         compareRange: compareRange,
         compareActual: compareActual,
+        compareReferenceLabel: compareReferenceLabel,
+        compareReferenceUnits: compareReferenceUnits || compareActual,
+        compareReferenceDate: compareReferenceDate,
         compareDelta: compareDelta,
         compareDeltaPct: compareDeltaPct,
         displayDelta: displayDelta,
@@ -2032,7 +2065,12 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
         label: "Today",
         value: safeNum(byKey.today && byKey.today.latestUnits).toLocaleString(),
         note: revenueNote(byKey.today),
-        subnote: referenceNote("Yesterday", byKey.yesterday),
+        subnote: byKey.today
+          ? referenceNote(
+              String(byKey.today.compareReferenceLabel || "Yesterday"),
+              { latestUnits: safeNum(byKey.today.compareReferenceUnits) }
+            )
+          : referenceNote("Yesterday", byKey.yesterday),
         detail: compareText(byKey.today),
         tone: compareTone(byKey.today)
       },
