@@ -12,6 +12,15 @@ function pickFieldLoose(row, keys) {
       if (String(rk).toLowerCase() === target) return row[rk];
     }
   }
+  var wanted = {};
+  keys.forEach(function(k) {
+    wanted[String(k || "").replace(/[^a-z0-9]/gi, "").toLowerCase()] = true;
+  });
+  for (var x = 0; x < rowKeys.length; x++) {
+    var rowKey = rowKeys[x];
+    var normalized = String(rowKey || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+    if (wanted[normalized]) return row[rowKey];
+  }
   return "";
 }
 

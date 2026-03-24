@@ -10,6 +10,21 @@ import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, XAxis, YA
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "../components/ui/chart";
 import { detectPackType, formatDescriptionForDisplay, normalizeStr } from "../utils";
 
+var MONTH_INDEX_LOCAL = {
+  jan: 0,
+  feb: 1,
+  mar: 2,
+  apr: 3,
+  may: 4,
+  jun: 5,
+  jul: 6,
+  aug: 7,
+  sep: 8,
+  oct: 9,
+  nov: 10,
+  dec: 11
+};
+
 function safeNum(v) {
   var n = Number(v || 0);
   return Number.isFinite(n) ? n : 0;
@@ -281,8 +296,107 @@ function pctDelta(actual, plan) {
   return Math.round(((safeNum(actual) - safeNum(plan)) / safeNum(plan)) * 100);
 }
 
+function timeZonePartsLocal(date, timeZone) {
+  if (!(date instanceof Date) || isNaN(date)) return null;
+  var out = {};
+  new Intl.DateTimeFormat("en-US", {
+    timeZone: timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  }).formatToParts(date).forEach(function(part) {
+    if (part.type !== "literal") out[part.type] = part.value;
+  });
+  if (!out.year || !out.month || !out.day) return null;
+  return {
+    year: parseInt(out.year, 10),
+    month: parseInt(out.month, 10),
+    day: parseInt(out.day, 10),
+    hour: parseInt(out.hour || "0", 10),
+    minute: parseInt(out.minute || "0", 10),
+    second: parseInt(out.second || "0", 10)
+  };
+}
+
+function timeZoneOffsetMillisLocal(date, timeZone) {
+  var parts = timeZonePartsLocal(date, timeZone);
+  if (!parts) return 0;
+  var asUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+  return asUtc - date.getTime();
+}
+
+function easternWallClockToDateLocal(year, monthIndex, day, hour24, minute, second) {
+  var utcGuess = Date.UTC(year, monthIndex, day, hour24, minute || 0, second || 0);
+  var offset = timeZoneOffsetMillisLocal(new Date(utcGuess), "America/New_York");
+  var actual = utcGuess - offset;
+  var resolvedOffset = timeZoneOffsetMillisLocal(new Date(actual), "America/New_York");
+  if (resolvedOffset !== offset) actual = utcGuess - resolvedOffset;
+  return new Date(actual);
+}
+
+function parseNulogyWallClockLocal(value) {
+  var raw = String(value || "").trim();
+  if (!raw) return null;
+  var patterns = [
+    /^(\d{4})-([A-Za-z]{3})-(\d{1,2})[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d{1,6})?\s*([AP]M)(?:\s+[A-Z]{2,5}|[+-]\d{2}:?\d{2})?$/i,
+    /^(\d{4})-([A-Za-z]{3})-(\d{1,2})[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d{1,6})?(?:\s+[A-Z]{2,5}|[+-]\d{2}:?\d{2})?$/i,
+    /^(\d{4})-(\d{2})-(\d{2})[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d{1,6})?\s*([AP]M)?(?:\s+[A-Z]{2,5}|[+-]\d{2}:?\d{2})?$/i,
+    /^(\d{1,2})\/(\d{1,2})\/(\d{4})[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d{1,6})?\s*([AP]M)?$/i
+  ];
+  for (var i = 0; i < patterns.length; i += 1) {
+    var match = raw.match(patterns[i]);
+    if (!match) continue;
+    var year = 0;
+    var monthIndex = 0;
+    var day = 0;
+    if (i === 0 || i === 1) {
+      year = parseInt(match[1], 10);
+      monthIndex = MONTH_INDEX_LOCAL[String(match[2] || "").toLowerCase()];
+      day = parseInt(match[3], 10);
+    } else if (i === 2) {
+      year = parseInt(match[1], 10);
+      monthIndex = parseInt(match[2], 10) - 1;
+      day = parseInt(match[3], 10);
+    } else {
+      monthIndex = parseInt(match[1], 10) - 1;
+      day = parseInt(match[2], 10);
+      year = parseInt(match[3], 10);
+    }
+    var hour = parseInt(match[4], 10);
+    var minute = parseInt(match[5], 10);
+    var second = parseInt(match[6] || "0", 10);
+    var meridiem = String(match[7] || "").toUpperCase();
+    if (!Number.isFinite(year) || !Number.isFinite(monthIndex) || monthIndex < 0 || monthIndex > 11 || !Number.isFinite(day)) continue;
+    if (meridiem === "PM" && hour < 12) hour += 12;
+    if (meridiem === "AM" && hour === 12) hour = 0;
+    var parsed = easternWallClockToDateLocal(year, monthIndex, day, hour, minute, second);
+    if (!isNaN(parsed)) return parsed;
+  }
+  return null;
+}
+
+function parseDateLooseLocal(value) {
+  if (!value) return null;
+  if (value instanceof Date) return isNaN(value) ? null : value;
+  if (typeof value === "number") {
+    var fromNum = new Date(value);
+    return isNaN(fromNum) ? null : fromNum;
+  }
+  var raw = String(value || "").trim();
+  if (!raw || /^[+-]?\d{4,}$/.test(raw)) return null;
+  var wallClock = parseNulogyWallClockLocal(raw);
+  if (wallClock) return wallClock;
+  var parsed = new Date(raw);
+  return isNaN(parsed) ? null : parsed;
+}
+
 function toIsoDateLocal(d) {
-  var dt = new Date(d);
+  var dt = parseDateLooseLocal(d);
+  if (!dt || isNaN(dt)) return "";
   var y = dt.getFullYear();
   var m = String(dt.getMonth() + 1).padStart(2, "0");
   var day = String(dt.getDate()).padStart(2, "0");
@@ -290,7 +404,8 @@ function toIsoDateLocal(d) {
 }
 
 function toIsoDateUTC(d) {
-  var dt = new Date(d);
+  var dt = parseDateLooseLocal(d);
+  if (!dt || isNaN(dt)) return "";
   var y = dt.getUTCFullYear();
   var m = String(dt.getUTCMonth() + 1).padStart(2, "0");
   var day = String(dt.getUTCDate()).padStart(2, "0");
@@ -298,14 +413,14 @@ function toIsoDateUTC(d) {
 }
 
 function toIso(value) {
-  var dt = value instanceof Date ? value : new Date(value);
-  if (isNaN(dt)) return "";
+  var dt = parseDateLooseLocal(value);
+  if (!dt || isNaN(dt)) return "";
   return dt.toISOString();
 }
 
 function toIsoDateET(d) {
-  var dt = d instanceof Date ? d : new Date(d);
-  if (isNaN(dt)) return "";
+  var dt = parseDateLooseLocal(d);
+  if (!dt || isNaN(dt)) return "";
   var parts = {};
   var fmt = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York",
@@ -321,8 +436,8 @@ function toIsoDateET(d) {
 }
 
 function toEasternDateTimeParts(d) {
-  var dt = d instanceof Date ? d : new Date(d);
-  if (isNaN(dt)) return null;
+  var dt = parseDateLooseLocal(d);
+  if (!dt || isNaN(dt)) return null;
   var parts = {};
   var fmt = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York",
@@ -640,8 +755,8 @@ function buildRawNulogySeries(rows) {
     var date = toIsoDateET(producedRaw || new Date());
     if (!date) return;
     var shift = "Unassigned";
-    var dt = new Date(producedRaw || "");
-    if (!isNaN(dt)) {
+    var dt = parseDateLooseLocal(producedRaw || "");
+    if (dt && !isNaN(dt)) {
       var parts = {};
       new Intl.DateTimeFormat("en-US", {
         timeZone: "America/New_York",
@@ -716,6 +831,15 @@ function buildRawNulogySeries(rows) {
       totalRows: rowsLite.length
     }
   };
+}
+
+function productionJobKey(row) {
+  var date = String(row && row.produced_date_et || "");
+  var jobId = String(row && row.job_id || "").trim();
+  var workOrder = String(row && row.work_order_code || "").trim();
+  var line = String(row && row.line || "Unknown").trim() || "Unknown";
+  var itemCode = String(row && row.item_code || "").trim();
+  return [date, jobId || "--", workOrder || "--", line, itemCode || "--"].join("|");
 }
 
 function buildEvoconSeries(rows) {
@@ -1850,7 +1974,38 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
 
   var productionJobLeaderboard = useMemo(function() {
     var leaderboardMinCases = 250;
-    var sourceRows = (filteredBreakdown && Array.isArray(filteredBreakdown.rowsLite)) ? filteredBreakdown.rowsLite : [];
+    var serverRows = (filteredBreakdown && Array.isArray(filteredBreakdown.rowsLite)) ? filteredBreakdown.rowsLite : [];
+    var rawRows = (localNulogySeries && localNulogySeries.breakdown && Array.isArray(localNulogySeries.breakdown.rowsLite))
+      ? localNulogySeries.breakdown.rowsLite.filter(function(row) {
+          return inRangeIso(String(row && row.produced_date_et || ""), effectiveRange);
+        })
+      : [];
+    var sourceRows = serverRows.length ? serverRows : rawRows;
+    var windowByKey = {};
+    var collectWindow = function(row, sourceLabel) {
+      var key = productionJobKey(row);
+      var startAtUtc = String(row && row.job_start_at_utc || "").trim();
+      var endAtUtc = String(row && (row.job_end_at_utc || row.produced_at_utc) || "").trim();
+      if (!startAtUtc && !endAtUtc) return;
+      if (!windowByKey[key]) {
+        windowByKey[key] = {
+          startAtUtc: "",
+          endAtUtc: "",
+          hasActualStart: false,
+          source: ""
+        };
+      }
+      if (startAtUtc) {
+        windowByKey[key].hasActualStart = true;
+        if (!windowByKey[key].source || windowByKey[key].source !== "server") windowByKey[key].source = sourceLabel;
+        if (!windowByKey[key].startAtUtc || startAtUtc < windowByKey[key].startAtUtc) windowByKey[key].startAtUtc = startAtUtc;
+      }
+      if (endAtUtc && (!windowByKey[key].endAtUtc || endAtUtc > windowByKey[key].endAtUtc)) {
+        windowByKey[key].endAtUtc = endAtUtc;
+      }
+    };
+    serverRows.forEach(function(row) { collectWindow(row, "server"); });
+    rawRows.forEach(function(row) { collectWindow(row, "raw"); });
     var grouped = {};
     var normalizeShiftBucket = function(label) {
       var text = String(label || "").toLowerCase();
@@ -1867,7 +2022,8 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       var line = String(row && row.line || "Unknown").trim() || "Unknown";
       var itemCode = String(row && row.item_code || "").trim();
       var itemDescription = formatDescriptionForDisplay(row && row.item_desc) || "";
-      var key = [date, jobId || "--", workOrder || "--", line, itemCode || "--"].join("|");
+      var key = productionJobKey(row);
+      var window = windowByKey[key] || null;
       if (!grouped[key]) {
         grouped[key] = {
           key: key,
@@ -1880,15 +2036,14 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
           casesProduced: 0,
           shiftSlots: {},
           jobStartAtUtc: "",
-          jobEndAtUtc: ""
+          jobEndAtUtc: "",
+          windowSource: window && window.hasActualStart ? window.source : ""
         };
       }
       grouped[key].casesProduced += safeNum(row && row.units_produced);
       grouped[key].shiftSlots[normalizeShiftBucket(row && row.shift_label)] = true;
-      var rowStartAtUtc = String(row && row.job_start_at_utc || "").trim();
-      var rowEndAtUtc = String(row && (row.job_end_at_utc || row.produced_at_utc) || "").trim();
-      if (rowStartAtUtc && (!grouped[key].jobStartAtUtc || rowStartAtUtc < grouped[key].jobStartAtUtc)) grouped[key].jobStartAtUtc = rowStartAtUtc;
-      if (rowEndAtUtc && (!grouped[key].jobEndAtUtc || rowEndAtUtc > grouped[key].jobEndAtUtc)) grouped[key].jobEndAtUtc = rowEndAtUtc;
+      if (window && window.startAtUtc && (!grouped[key].jobStartAtUtc || window.startAtUtc < grouped[key].jobStartAtUtc)) grouped[key].jobStartAtUtc = window.startAtUtc;
+      if (window && window.endAtUtc && (!grouped[key].jobEndAtUtc || window.endAtUtc > grouped[key].jobEndAtUtc)) grouped[key].jobEndAtUtc = window.endAtUtc;
       if (grouped[key].itemDescription === "--" && itemDescription) grouped[key].itemDescription = itemDescription;
     });
 
@@ -1913,6 +2068,10 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       .filter(function(row) {
         return row.casesProduced >= leaderboardMinCases && row.productionMinutes > 0;
       });
+    var actualWindowCount = ranked.filter(function(row) { return row.hasActualWindow; }).length;
+    var actualWindowSource = actualWindowCount
+      ? (ranked.some(function(row) { return row.hasActualWindow && row.windowSource === "server"; }) ? "server" : "raw")
+      : "fallback";
 
     var maxCasesProduced = ranked.reduce(function(max, row) {
       return Math.max(max, safeNum(row.casesProduced));
@@ -1952,10 +2111,12 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     return {
       minCases: leaderboardMinCases,
       qualifiedCount: ranked.length,
+      source: actualWindowSource,
+      actualWindowCount: actualWindowCount,
       best: byBest.slice(0, 5),
       worst: byWorst.slice(0, 5)
     };
-  }, [filteredBreakdown]);
+  }, [localNulogySeries, filteredBreakdown, effectiveRange]);
 
   var skuMixByDay = useMemo(function() {
     var rowsLite = (filteredBreakdown && Array.isArray(filteredBreakdown.rowsLite)) ? filteredBreakdown.rowsLite : [];
@@ -2878,7 +3039,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
             </div>
           </div>
           <div className="text-xs text-[rgb(var(--muted))]">
-            {productionJobLeaderboard.qualifiedCount.toLocaleString()} qualified job run{productionJobLeaderboard.qualifiedCount === 1 ? "" : "s"}
+            {productionJobLeaderboard.qualifiedCount.toLocaleString()} qualified job run{productionJobLeaderboard.qualifiedCount === 1 ? "" : "s"} · {productionJobLeaderboard.actualWindowCount > 0 ? (productionJobLeaderboard.actualWindowCount.toLocaleString() + " with actual Nulogy job windows via " + (productionJobLeaderboard.source === "raw" ? "live raw data" : "server data")) : "shift fallback only"}
           </div>
         </div>
 
