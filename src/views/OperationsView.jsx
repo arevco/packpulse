@@ -2094,17 +2094,12 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
         <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
           <div>
             <div className="text-sm font-semibold">Operations Snapshot</div>
-            <div className="mt-0.5 text-xs text-[rgb(var(--muted))]">
-              Today vs yesterday, this week vs last week, this month vs last month, plus current run-rate estimates.
-            </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <div className="text-xs text-[rgb(var(--muted))]">
-              Latest production day {metrics.latestProductionDate || "unavailable"}
-            </div>
             {onRefreshProduction ? (
               <Button variant="outline" size="sm" onClick={onRefreshProduction} disabled={!!refreshingProduction}>
-                {refreshingProduction ? "Refreshing..." : "Refresh Production"}
+                <span className="mr-1" aria-hidden="true">↻</span>
+                {refreshingProduction ? "Refreshing..." : "Refresh Data"}
               </Button>
             ) : null}
           </div>
@@ -2126,9 +2121,6 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
 
       <Card className="px-4 py-4">
         <div className="mb-2 text-sm font-semibold">Production Jobs</div>
-        <div className="text-xs text-[rgb(var(--muted))] mb-3">
-          Job-level production detail is now consolidated here for shift execution and performance review.
-        </div>
         {laborActuals.status === "missing_labor_events_table" && (
           <div className="mb-3 text-xs text-[rgb(var(--muted))]">
             Labor actuals are not enabled yet. Run `docs/supabase-labor-events.sql` in Supabase.

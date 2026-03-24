@@ -1035,8 +1035,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
       <div className="mb-3 rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-3">
         <div className="mb-2 flex items-start justify-between gap-3">
           <div>
-            <div className="mb-1 text-sm font-semibold">Execution Detail</div>
-            <div className="text-xs text-[rgb(var(--muted))]">One master view: line totals, then job totals, then shift/detail rows. Expand a line to see jobs, then expand a job to see shift rows.</div>
+            <div className="mb-1 text-sm font-semibold">Job Level Details</div>
           </div>
           <button
             type="button"
