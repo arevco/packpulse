@@ -480,8 +480,10 @@ async function fetchInventorySeed(auth) {
       attempts.push({
         key: source.key,
         format: parsed.format || "",
+        contentType: payload.contentType || "",
         headers: parsed.headers || [],
-        rowCount: rows.length
+        rowCount: rows.length,
+        preview: String(payload.text || "").slice(0, 1200)
       });
       if (rows.length) {
         return {
@@ -489,6 +491,7 @@ async function fetchInventorySeed(auth) {
           headers: parsed.headers || [],
           rows: rows,
           format: parsed.format || "",
+          contentType: payload.contentType || "",
           attempts: attempts
         };
       }
@@ -504,7 +507,9 @@ async function fetchInventorySeed(auth) {
   const detail = attempts.map(function(attempt) {
     return attempt.key + ":" + (attempt.error || ("0 rows (" + (attempt.format || "unknown") + ")"));
   }).join(" | ");
-  throw new Error("No usable inventory source returned rows. " + detail);
+  const error = new Error("No usable inventory source returned rows. " + detail);
+  error.attempts = attempts;
+  throw error;
 }
 
 function parseUnknownInventoryPayload(text, contentType) {
@@ -532,6 +537,7 @@ export default async function handler(req, res) {
 
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+  const debugEnabled = String((req.query && req.query.debug) || req.headers["x-codex-debug"] || "").trim() === "1";
 
   const user = process.env.NULOGY_USER;
   const pass = process.env.NULOGY_PASS;
@@ -571,7 +577,17 @@ export default async function handler(req, res) {
         inventorySeedHeaders: inventorySeed.headers || [],
         inventorySeedRows: inventorySeed.rows.length,
         inventorySeedFormat: inventorySeed.format || "",
-        inventorySeedAttempts: inventorySeed.attempts || [],
+        inventorySeedContentType: inventorySeed.contentType || "",
+        inventorySeedAttempts: debugEnabled ? (inventorySeed.attempts || []) : (inventorySeed.attempts || []).map(function(attempt) {
+          return {
+            key: attempt.key,
+            format: attempt.format,
+            contentType: attempt.contentType,
+            headers: attempt.headers,
+            rowCount: attempt.rowCount,
+            error: attempt.error
+          };
+        }),
         itemLocatorHeaders: itemLocatorHeaders,
         itemLocatorRows: itemLocatorRows.length,
         itemLocatorFormat: itemLocatorFormat,
@@ -582,7 +598,11 @@ export default async function handler(req, res) {
     Sentry.captureException(err);
     return res.status(500).json({
       error: "Rich inventory pull failed",
-      details: err && err.message ? err.message : "unknown"
+      details: err && err.message ? err.message : "unknown",
+      diagnostics: debugEnabled ? {
+        message: err && err.message ? err.message : "unknown",
+        inventorySeedAttempts: Array.isArray(err && err.attempts) ? err.attempts : []
+      } : undefined
     });
   }
 }
