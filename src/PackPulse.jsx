@@ -12,6 +12,17 @@ import TabsNav from "./components/ui/tabs-nav";
 import { Card } from "./components/ui/card";
 import AskAiPanel from "./components/AskAiPanel";
 
+var operationsViewImportPromise = null;
+
+function importOperationsView() {
+  if (!operationsViewImportPromise) operationsViewImportPromise = import("./views/OperationsView");
+  return operationsViewImportPromise;
+}
+
+function prefetchOperationsView() {
+  return importOperationsView().catch(function() {});
+}
+
 function lazySafe(importer, name) {
   return lazy(function() {
     return importer()
@@ -43,7 +54,7 @@ function lazySafe(importer, name) {
   });
 }
 
-const OperationsView = lazySafe(function() { return import("./views/OperationsView"); }, "Operations");
+const OperationsView = lazySafe(importOperationsView, "Operations");
 const ForecastView = lazySafe(function() { return import("./views/ForecastView"); }, "Forecast");
 const WorkOrdersView = lazySafe(function() { return import("./views/WorkOrdersView"); }, "Work Orders");
 const SupplyRiskView = lazySafe(function() { return import("./views/SupplyRiskView"); }, "Supply Risk");
@@ -207,11 +218,34 @@ export default function ProductionReadiness() {
     updatePermalink(activeView, workOrdersPermalinkState, forecastPermalinkState, operationsPermalinkState);
   }, [activeView, workOrdersPermalinkState, forecastPermalinkState, operationsPermalinkState, updatePermalink]);
 
+  useEffect(function() {
+    if (typeof window === "undefined" || activeView === "operations") return;
+    var cancelled = false;
+    var timerId = null;
+    var queuePrefetch = function() {
+      if (cancelled) return;
+      prefetchOperationsView();
+    };
+    if (typeof window.requestIdleCallback === "function") {
+      timerId = window.requestIdleCallback(queuePrefetch, { timeout: 1500 });
+      return function() {
+        cancelled = true;
+        if (timerId != null && typeof window.cancelIdleCallback === "function") window.cancelIdleCallback(timerId);
+      };
+    }
+    timerId = window.setTimeout(queuePrefetch, 1200);
+    return function() {
+      cancelled = true;
+      if (timerId != null) window.clearTimeout(timerId);
+    };
+  }, [activeView]);
+
   var navItems = [{key:"workorders",label:"Work Orders",count:null},{key:"operations",label:"Operations",count:null,alert:false},{key:"supplyrisk",label:"Supply Risk",count:null,alert:false},{key:"forecast",label:"Forecast",count:null,alert:false},{key:"aicopilot",label:"AI Copilot",count:null,alert:false}]
     .concat([{key:"sandbox",label:"Sandbox",count:null,alert:false}])
     .map(function(item) {
       return Object.assign({}, item, {
-        href: buildPermalinkUrl(item.key, workOrdersPermalinkState, forecastPermalinkState, operationsPermalinkState)
+        href: buildPermalinkUrl(item.key, workOrdersPermalinkState, forecastPermalinkState, operationsPermalinkState),
+        onPrefetch: item.key === "operations" ? prefetchOperationsView : undefined
       });
     });
 

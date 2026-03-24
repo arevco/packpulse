@@ -15,6 +15,132 @@ function safeNum(v) {
   return Number.isFinite(n) ? n : 0;
 }
 
+function createEmptyLaborActuals(status, productionStatus) {
+  return {
+    summary: {},
+    byDay: [],
+    byShift: [],
+    byLine: [],
+    byRole: [],
+    byWorkOrder: [],
+    byJob: [],
+    status: status || "idle",
+    productionStatus: productionStatus || "ok"
+  };
+}
+
+var EMPTY_BREAKDOWN = { rowsLite: [], bySku: [], byLine: [], latestByLine: [], latestDate: null, totalRows: 0 };
+var operationsResponseCache = {
+  breakdown: Object.create(null),
+  forecast: Object.create(null),
+  config: Object.create(null),
+  labor: Object.create(null)
+};
+var operationsInFlightCache = {
+  breakdown: Object.create(null),
+  forecast: Object.create(null),
+  config: Object.create(null),
+  labor: Object.create(null)
+};
+
+function readCachedOperationsData(kind, key) {
+  var bucket = operationsResponseCache[kind] || {};
+  return Object.prototype.hasOwnProperty.call(bucket, key) ? bucket[key] : null;
+}
+
+function loadCachedOperationsData(kind, key, loader) {
+  var cached = readCachedOperationsData(kind, key);
+  if (cached != null) return Promise.resolve(cached);
+  var inflight = operationsInFlightCache[kind] || {};
+  if (inflight[key]) return inflight[key];
+  var request = Promise.resolve()
+    .then(loader)
+    .then(function(result) {
+      operationsResponseCache[kind][key] = result;
+      delete operationsInFlightCache[kind][key];
+      return result;
+    })
+    .catch(function(error) {
+      delete operationsInFlightCache[kind][key];
+      throw error;
+    });
+  operationsInFlightCache[kind][key] = request;
+  return request;
+}
+
+async function fetchJsonWithCredentials(url) {
+  var response = await fetch(url, { credentials: "include" });
+  var body = {};
+  try {
+    body = await response.json();
+  } catch (_error) {
+    body = {};
+  }
+  return { response: response, body: body };
+}
+
+function normalizeBreakdownPayload(body) {
+  var breakdownRows = Array.isArray(body && body.rowsLite) ? body.rowsLite : [];
+  return {
+    trends: {
+      byDay: aggregateBreakdownByDay(breakdownRows).slice().sort(function(a, b) { return String(b.date || "").localeCompare(String(a.date || "")); }),
+      byShift: aggregateBreakdownByShift(breakdownRows)
+    },
+    breakdown: {
+      rowsLite: breakdownRows,
+      bySku: Array.isArray(body && body.bySku) ? body.bySku : [],
+      byLine: Array.isArray(body && body.byLine) ? body.byLine : [],
+      latestByLine: Array.isArray(body && body.latestByLine) ? body.latestByLine : [],
+      latestDate: body && body.latestDate ? body.latestDate : null,
+      totalRows: safeNum(body && body.totalRows),
+    }
+  };
+}
+
+function normalizeConfigPayload(body) {
+  return {
+    skuTargets: body && Array.isArray(body.skuTargets) ? body.skuTargets : [],
+    itemMasterCostBySku: body && body.itemMasterCostBySku && typeof body.itemMasterCostBySku === "object"
+      ? body.itemMasterCostBySku
+      : {}
+  };
+}
+
+function normalizeForecastPlansPayload(body) {
+  return body && typeof body.plans === "object" ? body.plans : {};
+}
+
+function normalizeLaborActualsPayload(ok, body) {
+  if (!ok || !body) return createEmptyLaborActuals("error", "error");
+  return {
+    summary: body.summary || {},
+    byDay: Array.isArray(body.byDay) ? body.byDay : [],
+    byShift: Array.isArray(body.byShift) ? body.byShift : [],
+    byLine: Array.isArray(body.byLine) ? body.byLine : [],
+    byRole: Array.isArray(body.byRole) ? body.byRole : [],
+    byWorkOrder: Array.isArray(body.byWorkOrder) ? body.byWorkOrder : [],
+    byJob: Array.isArray(body.byJob) ? body.byJob : [],
+    status: body.status || "ok",
+    productionStatus: body.productionStatus || "ok"
+  };
+}
+
+function scheduleAfterPaint(callback) {
+  if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+    var rafOne = 0;
+    var rafTwo = 0;
+    rafOne = window.requestAnimationFrame(function() {
+      rafTwo = window.requestAnimationFrame(callback);
+    });
+    return function() {
+      if (rafOne) window.cancelAnimationFrame(rafOne);
+      if (rafTwo) window.cancelAnimationFrame(rafTwo);
+    };
+  }
+  var timerId = setTimeout(callback, 0);
+  return function() { clearTimeout(timerId); };
+}
+
 var moneyCompactFormatter = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
@@ -751,11 +877,12 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [trends, setTrends] = useState(null);
-  const [breakdown, setBreakdown] = useState({ rowsLite: [], bySku: [], byLine: [], latestByLine: [], latestDate: null, totalRows: 0 });
+  const [breakdown, setBreakdown] = useState(EMPTY_BREAKDOWN);
   const [forecastPlans, setForecastPlans] = useState({});
   const [opsSkuTargets, setOpsSkuTargets] = useState([]);
   const [itemMasterCostBySku, setItemMasterCostBySku] = useState({});
-  const [laborActuals, setLaborActuals] = useState({ summary: {}, byDay: [], byShift: [], byLine: [], byRole: [], byWorkOrder: [], byJob: [], status: "idle", productionStatus: "ok" });
+  const [laborActuals, setLaborActuals] = useState(function() { return createEmptyLaborActuals("idle", "ok"); });
+  const [deferredLoading, setDeferredLoading] = useState({ forecast: false, config: false, labor: false });
   const loadRequestRef = useRef(0);
   const [skuMixMode, setSkuMixMode] = useState("type");
   const [showProductionLines, setShowProductionLines] = useState(false);
@@ -846,56 +973,119 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   var loadAll = async function() {
     var requestId = loadRequestRef.current + 1;
     loadRequestRef.current = requestId;
-    setLoading(true);
     setErr("");
     try {
       var fetchDays = Math.max(range.fetchDays, dailyPerfFetchDays);
       var laborFetchEnd = toIsoDateET(new Date());
       var laborFetchStart = shiftDays(laborFetchEnd, -(fetchDays - 1));
-      var forecastPlanReq = forecastPlanMonths.length
-        ? fetch("/api/ops/forecast-plan?monthKeys=" + encodeURIComponent(forecastPlanMonths.join(",")), { credentials: "include" })
-        : Promise.resolve({ ok: true, json: async function() { return { plans: {} }; } });
-      var [br, fp, laborResp, configResp] = await Promise.all([
-        fetch("/api/ops/production-breakdown?days=" + fetchDays, { credentials: "include" }),
-        forecastPlanReq,
-        fetch("/api/ops/labor-actuals?start=" + encodeURIComponent(laborFetchStart) + "&end=" + encodeURIComponent(laborFetchEnd), { credentials: "include" }),
-        fetch("/api/ops/config", { credentials: "include" }),
-      ]);
-      var [brBody, fpBody, laborBody, configBody] = await Promise.all([br.json(), fp.json(), laborResp.json(), configResp.json()]);
-      if (!br.ok) throw new Error(brBody.error || "Could not load production breakdown");
-      if (requestId !== loadRequestRef.current) return;
-      var breakdownRows = Array.isArray(brBody.rowsLite) ? brBody.rowsLite : [];
-      setTrends({
-        byDay: aggregateBreakdownByDay(breakdownRows).slice().sort(function(a, b) { return String(b.date || "").localeCompare(String(a.date || "")); }),
-        byShift: aggregateBreakdownByShift(breakdownRows)
+      var forecastKey = "v" + safeNum(serverSyncVersion) + "|" + forecastPlanMonths.join(",");
+      var configKey = "v" + safeNum(serverSyncVersion);
+      var laborKey = "v" + safeNum(serverSyncVersion) + "|" + laborFetchStart + "|" + laborFetchEnd;
+      var breakdownKey = "v" + safeNum(serverSyncVersion) + "|" + fetchDays;
+
+      var cachedBreakdown = readCachedOperationsData("breakdown", breakdownKey);
+      var cachedForecast = readCachedOperationsData("forecast", forecastKey);
+      var cachedConfig = readCachedOperationsData("config", configKey);
+      var cachedLabor = readCachedOperationsData("labor", laborKey);
+
+      setLoading(!cachedBreakdown);
+
+      if (cachedBreakdown) {
+        setTrends(cachedBreakdown.trends);
+        setBreakdown(cachedBreakdown.breakdown);
+      }
+      if (cachedForecast) setForecastPlans(cachedForecast);
+      else if (!forecastPlanMonths.length) setForecastPlans({});
+      if (cachedConfig) {
+        setOpsSkuTargets(cachedConfig.skuTargets);
+        setItemMasterCostBySku(cachedConfig.itemMasterCostBySku);
+      }
+      if (cachedLabor) {
+        setLaborActuals(cachedLabor);
+      } else {
+        setLaborActuals(createEmptyLaborActuals("loading", "loading"));
+      }
+      setDeferredLoading({
+        forecast: !cachedForecast && forecastPlanMonths.length > 0,
+        config: !cachedConfig,
+        labor: !cachedLabor
       });
-      setBreakdown({
-        rowsLite: breakdownRows,
-        bySku: Array.isArray(brBody.bySku) ? brBody.bySku : [],
-        byLine: Array.isArray(brBody.byLine) ? brBody.byLine : [],
-        latestByLine: Array.isArray(brBody.latestByLine) ? brBody.latestByLine : [],
-        latestDate: brBody.latestDate || null,
-        totalRows: safeNum(brBody.totalRows),
-      });
-      setForecastPlans(fp && fp.ok && fpBody && typeof fpBody.plans === "object" ? fpBody.plans : {});
-      setOpsSkuTargets(configResp.ok && configBody && Array.isArray(configBody.skuTargets) ? configBody.skuTargets : []);
-      setItemMasterCostBySku(configResp.ok && configBody && configBody.itemMasterCostBySku && typeof configBody.itemMasterCostBySku === "object" ? configBody.itemMasterCostBySku : {});
-      setLaborActuals(laborResp.ok && laborBody
-        ? {
-            summary: laborBody.summary || {},
-            byDay: Array.isArray(laborBody.byDay) ? laborBody.byDay : [],
-            byShift: Array.isArray(laborBody.byShift) ? laborBody.byShift : [],
-            byLine: Array.isArray(laborBody.byLine) ? laborBody.byLine : [],
-            byRole: Array.isArray(laborBody.byRole) ? laborBody.byRole : [],
-            byWorkOrder: Array.isArray(laborBody.byWorkOrder) ? laborBody.byWorkOrder : [],
-            byJob: Array.isArray(laborBody.byJob) ? laborBody.byJob : [],
-            status: laborBody.status || "ok",
-            productionStatus: laborBody.productionStatus || "ok"
+
+      var criticalPayload = cachedBreakdown;
+      if (!criticalPayload) {
+        criticalPayload = await loadCachedOperationsData("breakdown", breakdownKey, async function() {
+          var breakdownResult = await fetchJsonWithCredentials("/api/ops/production-breakdown?days=" + fetchDays);
+          if (!breakdownResult.response.ok) {
+            throw new Error((breakdownResult.body && breakdownResult.body.error) || "Could not load production breakdown");
           }
-        : { summary: {}, byDay: [], byShift: [], byLine: [], byRole: [], byWorkOrder: [], byJob: [], status: "error", productionStatus: "error" });
+          return normalizeBreakdownPayload(breakdownResult.body);
+        });
+      }
+      if (requestId !== loadRequestRef.current) return;
+      setTrends(criticalPayload.trends);
+      setBreakdown(criticalPayload.breakdown);
+      setLoading(false);
+
+      var cancelDeferred = scheduleAfterPaint(function() {
+        if (requestId !== loadRequestRef.current) return;
+
+        if (!cachedForecast && forecastPlanMonths.length) {
+          loadCachedOperationsData("forecast", forecastKey, async function() {
+            var forecastResult = await fetchJsonWithCredentials("/api/ops/forecast-plan?monthKeys=" + encodeURIComponent(forecastPlanMonths.join(",")));
+            return normalizeForecastPlansPayload(forecastResult.response.ok ? forecastResult.body : {});
+          })
+            .then(function(nextForecastPlans) {
+              if (requestId !== loadRequestRef.current) return;
+              setForecastPlans(nextForecastPlans);
+            })
+            .catch(function() {})
+            .finally(function() {
+              if (requestId !== loadRequestRef.current) return;
+              setDeferredLoading(function(prev) { return Object.assign({}, prev, { forecast: false }); });
+            });
+        }
+
+        if (!cachedConfig) {
+          loadCachedOperationsData("config", configKey, async function() {
+            var configResult = await fetchJsonWithCredentials("/api/ops/config");
+            return normalizeConfigPayload(configResult.response.ok ? configResult.body : {});
+          })
+            .then(function(configPayload) {
+              if (requestId !== loadRequestRef.current) return;
+              setOpsSkuTargets(configPayload.skuTargets);
+              setItemMasterCostBySku(configPayload.itemMasterCostBySku);
+            })
+            .catch(function() {})
+            .finally(function() {
+              if (requestId !== loadRequestRef.current) return;
+              setDeferredLoading(function(prev) { return Object.assign({}, prev, { config: false }); });
+            });
+        }
+
+        if (!cachedLabor) {
+          loadCachedOperationsData("labor", laborKey, async function() {
+            var laborResult = await fetchJsonWithCredentials("/api/ops/labor-actuals?start=" + encodeURIComponent(laborFetchStart) + "&end=" + encodeURIComponent(laborFetchEnd));
+            return normalizeLaborActualsPayload(laborResult.response.ok, laborResult.body);
+          })
+            .then(function(nextLaborActuals) {
+              if (requestId !== loadRequestRef.current) return;
+              setLaborActuals(nextLaborActuals);
+            })
+            .catch(function() {
+              if (requestId !== loadRequestRef.current) return;
+              setLaborActuals(createEmptyLaborActuals("error", "error"));
+            })
+            .finally(function() {
+              if (requestId !== loadRequestRef.current) return;
+              setDeferredLoading(function(prev) { return Object.assign({}, prev, { labor: false }); });
+            });
+        }
+      });
+      if (requestId !== loadRequestRef.current && typeof cancelDeferred === "function") cancelDeferred();
     } catch (e) {
       if (requestId !== loadRequestRef.current) return;
       setErr(e && e.message ? e.message : "Failed loading Operations data");
+      setDeferredLoading({ forecast: false, config: false, labor: false });
     } finally {
       if (requestId === loadRequestRef.current) setLoading(false);
     }
@@ -2138,6 +2328,25 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     ];
   }, [commandBoard, metrics]);
 
+  var hasCriticalOperationsData = (effectiveTrends && Array.isArray(effectiveTrends.byDay) && effectiveTrends.byDay.length > 0)
+    || (effectiveBreakdown && Array.isArray(effectiveBreakdown.rowsLite) && effectiveBreakdown.rowsLite.length > 0);
+  var isDeferredLoading = !!(deferredLoading.forecast || deferredLoading.config || deferredLoading.labor);
+  var showProductionJobsLoading = deferredLoading.labor && laborActuals.status === "loading";
+  var showProductionJobsError = laborActuals.status === "error" && !showProductionJobsLoading;
+
+  if (!hasCriticalOperationsData && (loading || err)) {
+    return (
+      <div className="space-y-4">
+        {err ? <Card className="border-[rgb(var(--danger-line))] bg-[rgb(var(--danger-soft))] px-3 py-2 text-sm text-[rgb(var(--danger))]">{err}</Card> : null}
+        {!err ? (
+          <Card className="px-4 py-4 text-sm text-[rgb(var(--muted))]">
+            Loading latest Operations snapshot...
+          </Card>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       {err && <Card className="border-[rgb(var(--danger-line))] bg-[rgb(var(--danger-soft))] px-3 py-2 text-sm text-[rgb(var(--danger))]">{err}</Card>}
@@ -2148,6 +2357,8 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
             <div className="text-sm font-semibold">Operations Snapshot</div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {loading ? <div className="text-xs text-[rgb(var(--muted))]">Refreshing production snapshot...</div> : null}
+            {isDeferredLoading ? <div className="text-xs text-[rgb(var(--muted))]">Loading labor, forecast, and cost overlays...</div> : null}
             {onRefreshProduction ? (
               <Button variant="outline" size="sm" onClick={onRefreshProduction} disabled={!!refreshingProduction}>
                 <span className="mr-1" aria-hidden="true">↻</span>
@@ -2178,12 +2389,22 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
             Labor actuals are not enabled yet. Run `docs/supabase-labor-events.sql` in Supabase.
           </div>
         )}
-        <ProductionView
-          productionSegments={serverProductionSegments}
-          laborActuals={laborActuals}
-          laborDataRaw={[]}
-          resolveRevenueForRow={revenuePerCaseForRow}
-        />
+        {showProductionJobsLoading ? (
+          <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-4 text-sm text-[rgb(var(--muted))]">
+            Loading labor-matched production jobs...
+          </div>
+        ) : showProductionJobsError ? (
+          <div className="rounded-xl border border-[rgb(var(--danger-line))] bg-[rgb(var(--danger-soft))] px-3 py-4 text-sm text-[rgb(var(--danger))]">
+            Could not load labor actuals for Production Jobs right now.
+          </div>
+        ) : (
+          <ProductionView
+            productionSegments={serverProductionSegments}
+            laborActuals={laborActuals}
+            laborDataRaw={[]}
+            resolveRevenueForRow={revenuePerCaseForRow}
+          />
+        )}
       </Card>
 
       <Card className="px-4 py-4">

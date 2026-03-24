@@ -18,6 +18,10 @@ export default function TabsNav({ items, activeKey, onChange, className }) {
     onChange(itemKey);
   };
 
+  var handlePrefetch = function(item) {
+    if (item && typeof item.onPrefetch === "function") item.onPrefetch();
+  };
+
   return (
     <nav
       aria-label="Primary dashboard views"
@@ -41,6 +45,8 @@ export default function TabsNav({ items, activeKey, onChange, className }) {
               href={item.href || "#"}
               aria-current={isActive ? "page" : undefined}
               onClick={function(event) { handleNavClick(event, item.key); }}
+              onMouseEnter={function() { handlePrefetch(item); }}
+              onFocus={function() { handlePrefetch(item); }}
             >
               {item.label}
               {item.count != null ? (
