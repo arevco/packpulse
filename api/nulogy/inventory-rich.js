@@ -482,8 +482,7 @@ async function fetchInventorySeed(auth) {
         format: parsed.format || "",
         contentType: payload.contentType || "",
         headers: parsed.headers || [],
-        rowCount: rows.length,
-        preview: String(payload.text || "").slice(0, 1200)
+        rowCount: rows.length
       });
       if (rows.length) {
         return {
@@ -537,7 +536,6 @@ export default async function handler(req, res) {
 
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
-  const debugEnabled = String((req.query && req.query.debug) || req.headers["x-codex-debug"] || "").trim() === "1";
 
   const user = process.env.NULOGY_USER;
   const pass = process.env.NULOGY_PASS;
@@ -578,7 +576,7 @@ export default async function handler(req, res) {
         inventorySeedRows: inventorySeed.rows.length,
         inventorySeedFormat: inventorySeed.format || "",
         inventorySeedContentType: inventorySeed.contentType || "",
-        inventorySeedAttempts: debugEnabled ? (inventorySeed.attempts || []) : (inventorySeed.attempts || []).map(function(attempt) {
+        inventorySeedAttempts: (inventorySeed.attempts || []).map(function(attempt) {
           return {
             key: attempt.key,
             format: attempt.format,
@@ -598,11 +596,7 @@ export default async function handler(req, res) {
     Sentry.captureException(err);
     return res.status(500).json({
       error: "Rich inventory pull failed",
-      details: err && err.message ? err.message : "unknown",
-      diagnostics: debugEnabled ? {
-        message: err && err.message ? err.message : "unknown",
-        inventorySeedAttempts: Array.isArray(err && err.attempts) ? err.attempts : []
-      } : undefined
+      details: err && err.message ? err.message : "unknown"
     });
   }
 }
