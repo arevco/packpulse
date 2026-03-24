@@ -21,6 +21,8 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
   const [custSortDir, setCustSortDir] = useState("desc");
   const [lateSortField, setLateSortField] = useState("daysLate");
   const [lateSortDir, setLateSortDir] = useState("desc");
+  const [showByCustomer, setShowByCustomer] = useState(true);
+  const [showPastDue, setShowPastDue] = useState(true);
 
   var statusLooksClosed = function(status) {
     var s = normalizeStr(status || "");
@@ -236,7 +238,14 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
     </div>
 
     <div style={{ marginBottom:20 }}>
-      <div style={{ fontSize:14, fontWeight:600, color:C.bright, marginBottom:10 }}>Work Orders by Customer</div>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, marginBottom:10 }}>
+        <div style={{ fontSize:14, fontWeight:600, color:C.bright }}>Work Orders by Customer</div>
+        <Button onClick={function() { setShowByCustomer(function(v) { return !v; }); }} variant="outline" size="sm">
+          <span style={{ marginRight:6 }}>{showByCustomer ? "\u25BE" : "\u25B8"}</span>
+          {showByCustomer ? "Hide" : "Show"}
+        </Button>
+      </div>
+      {showByCustomer ? (
       <TableShell>
         <table style={{ width:"100%", borderCollapse:"collapse" }}>
           <thead><tr style={{ background:C.raised }}>
@@ -272,12 +281,20 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
           </tbody>
         </table>
       </TableShell>
+      ) : null}
     </div>
 
     <div style={{ marginBottom:20 }}>
-      <div style={{ fontSize:14, fontWeight:600, color:C.bad, marginBottom:10, display:"flex", alignItems:"center", gap:8 }}>
-        <span style={{ fontSize:16 }}>{"\u26A0"}</span> Past Due Work Orders ({overview.lateWOs.length})
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, marginBottom:10 }}>
+        <div style={{ fontSize:14, fontWeight:600, color:C.bad, display:"flex", alignItems:"center", gap:8 }}>
+          <span style={{ fontSize:16 }}>{"\u26A0"}</span> Past Due Work Orders ({overview.lateWOs.length})
+        </div>
+        <Button onClick={function() { setShowPastDue(function(v) { return !v; }); }} variant="outline" size="sm">
+          <span style={{ marginRight:6 }}>{showPastDue ? "\u25BE" : "\u25B8"}</span>
+          {showPastDue ? "Hide" : "Show"}
+        </Button>
       </div>
+      {showPastDue ? (
       <TableShell className="border-[rgb(var(--danger))]/40">
         <table style={{ width:"100%", borderCollapse:"collapse" }}>
           <thead><tr style={{ background:C.raised }}>
@@ -311,6 +328,7 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
           </tbody>
         </table>
       </TableShell>
+      ) : null}
     </div>
   </div>);
 }

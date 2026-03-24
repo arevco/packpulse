@@ -43,7 +43,6 @@ function lazySafe(importer, name) {
   });
 }
 
-const OverviewView = lazySafe(function() { return import("./views/OverviewView"); }, "Overview");
 const OperationsView = lazySafe(function() { return import("./views/OperationsView"); }, "Operations");
 const ForecastView = lazySafe(function() { return import("./views/ForecastView"); }, "Forecast");
 const WorkOrdersView = lazySafe(function() { return import("./views/WorkOrdersView"); }, "Work Orders");
@@ -68,11 +67,12 @@ export default function ProductionReadiness() {
   });
 
   var parseInitialPermalink = function() {
-    if (typeof window === "undefined") return { view: "overview", wo: {} };
+    if (typeof window === "undefined") return { view: "workorders", wo: {} };
     var qs = new URLSearchParams(window.location.search || "");
-    var allowedViews = { overview:true, aicopilot:true, operations:true, forecast:true, workorders:true, supplyrisk:true, sandbox:true, flags:true, itemmaster:true };
-    var rawView = String(qs.get("view") || "overview");
-    var view = allowedViews[rawView] ? rawView : "overview";
+    var allowedViews = { aicopilot:true, operations:true, forecast:true, workorders:true, supplyrisk:true, sandbox:true, flags:true, itemmaster:true };
+    var rawView = String(qs.get("view") || "workorders");
+    if (rawView === "overview") rawView = "workorders";
+    var view = allowedViews[rawView] ? rawView : "workorders";
     var preset = String(qs.get("preset") || "").trim().toLowerCase();
     var wo = {
       q: String(qs.get("wo_q") || ""),
@@ -122,8 +122,6 @@ export default function ProductionReadiness() {
   const [showSettings, setShowSettings] = useState(false);
   const [showDataSetup, setShowDataSetup] = useState(false);
   const [showDataControlsPanel, setShowDataControlsPanel] = useState(false);
-  const [workOrdersPrefilterCustomer, setWorkOrdersPrefilterCustomer] = useState("");
-  const [workOrdersPrefilterNonce, setWorkOrdersPrefilterNonce] = useState(0);
   const [autoBootstrapEnabled, setAutoBootstrapEnabled] = useState(true);
   const [autoSyncArmed, setAutoSyncArmed] = useState(false);
   const [hiddenNulogySyncMode, setHiddenNulogySyncMode] = useState("full");
@@ -147,7 +145,8 @@ export default function ProductionReadiness() {
   var buildPermalinkUrl = useCallback(function(nextView, woState, fcState, opsState) {
     if (typeof window === "undefined") return "";
     var params = new URLSearchParams(window.location.search || "");
-    var view = String(nextView || "overview");
+    var view = String(nextView || "workorders");
+    if (view === "overview") view = "workorders";
     params.set("view", view);
     var wo = Object.assign({}, woState || {});
     var setOrDelete = function(key, value, defaultValue) {
@@ -190,7 +189,7 @@ export default function ProductionReadiness() {
     updatePermalink(activeView, workOrdersPermalinkState, forecastPermalinkState, operationsPermalinkState);
   }, [activeView, workOrdersPermalinkState, forecastPermalinkState, operationsPermalinkState, updatePermalink]);
 
-  var navItems = [{key:"overview",label:"Overview",count:null,alert:false},{key:"operations",label:"Operations",count:null,alert:false},{key:"workorders",label:"Work Orders",count:null},{key:"supplyrisk",label:"Supply Risk",count:null,alert:false},{key:"forecast",label:"Forecast",count:null,alert:false},{key:"aicopilot",label:"AI Copilot",count:null,alert:false}]
+  var navItems = [{key:"workorders",label:"Work Orders",count:null},{key:"operations",label:"Operations",count:null,alert:false},{key:"supplyrisk",label:"Supply Risk",count:null,alert:false},{key:"forecast",label:"Forecast",count:null,alert:false},{key:"aicopilot",label:"AI Copilot",count:null,alert:false}]
     .concat([{key:"sandbox",label:"Sandbox",count:null,alert:false}])
     .map(function(item) {
       return Object.assign({}, item, {
@@ -644,7 +643,7 @@ export default function ProductionReadiness() {
   askAiMetrics.marchDailyTargetFullMonth = businessDaysInMarch ? Math.ceil(marchRemainingUnits / businessDaysInMarch) : 0;
   askAiMetrics.marchDailyTargetRemaining = businessDaysRemainingInMarch ? Math.ceil(marchRemainingUnits / businessDaysRemainingInMarch) : 0;
   var askAiContextLines = [
-    "Active view: " + (activeView || "overview"),
+    "Active view: " + (activeView || "workorders"),
     "Work Orders: " + summaryForUI.total + " | Ready: " + summaryForUI.ready + " | Blocked: " + summaryForUI.blocked,
     "Supply risk items: " + criticalItemsForUI.length,
     "Fresh data: " + freshCount + "/" + dataSourceStatus.length + " | Produced today: " + productionTodayTotal,
@@ -741,17 +740,11 @@ export default function ProductionReadiness() {
       if (el && el.scrollIntoView) el.scrollIntoView({ behavior:"smooth", block:"start" });
     }, 0);
   };
-  var openWorkOrdersForCustomer = useCallback(function(customerName) {
-    setWorkOrdersPrefilterCustomer(customerName || "");
-    setWorkOrdersPrefilterNonce(function(v) { return v + 1; });
-    setActiveView("workorders");
-    setTimeout(function() {
-      var el = document.getElementById("dashboard-main");
-      if (el && el.scrollIntoView) el.scrollIntoView({ behavior:"smooth", block:"start" });
-    }, 0);
-  }, []);
   useEffect(function() {
     if (activeView === "production") setActiveView("operations");
+  }, [activeView]);
+  useEffect(function() {
+    if (activeView === "overview") setActiveView("workorders");
   }, [activeView]);
   useEffect(function() {
     if (activeView === "recommendations") setActiveView("workorders");
@@ -1143,11 +1136,10 @@ export default function ProductionReadiness() {
         />
 
         <Suspense fallback={<Card className="mt-3 p-4 text-sm text-[rgb(var(--muted))]">Loading view...</Card>}>
-          {activeView === "overview" && <OverviewView analysis={analysisForUI} woStatuses={woStatusesForUI} onSelectCustomer={openWorkOrdersForCustomer} />}
           {activeView === "aicopilot" && <AICopilotView summary={summaryForUI} criticalItems={criticalItemsForUI} dispatchQueue={dispatchQueue || []} productionSegments={productionSegmentsForUI} evoconData={ds.evoconData || []} workOrders={analysisForUI.results || []} onNavigate={setActiveView} />}
           {activeView === "operations" && <OperationsView productionSegments={productionSegmentsForUI} productionDataRaw={ds.productionData || []} laborDataRaw={ds.laborData || []} evoconData={ds.evoconData || []} evoconTimestamp={ds.evoconTimestamp || evoconLastSyncAt} itemMaster={ds.itemMaster || []} initialFilters={operationsPermalinkState} onPermalinkChange={handleOperationsPermalinkChange} serverSyncVersion={operationsServerSyncVersion} onRefreshProduction={triggerFullNulogySync} refreshingProduction={!!(nulogySyncState && nulogySyncState.syncing)} />}
           {activeView === "forecast" && <ForecastView workOrders={ds.workOrders || []} itemMaster={ds.itemMaster || []} productionData={ds.productionData || []} laborData={ds.laborData || []} initialFilters={forecastPermalinkState} onPermalinkChange={handleForecastPermalinkChange} />}
-          {activeView === "workorders" && <WorkOrdersView analysis={analysisForUI} woStatuses={woStatusesForUI} woCustomers={woCustomersForUI} recommendations={recommendationsForUI} dispatchQueue={dispatchQueue || []} inboundCoverage={inboundCoverage} prefilterCustomer={workOrdersPrefilterCustomer} prefilterNonce={workOrdersPrefilterNonce} initialFilters={workOrdersPermalinkState} onPermalinkChange={handleWorkOrdersPermalinkChange} />}
+          {activeView === "workorders" && <WorkOrdersView analysis={analysisForUI} woStatuses={woStatusesForUI} woCustomers={woCustomersForUI} recommendations={recommendationsForUI} dispatchQueue={dispatchQueue || []} inboundCoverage={inboundCoverage} initialFilters={workOrdersPermalinkState} onPermalinkChange={handleWorkOrdersPermalinkChange} />}
           {activeView === "itemmaster" && <ItemMasterView itemMaster={ds.itemMaster || []} inventory={ds.inventory || []} />}
           {activeView === "supplyrisk" && <SupplyRiskView rawCriticalItems={criticalItemsForUI} inboundCoverage={inboundCoverage} timelineData={timelineData} deliveriesV2={deliveriesV2} />}
           {activeView === "sandbox" && <SandboxView />}

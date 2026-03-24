@@ -8,6 +8,7 @@ import { Badge } from "../components/ui/badge";
 import { MonthPicker } from "../components/ui/month-picker";
 import TableShell from "../components/ui/table-shell";
 import SortHeaderButton from "../components/ui/sort-header-button";
+import OverviewView from "./OverviewView";
 
 function parseDateValue(value) {
   if (!value) return null;
@@ -45,7 +46,7 @@ function csvCell(value) {
   return text;
 }
 
-export default function WorkOrdersView({ analysis, woStatuses, woCustomers, recommendations, dispatchQueue, inboundCoverage, prefilterCustomer, prefilterNonce, initialFilters, onPermalinkChange }) {
+export default function WorkOrdersView({ analysis, woStatuses, woCustomers, recommendations, dispatchQueue, inboundCoverage, initialFilters, onPermalinkChange }) {
   const { C, sans, mono } = useTheme();
   const { thC, tdN, tdM, thDS, tdDN, tdDM, truncate } = useStyles();
   var initial = initialFilters || {};
@@ -136,18 +137,6 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     if (norm.includes("cancel")) return "CXL";
     return raw.length > 4 ? raw.slice(0, 4).toUpperCase() : raw.toUpperCase();
   };
-
-  useEffect(() => {
-    if (!prefilterCustomer) return;
-    setFilterCustomer(prefilterCustomer);
-    setFilterStatus("all");
-    setFilterWoStatus("all");
-    setFilterPackType("all");
-    setFilterShared(false);
-    setFilterRunNext(false);
-    setFilterBatchable(false);
-    setSearchTerm("");
-  }, [prefilterCustomer, prefilterNonce]);
 
   useEffect(function() {
     if (!onPermalinkChange) return;
@@ -1207,7 +1196,28 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     return out;
   };
 
+  var handleOverviewCustomerSelect = function(customerName) {
+    setFilterCustomer(customerName || "all");
+    setFilterStatus("all");
+    setFilterWoStatus("all");
+    setFilterPackType("all");
+    setFilterDueMonth("all");
+    setFilterShared(false);
+    setFilterRunNext(false);
+    setFilterBatchable(false);
+    setSearchTerm("");
+    setTimeout(function() {
+      var el = document.getElementById("workorders-table");
+      if (el && el.scrollIntoView) el.scrollIntoView({ behavior:"smooth", block:"start" });
+    }, 0);
+  };
+
   return (<div>
+    <div style={{ marginBottom:18 }}>
+      <div style={{ fontSize:14, fontWeight:600, color:C.bright, marginBottom:10 }}>Overview Snapshot</div>
+      <OverviewView analysis={analysis} woStatuses={woStatuses} onSelectCustomer={handleOverviewCustomerSelect} />
+    </div>
+    <div id="workorders-table">
     <div className="mb-3 flex items-center gap-1.5 overflow-x-auto whitespace-nowrap pb-1">
       <Input type="text" placeholder="Search WO / SKU / customer" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="h-10 w-72 shrink-0 text-sm" />
       <select value={filterCustomer} onChange={e => setFilterCustomer(e.target.value)} className="h-10 shrink-0 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]">
@@ -1355,5 +1365,6 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       </div>
     </TableShell>
     <div style={{ marginTop:8, fontSize:13, color:C.dim }}>{filteredResults.length} of {analysis.results.length} work orders</div>
+    </div>
   </div>);
 }

@@ -35,11 +35,10 @@ function buildPrototypeReply(text, context) {
 export default function AskAiPanel(props) {
   var open = !!props.open;
   var onClose = props.onClose;
-  var activeView = props.activeView || "overview";
+  var activeView = props.activeView || "workorders";
   var contextLines = Array.isArray(props.contextLines) ? props.contextLines : [];
   var metrics = props.metrics && typeof props.metrics === "object" ? props.metrics : {};
   var labelByView = {
-    overview: "Overview",
     aicopilot: "AI Copilot",
     operations: "Operations",
     workorders: "Work Orders",
