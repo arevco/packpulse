@@ -428,29 +428,24 @@ export default async function handler(req, res) {
     // Transform column names for PackPulse compatibility unless raw mode requested.
     const transformed = rawMode ? rows : transformColumns(rows, reportType);
 
-    if (reportType === "production" && !rawMode && transformed.length) {
-      const hasAnyStart = transformed.some(function(row) {
-        return !!String(pickLooseValue(row, ["Actual Job Start", "actual_job_start_at", "Actual Job Start At"]) || "").trim();
-      });
-      const hasAnyEnd = transformed.some(function(row) {
-        return !!String(pickLooseValue(row, ["Actual Job End", "actual_job_end_at", "Actual Job End At"]) || "").trim();
-      });
-      if (!hasAnyStart || !hasAnyEnd) {
-        return res.status(422).json({
-          error: "Production report missing required Nulogy job start/stop data. PackPulse will not import degraded production rows without Actual Job Start and Actual Job End.",
-          reportType,
-          columns: transformed.length > 0 ? Object.keys(transformed[0]) : [],
-          originalHeaders: originalHeaders
-        });
-      }
-    }
+    const productionJobWindowDiagnostics = reportType === "production" && !rawMode && transformed.length
+      ? {
+          hasAnyActualJobStart: transformed.some(function(row) {
+            return !!String(pickLooseValue(row, ["Actual Job Start", "actual_job_start_at", "Actual Job Start At"]) || "").trim();
+          }),
+          hasAnyActualJobEnd: transformed.some(function(row) {
+            return !!String(pickLooseValue(row, ["Actual Job End", "actual_job_end_at", "Actual Job End At"]) || "").trim();
+          })
+        }
+      : null;
 
     return res.status(200).json({
       data: transformed,
       rowCount: transformed.length,
       reportType,
       columns: transformed.length > 0 ? Object.keys(transformed[0]) : [],
-      originalHeaders: originalHeaders
+      originalHeaders: originalHeaders,
+      diagnostics: productionJobWindowDiagnostics
     });
 
   } catch (err) {

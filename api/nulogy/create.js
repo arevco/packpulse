@@ -167,11 +167,14 @@ const REPORT_CONFIGS = {
   },
   production: {
     report: "production",
-    requiredColumns: ["produced_at", "actual_job_start_at", "actual_job_end_at", "job_id", "units_produced"],
+    requiredColumns: ["produced_at", "job_id", "units_produced"],
     columnSets: [
       ["produced_at", "actual_job_start_at", "actual_job_end_at", "job_id", "project_code", "item_code", "item_description",
        "line", "units_produced", "project_status", "purchase_order_number"],
       ["produced_at", "actual_job_start_at", "actual_job_end_at", "job_id", "project_code", "item_code", "units_produced", "line"],
+      ["produced_at", "job_id", "project_code", "item_code", "item_description",
+       "line", "units_produced", "project_status", "purchase_order_number"],
+      ["produced_at", "job_id", "project_code", "item_code", "units_produced", "line"],
       ["produced_at", "job_id", "units_produced"]
     ],
     filters: buildProductionFilters
@@ -393,7 +396,7 @@ export default async function handler(req, res) {
 
   return res.status(400).json({
     error: reportType === "production"
-      ? "Could not create a production report with required job window columns (actual_job_start_at, actual_job_end_at)."
+      ? "Could not create a production report with the minimum required production columns."
       : "Could not find valid column names for this Nulogy report.",
     reportType,
     nulogyReport: config.report,
