@@ -96,7 +96,28 @@ const REPORT_CONFIGS = {
   inventory: {
     report: "inventory_snapshot",
     columnSets: [
-      // Attempt 1: Full data fields (item_code is auto-included as fixed field)
+      // Attempt 1: Full data fields + location variants (item_code is auto-included as fixed field)
+      ["item_description", "base_quantity", "base_unit_of_measure",
+       "cost_per_base_unit", "cost_per_unit", "unit_cost", "standard_cost", "average_cost",
+       "inventory_status", "lot_code", "expiry_date", "customer_name",
+       "item_category_name", "item_type", "item_family_name", "is_finished_good",
+       "pallet_number", "location_name"],
+      ["item_description", "base_quantity", "base_unit_of_measure",
+       "cost_per_base_unit", "cost_per_unit", "unit_cost", "standard_cost", "average_cost",
+       "inventory_status", "lot_code", "expiry_date", "customer_name",
+       "item_category_name", "item_type", "item_family_name", "is_finished_good",
+       "pallet_number", "storage_location_name"],
+      ["item_description", "base_quantity", "base_unit_of_measure",
+       "cost_per_base_unit", "cost_per_unit", "unit_cost", "standard_cost", "average_cost",
+       "inventory_status", "lot_code", "expiry_date", "customer_name",
+       "item_category_name", "item_type", "item_family_name", "is_finished_good",
+       "pallet_number", "inventory_location"],
+      ["item_description", "base_quantity", "base_unit_of_measure",
+       "cost_per_base_unit", "cost_per_unit", "unit_cost", "standard_cost", "average_cost",
+       "inventory_status", "lot_code", "expiry_date", "customer_name",
+       "item_category_name", "item_type", "item_family_name", "is_finished_good",
+       "pallet_number", "location"],
+      // Attempt 1e: Full data fields
       ["item_description", "base_quantity", "base_unit_of_measure",
        "cost_per_base_unit", "cost_per_unit", "unit_cost", "standard_cost", "average_cost",
        "inventory_status", "lot_code", "expiry_date", "customer_name",

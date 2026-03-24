@@ -57,6 +57,7 @@ function lazySafe(importer, name) {
 const OperationsView = lazySafe(importOperationsView, "Operations");
 const ForecastView = lazySafe(function() { return import("./views/ForecastView"); }, "Forecast");
 const WorkOrdersView = lazySafe(function() { return import("./views/WorkOrdersView"); }, "Work Orders");
+const InventoryView = lazySafe(function() { return import("./views/InventoryView"); }, "Inventory");
 const SupplyRiskView = lazySafe(function() { return import("./views/SupplyRiskView"); }, "Supply Risk");
 const ItemMasterView = lazySafe(function() { return import("./views/ItemMasterView"); }, "Item Master");
 const FlagsView = lazySafe(function() { return import("./views/FlagsView"); }, "Data Flags");
@@ -82,7 +83,7 @@ export default function ProductionReadiness() {
   var parseInitialPermalink = function() {
     if (typeof window === "undefined") return { view: "workorders", wo: {} };
     var qs = new URLSearchParams(window.location.search || "");
-    var allowedViews = { aicopilot:true, operations:true, forecast:true, workorders:true, supplyrisk:true, sandbox:true, flags:true, itemmaster:true };
+    var allowedViews = { aicopilot:true, operations:true, forecast:true, workorders:true, inventory:true, supplyrisk:true, sandbox:true, flags:true, itemmaster:true };
     var rawView = String(qs.get("view") || "workorders");
     if (rawView === "overview") rawView = "workorders";
     var view = allowedViews[rawView] ? rawView : "workorders";
@@ -245,7 +246,7 @@ export default function ProductionReadiness() {
     };
   }, [activeView]);
 
-  var navItems = [{key:"workorders",label:"Work Orders",count:null},{key:"operations",label:"Operations",count:null,alert:false},{key:"supplyrisk",label:"Supply Risk",count:null,alert:false},{key:"forecast",label:"Forecast",count:null,alert:false},{key:"aicopilot",label:"AI Copilot",count:null,alert:false}]
+  var navItems = [{key:"workorders",label:"Work Orders",count:null},{key:"inventory",label:"Inventory",count:null},{key:"operations",label:"Operations",count:null,alert:false},{key:"supplyrisk",label:"Supply Risk",count:null,alert:false},{key:"forecast",label:"Forecast",count:null,alert:false},{key:"aicopilot",label:"AI Copilot",count:null,alert:false}]
     .concat([{key:"sandbox",label:"Sandbox",count:null,alert:false}])
     .map(function(item) {
       return Object.assign({}, item, {
@@ -1159,7 +1160,7 @@ export default function ProductionReadiness() {
                 </div>
                 <Button onClick={() => setShowSettings(false)} variant="outline" size="sm">{"\u2715"}</Button>
               </div>
-              <ColumnMapper title="Inventory" headers={ds.invHeaders} mapping={ds.invMapping} onMappingChange={ds.setInvMapping} fields={[{key:"sku",label:"Item / SKU",required:true},{key:"description",label:"Description"},{key:"qtyOnHand",label:"Qty On Hand",required:true},{key:"status",label:"Inventory Status",help:"If mapped, PackPulse uses only rows marked Good."}]} />
+              <ColumnMapper title="Inventory" headers={ds.invHeaders} mapping={ds.invMapping} onMappingChange={ds.setInvMapping} fields={[{key:"sku",label:"Item / SKU",required:true},{key:"description",label:"Description"},{key:"qtyOnHand",label:"Qty On Hand",required:true},{key:"status",label:"Inventory Status",help:"If mapped, PackPulse uses only rows marked Good."},{key:"location",label:"Location"},{key:"lotCode",label:"Lot Code"},{key:"palletNumber",label:"Pallet Number"}]} />
               {ds.boms && <ColumnMapper title="Bill of Materials" headers={ds.bomHeaders} mapping={ds.bomMapping} onMappingChange={ds.setBomMapping} fields={[{key:"bomId",label:"Finished Good",required:true},{key:"componentSku",label:"Component SKU",required:true},{key:"description",label:"Description (optional)",help:"Used for component naming in details. If blank, PackPulse falls back to Item Master / Inventory descriptions."},{key:"qtyPer",label:"Qty Per",required:true},{key:"substituteFor",label:"Substitute For"},{key:"priority",label:"Priority"}]} />}
               <ColumnMapper title="Work Orders" headers={ds.woHeaders} mapping={ds.woMapping} onMappingChange={ds.setWoMapping} fields={[{key:"woNumber",label:"WO Number",required:true},{key:"productSku",label:"Product SKU",required:true},{key:"qtyToProduce",label:"Qty to Produce",required:true},{key:"dueDate",label:"Due Date"},{key:"status",label:"Status"},{key:"customer",label:"Customer"},{key:"unitsProduced",label:"Units Produced"},{key:"unitsRemaining",label:"Units Remaining"},{key:"unitsPerHour",label:"Units/Hour"},{key:"standardPeople",label:"Crew Size"},{key:"plannedStart",label:"Planned Start"},{key:"plannedEnd",label:"Planned End"},{key:"reference1",label:"Reference / Notes"}]} />
               <div className="mt-4 flex justify-end">
@@ -1180,6 +1181,7 @@ export default function ProductionReadiness() {
           {activeView === "operations" && <OperationsView productionSegments={productionSegmentsForUI} productionDataRaw={ds.productionData || []} laborDataRaw={ds.laborData || []} evoconData={ds.evoconData || []} evoconTimestamp={ds.evoconTimestamp || evoconLastSyncAt} itemMaster={ds.itemMaster || []} initialFilters={operationsPermalinkState} onPermalinkChange={handleOperationsPermalinkChange} serverSyncVersion={operationsServerSyncVersion} onRefreshProduction={triggerFullNulogySync} refreshingProduction={!!(nulogySyncState && nulogySyncState.syncing)} />}
           {activeView === "forecast" && <ForecastView workOrders={ds.workOrders || []} itemMaster={ds.itemMaster || []} productionData={ds.productionData || []} laborData={ds.laborData || []} initialFilters={forecastPermalinkState} onPermalinkChange={handleForecastPermalinkChange} />}
           {activeView === "workorders" && <WorkOrdersView analysis={analysisForUI} woStatuses={woStatusesForUI} woCustomers={woCustomersForUI} recommendations={recommendationsForUI} dispatchQueue={dispatchQueue || []} inboundCoverage={inboundCoverage} initialFilters={workOrdersPermalinkState} onPermalinkChange={handleWorkOrdersPermalinkChange} />}
+          {activeView === "inventory" && <InventoryView inventory={ds.inventory || []} itemMaster={ds.itemMaster || []} invMapping={ds.invMapping || {}} />}
           {activeView === "itemmaster" && <ItemMasterView itemMaster={ds.itemMaster || []} inventory={ds.inventory || []} />}
           {activeView === "supplyrisk" && <SupplyRiskView rawCriticalItems={criticalItemsForUI} inboundCoverage={inboundCoverage} timelineData={timelineData} deliveriesV2={deliveriesV2} />}
           {activeView === "sandbox" && <SandboxView />}
