@@ -64,6 +64,7 @@ export function useDataSources() {
   const [woMapping, setWoMapping] = useState({});
   const [mappingConfirmed, setMappingConfirmed] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
+  const [cacheHydrated, setCacheHydrated] = useState(false);
   const [sharedSnapshotMeta, setSharedSnapshotMeta] = useState({ source: "unknown", syncedAt: null, updatedBy: "" });
   const [sharedSnapshotWrite, setSharedSnapshotWrite] = useState({
     status: "idle", // idle | writing | ok | error
@@ -282,6 +283,7 @@ export function useDataSources() {
         // If cache is unavailable, app still works with live/manual data load.
       } finally {
         hydrateDoneRef.current = true;
+        setCacheHydrated(true);
       }
     })();
   }, [hydrateDataSet, hydrateFromPayloadObject, readStoredDataSet]);
@@ -577,6 +579,7 @@ export function useDataSources() {
     bomMapping, setBomMapping,
     woMapping, setWoMapping,
     mappingConfirmed, setMappingConfirmed,
+    cacheHydrated,
     sharedSnapshotMeta,
     sharedSnapshotWrite,
     analyzing, setAnalyzing,

@@ -287,6 +287,7 @@ export default function ProductionReadiness() {
     sharedWrite.error
   );
   var staleCount = Math.max(0, dataSourceStatus.length - freshCount);
+  var setupNeedsBootstrap = !!(ds.cacheHydrated && !ds.mappingConfirmed);
   var autoSyncHydrated = sharedMeta.source !== "unknown";
   var latestNulogySyncMs = freshestTimestampMs([
     ds.invTimestamp,
@@ -686,14 +687,14 @@ export default function ProductionReadiness() {
     };
   })();
   var showSyncBanner = showAutoBootstrap && (
-    !ds.mappingConfirmed ||
+    setupNeedsBootstrap ||
     dockApiLoading ||
     (nulogySyncState && nulogySyncState.syncing) ||
     dockApiError ||
     (nulogySyncState && nulogySyncState.errorCount > 0)
   );
   var isActivelySyncing = showAutoBootstrap && (
-    !ds.mappingConfirmed ||
+    setupNeedsBootstrap ||
     dockApiLoading ||
     (nulogySyncState && nulogySyncState.syncing)
   );
@@ -949,7 +950,7 @@ export default function ProductionReadiness() {
             {dockApiInfo && syncVisualPct < 100 && <Badge variant="success">{dockApiInfo}</Badge>}
             {dockApiError && <Badge variant="danger">OpenDock: {dockApiError}</Badge>}
             {nulogySyncState && nulogySyncState.errorCount > 0 && <Badge variant="danger">Nulogy sync has errors</Badge>}
-            {!dockApiLoading && (!nulogySyncState || !nulogySyncState.syncing) && !ds.mappingConfirmed && (
+            {!dockApiLoading && (!nulogySyncState || !nulogySyncState.syncing) && setupNeedsBootstrap && (
               <Button variant="outline" size="sm" onClick={() => { setDockApiInfo(""); setDockApiError(""); triggerFullNulogySync(); fetchOpenDockApi(); fetchEvoconApi(); }}>
                 Retry
               </Button>
