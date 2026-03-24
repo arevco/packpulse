@@ -1,4 +1,4 @@
-import { Suspense, lazy, useState, useCallback, useEffect } from "react";
+import { Suspense, lazy, useState, useCallback, useEffect, useRef } from "react";
 import NulogySync from "./NulogySync";
 import { useTheme } from "./theme";
 import { useDataSources } from "./hooks/useDataSources";
