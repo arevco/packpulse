@@ -8,7 +8,7 @@ import ProductionView from "./ProductionView";
 import { Minus, TrendingDown, TrendingUp } from "lucide-react";
 import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, XAxis, YAxis } from "recharts";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "../components/ui/chart";
-import { detectPackType, normalizeStr } from "../utils";
+import { detectPackType, formatDescriptionForDisplay, normalizeStr } from "../utils";
 
 function safeNum(v) {
   var n = Number(v || 0);
@@ -164,6 +164,31 @@ function fmtMoney(v) {
 
 function fmtMissingRevenueSkuCount(count) {
   return count + " SKU" + (count === 1 ? "" : "s") + " missing revenue";
+}
+
+function fmtMoneyPrecise(v) {
+  var amount = safeNum(v);
+  if (!Number.isFinite(amount)) return "--";
+  if (amount < 0) return "-$" + Math.abs(amount).toFixed(2);
+  return "$" + amount.toFixed(2);
+}
+
+function fmtCasesPerHour(v) {
+  return safeNum(v).toFixed(1) + " cs/lh";
+}
+
+function deriveLaborStatusFromRows(finalizedRows, provisionalRows) {
+  if (provisionalRows > 0 && finalizedRows > 0) return "mixed";
+  if (provisionalRows > 0) return "provisional";
+  if (finalizedRows > 0) return "finalized";
+  return "unknown";
+}
+
+function laborStatusShortLabel(status) {
+  if (status === "provisional") return "Provisional";
+  if (status === "mixed") return "Mixed";
+  if (status === "finalized") return "Finalized";
+  return "Unmatched";
 }
 
 function OperationsDailyTotalTooltipContent(props) {
@@ -1812,6 +1837,90 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     };
   }, [effectiveBreakdown, effectiveRange, windowPreset]);
 
+  var productionJobLeaderboard = useMemo(function() {
+    var leaderboardMinCases = 250;
+    var leaderboardMinHours = 1;
+    var sourceRows = (laborActuals && Array.isArray(laborActuals.byJob)) ? laborActuals.byJob : [];
+    var grouped = {};
+
+    sourceRows.forEach(function(row) {
+      var date = String(row && row.date_et || "");
+      if (!inRangeIso(date, effectiveRange)) return;
+      var jobId = String(row && row.job_id || "").trim();
+      var workOrder = String(row && row.work_order_code || "").trim();
+      var line = String(row && row.line_name || "Unknown").trim() || "Unknown";
+      var itemCode = String(row && row.item_code || "").trim();
+      var itemDescription = formatDescriptionForDisplay(row && row.item_description) || "";
+      var key = [jobId || "--", workOrder || "--", line, itemCode || "--"].join("|");
+      if (!grouped[key]) {
+        grouped[key] = {
+          key: key,
+          jobId: jobId || "--",
+          workOrder: workOrder || "--",
+          line: line,
+          itemCode: itemCode || "--",
+          itemDescription: itemDescription || "--",
+          casesProduced: 0,
+          payableHours: 0,
+          productiveHours: 0,
+          laborCost: 0,
+          finalizedRows: 0,
+          provisionalRows: 0,
+          activeDates: {}
+        };
+      }
+      grouped[key].casesProduced += safeNum(row && row.cases_produced);
+      grouped[key].payableHours += safeNum(row && row.payable_hours);
+      grouped[key].productiveHours += safeNum(row && row.productive_hours);
+      grouped[key].laborCost += safeNum(row && row.labor_cost);
+      grouped[key].finalizedRows += safeNum(row && row.finalized_rows);
+      grouped[key].provisionalRows += safeNum(row && row.provisional_rows);
+      if (date) grouped[key].activeDates[date] = true;
+      if (grouped[key].itemDescription === "--" && itemDescription) grouped[key].itemDescription = itemDescription;
+    });
+
+    var ranked = Object.values(grouped)
+      .map(function(row) {
+        var casesProduced = safeNum(row.casesProduced);
+        var payableHours = safeNum(row.payableHours);
+        var productiveHours = safeNum(row.productiveHours);
+        var laborCost = safeNum(row.laborCost);
+        return Object.assign({}, row, {
+          activeDayCount: Object.keys(row.activeDates).length,
+          laborStatus: deriveLaborStatusFromRows(row.finalizedRows, row.provisionalRows),
+          casesPerPayableHour: payableHours > 0 ? (casesProduced / payableHours) : 0,
+          casesPerProductiveHour: productiveHours > 0 ? (casesProduced / productiveHours) : 0,
+          laborCostPerCase: casesProduced > 0 ? (laborCost / casesProduced) : 0
+        });
+      })
+      .filter(function(row) {
+        return row.casesProduced >= leaderboardMinCases && row.payableHours >= leaderboardMinHours;
+      });
+
+    var byBest = ranked.slice().sort(function(a, b) {
+      if (safeNum(b.casesPerPayableHour) !== safeNum(a.casesPerPayableHour)) {
+        return safeNum(b.casesPerPayableHour) - safeNum(a.casesPerPayableHour);
+      }
+      if (safeNum(b.casesProduced) !== safeNum(a.casesProduced)) return safeNum(b.casesProduced) - safeNum(a.casesProduced);
+      return safeNum(a.laborCostPerCase) - safeNum(b.laborCostPerCase);
+    });
+    var byWorst = ranked.slice().sort(function(a, b) {
+      if (safeNum(a.casesPerPayableHour) !== safeNum(b.casesPerPayableHour)) {
+        return safeNum(a.casesPerPayableHour) - safeNum(b.casesPerPayableHour);
+      }
+      if (safeNum(b.payableHours) !== safeNum(a.payableHours)) return safeNum(b.payableHours) - safeNum(a.payableHours);
+      return safeNum(a.casesProduced) - safeNum(b.casesProduced);
+    });
+
+    return {
+      minCases: leaderboardMinCases,
+      minHours: leaderboardMinHours,
+      qualifiedCount: ranked.length,
+      best: byBest.slice(0, 5),
+      worst: byWorst.slice(0, 5)
+    };
+  }, [laborActuals, effectiveRange]);
+
   var skuMixByDay = useMemo(function() {
     var rowsLite = (filteredBreakdown && Array.isArray(filteredBreakdown.rowsLite)) ? filteredBreakdown.rowsLite : [];
     if (!rowsLite.length) return { rows: [], series: [] };
@@ -2723,6 +2832,89 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
           </div>
         </Card>
       </div>
+
+      <Card className="px-4 py-4">
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold">Production Job Leaderboard</div>
+            <div className="text-xs text-[rgb(var(--muted))]">
+              Ranked by cases per payable labor hour in the selected window. Qualified jobs need at least {productionJobLeaderboard.minCases.toLocaleString()} cases and {productionJobLeaderboard.minHours.toFixed(1)} matched labor hour.
+            </div>
+          </div>
+          <div className="text-xs text-[rgb(var(--muted))]">
+            {productionJobLeaderboard.qualifiedCount.toLocaleString()} qualified job{productionJobLeaderboard.qualifiedCount === 1 ? "" : "s"}
+          </div>
+        </div>
+
+        {showProductionJobsLoading ? (
+          <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-4 text-sm text-[rgb(var(--muted))]">
+            Loading labor-matched job leaderboard...
+          </div>
+        ) : laborActuals.status === "missing_labor_events_table" ? (
+          <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-4 text-sm text-[rgb(var(--muted))]">
+            Labor actuals are not enabled yet, so the job leaderboard is unavailable.
+          </div>
+        ) : showProductionJobsError ? (
+          <div className="rounded-xl border border-[rgb(var(--danger-line))] bg-[rgb(var(--danger-soft))] px-3 py-4 text-sm text-[rgb(var(--danger))]">
+            Could not load matched labor data for the job leaderboard right now.
+          </div>
+        ) : productionJobLeaderboard.qualifiedCount ? (
+          <div className="grid gap-3 xl:grid-cols-2">
+            {[
+              { key: "best", label: "Top 5 Best Jobs", rows: productionJobLeaderboard.best, tone: "success", icon: TrendingUp },
+              { key: "worst", label: "Top 5 Worst Jobs", rows: productionJobLeaderboard.worst, tone: "danger", icon: TrendingDown }
+            ].map(function(section) {
+              var Icon = section.icon;
+              var headerTone = section.tone === "success"
+                ? "text-[rgb(var(--success))]"
+                : "text-[rgb(var(--danger))]";
+              return (
+                <div key={section.key} className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
+                  <div className="flex items-center gap-2 border-b border-[rgb(var(--border))] px-3 py-2">
+                    <Icon className={"h-4 w-4 " + headerTone} />
+                    <div className="text-sm font-semibold">{section.label}</div>
+                  </div>
+                  <div className="divide-y divide-[rgb(var(--border))]">
+                    {section.rows.map(function(row, idx) {
+                      var statusTone = row.laborStatus === "finalized"
+                        ? "border-[rgb(var(--success-line))] bg-[rgb(var(--success-soft))] text-[rgb(var(--success))]"
+                        : row.laborStatus === "provisional" || row.laborStatus === "mixed"
+                          ? "border-[rgb(var(--warn-line))] bg-[rgb(var(--warn-soft))] text-[rgb(var(--warn))]"
+                          : "border-[rgb(var(--border))] bg-[rgb(var(--surface))] text-[rgb(var(--muted))]";
+                      return (
+                        <div key={row.key} className="flex flex-wrap items-start justify-between gap-3 px-3 py-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="mb-1 flex items-center gap-2">
+                              <span className={"inline-flex h-6 min-w-6 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold " + (section.tone === "success" ? "bg-[rgb(var(--success-soft))] text-[rgb(var(--success))]" : "bg-[rgb(var(--danger-soft))] text-[rgb(var(--danger))]")}>
+                                #{idx + 1}
+                              </span>
+                              <span className="truncate text-sm font-semibold text-[rgb(var(--foreground))]">{row.itemCode}</span>
+                              <span className={"inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium " + statusTone}>{laborStatusShortLabel(row.laborStatus)}</span>
+                            </div>
+                            <div className="truncate text-xs text-[rgb(var(--muted))]">
+                              Job {row.jobId} · WO {row.workOrder} · {row.line}
+                            </div>
+                            <div className="truncate text-[11px] text-[rgb(var(--muted))]">{row.itemDescription || "--"}</div>
+                          </div>
+                          <div className="shrink-0 text-right text-xs [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>
+                            <div className={"text-sm font-semibold " + headerTone}>{fmtCasesPerHour(row.casesPerPayableHour)}</div>
+                            <div className="text-[rgb(var(--muted))]">{Math.round(safeNum(row.casesProduced)).toLocaleString()} cs · {safeNum(row.payableHours).toFixed(1)} hrs</div>
+                            <div className="text-[rgb(var(--muted))]">{fmtMoneyPrecise(row.laborCostPerCase)}/case · {row.activeDayCount} day{row.activeDayCount === 1 ? "" : "s"}</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-4 text-sm text-[rgb(var(--muted))]">
+            No matched production jobs met the leaderboard minimums in this window.
+          </div>
+        )}
+      </Card>
 
       <div className="grid gap-3 xl:grid-cols-2">
         <Card className="px-4 py-4">
