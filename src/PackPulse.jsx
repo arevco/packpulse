@@ -1065,8 +1065,12 @@ export default function ProductionReadiness() {
               {dataSourceStatus.map(function(s) {
                 var sl = s.forceFresh ? "fresh" : staleLevel(s.ts, s.cad);
                 var dc = sl==="fresh"?C.ok:sl==="stale"?C.warn:C.bad;
+                var statusLabel = sl === "fresh" ? "Fresh" : sl === "stale" ? "Stale" : "Old";
                 return <button key={s.k} onClick={s.ref} className="inline-flex items-center gap-1.5 rounded-md border border-[rgb(var(--border))] bg-white px-2.5 py-1 text-xs font-medium text-[rgb(var(--muted))]">
-                  <span style={{ width:6, height:6, borderRadius:"50%", background:dc }} />{s.l} <span style={{ opacity:0.6 }}>{fmtTs(s.ts)}</span>
+                  <span style={{ width:6, height:6, borderRadius:"50%", background:dc }} />
+                  {s.l}
+                  <span style={{ opacity:0.85 }}>{statusLabel}</span>
+                  <span style={{ opacity:0.6 }}>{fmtTs(s.ts)}</span>
                 </button>;
               })}
               <span className="inline-flex items-center gap-1.5 rounded-md border border-[rgb(var(--border))] bg-white px-2.5 py-1 text-xs font-medium text-[rgb(var(--muted))]">

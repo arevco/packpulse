@@ -1,9 +1,10 @@
 import { cva } from "class-variance-authority";
+import { AlertCircle, AlertTriangle, CheckCircle2, Info } from "lucide-react";
 
 import { cn } from "../../lib/utils";
 
 const badgeVariants = cva(
-  "inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold",
+  "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold",
   {
     variants: {
       variant: {
@@ -21,8 +22,19 @@ const badgeVariants = cva(
   }
 );
 
-function Badge({ className, variant, ...props }) {
-  return <span className={cn(badgeVariants({ variant }), className)} {...props} />;
+function Badge({ className, variant, children, ...props }) {
+  var Icon = null;
+  if (variant === "success") Icon = CheckCircle2;
+  else if (variant === "warning") Icon = AlertTriangle;
+  else if (variant === "danger") Icon = AlertCircle;
+  else if (variant === "info") Icon = Info;
+
+  return (
+    <span className={cn(badgeVariants({ variant }), className)} {...props}>
+      {Icon ? <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /> : null}
+      {children}
+    </span>
+  );
 }
 
 export { Badge, badgeVariants };

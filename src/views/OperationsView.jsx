@@ -395,15 +395,28 @@ function toSeriesKey(prefix, label) {
 
 function lineColor(index) {
   var palette = [
-    "#3b6fd8",
-    "#6f96ea",
-    "#1c9858",
-    "#b88510",
-    "#cc3838",
-    "#95a0b5",
+    "#0072B2",
+    "#E69F00",
+    "#009E73",
+    "#CC79A7",
+    "#56B4E9",
+    "#D55E00",
+    "#7F7F7F",
   ];
   return palette[index % palette.length];
 }
+
+var OPERATIONS_SHIFT_COLORS = {
+  s1: "#0072B2",
+  s2: "#E69F00",
+  un: "#7F7F7F"
+};
+
+var OPERATIONS_ECONOMICS_COLORS = {
+  cases: "#0072B2",
+  revenue: "#009E73",
+  labor: "#CC79A7"
+};
 
 var COMMAND_BOARD_PRESETS = [
   { key: "today", label: "Today" },
@@ -1978,20 +1991,20 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
 
   const shiftChartConfig = useMemo(function() {
     return {
-      s1: { label: "Shift 1", color: C.accent },
-      s2: { label: "Shift 2", color: "#6f96ea" },
-      un: { label: "Unassigned", color: "#c3cad7" },
+      s1: { label: "Shift 1", color: OPERATIONS_SHIFT_COLORS.s1 },
+      s2: { label: "Shift 2", color: OPERATIONS_SHIFT_COLORS.s2 },
+      un: { label: "Unassigned", color: OPERATIONS_SHIFT_COLORS.un },
       plan: { label: "Baseline daily plan", color: C.dim }
     };
-  }, [C.accent, C.dim]);
+  }, [C.dim]);
 
   const dailyEconomicsChartConfig = useMemo(function() {
     return {
-      cases: { label: "Cases Produced", color: C.accent },
-      revenue: { label: "Revenue", color: C.ok },
-      labor: { label: "Labor Cost", color: C.bad }
+      cases: { label: "Cases Produced", color: OPERATIONS_ECONOMICS_COLORS.cases },
+      revenue: { label: "Revenue", color: OPERATIONS_ECONOMICS_COLORS.revenue },
+      labor: { label: "Labor Cost", color: OPERATIONS_ECONOMICS_COLORS.labor }
     };
-  }, [C.accent, C.bad, C.ok]);
+  }, []);
 
   const dailyEconomicsRows = useMemo(function() {
     var dayMap = {};
@@ -2054,10 +2067,11 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       var prefix = delta > 0 ? "+" : "";
       var pctText = compareActual > 0 ? " (" + (pct > 0 ? "+" : "") + pct + "%)" : "";
       var label = String(card.displayLabel || card.compareLabel || "");
+      var stateLabel = delta > 0 ? "Ahead" : delta < 0 ? "Behind" : "Flat";
       if (card.paceProjectedUnits != null) {
-        return "Pacing " + safeNum(card.paceProjectedUnits).toLocaleString() + " · " + prefix + delta.toLocaleString() + pctText + " " + label;
+        return "Pacing " + safeNum(card.paceProjectedUnits).toLocaleString() + " · " + stateLabel + " " + prefix + delta.toLocaleString() + pctText + " " + label;
       }
-      return prefix + delta.toLocaleString() + pctText + " " + label;
+      return stateLabel + " " + prefix + delta.toLocaleString() + pctText + " " + label;
     };
     return [
       {
@@ -2273,9 +2287,9 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
           <div className="h-60 w-full self-center text-center text-sm text-[rgb(var(--muted))] leading-[15rem]">No daily production or labor data in selected window.</div>
         )}
         <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-[rgb(var(--muted))]">
-          <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-[rgb(var(--accent))]" />Cases Produced</span>
-          <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-[rgb(var(--success))]" />Revenue</span>
-          <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-[rgb(var(--danger))]" />Labor Cost</span>
+          <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm" style={{ background: dailyEconomicsChartConfig.cases.color }} />Cases Produced</span>
+          <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm" style={{ background: dailyEconomicsChartConfig.revenue.color }} />Revenue</span>
+          <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm" style={{ background: dailyEconomicsChartConfig.labor.color }} />Labor Cost</span>
         </div>
       </Card>
 
@@ -2409,9 +2423,9 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
             <div className="h-52 w-full self-center text-center text-sm text-[rgb(var(--muted))] leading-[13rem]">No shift production data in selected window.</div>
           )}
           <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-[rgb(var(--muted))]">
-            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-[rgb(var(--accent))]" />Shift 1</span>
-            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-[rgb(var(--accent))/0.7]" />Shift 2</span>
-            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-[rgb(var(--muted))/0.3]" />Unassigned</span>
+            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm" style={{ background: shiftChartConfig.s1.color }} />Shift 1</span>
+            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm" style={{ background: shiftChartConfig.s2.color }} />Shift 2</span>
+            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm" style={{ background: shiftChartConfig.un.color }} />Unassigned</span>
             <span className="inline-flex items-center gap-1"><span className="h-px w-3 border-t-2 border-dashed border-[rgb(var(--muted))]" />Forecast daily plan</span>
           </div>
         </Card>
@@ -2624,6 +2638,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                   var deltaIsGood = card.goodWhenDown ? rawDelta < 0 : rawDelta > 0;
                   var deltaIsBad = card.goodWhenDown ? rawDelta > 0 : rawDelta < 0;
                   var DeltaIcon = rawDelta > 0 ? TrendingUp : rawDelta < 0 ? TrendingDown : Minus;
+                  var deltaLabel = deltaIsGood ? "Improving" : deltaIsBad ? "Worsening" : "Flat";
                   var deltaTone = deltaIsGood
                     ? "text-[rgb(var(--success))]"
                     : deltaIsBad
@@ -2641,6 +2656,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                         <div className={"mt-2 inline-flex items-center gap-1 text-[11px] font-medium " + deltaTone}>
                           <DeltaIcon className="h-3.5 w-3.5 shrink-0" />
                           <span>
+                            {deltaLabel + " · "}
                             {rawDelta > 0 ? "+" : ""}{rawDelta.toLocaleString()}
                             {card.deltaPct != null ? " (" + (safeNum(card.deltaPct) > 0 ? "+" : "") + card.deltaPct + "%)" : ""}
                           </span>
