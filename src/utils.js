@@ -85,11 +85,12 @@ export function buildExportHTML(title, headerCells, bodyRows) {
 export const INV_PAT = {
   sku:["itemcode","sku","item","material","partnumber"],
   description:["description","desc","itemname","name"],
-  qtyOnHand:["qtyonhand","onhand","basequantity","available","stock","instock","quantity"],
+  qtyOnHand:["qtyonhand","onhand","basequantity","good","stock","instock","quantity","available"],
   status:["status","inventorystatus","itemstatus","lotstatus","qualitystatus","disposition"],
   location:["locationname","location","storagelocationname","storagelocation","inventorylocation","warehouselocation","binlocation","zone"],
   lotCode:["lotcode","lot","batch","lotnumber"],
-  palletNumber:["palletnumber","pallet","licenseplate","lp"]
+  palletNumber:["palletnumber","pallet","licenseplate","lp"],
+  expiryDate:["expirydate","expirationdate","expiration","expiry","bestbefore","useby"]
 };
 export const BOM_PAT = { bomId:["finishedgoodcode","bomid","parentsku","parent","fgcode"], componentSku:["subcomponentcode","componentsku","childsku","component","material"], description:["subcomponentdescription","componentdescription","itemdescription","materialdescription","subcomponentname","componentname","description","desc"], qtyPer:["qtyper","quantity","ratio","usage","per"], substituteFor:["substitutefor","altfor","replacementfor","subfor"], priority:["priority","prio","rank","preference"] };
 export const WO_PAT = { woNumber:["workordercode","wonum","wonumber","workorder","wo"], productSku:["itemcode","productsku","sku","material","fgsku"], qtyToProduce:["unitsexpected","qtytoproduce","orderqty","quantity","qty"], dueDate:["duedate","due","needdate","requireddate"], status:["workorderstatus","status","state","wostatus"], customer:["customername","customer","client"], unitsProduced:["unitsproduced","produced","completed"], unitsRemaining:["unitsremaining","remaining","balance"], unitsPerHour:["standardunitsperhour","unitsperhour","rateperhour","rate"], standardPeople:["standardpeople","people","crew","headcount"], plannedStart:["plannedstart","startdate","planstart"], plannedEnd:["plannedend","enddate","planend"], reference1:["reference1","ref1","notes","reference"] };

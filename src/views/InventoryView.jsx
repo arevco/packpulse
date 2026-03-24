@@ -51,6 +51,23 @@ function statusVariant(status) {
   return "info";
 }
 
+function statusBucketRows(row, mapping) {
+  var buckets = [
+    { label: "Good", keys: ["Good", "good"] },
+    { label: "Quarantined", keys: ["Quarantined", "quarantined"] },
+    { label: "Rejected", keys: ["Rejected", "rejected"] },
+    { label: "Unavailable", keys: ["Unavailable", "unavailable"] }
+  ];
+  return buckets.map(function(bucket) {
+    return {
+      status: bucket.label,
+      qty: safeNum(pickLooseValue(row, bucket.keys))
+    };
+  }).filter(function(bucket) {
+    return bucket.qty > 0;
+  });
+}
+
 export default function InventoryView({ inventory, itemMaster, invMapping }) {
   var rows = Array.isArray(inventory) ? inventory : [];
   var itemMasterRows = Array.isArray(itemMaster) ? itemMaster : [];
@@ -96,36 +113,50 @@ export default function InventoryView({ inventory, itemMaster, invMapping }) {
       var status = String(pickMappedOrLoose(row, mapping.status, ["Inventory Status", "inventory_status", "Status", "status"]) || "").trim();
       var location = String(pickMappedOrLoose(row, mapping.location, ["Location", "location", "Location Name", "location_name", "Storage Location", "storage_location", "Storage Location Name", "storage_location_name", "Warehouse Location", "warehouse_location", "Inventory Location", "inventory_location", "Bin Location", "bin_location"]) || "").trim();
       var lotCode = String(pickMappedOrLoose(row, mapping.lotCode, ["Lot Code", "lot_code", "Lot", "lot", "Batch", "batch"]) || "").trim();
+      var expiryDate = String(pickMappedOrLoose(row, mapping.expiryDate, ["Expiry Date", "expiry_date", "Expiration Date", "expiration_date", "Expiry", "expiration"]) || "").trim();
       var palletNumber = String(pickMappedOrLoose(row, mapping.palletNumber, ["Pallet Number", "pallet_number", "Pallet", "pallet"]) || "").trim();
       var customer = String(pickLooseValue(row, ["Customer Name", "customer_name", "Customer", "customer"]) || "").trim();
       var baseUom = String(pickLooseValue(row, ["Base UOM", "base_unit_of_measure", "Base Unit Of Measure", "UOM"]) || "").trim();
+      var bucketRows = statusBucketRows(row, mapping);
+      var hasBucketedStatuses = bucketRows.length > 0;
 
-      if (!sku && !description && !location && !lotCode && !palletNumber && !(quantity || status || customer)) return;
+      if (!sku && !description && !location && !lotCode && !expiryDate && !palletNumber && !(quantity || status || customer || hasBucketedStatuses)) return;
 
-      var displayLocation = location || "Unspecified";
-      var displayLotCode = lotCode || "--";
-      var displayPallet = palletNumber || "--";
-      var displayStatus = status || "Unknown";
-      var key = [sku || ("row-" + idx), displayLocation, displayLotCode, displayPallet, displayStatus, customer || ""].join("|");
-      if (!grouped[key]) {
-        grouped[key] = {
-          id: key,
-          sku: sku || "--",
-          description: formatDescriptionForDisplay(description) || "--",
-          location: displayLocation,
-          lotCode: displayLotCode,
-          palletNumber: displayPallet,
-          qtyOnHand: 0,
-          status: displayStatus,
-          customer: customer || "--",
-          baseUom: baseUom || "",
-          sourceRows: 0
-        };
-      }
-      grouped[key].qtyOnHand += quantity;
-      grouped[key].sourceRows += 1;
-      if (grouped[key].description === "--" && description) grouped[key].description = formatDescriptionForDisplay(description);
-      if (!grouped[key].baseUom && baseUom) grouped[key].baseUom = baseUom;
+      var derivedRows = hasBucketedStatuses
+        ? bucketRows
+        : [{
+            status: status || "Unknown",
+            qty: quantity
+          }];
+
+      derivedRows.forEach(function(derived, derivedIdx) {
+        var displayLocation = location || "";
+        var displayLotCode = lotCode || "";
+        var displayExpiry = expiryDate || "";
+        var displayPallet = palletNumber || "";
+        var displayStatus = derived.status || status || "Unknown";
+        var key = [sku || ("row-" + idx), displayLocation, displayLotCode, displayExpiry, displayPallet, displayStatus, customer || "", String(derivedIdx)].join("|");
+        if (!grouped[key]) {
+          grouped[key] = {
+            id: key,
+            sku: sku || "--",
+            description: formatDescriptionForDisplay(description) || "--",
+            location: displayLocation,
+            lotCode: displayLotCode,
+            expiryDate: displayExpiry,
+            palletNumber: displayPallet,
+            qtyOnHand: 0,
+            status: displayStatus,
+            customer: customer || "--",
+            baseUom: baseUom || "",
+            sourceRows: 0
+          };
+        }
+        grouped[key].qtyOnHand += derived.qty;
+        grouped[key].sourceRows += 1;
+        if (grouped[key].description === "--" && description) grouped[key].description = formatDescriptionForDisplay(description);
+        if (!grouped[key].baseUom && baseUom) grouped[key].baseUom = baseUom;
+      });
     });
     return Object.values(grouped);
   }, [rows, mapping, itemMasterDescriptionBySku]);
@@ -180,6 +211,19 @@ export default function InventoryView({ inventory, itemMaster, invMapping }) {
       uniqueSkus: uniqueSkus
     };
   }, [filteredRows]);
+
+  var hasLocationColumn = useMemo(function() {
+    return preparedRows.some(function(row) { return !!String(row.location || "").trim(); });
+  }, [preparedRows]);
+  var hasLotColumn = useMemo(function() {
+    return preparedRows.some(function(row) { return !!String(row.lotCode || "").trim(); });
+  }, [preparedRows]);
+  var hasExpiryColumn = useMemo(function() {
+    return preparedRows.some(function(row) { return !!String(row.expiryDate || "").trim(); });
+  }, [preparedRows]);
+  var hasPalletColumn = useMemo(function() {
+    return preparedRows.some(function(row) { return !!String(row.palletNumber || "").trim(); });
+  }, [preparedRows]);
 
   var handleSort = function(field) {
     if (sortField === field) setSortDir(function(prev) { return prev === "asc" ? "desc" : "asc"; });
@@ -287,6 +331,19 @@ export default function InventoryView({ inventory, itemMaster, invMapping }) {
         <Badge variant="secondary">{statusOptions.length.toLocaleString()} statuses</Badge>
       </div>
 
+      {(!hasLocationColumn || !hasPalletColumn) ? (
+        <div className="rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-2 text-sm text-[rgb(var(--muted))]">
+          Current inventory source includes
+          {hasLotColumn ? " lot codes" : ""}
+          {hasLotColumn && hasExpiryColumn ? " and" : ""}
+          {hasExpiryColumn ? " expiry dates" : ""}
+          {!hasLotColumn && !hasExpiryColumn ? " quantity/status rows" : ""}
+          , but it does not include
+          {!hasLocationColumn && !hasPalletColumn ? " location or pallet data" : (!hasLocationColumn ? " location data" : " pallet data")}
+          .
+        </div>
+      ) : null}
+
       <TableShell>
         <div className="overflow-x-auto">
           <table className="min-w-full">
@@ -294,9 +351,10 @@ export default function InventoryView({ inventory, itemMaster, invMapping }) {
               <tr>
                 <th style={thC(sortField === "sku")}><SortHeaderButton onClick={function() { handleSort("sku"); }}>SKU</SortHeaderButton></th>
                 <th style={thC(sortField === "description")}><SortHeaderButton onClick={function() { handleSort("description"); }}>Description</SortHeaderButton></th>
-                <th style={thC(sortField === "location")}><SortHeaderButton onClick={function() { handleSort("location"); }}>Location</SortHeaderButton></th>
-                <th style={thC(sortField === "lotCode")}><SortHeaderButton onClick={function() { handleSort("lotCode"); }}>Lot Code</SortHeaderButton></th>
-                <th style={thC(sortField === "palletNumber")}><SortHeaderButton onClick={function() { handleSort("palletNumber"); }}>Pallet</SortHeaderButton></th>
+                {hasLocationColumn ? <th style={thC(sortField === "location")}><SortHeaderButton onClick={function() { handleSort("location"); }}>Location</SortHeaderButton></th> : null}
+                {hasLotColumn ? <th style={thC(sortField === "lotCode")}><SortHeaderButton onClick={function() { handleSort("lotCode"); }}>Lot Code</SortHeaderButton></th> : null}
+                {hasExpiryColumn ? <th style={thC(sortField === "expiryDate")}><SortHeaderButton onClick={function() { handleSort("expiryDate"); }}>Expiry</SortHeaderButton></th> : null}
+                {hasPalletColumn ? <th style={thC(sortField === "palletNumber")}><SortHeaderButton onClick={function() { handleSort("palletNumber"); }}>Pallet</SortHeaderButton></th> : null}
                 <th style={thC(sortField === "qtyOnHand")}><SortHeaderButton onClick={function() { handleSort("qtyOnHand"); }}>Qty On Hand</SortHeaderButton></th>
                 <th style={thC(sortField === "status")}><SortHeaderButton onClick={function() { handleSort("status"); }}>Status</SortHeaderButton></th>
               </tr>
@@ -307,9 +365,10 @@ export default function InventoryView({ inventory, itemMaster, invMapping }) {
                   <tr key={row.id} className="border-b border-[rgb(var(--border))] last:border-b-0">
                     <td style={Object.assign({}, tdN, { fontWeight: 700 })}>{row.sku}</td>
                     <td style={Object.assign({}, tdN, truncate(320))} title={row.description}>{row.description}</td>
-                    <td style={Object.assign({}, tdN, { fontFamily: mono })}>{row.location}</td>
-                    <td style={Object.assign({}, tdN, { fontFamily: mono })}>{row.lotCode}</td>
-                    <td style={Object.assign({}, tdN, { fontFamily: mono })}>{row.palletNumber}</td>
+                    {hasLocationColumn ? <td style={Object.assign({}, tdN, { fontFamily: mono })}>{row.location || "--"}</td> : null}
+                    {hasLotColumn ? <td style={Object.assign({}, tdN, { fontFamily: mono })}>{row.lotCode || "--"}</td> : null}
+                    {hasExpiryColumn ? <td style={Object.assign({}, tdN, { fontFamily: mono })}>{row.expiryDate || "--"}</td> : null}
+                    {hasPalletColumn ? <td style={Object.assign({}, tdN, { fontFamily: mono })}>{row.palletNumber || "--"}</td> : null}
                     <td style={Object.assign({}, tdM, { fontWeight: 700, color: C.ok })}>
                       {Math.round((row.qtyOnHand || 0) * 100) / 100}
                       {row.baseUom ? <span style={{ marginLeft: 6, color: C.dim, fontWeight: 500 }}>{row.baseUom}</span> : null}
@@ -319,7 +378,7 @@ export default function InventoryView({ inventory, itemMaster, invMapping }) {
                 );
               }) : (
                 <tr>
-                  <td colSpan={7} style={Object.assign({}, tdN, { padding: "28px 16px", textAlign: "center", color: C.dim })}>
+                  <td colSpan={2 + (hasLocationColumn ? 1 : 0) + (hasLotColumn ? 1 : 0) + (hasExpiryColumn ? 1 : 0) + (hasPalletColumn ? 1 : 0) + 2} style={Object.assign({}, tdN, { padding: "28px 16px", textAlign: "center", color: C.dim })}>
                     No inventory rows match the current filters.
                   </td>
                 </tr>
