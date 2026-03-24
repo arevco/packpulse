@@ -40,6 +40,13 @@ function parseMissingColumns(errorText) {
     .filter(Boolean);
 }
 
+function missingRequiredColumns(config, columns) {
+  var required = Array.isArray(config && config.requiredColumns) ? config.requiredColumns : [];
+  return required.filter(function(col) {
+    return columns.indexOf(col) === -1;
+  });
+}
+
 function buildProductionFilters(options) {
   var syncProfile = String(options && options.syncProfile || "full");
   var shiftHours = Number(process.env.NULOGY_SHIFT_HOURS || 8);
@@ -160,6 +167,7 @@ const REPORT_CONFIGS = {
   },
   production: {
     report: "production",
+    requiredColumns: ["produced_at", "actual_job_start_at", "actual_job_end_at", "job_id", "units_produced"],
     columnSets: [
       ["produced_at", "actual_job_start_at", "actual_job_end_at", "job_id", "project_code", "item_code", "item_description",
        "line", "units_produced", "project_status", "purchase_order_number"],
@@ -241,6 +249,15 @@ export default async function handler(req, res) {
       }
 
       if (response.ok || response.status === 201) {
+        var missingRequired = missingRequiredColumns(config, columns);
+        if (missingRequired.length) {
+          errors.push({
+            attempt: attempt + 1,
+            columns: columns,
+            error: "Successful report omitted required columns: " + missingRequired.join(", ")
+          });
+          continue;
+        }
         const statusUrl = response.headers.get("location") || response.headers.get("Location");
         const responseBody = await response.json().catch(() => ({}));
         const taskId = responseBody.task_id;
@@ -268,7 +285,7 @@ export default async function handler(req, res) {
           nulogyError: errorText
         });
 
-        if (reportType === "labor") {
+        if (reportType === "labor" || (Array.isArray(config.requiredColumns) && config.requiredColumns.length)) {
           var missing = parseMissingColumns(errorText);
           if (missing.length) {
             var missingLookup = {};
@@ -276,7 +293,8 @@ export default async function handler(req, res) {
             var prunedColumns = columns.filter(function(col) {
               return !missingLookup[String(col || "").trim()];
             });
-            if (prunedColumns.length > 0 && prunedColumns.length < columns.length) {
+            var prunedMissingRequired = missingRequiredColumns(config, prunedColumns);
+            if (prunedColumns.length > 0 && prunedColumns.length < columns.length && prunedMissingRequired.length === 0) {
               const prunedBody = {
                 report: config.report,
                 columns: prunedColumns,
@@ -309,7 +327,7 @@ export default async function handler(req, res) {
                   nulogyReport: config.report,
                   columnsUsed: prunedColumns,
                   attempt: attempt + 1,
-                  note: "auto-pruned unsupported labor columns",
+                  note: reportType === "labor" ? "auto-pruned unsupported labor columns" : "auto-pruned unsupported columns",
                   totalColumns: prunedColumns.length
                 });
               }
@@ -332,6 +350,15 @@ export default async function handler(req, res) {
           });
 
           if (retryRes.ok || retryRes.status === 201) {
+            var retryMissingRequired = missingRequiredColumns(config, columns);
+            if (retryMissingRequired.length) {
+              errors.push({
+                attempt: attempt + 1,
+                columns: columns,
+                error: "Successful report without filters omitted required columns: " + retryMissingRequired.join(", ")
+              });
+              continue;
+            }
             const statusUrl = retryRes.headers.get("location") || retryRes.headers.get("Location");
             const retryBody = await retryRes.json().catch(() => ({}));
             const taskId = retryBody.task_id;
@@ -365,7 +392,9 @@ export default async function handler(req, res) {
   }
 
   return res.status(400).json({
-    error: "Could not find valid column names for this Nulogy report.",
+    error: reportType === "production"
+      ? "Could not create a production report with required job window columns (actual_job_start_at, actual_job_end_at)."
+      : "Could not find valid column names for this Nulogy report.",
     reportType,
     nulogyReport: config.report,
     totalAttempts: errors.length,

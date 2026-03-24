@@ -2050,23 +2050,21 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     var ranked = Object.values(grouped)
       .map(function(row) {
         var casesProduced = safeNum(row.casesProduced);
-        var shiftSlotCount = Math.min(2, Math.max(1, Object.keys(row.shiftSlots).length));
         var actualElapsedMinutes = elapsedMinutesBetween(row.jobStartAtUtc, row.jobEndAtUtc);
         var productionMinutes = actualElapsedMinutes > 0
           ? Math.min(960, actualElapsedMinutes)
-          : (shiftSlotCount * 480);
+          : 0;
         return Object.assign({}, row, {
-          shiftSlotCount: shiftSlotCount,
           productionMinutes: productionMinutes,
           hasActualWindow: actualElapsedMinutes > 0,
           windowLabel: actualElapsedMinutes > 0
             ? (formatTimeEt(row.jobStartAtUtc) + " - " + formatTimeEt(row.jobEndAtUtc))
-            : (shiftSlotCount + " shift bucket" + (shiftSlotCount === 1 ? "" : "s")),
+            : "Actual job window unavailable",
           casesPerProductionMinute: productionMinutes > 0 ? (casesProduced / productionMinutes) : 0
         });
       })
       .filter(function(row) {
-        return row.casesProduced >= leaderboardMinCases && row.productionMinutes > 0;
+        return row.casesProduced >= leaderboardMinCases && row.hasActualWindow && row.productionMinutes > 0;
       });
     var actualWindowCount = ranked.filter(function(row) { return row.hasActualWindow; }).length;
     var actualWindowSource = actualWindowCount
@@ -3035,11 +3033,11 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
           <div>
             <div className="text-sm font-semibold">Production Job Leaderboard</div>
             <div className="text-xs text-[rgb(var(--muted))]">
-              Ranked with yield-first weighting in the selected window: total cases carry more weight, then cases per production minute. Each row is one job-day run using actual job start/stop times when available, with shift buckets only as fallback.
+              Ranked with yield-first weighting in the selected window: total cases carry more weight, then cases per production minute. Each row is one job-day run using actual Nulogy job start/stop timestamps only.
             </div>
           </div>
           <div className="text-xs text-[rgb(var(--muted))]">
-            {productionJobLeaderboard.qualifiedCount.toLocaleString()} qualified job run{productionJobLeaderboard.qualifiedCount === 1 ? "" : "s"} · {productionJobLeaderboard.actualWindowCount > 0 ? (productionJobLeaderboard.actualWindowCount.toLocaleString() + " with actual Nulogy job windows via " + (productionJobLeaderboard.source === "raw" ? "live raw data" : "server data")) : "shift fallback only"}
+            {productionJobLeaderboard.qualifiedCount.toLocaleString()} qualified job run{productionJobLeaderboard.qualifiedCount === 1 ? "" : "s"}{productionJobLeaderboard.actualWindowCount > 0 ? (" · actual Nulogy job windows via " + (productionJobLeaderboard.source === "raw" ? "live raw data" : "server data")) : ""}
           </div>
         </div>
 
@@ -3079,7 +3077,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                           <div className="shrink-0 text-right text-xs [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>
                             <div className={"text-sm font-semibold " + headerTone}>{fmtCasesPerProductionMin(row.casesPerProductionMinute)}</div>
                             <div className="text-[rgb(var(--muted))]">{Math.round(safeNum(row.casesProduced)).toLocaleString()} cs · {Math.round(safeNum(row.productionMinutes)).toLocaleString()} prod min</div>
-                            <div className="text-[rgb(var(--muted))]">{row.windowLabel}{row.hasActualWindow ? "" : " tracked"}</div>
+                            <div className="text-[rgb(var(--muted))]">{row.windowLabel}</div>
                           </div>
                         </div>
                       );
@@ -3091,7 +3089,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
           </div>
         ) : (
           <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-4 text-sm text-[rgb(var(--muted))]">
-            No production job runs met the leaderboard minimums in this window.
+            No production job runs with valid Nulogy start/stop timestamps met the leaderboard minimums in this window.
           </div>
         )}
       </Card>

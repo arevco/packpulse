@@ -373,6 +373,23 @@ function transformColumns(rows, reportType) {
   });
 }
 
+function normalizeLooseKey(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function pickLooseValue(row, keys) {
+  if (!row || typeof row !== "object") return "";
+  var rowKeys = Object.keys(row);
+  for (var i = 0; i < keys.length; i++) {
+    var wanted = normalizeLooseKey(keys[i]);
+    for (var j = 0; j < rowKeys.length; j++) {
+      var rowKey = rowKeys[j];
+      if (normalizeLooseKey(rowKey) === wanted) return row[rowKey];
+    }
+  }
+  return "";
+}
+
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
@@ -410,6 +427,23 @@ export default async function handler(req, res) {
 
     // Transform column names for PackPulse compatibility unless raw mode requested.
     const transformed = rawMode ? rows : transformColumns(rows, reportType);
+
+    if (reportType === "production" && !rawMode && transformed.length) {
+      const hasAnyStart = transformed.some(function(row) {
+        return !!String(pickLooseValue(row, ["Actual Job Start", "actual_job_start_at", "Actual Job Start At"]) || "").trim();
+      });
+      const hasAnyEnd = transformed.some(function(row) {
+        return !!String(pickLooseValue(row, ["Actual Job End", "actual_job_end_at", "Actual Job End At"]) || "").trim();
+      });
+      if (!hasAnyStart || !hasAnyEnd) {
+        return res.status(422).json({
+          error: "Production report missing required Nulogy job start/stop data. PackPulse will not import degraded production rows without Actual Job Start and Actual Job End.",
+          reportType,
+          columns: transformed.length > 0 ? Object.keys(transformed[0]) : [],
+          originalHeaders: originalHeaders
+        });
+      }
+    }
 
     return res.status(200).json({
       data: transformed,
