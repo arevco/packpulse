@@ -422,8 +422,9 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       var woKey = normalizeWorkOrderKey(woNum);
       var hasAttributedSkuProduction = !isStatusClosed && safeNum(productionBySkuAttributed[productSku]) > 0;
       var hasAttributedWoProduction = !!(woKey && Object.prototype.hasOwnProperty.call(productionByWorkOrder, woKey));
+      var attributedUnitsProduced = hasAttributedWoProduction ? safeNum(productionByWorkOrder[woKey]) : 0;
       var unitsProduced = hasAttributedSkuProduction
-        ? (hasAttributedWoProduction ? safeNum(productionByWorkOrder[woKey]) : 0)
+        ? Math.max(snapshotUnitsProduced, attributedUnitsProduced)
         : snapshotUnitsProduced;
       var unitsRemaining = hasAttributedSkuProduction
         ? Math.max(0, qtyToProduce - unitsProduced)
@@ -446,7 +447,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
         reference1:reference1,
         estHours:estHours,
         prodPct:prodPct,
-        unitsProducedSource: hasAttributedSkuProduction ? "production_events" : "workorders_snapshot",
+        unitsProducedSource: hasAttributedSkuProduction && attributedUnitsProduced > snapshotUnitsProduced ? "production_events" : "workorders_snapshot",
         snapshotUnitsProduced: snapshotUnitsProduced
       };
       var bom = bomMap[productSku];

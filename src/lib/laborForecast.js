@@ -387,8 +387,9 @@ export function runLaborForecast(input) {
     var woKey = normalizeWorkOrderCode(woCode);
     var hasAttributedSkuProduction = !isClosed && safeNum(productionActualsBySku[skuKey]) > 0;
     var hasAttributedWoProduction = !!(woKey && Object.prototype.hasOwnProperty.call(productionActualsByWorkOrder, woKey));
+    var attributedUnitsProduced = hasAttributedWoProduction ? safeNum(productionActualsByWorkOrder[woKey]) : 0;
     var unitsProduced = hasAttributedSkuProduction
-      ? (hasAttributedWoProduction ? safeNum(productionActualsByWorkOrder[woKey]) : 0)
+      ? Math.max(snapshotUnitsProduced, attributedUnitsProduced)
       : snapshotUnitsProduced;
     var remainingCases = hasAttributedSkuProduction
       ? Math.max(0, unitsExpected - unitsProduced)
