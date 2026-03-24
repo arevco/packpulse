@@ -3,20 +3,13 @@ import { useTheme } from "../theme";
 import { useStyles } from "../hooks/useStyles";
 import { fmtDate, formatDescriptionForDisplay, normalizeStr } from "../utils";
 import { Button } from "../components/ui/button";
-import { Input } from "../components/ui/input";
-import { DatePicker } from "../components/ui/date-picker";
 import TableShell from "../components/ui/table-shell";
 import SortHeaderButton from "../components/ui/sort-header-button";
 
-export default function OverviewView({ analysis, woStatuses, onSelectCustomer }) {
+export default function OverviewView({ analysis, onSelectCustomer }) {
   const { C, mono } = useTheme();
   const { thS, tdN, tdM } = useStyles();
 
-  const [ovSearch, setOvSearch] = useState("");
-  const [ovWoStatus, setOvWoStatus] = useState("Booked");
-  const [ovCustomer, setOvCustomer] = useState("all");
-  const [ovDateFrom, setOvDateFrom] = useState("");
-  const [ovDateTo, setOvDateTo] = useState("");
   const [custSortField, setCustSortField] = useState("remaining");
   const [custSortDir, setCustSortDir] = useState("desc");
   const [lateSortField, setLateSortField] = useState("daysLate");
@@ -38,24 +31,6 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
   var overview = useMemo(() => {
     if (!analysis) return null;
     var r = analysis.results.slice();
-    if (ovSearch) {
-      var q = ovSearch.toLowerCase();
-      r = r.filter(function(w) {
-        return (
-          (w.woNum || "").toLowerCase().includes(q) ||
-          (w.productSkuRaw || "").toLowerCase().includes(q) ||
-          (w.productDesc || "").toLowerCase().includes(q) ||
-          (w.customer || "").toLowerCase().includes(q)
-        );
-      });
-    }
-    // WO status filter
-    if (ovWoStatus !== "all") r = r.filter(w => w.status === ovWoStatus);
-    // Customer filter
-    if (ovCustomer !== "all") r = r.filter(function(w) { return (w.customer || "Unassigned") === ovCustomer; });
-    // Date range filter on due date
-    if (ovDateFrom) { var from = new Date(ovDateFrom); from.setHours(0,0,0,0); r = r.filter(w => { if (!w.dueDate) return false; var d = new Date(w.dueDate); return !isNaN(d) && d >= from; }); }
-    if (ovDateTo) { var to = new Date(ovDateTo); to.setHours(23,59,59,999); r = r.filter(w => { if (!w.dueDate) return false; var d = new Date(w.dueDate); return !isNaN(d) && d <= to; }); }
     var activeWOs = r.filter(function(wo) {
       if (wo.runStatus === "nobom") return false;
       if (statusLooksClosed(wo.status)) return false;
@@ -147,13 +122,6 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
     var completionPct = totalOrderQty > 0 ? Math.round(totalProduced / totalOrderQty * 100) : 0;
     var custArr = Object.entries(byCustomer).map(([name, d]) => Object.assign({ name:name }, d)).sort((a,b) => b.remaining - a.remaining);
     return { totalOrderQty:totalOrderQty, totalProduced:totalProduced, totalRemaining:totalRemaining, totalNetMake:totalNetMake, totalEstHours:Math.round(totalEstHours*10)/10, completionPct:completionPct, lateWOs:lateWOs, byCustomer:custArr, woCount:woCount, noDueDate:noDueDate };
-  }, [analysis, ovSearch, ovWoStatus, ovCustomer, ovDateFrom, ovDateTo]);
-
-  var customerOptions = useMemo(function() {
-    if (!analysis || !analysis.results) return [];
-    var set = new Set();
-    analysis.results.forEach(function(w) { set.add(w.customer || "Unassigned"); });
-    return Array.from(set).sort();
   }, [analysis]);
 
   if (!overview) return null;
@@ -201,27 +169,6 @@ export default function OverviewView({ analysis, woStatuses, onSelectCustomer })
   });
 
   return (<div>
-    <div className="mb-4 flex flex-wrap items-center gap-2">
-      <Input type="text" placeholder="Search WO / SKU / customer" value={ovSearch} onChange={function(e) { setOvSearch(e.target.value); }} className="h-10 w-full text-sm sm:w-72" />
-      <select value={ovCustomer} onChange={function(e) { setOvCustomer(e.target.value); }} className="h-10 w-full rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))] sm:w-auto">
-        <option value="all">All Customers</option>
-        {customerOptions.map(function(c) { return <option key={c} value={c}>{c}</option>; })}
-      </select>
-      <select
-        value={ovWoStatus}
-        onChange={function(e) { setOvWoStatus(e.target.value); }}
-        className="h-10 w-full rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))] sm:w-auto"
-      >
-        <option value="all">All WO Status</option>
-        {woStatuses.map(function(s) { return <option key={s} value={s}>{s}</option>; })}
-      </select>
-      <span style={{ fontSize:13, color:C.dim, marginLeft:4 }}>Due from</span>
-      <DatePicker value={ovDateFrom} onChange={setOvDateFrom} placeholder="Start date" className="w-full sm:w-36" />
-      <span style={{ fontSize:13, color:C.dim }}>to</span>
-      <DatePicker value={ovDateTo} onChange={setOvDateTo} placeholder="End date" className="w-full sm:w-36" />
-      {(ovSearch || ovWoStatus!=="all" || ovCustomer!=="all" || ovDateFrom || ovDateTo) && <Button onClick={() => {setOvSearch("");setOvWoStatus("all");setOvCustomer("all");setOvDateFrom("");setOvDateTo("");}} variant="outline" size="default">Clear</Button>}
-      <span style={{ fontSize:13, color:C.dim, marginLeft:4 }}>{overview.woCount} of {analysis.results.length} WOs{overview.noDueDate > 0 && ovDateFrom ? " ("+overview.noDueDate+" excluded \u2014 no due date)" : ""}</span>
-    </div>
     <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(150px, 1fr))", gap:10, marginBottom:20 }}>
       {[
         {l:"Total Order Qty", v:overview.totalOrderQty.toLocaleString(), c:C.bright},

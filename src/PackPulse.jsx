@@ -74,15 +74,28 @@ export default function ProductionReadiness() {
     if (rawView === "overview") rawView = "workorders";
     var view = allowedViews[rawView] ? rawView : "workorders";
     var preset = String(qs.get("preset") || "").trim().toLowerCase();
+    var legacyMonth = String(qs.get("wo_month") || "").trim();
+    var start = String(qs.get("wo_start") || "").trim();
+    var end = String(qs.get("wo_end") || "").trim();
+    if ((!start || !end) && /^\d{4}-\d{2}$/.test(legacyMonth)) {
+      start = legacyMonth + "-01";
+      var legacyMonthDate = new Date(legacyMonth + "-01T00:00:00");
+      if (!isNaN(legacyMonthDate)) {
+        var legacyMonthEnd = new Date(legacyMonthDate.getFullYear(), legacyMonthDate.getMonth() + 1, 0);
+        end = legacyMonthEnd.toISOString().slice(0, 10);
+      }
+    }
     var wo = {
       q: String(qs.get("wo_q") || ""),
       runStatus: String(qs.get("wo_run_status") || "all"),
       woStatus: String(qs.get("wo_wo_status") || "Booked"),
       customer: String(qs.get("wo_customer") || "all"),
-      month: String(qs.get("wo_month") || "all"),
+      start: start,
+      end: end,
       packType: String(qs.get("wo_pack") || "all"),
       shared: qs.get("wo_shared") === "1",
       runNext: qs.get("wo_run_next") === "1",
+      batchable: qs.get("wo_batchable") === "1",
       runNextLimit: String(qs.get("wo_run_next_limit") || "12"),
       sortField: String(qs.get("wo_sort_field") || "readiness"),
       sortDir: String(qs.get("wo_sort_dir") || "desc"),
@@ -158,13 +171,16 @@ export default function ProductionReadiness() {
     setOrDelete("wo_run_status", wo.runStatus || "all", "all");
     setOrDelete("wo_wo_status", wo.woStatus || "Booked", "Booked");
     setOrDelete("wo_customer", wo.customer || "all", "all");
-    setOrDelete("wo_month", wo.month || "all", "all");
+    setOrDelete("wo_start", wo.start || "", "");
+    setOrDelete("wo_end", wo.end || "", "");
+    params.delete("wo_month");
     setOrDelete("wo_pack", wo.packType || "all", "all");
     setOrDelete("wo_run_next_limit", wo.runNextLimit || "12", "12");
     setOrDelete("wo_sort_field", wo.sortField || "readiness", "readiness");
     setOrDelete("wo_sort_dir", wo.sortDir || "desc", "desc");
     if (wo.shared) params.set("wo_shared", "1"); else params.delete("wo_shared");
     if (wo.runNext) params.set("wo_run_next", "1"); else params.delete("wo_run_next");
+    if (wo.batchable) params.set("wo_batchable", "1"); else params.delete("wo_batchable");
     var preset = String(wo.preset || "");
     if (preset) params.set("preset", preset); else params.delete("preset");
     var fc = Object.assign({}, fcState || {});

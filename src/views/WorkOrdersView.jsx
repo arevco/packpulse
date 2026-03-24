@@ -5,7 +5,7 @@ import { fmtDate, triggerDownload, normalizeStr, formatDescriptionForDisplay, de
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Badge } from "../components/ui/badge";
-import { MonthPicker } from "../components/ui/month-picker";
+import { DatePicker } from "../components/ui/date-picker";
 import TableShell from "../components/ui/table-shell";
 import SortHeaderButton from "../components/ui/sort-header-button";
 import OverviewView from "./OverviewView";
@@ -46,6 +46,27 @@ function csvCell(value) {
   return text;
 }
 
+function isWithinDueDateRange(value, start, end) {
+  if (!start && !end) return true;
+  var dueDate = parseDateValue(value);
+  if (!dueDate) return false;
+  if (start) {
+    var startDate = parseDateValue(start);
+    if (startDate) {
+      startDate.setHours(0, 0, 0, 0);
+      if (dueDate < startDate) return false;
+    }
+  }
+  if (end) {
+    var endDate = parseDateValue(end);
+    if (endDate) {
+      endDate.setHours(23, 59, 59, 999);
+      if (dueDate > endDate) return false;
+    }
+  }
+  return true;
+}
+
 export default function WorkOrdersView({ analysis, woStatuses, woCustomers, recommendations, dispatchQueue, inboundCoverage, initialFilters, onPermalinkChange }) {
   const { C, sans, mono } = useTheme();
   const { thC, tdN, tdM, thDS, tdDN, tdDM, truncate } = useStyles();
@@ -55,7 +76,8 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
   const [filterStatus, setFilterStatus] = useState(String(initial.runStatus || "all"));
   const [filterWoStatus, setFilterWoStatus] = useState(String(initial.woStatus || "Booked"));
   const [filterCustomer, setFilterCustomer] = useState(String(initial.customer || "all"));
-  const [filterDueMonth, setFilterDueMonth] = useState(String(initial.month || "all"));
+  const [filterDateFrom, setFilterDateFrom] = useState(String(initial.start || ""));
+  const [filterDateTo, setFilterDateTo] = useState(String(initial.end || ""));
   const [filterPackType, setFilterPackType] = useState(String(initial.packType || "all"));
   const [filterShared, setFilterShared] = useState(!!initial.shared);
   const [filterRunNext, setFilterRunNext] = useState(!!initial.runNext);
@@ -145,7 +167,8 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       runStatus: filterStatus,
       woStatus: filterWoStatus,
       customer: filterCustomer,
-      month: filterDueMonth,
+      start: filterDateFrom || "",
+      end: filterDateTo || "",
       packType: filterPackType,
       shared: !!filterShared,
       runNext: !!filterRunNext,
@@ -154,7 +177,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       sortField: sortField,
       sortDir: sortDir
     });
-  }, [onPermalinkChange, searchTerm, filterStatus, filterWoStatus, filterCustomer, filterDueMonth, filterPackType, filterShared, filterRunNext, filterBatchable, runNextLimit, sortField, sortDir]);
+  }, [onPermalinkChange, searchTerm, filterStatus, filterWoStatus, filterCustomer, filterDateFrom, filterDateTo, filterPackType, filterShared, filterRunNext, filterBatchable, runNextLimit, sortField, sortDir]);
 
   var handleSort = f => { if (sortField === f) setSortDir(d => d==="asc"?"desc":"asc"); else { setSortField(f); setSortDir("desc"); } };
   var woCommitKey = function(wo) { return [wo.woNum || "", wo.productSkuRaw || "", wo.dueDate || ""].join("|"); };
@@ -167,13 +190,6 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
   var parseDueDateTs = function(v) {
     var d = parseDateValue(v);
     return d ? d.getTime() : Number.POSITIVE_INFINITY;
-  };
-  var dueMonthKey = function(v) {
-    var d = parseDateValue(v);
-    if (!d) return "";
-    var y = d.getFullYear();
-    var m = String(d.getMonth() + 1).padStart(2, "0");
-    return y + "-" + m;
   };
   var batchOpportunityKey = function(wo) {
     if (!wo) return "";
@@ -303,22 +319,6 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     return map;
   }, [analysis]);
 
-  var commitmentSummary = useMemo(function() {
-    if (!analysis) return null;
-    var rows = analysis.results || [];
-    var atRisk = 0;
-    var reducedUnits = 0;
-    rows.forEach(function(wo) {
-      var c = commitmentMap[woCommitKey(wo)];
-      if (!c) return;
-      if (c.commitmentGap > 0) {
-        atRisk += 1;
-        reducedUnits += c.commitmentGap;
-      }
-    });
-    return { atRisk:atRisk, reducedUnits:reducedUnits };
-  }, [analysis, commitmentMap]);
-
   var sharedComponentUsage = useMemo(function() {
     if (!analysis) return {};
     var usage = {};
@@ -403,18 +403,33 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     });
   };
 
+  var searchQuery = useMemo(function() {
+    var qRaw = String(searchTerm || "").toLowerCase().trim();
+    return {
+      active: !!qRaw,
+      qRaw: qRaw,
+      qNorm: normalizeSearchValue(qRaw),
+      qSku: normalizeSkuSearchValue(qRaw)
+    };
+  }, [searchTerm]);
+
+  var matchesScopedFilters = function(wo, options) {
+    var opts = options || {};
+    if (filterCustomer !== "all" && wo.customer !== filterCustomer) return false;
+    if (!isWithinDueDateRange(wo.dueDate, filterDateFrom, filterDateTo)) return false;
+    if (searchQuery.active && !matchesWorkOrderSearch(wo, searchQuery.qRaw, searchQuery.qNorm, searchQuery.qSku)) return false;
+    if (opts.includeWoStatus !== false && filterWoStatus !== "all" && wo.status !== filterWoStatus) return false;
+    if (filterStatus !== "all" && wo.runStatus !== filterStatus) return false;
+    if (filterShared && !hasSharedComponent(wo)) return false;
+    if (filterRunNext && !runNextWoSet[String(wo.woNum || "")]) return false;
+    if (filterPackType !== "all" && detectPackType(wo.productDesc || wo.productSkuRaw || "", wo.productSkuRaw || wo.productSku || "") !== filterPackType) return false;
+    return true;
+  };
+
   var batchScopeResults = useMemo(function() {
     if (!analysis) return [];
-    var r = analysis.results.slice();
-    if (filterStatus !== "all") r = r.filter(function(w) { return w.runStatus === filterStatus; });
-    if (filterCustomer !== "all") r = r.filter(function(w) { return w.customer === filterCustomer; });
-    if (filterDueMonth !== "all") r = r.filter(function(w) { return dueMonthKey(w.dueDate) === filterDueMonth; });
-    if (filterShared) r = r.filter(function(w) { return hasSharedComponent(w); });
-    if (filterRunNext) r = r.filter(function(w) { return !!runNextWoSet[String(w.woNum || "")]; });
-    if (filterWoStatus !== "all") r = r.filter(function(w) { return w.status === filterWoStatus; });
-    if (filterPackType !== "all") r = r.filter(function(w) { return detectPackType(w.productDesc || w.productSkuRaw || "", w.productSkuRaw || w.productSku || "") === filterPackType; });
-    return r;
-  }, [analysis, filterStatus, filterCustomer, filterDueMonth, filterShared, filterRunNext, filterWoStatus, filterPackType, sharedComponentUsage, runNextWoSet]);
+    return (analysis.results || []).filter(function(wo) { return matchesScopedFilters(wo); });
+  }, [analysis, filterCustomer, filterDateFrom, filterDateTo, filterPackType, filterShared, filterRunNext, filterStatus, filterWoStatus, runNextWoSet, searchQuery, sharedComponentUsage]);
 
   var batchOpportunityGroups = useMemo(function() {
     var grouped = {};
@@ -466,22 +481,19 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     return map;
   }, [batchOpportunityGroups]);
 
+  var pageScopeResults = useMemo(function() {
+    return batchScopeResults.filter(function(wo) {
+      return !filterBatchable || !!batchOpportunityMap[woCommitKey(wo)];
+    });
+  }, [batchScopeResults, filterBatchable, batchOpportunityMap]);
+
+  var filteredAnalysis = useMemo(function() {
+    if (!analysis) return null;
+    return Object.assign({}, analysis, { results:pageScopeResults.slice() });
+  }, [analysis, pageScopeResults]);
+
   var filteredResults = useMemo(() => {
-    if (!analysis) return []; var r = analysis.results.slice();
-    if (filterStatus !== "all") r = r.filter(w => w.runStatus === filterStatus);
-    if (filterCustomer !== "all") r = r.filter(w => w.customer === filterCustomer);
-    if (filterDueMonth !== "all") r = r.filter(function(w) { return dueMonthKey(w.dueDate) === filterDueMonth; });
-    if (filterShared) r = r.filter(function(w) { return hasSharedComponent(w); });
-    if (filterRunNext) r = r.filter(function(w) { return !!runNextWoSet[String(w.woNum || "")]; });
-    if (searchTerm) {
-      var qRaw = String(searchTerm || "").toLowerCase().trim();
-      var qNorm = normalizeSearchValue(qRaw);
-      var qSku = normalizeSkuSearchValue(qRaw);
-      r = r.filter(function(w) { return matchesWorkOrderSearch(w, qRaw, qNorm, qSku); });
-    }
-    if (filterWoStatus !== "all") r = r.filter(w => w.status === filterWoStatus);
-    if (filterPackType !== "all") r = r.filter(function(w) { return detectPackType(w.productDesc || w.productSkuRaw || "", w.productSkuRaw || w.productSku || "") === filterPackType; });
-    if (filterBatchable) r = r.filter(function(w) { return !!batchOpportunityMap[woCommitKey(w)]; });
+    var r = pageScopeResults.slice();
     r.sort((a,b) => {
       var c = 0;
       if (sortField==="woNum") c=a.woNum.localeCompare(b.woNum);
@@ -557,24 +569,29 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       return sortDir==="desc"?-c:c;
     });
     return r;
-  }, [analysis, filterStatus, filterWoStatus, filterCustomer, filterDueMonth, filterPackType, filterShared, filterRunNext, filterBatchable, searchTerm, sortField, sortDir, commitmentMap, sharedComponentUsage, runNextWoSet, runNextMetaMap, batchOpportunityMap]);
+  }, [pageScopeResults, sortField, sortDir, commitmentMap, runNextMetaMap, batchOpportunityMap]);
+
+  var commitmentSummary = useMemo(function() {
+    if (!analysis) return null;
+    var atRisk = 0;
+    var reducedUnits = 0;
+    pageScopeResults.forEach(function(wo) {
+      var c = commitmentMap[woCommitKey(wo)];
+      if (!c) return;
+      if (c.commitmentGap > 0) {
+        atRisk += 1;
+        reducedUnits += c.commitmentGap;
+      }
+    });
+    return { atRisk:atRisk, reducedUnits:reducedUnits };
+  }, [analysis, pageScopeResults, commitmentMap]);
 
   var woStatusBreakdown = useMemo(function() {
     if (!analysis) return [];
-    var r = analysis.results.slice();
-    if (filterStatus !== "all") r = r.filter(function(w) { return w.runStatus === filterStatus; });
-    if (filterCustomer !== "all") r = r.filter(function(w) { return w.customer === filterCustomer; });
-    if (filterDueMonth !== "all") r = r.filter(function(w) { return dueMonthKey(w.dueDate) === filterDueMonth; });
-    if (filterShared) r = r.filter(function(w) { return hasSharedComponent(w); });
-    if (filterRunNext) r = r.filter(function(w) { return !!runNextWoSet[String(w.woNum || "")]; });
-    if (searchTerm) {
-      var qRaw = String(searchTerm || "").toLowerCase().trim();
-      var qNorm = normalizeSearchValue(qRaw);
-      var qSku = normalizeSkuSearchValue(qRaw);
-      r = r.filter(function(w) { return matchesWorkOrderSearch(w, qRaw, qNorm, qSku); });
-    }
-    if (filterPackType !== "all") r = r.filter(function(w) { return detectPackType(w.productDesc || w.productSkuRaw || "", w.productSkuRaw || w.productSku || "") === filterPackType; });
-    if (filterBatchable) r = r.filter(function(w) { return !!batchOpportunityMap[woCommitKey(w)]; });
+    var r = (analysis.results || []).filter(function(wo) {
+      return matchesScopedFilters(wo, { includeWoStatus:false });
+    });
+    if (filterBatchable) r = r.filter(function(wo) { return !!batchOpportunityMap[woCommitKey(wo)]; });
     var map = {};
     r.forEach(function(w) {
       var key = String(w.status || "--").trim() || "--";
@@ -583,7 +600,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       map[key].qtyUnits += Number(w.qtyToProduce || 0);
     });
     return Object.values(map).sort(function(a, b) { return b.qtyUnits - a.qtyUnits; });
-  }, [analysis, filterStatus, filterCustomer, filterDueMonth, filterPackType, filterShared, filterRunNext, filterBatchable, searchTerm, commitmentMap, sharedComponentUsage, runNextWoSet, batchOpportunityMap]);
+  }, [analysis, filterBatchable, filterCustomer, filterDateFrom, filterDateTo, filterPackType, filterShared, filterRunNext, filterStatus, searchQuery, sharedComponentUsage, runNextWoSet, batchOpportunityMap]);
 
   var packMixBreakdown = useMemo(function() {
     var byType = {};
@@ -629,7 +646,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     var parts = [];
     if (searchTerm) parts.push('Search: "' + searchTerm + '"');
     if (filterCustomer !== "all") parts.push("Customer: " + filterCustomer);
-    if (filterDueMonth !== "all") parts.push("Due month: " + filterDueMonth);
+    if (filterDateFrom || filterDateTo) parts.push("Due: " + (filterDateFrom || "Any") + " to " + (filterDateTo || "Any"));
     if (filterPackType !== "all") parts.push("Pack: " + filterPackType);
     if (filterWoStatus !== "all") parts.push("WO status: " + filterWoStatus);
     if (filterStatus !== "all") parts.push("Run status: " + filterStatus);
@@ -637,7 +654,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     if (filterBatchable) parts.push("Batch");
     if (filterShared) parts.push("Shared");
     return parts.length ? parts.join(" • ") : "All work orders in current view";
-  }, [searchTerm, filterCustomer, filterDueMonth, filterPackType, filterWoStatus, filterStatus, filterRunNext, filterBatchable, filterShared]);
+  }, [searchTerm, filterCustomer, filterDateFrom, filterDateTo, filterPackType, filterWoStatus, filterStatus, filterRunNext, filterBatchable, filterShared]);
 
   var exportWorkOrderRows = useMemo(function() {
     return filteredResults.map(function(wo) {
@@ -1198,61 +1215,75 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
 
   var handleOverviewCustomerSelect = function(customerName) {
     setFilterCustomer(customerName || "all");
-    setFilterStatus("all");
-    setFilterWoStatus("all");
-    setFilterPackType("all");
-    setFilterDueMonth("all");
-    setFilterShared(false);
-    setFilterRunNext(false);
-    setFilterBatchable(false);
-    setSearchTerm("");
     setTimeout(function() {
       var el = document.getElementById("workorders-table");
       if (el && el.scrollIntoView) el.scrollIntoView({ behavior:"smooth", block:"start" });
     }, 0);
   };
 
+  var hasActiveFilters = !!(
+    searchTerm ||
+    filterCustomer !== "all" ||
+    filterWoStatus !== "Booked" ||
+    filterDateFrom ||
+    filterDateTo ||
+    filterStatus !== "all" ||
+    filterPackType !== "all" ||
+    filterShared ||
+    filterRunNext ||
+    filterBatchable
+  );
+
+  var clearAllFilters = function() {
+    setSearchTerm("");
+    setFilterCustomer("all");
+    setFilterWoStatus("Booked");
+    setFilterDateFrom("");
+    setFilterDateTo("");
+    setFilterStatus("all");
+    setFilterPackType("all");
+    setFilterShared(false);
+    setFilterRunNext(false);
+    setFilterBatchable(false);
+    setRunNextLimit("12");
+  };
+
+  var scopeCountLabel = analysis ? (filteredResults.length + " of " + analysis.results.length + " WOs") : "0 WOs";
+
   return (<div>
-    <div style={{ marginBottom:18 }}>
-      <div style={{ fontSize:14, fontWeight:600, color:C.bright, marginBottom:10 }}>Overview Snapshot</div>
-      <OverviewView analysis={analysis} woStatuses={woStatuses} onSelectCustomer={handleOverviewCustomerSelect} />
-    </div>
-    <div id="workorders-table">
-    <div className="mb-3 flex items-center gap-1.5 overflow-x-auto whitespace-nowrap pb-1">
-      <Input type="text" placeholder="Search WO / SKU / customer" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="h-10 w-72 shrink-0 text-sm" />
-      <select value={filterCustomer} onChange={e => setFilterCustomer(e.target.value)} className="h-10 shrink-0 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]">
+    <div className="mb-3 flex flex-wrap items-center gap-2">
+      <Input type="text" placeholder="Search WO / SKU / customer" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="h-10 w-full text-sm sm:w-72" />
+      <select value={filterCustomer} onChange={e => setFilterCustomer(e.target.value)} className="h-10 w-full rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))] sm:w-auto">
         <option value="all">All Customers</option>
         {woCustomers.map(s => <option key={s} value={s}>{s}</option>)}
       </select>
-      <MonthPicker
-        value={filterDueMonth === "all" ? "" : filterDueMonth}
-        onChange={function(nextMonth) { setFilterDueMonth(nextMonth || "all"); }}
-        placeholder="Due month"
-        className="w-40 shrink-0"
-      />
-      {filterDueMonth !== "all" && (
-        <Button onClick={function() { setFilterDueMonth("all"); }} variant="outline" size="default" className="shrink-0">
-          All Months
-        </Button>
-      )}
-      <select value={filterPackType} onChange={e => setFilterPackType(e.target.value)} className="h-10 shrink-0 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]">
-        <option value="all">All SKU Types</option>
-        {skuTypeOptions.map(function(t) { return <option key={t} value={t}>{t}</option>; })}
-      </select>
-      <select value={filterWoStatus} onChange={e => setFilterWoStatus(e.target.value)} className="h-10 shrink-0 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]">
+      <select value={filterWoStatus} onChange={e => setFilterWoStatus(e.target.value)} className="h-10 w-full rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))] sm:w-auto">
         <option value="all">All WO Status</option>
         {woStatuses.map(s => <option key={s} value={s}>{s}</option>)}
       </select>
+      <span style={{ fontSize:13, color:C.dim, marginLeft:4 }}>Due from</span>
+      <DatePicker value={filterDateFrom} onChange={setFilterDateFrom} placeholder="Start date" className="w-full sm:w-36" />
+      <span style={{ fontSize:13, color:C.dim }}>to</span>
+      <DatePicker value={filterDateTo} onChange={setFilterDateTo} placeholder="End date" className="w-full sm:w-36" />
+      {hasActiveFilters && <Button onClick={clearAllFilters} variant="outline" size="default">Clear</Button>}
+      <span style={{ fontSize:13, color:C.dim, marginLeft:4 }}>{scopeCountLabel}</span>
+    </div>
+
+    <div className="mb-4 flex flex-wrap items-center gap-2">
       <select
         value={filterStatus}
         onChange={function(e) { setFilterStatus(e.target.value); }}
-        className="h-10 shrink-0 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]"
+        className="h-10 w-full rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))] sm:w-auto"
       >
         <option value="all">All Run Status</option>
         <option value="ready">Ready</option>
         <option value="partial">Partial</option>
         <option value="blocked">Blocked</option>
         <option value="nobom">No BOM</option>
+      </select>
+      <select value={filterPackType} onChange={e => setFilterPackType(e.target.value)} className="h-10 w-full rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))] sm:w-auto">
+        <option value="all">All SKU Types</option>
+        {skuTypeOptions.map(function(t) { return <option key={t} value={t}>{t}</option>; })}
       </select>
       <Button onClick={function() {
         setFilterRunNext(function(v) {
@@ -1264,21 +1295,28 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
           }
           return next;
         });
-      }} variant={filterRunNext ? "active" : "outline"} size="default" className="shrink-0">Run Next</Button>
+      }} variant={filterRunNext ? "active" : "outline"} size="default">Run Next</Button>
       {filterRunNext && (
-        <select value={runNextLimit} onChange={function(e) { setRunNextLimit(e.target.value); }} className="h-10 shrink-0 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]">
+        <select value={runNextLimit} onChange={function(e) { setRunNextLimit(e.target.value); }} className="h-10 w-full rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))] sm:w-auto">
           <option value="8">Top 8</option>
           <option value="12">Top 12</option>
           <option value="20">Top 20</option>
         </select>
       )}
-      <Button onClick={function() { setFilterBatchable(function(v) { return !v; }); }} variant={filterBatchable ? "active" : "outline"} size="default" className="shrink-0" title="Show same-item work orders that can be batched to reduce changeovers">
+      <Button onClick={function() { setFilterBatchable(function(v) { return !v; }); }} variant={filterBatchable ? "active" : "outline"} size="default" title="Show same-item work orders that can be batched to reduce changeovers">
         Batch
       </Button>
-      <Button onClick={function() { setFilterShared(function(v) { return !v; }); }} variant={filterShared ? "active" : "outline"} size="default" className="shrink-0">Shared</Button>
-      <Button onClick={exportCSV} variant="outline" size="default" className="shrink-0">CSV</Button>
-      <Button onClick={exportPDF} variant="outline" size="default" className="shrink-0">PDF</Button>
+      <Button onClick={function() { setFilterShared(function(v) { return !v; }); }} variant={filterShared ? "active" : "outline"} size="default">Shared</Button>
+      <Button onClick={exportCSV} variant="outline" size="default">CSV</Button>
+      <Button onClick={exportPDF} variant="outline" size="default">PDF</Button>
     </div>
+
+    <div style={{ marginBottom:18 }}>
+      <div style={{ fontSize:14, fontWeight:600, color:C.bright, marginBottom:10 }}>Overview Snapshot</div>
+      <OverviewView analysis={filteredAnalysis || analysis} onSelectCustomer={handleOverviewCustomerSelect} />
+    </div>
+    <div id="workorders-table">
+    <div style={{ fontSize:14, fontWeight:600, color:C.bright, marginBottom:10 }}>Work Orders Detail</div>
     {commitmentSummary && (
       <div style={{ marginBottom:10, display:"flex", flexDirection:"column", gap:8 }}>
         <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
@@ -1364,7 +1402,6 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
         </table>
       </div>
     </TableShell>
-    <div style={{ marginTop:8, fontSize:13, color:C.dim }}>{filteredResults.length} of {analysis.results.length} work orders</div>
     </div>
   </div>);
 }
