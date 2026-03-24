@@ -173,8 +173,8 @@ function fmtMoneyPrecise(v) {
   return "$" + amount.toFixed(2);
 }
 
-function fmtCasesPerHour(v) {
-  return safeNum(v).toFixed(1) + " cs/lh";
+function fmtCasesPerProductionMin(v) {
+  return safeNum(v).toFixed(2) + " cs/prod min";
 }
 
 function deriveLaborStatusFromRows(finalizedRows, provisionalRows) {
@@ -1839,7 +1839,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
 
   var productionJobLeaderboard = useMemo(function() {
     var leaderboardMinCases = 250;
-    var leaderboardMinHours = 1;
+    var leaderboardMinProductionHours = 1;
     var sourceRows = (laborActuals && Array.isArray(laborActuals.byJob)) ? laborActuals.byJob : [];
     var grouped = {};
 
@@ -1890,31 +1890,53 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
           laborStatus: deriveLaborStatusFromRows(row.finalizedRows, row.provisionalRows),
           casesPerPayableHour: payableHours > 0 ? (casesProduced / payableHours) : 0,
           casesPerProductiveHour: productiveHours > 0 ? (casesProduced / productiveHours) : 0,
+          productiveMinutes: productiveHours > 0 ? (productiveHours * 60) : 0,
+          casesPerProductionMinute: productiveHours > 0 ? (casesProduced / (productiveHours * 60)) : 0,
           laborCostPerCase: casesProduced > 0 ? (laborCost / casesProduced) : 0
         });
       })
       .filter(function(row) {
-        return row.casesProduced >= leaderboardMinCases && row.payableHours >= leaderboardMinHours;
+        return row.casesProduced >= leaderboardMinCases && row.productiveHours >= leaderboardMinProductionHours;
       });
 
+    var maxCasesProduced = ranked.reduce(function(max, row) {
+      return Math.max(max, safeNum(row.casesProduced));
+    }, 0) || 1;
+    var maxCasesPerProductionMinute = ranked.reduce(function(max, row) {
+      return Math.max(max, safeNum(row.casesPerProductionMinute));
+    }, 0) || 1;
+
+    ranked = ranked.map(function(row) {
+      var yieldScore = safeNum(row.casesProduced) / maxCasesProduced;
+      var speedScore = safeNum(row.casesPerProductionMinute) / maxCasesPerProductionMinute;
+      return Object.assign({}, row, {
+        leaderboardScore: (yieldScore * 0.75) + (speedScore * 0.25)
+      });
+    });
+
     var byBest = ranked.slice().sort(function(a, b) {
-      if (safeNum(b.casesPerPayableHour) !== safeNum(a.casesPerPayableHour)) {
-        return safeNum(b.casesPerPayableHour) - safeNum(a.casesPerPayableHour);
+      if (safeNum(b.leaderboardScore) !== safeNum(a.leaderboardScore)) {
+        return safeNum(b.leaderboardScore) - safeNum(a.leaderboardScore);
       }
       if (safeNum(b.casesProduced) !== safeNum(a.casesProduced)) return safeNum(b.casesProduced) - safeNum(a.casesProduced);
+      if (safeNum(b.casesPerProductionMinute) !== safeNum(a.casesPerProductionMinute)) {
+        return safeNum(b.casesPerProductionMinute) - safeNum(a.casesPerProductionMinute);
+      }
       return safeNum(a.laborCostPerCase) - safeNum(b.laborCostPerCase);
     });
     var byWorst = ranked.slice().sort(function(a, b) {
-      if (safeNum(a.casesPerPayableHour) !== safeNum(b.casesPerPayableHour)) {
-        return safeNum(a.casesPerPayableHour) - safeNum(b.casesPerPayableHour);
+      if (safeNum(a.leaderboardScore) !== safeNum(b.leaderboardScore)) {
+        return safeNum(a.leaderboardScore) - safeNum(b.leaderboardScore);
       }
-      if (safeNum(b.payableHours) !== safeNum(a.payableHours)) return safeNum(b.payableHours) - safeNum(a.payableHours);
+      if (safeNum(a.casesPerProductionMinute) !== safeNum(b.casesPerProductionMinute)) {
+        return safeNum(a.casesPerProductionMinute) - safeNum(b.casesPerProductionMinute);
+      }
       return safeNum(a.casesProduced) - safeNum(b.casesProduced);
     });
 
     return {
       minCases: leaderboardMinCases,
-      minHours: leaderboardMinHours,
+      minProductionHours: leaderboardMinProductionHours,
       qualifiedCount: ranked.length,
       best: byBest.slice(0, 5),
       worst: byWorst.slice(0, 5)
@@ -2838,7 +2860,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
           <div>
             <div className="text-sm font-semibold">Production Job Leaderboard</div>
             <div className="text-xs text-[rgb(var(--muted))]">
-              Ranked by cases per payable labor hour in the selected window. Qualified jobs need at least {productionJobLeaderboard.minCases.toLocaleString()} cases and {productionJobLeaderboard.minHours.toFixed(1)} matched labor hour.
+              Ranked with yield-first weighting in the selected window: total cases carry more weight, then cases per productive minute. Qualified jobs need at least {productionJobLeaderboard.minCases.toLocaleString()} cases and {productionJobLeaderboard.minProductionHours.toFixed(1)} productive labor hour.
             </div>
           </div>
           <div className="text-xs text-[rgb(var(--muted))]">
@@ -2897,8 +2919,8 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                             <div className="truncate text-[11px] text-[rgb(var(--muted))]">{row.itemDescription || "--"}</div>
                           </div>
                           <div className="shrink-0 text-right text-xs [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>
-                            <div className={"text-sm font-semibold " + headerTone}>{fmtCasesPerHour(row.casesPerPayableHour)}</div>
-                            <div className="text-[rgb(var(--muted))]">{Math.round(safeNum(row.casesProduced)).toLocaleString()} cs · {safeNum(row.payableHours).toFixed(1)} hrs</div>
+                            <div className={"text-sm font-semibold " + headerTone}>{fmtCasesPerProductionMin(row.casesPerProductionMinute)}</div>
+                            <div className="text-[rgb(var(--muted))]">{Math.round(safeNum(row.casesProduced)).toLocaleString()} cs · {Math.round(safeNum(row.productiveMinutes)).toLocaleString()} prod min</div>
                             <div className="text-[rgb(var(--muted))]">{fmtMoneyPrecise(row.laborCostPerCase)}/case · {row.activeDayCount} day{row.activeDayCount === 1 ? "" : "s"}</div>
                           </div>
                         </div>
