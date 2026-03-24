@@ -144,8 +144,8 @@ export default function ProductionReadiness() {
   const [userActivityRows, setUserActivityRows] = useState([]);
   const [showAskAi, setShowAskAi] = useState(false);
 
-  var updatePermalink = useCallback(function(nextView, woState, fcState, opsState) {
-    if (typeof window === "undefined") return;
+  var buildPermalinkUrl = useCallback(function(nextView, woState, fcState, opsState) {
+    if (typeof window === "undefined") return "";
     var params = new URLSearchParams(window.location.search || "");
     var view = String(nextView || "overview");
     params.set("view", view);
@@ -177,13 +177,26 @@ export default function ProductionReadiness() {
     setOrDelete("ops_preset", ops.preset || "last_14", "last_14");
     setOrDelete("ops_start", ops.start || "", "");
     setOrDelete("ops_end", ops.end || "", "");
-    var nextUrl = window.location.pathname + "?" + params.toString();
-    window.history.replaceState(null, "", nextUrl);
+    return window.location.pathname + "?" + params.toString();
   }, []);
+
+  var updatePermalink = useCallback(function(nextView, woState, fcState, opsState) {
+    if (typeof window === "undefined") return;
+    var nextUrl = buildPermalinkUrl(nextView, woState, fcState, opsState);
+    window.history.replaceState(null, "", nextUrl);
+  }, [buildPermalinkUrl]);
 
   useEffect(function() {
     updatePermalink(activeView, workOrdersPermalinkState, forecastPermalinkState, operationsPermalinkState);
   }, [activeView, workOrdersPermalinkState, forecastPermalinkState, operationsPermalinkState, updatePermalink]);
+
+  var navItems = [{key:"overview",label:"Overview",count:null,alert:false},{key:"operations",label:"Operations",count:null,alert:false},{key:"workorders",label:"Work Orders",count:null},{key:"supplyrisk",label:"Supply Risk",count:null,alert:false},{key:"forecast",label:"Forecast",count:null,alert:false},{key:"aicopilot",label:"AI Copilot",count:null,alert:false}]
+    .concat([{key:"sandbox",label:"Sandbox",count:null,alert:false}])
+    .map(function(item) {
+      return Object.assign({}, item, {
+        href: buildPermalinkUrl(item.key, workOrdersPermalinkState, forecastPermalinkState, operationsPermalinkState)
+      });
+    });
 
   var handleWorkOrdersPermalinkChange = useCallback(function(woState) {
     setWorkOrdersPermalinkState(woState || {});
@@ -1121,8 +1134,7 @@ export default function ProductionReadiness() {
         <TabsNav
           activeKey={activeView}
           onChange={setActiveView}
-          items={[{key:"overview",label:"Overview",count:null,alert:false},{key:"operations",label:"Operations",count:null,alert:false},{key:"workorders",label:"Work Orders",count:null},{key:"supplyrisk",label:"Supply Risk",count:null,alert:false},{key:"forecast",label:"Forecast",count:null,alert:false},{key:"aicopilot",label:"AI Copilot",count:null,alert:false}]
-            .concat([{key:"sandbox",label:"Sandbox",count:null,alert:false}])}
+          items={navItems}
         />
 
         <Suspense fallback={<Card className="mt-3 p-4 text-sm text-[rgb(var(--muted))]">Loading view...</Card>}>

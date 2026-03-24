@@ -2,9 +2,24 @@ import { Button } from "./button";
 import { cn } from "../../lib/utils";
 
 export default function TabsNav({ items, activeKey, onChange, className }) {
+  var handleNavClick = function(event, itemKey) {
+    if (!onChange) return;
+    if (
+      event.defaultPrevented ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.altKey ||
+      event.ctrlKey ||
+      event.shiftKey
+    ) {
+      return;
+    }
+    event.preventDefault();
+    onChange(itemKey);
+  };
+
   return (
-    <div
-      role="tablist"
+    <nav
       aria-label="Primary dashboard views"
       className={cn("mb-4 flex flex-nowrap gap-1 overflow-x-auto border-b border-[rgb(var(--border))] pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", className)}
     >
@@ -13,13 +28,8 @@ export default function TabsNav({ items, activeKey, onChange, className }) {
         return (
           <Button
             key={item.key}
+            asChild
             variant="ghost"
-            role="tab"
-            aria-selected={isActive}
-            aria-controls={"view-" + item.key}
-            id={"tab-" + item.key}
-            tabIndex={isActive ? 0 : -1}
-            onClick={() => onChange(item.key)}
             className={cn(
               "h-auto shrink-0 -mb-px rounded-none border-x-0 border-t-0 border-b-2 px-3 py-2.5 text-sm sm:px-5",
               isActive
@@ -27,13 +37,19 @@ export default function TabsNav({ items, activeKey, onChange, className }) {
                 : "border-b-transparent text-[rgb(var(--muted))]"
             )}
           >
-            {item.label}
-            {item.count != null ? (
-              <span className={cn("ml-1 text-xs opacity-70", item.alert ? "text-[rgb(var(--danger))] opacity-100" : "")}>{item.alert ? "⚠ " : ""}{item.count}</span>
-            ) : null}
+            <a
+              href={item.href || "#"}
+              aria-current={isActive ? "page" : undefined}
+              onClick={function(event) { handleNavClick(event, item.key); }}
+            >
+              {item.label}
+              {item.count != null ? (
+                <span className={cn("ml-1 text-xs opacity-70", item.alert ? "text-[rgb(var(--danger))] opacity-100" : "")}>{item.alert ? "⚠ " : ""}{item.count}</span>
+              ) : null}
+            </a>
           </Button>
         );
       })}
-    </div>
+    </nav>
   );
 }
