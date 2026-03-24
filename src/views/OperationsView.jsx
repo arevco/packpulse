@@ -182,7 +182,7 @@ function fmtMissingRevenueSkuCount(count) {
 }
 
 function fmtCasesPerProductionMin(v) {
-  return safeNum(v).toFixed(2) + " cs/prod min";
+  return safeNum(v).toFixed(2) + " cs/span min";
 }
 
 function elapsedMinutesBetween(startUtc, endUtc) {
@@ -2037,13 +2037,18 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
           shiftSlots: {},
           jobStartAtUtc: "",
           jobEndAtUtc: "",
+          firstProducedAtUtc: "",
+          lastProducedAtUtc: "",
           windowSource: window && window.hasActualStart ? window.source : ""
         };
       }
       grouped[key].casesProduced += safeNum(row && row.units_produced);
       grouped[key].shiftSlots[normalizeShiftBucket(row && row.shift_label)] = true;
+      var producedAtUtc = String(row && row.produced_at_utc || "").trim();
       if (window && window.startAtUtc && (!grouped[key].jobStartAtUtc || window.startAtUtc < grouped[key].jobStartAtUtc)) grouped[key].jobStartAtUtc = window.startAtUtc;
       if (window && window.endAtUtc && (!grouped[key].jobEndAtUtc || window.endAtUtc > grouped[key].jobEndAtUtc)) grouped[key].jobEndAtUtc = window.endAtUtc;
+      if (producedAtUtc && (!grouped[key].firstProducedAtUtc || producedAtUtc < grouped[key].firstProducedAtUtc)) grouped[key].firstProducedAtUtc = producedAtUtc;
+      if (producedAtUtc && (!grouped[key].lastProducedAtUtc || producedAtUtc > grouped[key].lastProducedAtUtc)) grouped[key].lastProducedAtUtc = producedAtUtc;
       if (grouped[key].itemDescription === "--" && itemDescription) grouped[key].itemDescription = itemDescription;
     });
 
@@ -2051,25 +2056,33 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       .map(function(row) {
         var casesProduced = safeNum(row.casesProduced);
         var actualElapsedMinutes = elapsedMinutesBetween(row.jobStartAtUtc, row.jobEndAtUtc);
-        var productionMinutes = actualElapsedMinutes > 0
+        var observedElapsedMinutes = elapsedMinutesBetween(row.firstProducedAtUtc, row.lastProducedAtUtc);
+        var hasActualWindow = actualElapsedMinutes > 0;
+        var hasObservedSpan = !hasActualWindow && observedElapsedMinutes > 0;
+        var productionMinutes = hasActualWindow
           ? Math.min(960, actualElapsedMinutes)
-          : 0;
+          : (hasObservedSpan ? Math.min(960, observedElapsedMinutes) : 0);
         return Object.assign({}, row, {
           productionMinutes: productionMinutes,
-          hasActualWindow: actualElapsedMinutes > 0,
-          windowLabel: actualElapsedMinutes > 0
-            ? (formatTimeEt(row.jobStartAtUtc) + " - " + formatTimeEt(row.jobEndAtUtc))
-            : "Actual job window unavailable",
+          hasActualWindow: hasActualWindow,
+          hasObservedSpan: hasObservedSpan,
+          spanSource: hasActualWindow ? "actual_job_window" : (hasObservedSpan ? "observed_fg_output_span" : "unavailable"),
+          windowLabel: hasActualWindow
+            ? ("Actual Nulogy Job Window: " + formatTimeEt(row.jobStartAtUtc) + " - " + formatTimeEt(row.jobEndAtUtc))
+            : (hasObservedSpan
+              ? ("Observed FG Output Span: " + formatTimeEt(row.firstProducedAtUtc) + " - " + formatTimeEt(row.lastProducedAtUtc))
+              : "Observed FG Output Span unavailable"),
           casesPerProductionMinute: productionMinutes > 0 ? (casesProduced / productionMinutes) : 0
         });
       })
       .filter(function(row) {
-        return row.casesProduced >= leaderboardMinCases && row.hasActualWindow && row.productionMinutes > 0;
+        return row.casesProduced >= leaderboardMinCases && row.productionMinutes > 0;
       });
     var actualWindowCount = ranked.filter(function(row) { return row.hasActualWindow; }).length;
+    var observedSpanCount = ranked.filter(function(row) { return row.hasObservedSpan; }).length;
     var actualWindowSource = actualWindowCount
       ? (ranked.some(function(row) { return row.hasActualWindow && row.windowSource === "server"; }) ? "server" : "raw")
-      : "fallback";
+      : "";
 
     var maxCasesProduced = ranked.reduce(function(max, row) {
       return Math.max(max, safeNum(row.casesProduced));
@@ -2111,6 +2124,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       qualifiedCount: ranked.length,
       source: actualWindowSource,
       actualWindowCount: actualWindowCount,
+      observedSpanCount: observedSpanCount,
       best: byBest.slice(0, 5),
       worst: byWorst.slice(0, 5)
     };
@@ -3033,11 +3047,11 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
           <div>
             <div className="text-sm font-semibold">Production Job Leaderboard</div>
             <div className="text-xs text-[rgb(var(--muted))]">
-              Ranked with yield-first weighting in the selected window: total cases carry more weight, then cases per production minute. Each row is one job-day run using actual Nulogy job start/stop timestamps only.
+              Ranked with yield-first weighting in the selected window: total cases carry more weight, then cases per measured span minute. Each row uses actual Nulogy job start/stop timestamps when available; otherwise it uses Observed FG Output Span from first-to-last produced timestamps.
             </div>
           </div>
           <div className="text-xs text-[rgb(var(--muted))]">
-            {productionJobLeaderboard.qualifiedCount.toLocaleString()} qualified job run{productionJobLeaderboard.qualifiedCount === 1 ? "" : "s"}{productionJobLeaderboard.actualWindowCount > 0 ? (" · actual Nulogy job windows via " + (productionJobLeaderboard.source === "raw" ? "live raw data" : "server data")) : ""}
+            {productionJobLeaderboard.qualifiedCount.toLocaleString()} qualified job run{productionJobLeaderboard.qualifiedCount === 1 ? "" : "s"}{productionJobLeaderboard.actualWindowCount > 0 ? (" · " + productionJobLeaderboard.actualWindowCount.toLocaleString() + " actual job window" + (productionJobLeaderboard.actualWindowCount === 1 ? "" : "s")) : ""}{productionJobLeaderboard.observedSpanCount > 0 ? (" · " + productionJobLeaderboard.observedSpanCount.toLocaleString() + " Observed FG Output Span" + (productionJobLeaderboard.observedSpanCount === 1 ? "" : "s")) : ""}
           </div>
         </div>
 
@@ -3076,7 +3090,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                           </div>
                           <div className="shrink-0 text-right text-xs [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>
                             <div className={"text-sm font-semibold " + headerTone}>{fmtCasesPerProductionMin(row.casesPerProductionMinute)}</div>
-                            <div className="text-[rgb(var(--muted))]">{Math.round(safeNum(row.casesProduced)).toLocaleString()} cs · {Math.round(safeNum(row.productionMinutes)).toLocaleString()} prod min</div>
+                            <div className="text-[rgb(var(--muted))]">{Math.round(safeNum(row.casesProduced)).toLocaleString()} cs · {Math.round(safeNum(row.productionMinutes)).toLocaleString()} span min</div>
                             <div className="text-[rgb(var(--muted))]">{row.windowLabel}</div>
                           </div>
                         </div>
@@ -3089,7 +3103,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
           </div>
         ) : (
           <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-4 text-sm text-[rgb(var(--muted))]">
-            No production job runs with valid Nulogy start/stop timestamps met the leaderboard minimums in this window.
+            No production job runs with a measurable actual job window or Observed FG Output Span met the leaderboard minimums in this window.
           </div>
         )}
       </Card>
