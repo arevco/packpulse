@@ -520,27 +520,62 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         normKey(r.jobId),
         normKey(r.date)
       ].join("|");
-      var labor = laborByJobKey.exact[exactKey] || laborByJobKey.slim[slimKey] || rawLaborByJobKey.exact[exactKey] || rawLaborByJobKey.slim[slimKey] || null;
+      var labor = null;
+      var laborSource = "none";
+      var allocationMethod = "unmatched";
+      var matchLevel = "unmatched";
+      if (laborByJobKey.exact[exactKey]) {
+        labor = laborByJobKey.exact[exactKey];
+        laborSource = "server_by_job";
+        allocationMethod = "direct_match";
+        matchLevel = "job_date_shift_line_wo_item";
+      } else if (laborByJobKey.slim[slimKey]) {
+        labor = laborByJobKey.slim[slimKey];
+        laborSource = "server_by_job";
+        allocationMethod = "direct_match";
+        matchLevel = "job_date_shift";
+      } else if (rawLaborByJobKey.exact[exactKey]) {
+        labor = rawLaborByJobKey.exact[exactKey];
+        laborSource = "raw_labor_upload";
+        allocationMethod = "direct_match";
+        matchLevel = "job_date_shift_line_wo_item";
+      } else if (rawLaborByJobKey.slim[slimKey]) {
+        labor = rawLaborByJobKey.slim[slimKey];
+        laborSource = "raw_labor_upload";
+        allocationMethod = "direct_match";
+        matchLevel = "job_date_shift";
+      }
       if (!labor) {
         var aggregateLabor = laborByJobKey.byLineItem[lineItemKey] || rawLaborByJobKey.byLineItem[lineItemKey] || null;
         var aggregateGroup = productionFallbackGroups.byLineItem[lineItemKey] || null;
+        var aggregateSource = laborByJobKey.byLineItem[lineItemKey] ? "server_by_job" : (rawLaborByJobKey.byLineItem[lineItemKey] ? "raw_labor_upload" : "none");
+        var aggregateMatchLevel = "job_date_line_item_prorated";
         if (!aggregateLabor) {
           aggregateLabor = laborByJobKey.byLine[lineKey] || rawLaborByJobKey.byLine[lineKey] || null;
           aggregateGroup = productionFallbackGroups.byLine[lineKey] || null;
+          aggregateSource = laborByJobKey.byLine[lineKey] ? "server_by_job" : (rawLaborByJobKey.byLine[lineKey] ? "raw_labor_upload" : "none");
+          aggregateMatchLevel = "job_date_line_prorated";
         }
         if (!aggregateLabor) {
           aggregateLabor = laborByJobKey.byJobDateItem[jobDateItemKey] || rawLaborByJobKey.byJobDateItem[jobDateItemKey] || null;
           aggregateGroup = productionFallbackGroups.byJobDateItem[jobDateItemKey] || null;
+          aggregateSource = laborByJobKey.byJobDateItem[jobDateItemKey] ? "server_by_job" : (rawLaborByJobKey.byJobDateItem[jobDateItemKey] ? "raw_labor_upload" : "none");
+          aggregateMatchLevel = "job_date_item_prorated";
         }
         if (!aggregateLabor) {
           aggregateLabor = laborByJobKey.byJobDate[jobDateKey] || rawLaborByJobKey.byJobDate[jobDateKey] || null;
           aggregateGroup = productionFallbackGroups.byJobDate[jobDateKey] || null;
+          aggregateSource = laborByJobKey.byJobDate[jobDateKey] ? "server_by_job" : (rawLaborByJobKey.byJobDate[jobDateKey] ? "raw_labor_upload" : "none");
+          aggregateMatchLevel = "job_date_prorated";
         }
         if (aggregateLabor && aggregateGroup) {
           var groupUnits = safeNum(aggregateGroup.units);
           var groupRows = safeNum(aggregateGroup.rows);
           var ratio = groupUnits > 0 ? (safeNum(r.unitsProduced) / groupUnits) : (groupRows > 0 ? (1 / groupRows) : 0);
           labor = scaleLaborMetric(aggregateLabor, ratio);
+          laborSource = aggregateSource;
+          allocationMethod = "prorated_by_units";
+          matchLevel = aggregateMatchLevel;
         }
       }
       var rawPayableHours = safeNum(labor && labor.payable_hours);
@@ -548,6 +583,11 @@ export default function ProductionView({ productionSegments, laborActuals, labor
       var productiveHours = payableHours > 0 ? safeNum(labor && labor.productive_hours) : 0;
       var laborCost = payableHours > 0 ? safeNum(labor && labor.labor_cost) : 0;
       var laborStatus = payableHours > 0 ? laborStatusFromMetric(labor) : "unknown";
+      if (!(payableHours > 0)) {
+        laborSource = "none";
+        allocationMethod = "unmatched";
+        matchLevel = "unmatched";
+      }
       var unitsProduced = safeNum(r.unitsProduced);
       var revenueMatch = typeof resolveRevenueForRow === "function" ? resolveRevenueForRow(r.itemCode, r.date) : null;
       var revenuePerCase = safeNum(revenueMatch && revenueMatch.value);
@@ -575,7 +615,10 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         hasLabor: payableHours > 0,
         hasRevenue: revenue > 0,
         laborStatus: laborStatus,
-        laborIsProvisional: payableHours > 0 && isProvisionalLabor(laborStatus)
+        laborIsProvisional: payableHours > 0 && isProvisionalLabor(laborStatus),
+        laborSource: laborSource,
+        allocationMethod: allocationMethod,
+        matchLevel: matchLevel
       });
     });
   }, [filteredJobRows, laborByJobKey, rawLaborByJobKey, productionFallbackGroups, resolveRevenueForRow]);
@@ -869,6 +912,9 @@ export default function ProductionView({ productionSegments, laborActuals, labor
       "has_labor",
       "labor_status",
       "labor_is_provisional",
+      "labor_source",
+      "allocation_method",
+      "match_level",
       "has_revenue",
       "missing_revenue"
     ];
@@ -898,6 +944,9 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         row.hasLabor ? "yes" : "no",
         row.laborStatus || "",
         row.laborIsProvisional ? "yes" : "no",
+        row.laborSource || "",
+        row.allocationMethod || "",
+        row.matchLevel || "",
         row.hasRevenue ? "yes" : "no",
         row.missingRevenue ? "yes" : "no"
       ].map(csvCell).join(",");
