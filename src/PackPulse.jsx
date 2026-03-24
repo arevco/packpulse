@@ -93,6 +93,7 @@ export default function ProductionReadiness() {
       start: start,
       end: end,
       packType: String(qs.get("wo_pack") || "all"),
+      pastDue: qs.get("wo_past_due") === "1",
       shared: qs.get("wo_shared") === "1",
       runNext: qs.get("wo_run_next") === "1",
       batchable: qs.get("wo_batchable") === "1",
@@ -178,6 +179,7 @@ export default function ProductionReadiness() {
     setOrDelete("wo_run_next_limit", wo.runNextLimit || "12", "12");
     setOrDelete("wo_sort_field", wo.sortField || "readiness", "readiness");
     setOrDelete("wo_sort_dir", wo.sortDir || "desc", "desc");
+    if (wo.pastDue) params.set("wo_past_due", "1"); else params.delete("wo_past_due");
     if (wo.shared) params.set("wo_shared", "1"); else params.delete("wo_shared");
     if (wo.runNext) params.set("wo_run_next", "1"); else params.delete("wo_run_next");
     if (wo.batchable) params.set("wo_batchable", "1"); else params.delete("wo_batchable");

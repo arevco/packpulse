@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useTheme } from "../theme";
 import { useStyles } from "../hooks/useStyles";
-import { fmtDate, formatDescriptionForDisplay, normalizeStr } from "../utils";
+import { normalizeStr } from "../utils";
 import { Button } from "../components/ui/button";
 import TableShell from "../components/ui/table-shell";
 import SortHeaderButton from "../components/ui/sort-header-button";
@@ -12,10 +12,7 @@ export default function OverviewView({ analysis, onSelectCustomer }) {
 
   const [custSortField, setCustSortField] = useState("remaining");
   const [custSortDir, setCustSortDir] = useState("desc");
-  const [lateSortField, setLateSortField] = useState("daysLate");
-  const [lateSortDir, setLateSortDir] = useState("desc");
   const [showByCustomer, setShowByCustomer] = useState(true);
-  const [showPastDue, setShowPastDue] = useState(true);
 
   var statusLooksClosed = function(status) {
     var s = normalizeStr(status || "");
@@ -131,10 +128,6 @@ export default function OverviewView({ analysis, onSelectCustomer }) {
     if (custSortField === field) setCustSortDir(custSortDir === "asc" ? "desc" : "asc");
     else { setCustSortField(field); setCustSortDir(field === "name" ? "asc" : "desc"); }
   };
-  var onLateSort = function(field) {
-    if (lateSortField === field) setLateSortDir(lateSortDir === "asc" ? "desc" : "asc");
-    else { setLateSortField(field); setLateSortDir(field === "woNum" || field === "productSkuRaw" || field === "customer" || field === "dueDate" ? "asc" : "desc"); }
-  };
 
   var sortedByCustomer = overview.byCustomer.slice().sort(function(a, b) {
     var c = 0;
@@ -150,22 +143,6 @@ export default function OverviewView({ analysis, onSelectCustomer }) {
       c = ap - bp;
     } else if (custSortField === "late") c = (a.late || 0) - (b.late || 0);
     return custSortDir === "desc" ? -c : c;
-  });
-
-  var sortedLateWOs = overview.lateWOs.slice().sort(function(a, b) {
-    var c = 0;
-    if (lateSortField === "daysLate") c = (a.daysLate || 0) - (b.daysLate || 0);
-    else if (lateSortField === "woNum") c = (a.woNum || "").localeCompare(b.woNum || "");
-    else if (lateSortField === "productSkuRaw") c = (a.productSkuRaw || "").localeCompare(b.productSkuRaw || "");
-    else if (lateSortField === "productDesc") c = (a.productDesc || "").localeCompare(b.productDesc || "");
-    else if (lateSortField === "customer") c = (a.customer || "").localeCompare(b.customer || "");
-    else if (lateSortField === "qtyToProduce") c = (a.qtyToProduce || 0) - (b.qtyToProduce || 0);
-    else if (lateSortField === "unitsRemaining") c = (a.unitsRemaining || 0) - (b.unitsRemaining || 0);
-    else if (lateSortField === "prodPct") c = (a.prodPct || 0) - (b.prodPct || 0);
-    else if (lateSortField === "readiness") c = (a.readiness || 0) - (b.readiness || 0);
-    else if (lateSortField === "netCanMake") c = (a.netCanMake || 0) - (b.netCanMake || 0);
-    else if (lateSortField === "dueDate") c = (a.dueDate || "").localeCompare(b.dueDate || "");
-    return lateSortDir === "desc" ? -c : c;
   });
 
   return (<div>
@@ -222,53 +199,6 @@ export default function OverviewView({ analysis, onSelectCustomer }) {
               <tr>
                 <td colSpan={8} style={{ padding:24, textAlign:"center", color:C.dim }}>
                   No customer data available.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </TableShell>
-      ) : null}
-    </div>
-
-    <div style={{ marginBottom:20 }}>
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, marginBottom:10 }}>
-        <div style={{ fontSize:14, fontWeight:600, color:C.bad, display:"flex", alignItems:"center", gap:8 }}>
-          <span style={{ fontSize:16 }}>{"\u26A0"}</span> Past Due Work Orders ({overview.lateWOs.length})
-        </div>
-        <Button onClick={function() { setShowPastDue(function(v) { return !v; }); }} variant="outline" size="sm">
-          <span style={{ marginRight:6 }}>{showPastDue ? "\u25BE" : "\u25B8"}</span>
-          {showPastDue ? "Hide" : "Show"}
-        </Button>
-      </div>
-      {showPastDue ? (
-      <TableShell className="border-[rgb(var(--danger))]/40">
-        <table style={{ width:"100%", borderCollapse:"collapse" }}>
-          <thead><tr style={{ background:C.raised }}>
-            {[{l:"Days Late",f:"daysLate"},{l:"WO#",f:"woNum"},{l:"Product",f:"productSkuRaw"},{l:"Product Description",f:"productDesc"},{l:"Customer",f:"customer"},{l:"Order Qty",f:"qtyToProduce"},{l:"Remaining",f:"unitsRemaining"},{l:"Complete",f:"prodPct"},{l:"Ready",f:"readiness"},{l:"Net Make",f:"netCanMake"},{l:"Due Date",f:"dueDate"}].map(function(col) {
-              var active = lateSortField === col.f;
-              var arrow = active ? (lateSortDir === "asc" ? " \u2191" : " \u2193") : "";
-              return <th key={col.f} style={Object.assign({}, thS, { color:active ? C.accent : thS.color })}><SortHeaderButton onClick={function() { onLateSort(col.f); }}>{col.l + arrow}</SortHeaderButton></th>;
-            })}
-          </tr></thead>
-          <tbody>
-            {sortedLateWOs.map((wo, i) => <tr key={i} style={{ borderBottom:"1px solid "+C.border }}>
-              <td style={Object.assign({}, tdM, { fontWeight:700, color:C.bad })}>{wo.daysLate}d</td>
-              <td style={Object.assign({}, tdM, { fontWeight:600, color:C.bright })}>{wo.woNum}</td>
-              <td style={tdM}>{wo.productSkuRaw}</td>
-              <td style={Object.assign({}, tdN, { color:C.dim, maxWidth:220, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" })}>{formatDescriptionForDisplay(wo.productDesc) || "--"}</td>
-              <td style={Object.assign({}, tdN, { color:C.dim })}>{wo.customer || "--"}</td>
-              <td style={Object.assign({}, tdM, { color:C.bright })}>{wo.qtyToProduce.toLocaleString()}</td>
-              <td style={Object.assign({}, tdM, { color:C.warn })}>{wo.unitsRemaining.toLocaleString()}</td>
-              <td style={Object.assign({}, tdM, { fontWeight:600, color:wo.prodPct>=100?C.ok:wo.prodPct>0?C.accent:C.dim })}>{wo.prodPct>0?wo.prodPct+"%":"--"}</td>
-              <td style={Object.assign({}, tdM, { fontWeight:600, color:wo.readiness>=100?C.ok:wo.readiness>=70?C.warn:C.bad })}>{wo.readiness<0?"--":Math.round(wo.readiness)+"%"}</td>
-              <td style={Object.assign({}, tdM, { fontWeight:600, color:wo.runStatus==="ready"?C.ok:(wo.netCanMake||0)>0?C.warn:C.bad })}>{wo.runStatus==="nobom"?"--":(wo.netCanMake||0).toLocaleString()}</td>
-              <td style={Object.assign({}, tdM, { color:C.bad })}>{fmtDate(wo.dueDate)}</td>
-            </tr>)}
-            {overview.lateWOs.length === 0 && (
-              <tr>
-                <td colSpan={11} style={{ padding:24, textAlign:"center", color:C.dim }}>
-                  No past due work orders.
                 </td>
               </tr>
             )}

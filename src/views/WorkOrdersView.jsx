@@ -79,6 +79,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
   const [filterDateFrom, setFilterDateFrom] = useState(String(initial.start || ""));
   const [filterDateTo, setFilterDateTo] = useState(String(initial.end || ""));
   const [filterPackType, setFilterPackType] = useState(String(initial.packType || "all"));
+  const [filterPastDue, setFilterPastDue] = useState(!!initial.pastDue);
   const [filterShared, setFilterShared] = useState(!!initial.shared);
   const [filterRunNext, setFilterRunNext] = useState(!!initial.runNext);
   const [filterBatchable, setFilterBatchable] = useState(!!initial.batchable);
@@ -170,6 +171,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       start: filterDateFrom || "",
       end: filterDateTo || "",
       packType: filterPackType,
+      pastDue: !!filterPastDue,
       shared: !!filterShared,
       runNext: !!filterRunNext,
       batchable: !!filterBatchable,
@@ -177,7 +179,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       sortField: sortField,
       sortDir: sortDir
     });
-  }, [onPermalinkChange, searchTerm, filterStatus, filterWoStatus, filterCustomer, filterDateFrom, filterDateTo, filterPackType, filterShared, filterRunNext, filterBatchable, runNextLimit, sortField, sortDir]);
+  }, [onPermalinkChange, searchTerm, filterStatus, filterWoStatus, filterCustomer, filterDateFrom, filterDateTo, filterPackType, filterPastDue, filterShared, filterRunNext, filterBatchable, runNextLimit, sortField, sortDir]);
 
   var handleSort = f => { if (sortField === f) setSortDir(d => d==="asc"?"desc":"asc"); else { setSortField(f); setSortDir("desc"); } };
   var woCommitKey = function(wo) { return [wo.woNum || "", wo.productSkuRaw || "", wo.dueDate || ""].join("|"); };
@@ -190,6 +192,17 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
   var parseDueDateTs = function(v) {
     var d = parseDateValue(v);
     return d ? d.getTime() : Number.POSITIVE_INFINITY;
+  };
+  var isPastDueWorkOrder = function(wo) {
+    if (!wo) return false;
+    if (statusLooksClosed(wo.status)) return false;
+    if (Number(wo.unitsRemaining || 0) <= 0) return false;
+    var dueDate = parseDateValue(wo.dueDate);
+    if (!dueDate) return false;
+    dueDate.setHours(0, 0, 0, 0);
+    var today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return dueDate.getTime() < today.getTime();
   };
   var batchOpportunityKey = function(wo) {
     if (!wo) return "";
@@ -418,6 +431,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     if (filterCustomer !== "all" && wo.customer !== filterCustomer) return false;
     if (!isWithinDueDateRange(wo.dueDate, filterDateFrom, filterDateTo)) return false;
     if (searchQuery.active && !matchesWorkOrderSearch(wo, searchQuery.qRaw, searchQuery.qNorm, searchQuery.qSku)) return false;
+    if (filterPastDue && !isPastDueWorkOrder(wo)) return false;
     if (opts.includeWoStatus !== false && filterWoStatus !== "all" && wo.status !== filterWoStatus) return false;
     if (filterStatus !== "all" && wo.runStatus !== filterStatus) return false;
     if (filterShared && !hasSharedComponent(wo)) return false;
@@ -429,7 +443,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
   var batchScopeResults = useMemo(function() {
     if (!analysis) return [];
     return (analysis.results || []).filter(function(wo) { return matchesScopedFilters(wo); });
-  }, [analysis, filterCustomer, filterDateFrom, filterDateTo, filterPackType, filterShared, filterRunNext, filterStatus, filterWoStatus, runNextWoSet, searchQuery, sharedComponentUsage]);
+  }, [analysis, filterCustomer, filterDateFrom, filterDateTo, filterPackType, filterPastDue, filterShared, filterRunNext, filterStatus, filterWoStatus, runNextWoSet, searchQuery, sharedComponentUsage]);
 
   var batchOpportunityGroups = useMemo(function() {
     var grouped = {};
@@ -600,7 +614,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       map[key].qtyUnits += Number(w.qtyToProduce || 0);
     });
     return Object.values(map).sort(function(a, b) { return b.qtyUnits - a.qtyUnits; });
-  }, [analysis, filterBatchable, filterCustomer, filterDateFrom, filterDateTo, filterPackType, filterShared, filterRunNext, filterStatus, searchQuery, sharedComponentUsage, runNextWoSet, batchOpportunityMap]);
+  }, [analysis, filterBatchable, filterCustomer, filterDateFrom, filterDateTo, filterPackType, filterPastDue, filterShared, filterRunNext, filterStatus, searchQuery, sharedComponentUsage, runNextWoSet, batchOpportunityMap]);
 
   var packMixBreakdown = useMemo(function() {
     var byType = {};
@@ -649,12 +663,13 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     if (filterDateFrom || filterDateTo) parts.push("Due: " + (filterDateFrom || "Any") + " to " + (filterDateTo || "Any"));
     if (filterPackType !== "all") parts.push("Pack: " + filterPackType);
     if (filterWoStatus !== "all") parts.push("WO status: " + filterWoStatus);
+    if (filterPastDue) parts.push("Past Due");
     if (filterStatus !== "all") parts.push("Run status: " + filterStatus);
     if (filterRunNext) parts.push("Run Next");
     if (filterBatchable) parts.push("Batch");
     if (filterShared) parts.push("Shared");
     return parts.length ? parts.join(" • ") : "All work orders in current view";
-  }, [searchTerm, filterCustomer, filterDateFrom, filterDateTo, filterPackType, filterWoStatus, filterStatus, filterRunNext, filterBatchable, filterShared]);
+  }, [searchTerm, filterCustomer, filterDateFrom, filterDateTo, filterPackType, filterWoStatus, filterPastDue, filterStatus, filterRunNext, filterBatchable, filterShared]);
 
   var exportWorkOrderRows = useMemo(function() {
     return filteredResults.map(function(wo) {
@@ -1229,6 +1244,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     filterDateTo ||
     filterStatus !== "all" ||
     filterPackType !== "all" ||
+    filterPastDue ||
     filterShared ||
     filterRunNext ||
     filterBatchable
@@ -1242,6 +1258,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     setFilterDateTo("");
     setFilterStatus("all");
     setFilterPackType("all");
+    setFilterPastDue(false);
     setFilterShared(false);
     setFilterRunNext(false);
     setFilterBatchable(false);
@@ -1307,6 +1324,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
         Batch
       </Button>
       <Button onClick={function() { setFilterShared(function(v) { return !v; }); }} variant={filterShared ? "active" : "outline"} size="default">Shared</Button>
+      <Button onClick={function() { setFilterPastDue(function(v) { return !v; }); }} variant={filterPastDue ? "active" : "outline"} size="default">Past Due</Button>
       <Button onClick={exportCSV} variant="outline" size="default">CSV</Button>
       <Button onClick={exportPDF} variant="outline" size="default">PDF</Button>
     </div>
