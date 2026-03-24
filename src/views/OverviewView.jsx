@@ -162,7 +162,7 @@ export default function OverviewView({ analysis, onSelectCustomer }) {
     </div>
 
     <div style={{ marginBottom:20 }}>
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, marginBottom:10 }}>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"flex-start", gap:10, marginBottom:10 }}>
         <div style={{ fontSize:14, fontWeight:600, color:C.bright }}>Work Orders by Customer</div>
         <Button onClick={function() { setShowByCustomer(function(v) { return !v; }); }} variant="outline" size="sm">
           <span style={{ marginRight:6 }}>{showByCustomer ? "\u25BE" : "\u25B8"}</span>

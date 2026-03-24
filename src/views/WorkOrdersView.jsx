@@ -1330,7 +1330,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     </div>
 
     <div style={{ marginBottom:18 }}>
-      <div style={{ fontSize:14, fontWeight:600, color:C.bright, marginBottom:10 }}>Overview Snapshot</div>
+      <div style={{ fontSize:14, fontWeight:600, color:C.bright, marginBottom:10 }}>Work Order Snapshot</div>
       <OverviewView analysis={filteredAnalysis || analysis} onSelectCustomer={handleOverviewCustomerSelect} />
     </div>
     <div id="workorders-table">
