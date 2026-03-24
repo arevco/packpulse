@@ -68,6 +68,8 @@ export default function ProductionReadiness() {
   const AUTO_SYNC_MS = 15 * 60 * 1000;
   const FULL_AUTO_SYNC_FRESH_MS = 30 * 60 * 1000;
   const PRODUCTION_AUTO_SYNC_FRESH_MS = 15 * 60 * 1000;
+  const FULL_AUTO_SYNC_RETRY_BACKOFF_MS = 10 * 60 * 1000;
+  const PRODUCTION_AUTO_SYNC_RETRY_BACKOFF_MS = 5 * 60 * 1000;
   const ds = useDataSources();
   const { analysis, summary, criticalItems, woStatuses, woCustomers, timelineData, deliveriesV2, inboundCoverage, recommendations, dispatchQueue, productionSegments } = useAnalysis({
     mappingConfirmed: ds.mappingConfirmed, allUploaded: ds.allUploaded,
@@ -152,6 +154,7 @@ export default function ProductionReadiness() {
   const [hiddenNulogySyncMode, setHiddenNulogySyncMode] = useState("full");
   const [syncNonce, setSyncNonce] = useState(0);
   const [nulogySyncState, setNulogySyncState] = useState(null);
+  const [autoSyncRetryUntil, setAutoSyncRetryUntil] = useState({ full: 0, production_only: 0 });
   const [dockApiLoading, setDockApiLoading] = useState(false);
   const [dockApiError, setDockApiError] = useState("");
   const [dockApiInfo, setDockApiInfo] = useState("");
@@ -166,6 +169,8 @@ export default function ProductionReadiness() {
   const [userActivityError, setUserActivityError] = useState("");
   const [userActivityRows, setUserActivityRows] = useState([]);
   const [showAskAi, setShowAskAi] = useState(false);
+  const lastHiddenSyncModeRef = useRef("full");
+  const hiddenSyncWasBusyRef = useRef(false);
 
   var buildPermalinkUrl = useCallback(function(nextView, woState, fcState, opsState) {
     if (typeof window === "undefined") return "";
@@ -352,20 +357,33 @@ export default function ProductionReadiness() {
   var nulogyAutoSyncFresh = !!latestNulogySyncMs && (Date.now() - latestNulogySyncMs) < FULL_AUTO_SYNC_FRESH_MS;
   var productionAutoSyncFresh = !!latestProductionSyncMs && (Date.now() - latestProductionSyncMs) < PRODUCTION_AUTO_SYNC_FRESH_MS;
   var hiddenSyncBusy = !!(nulogySyncState && (nulogySyncState.syncing || nulogySyncState.deferredSyncing));
+  var pendingHiddenSyncFailureCooldown = !hiddenSyncBusy && hiddenSyncWasBusyRef.current && !!(nulogySyncState && nulogySyncState.errorCount > 0);
+  var fullAutoRetryUntilMs = Number(autoSyncRetryUntil.full || 0);
+  var productionAutoRetryUntilMs = Number(autoSyncRetryUntil.production_only || 0);
   var dockAutoSyncFresh = isFreshForAutoSync(ds.dockTimestamp);
   var evoconAutoSyncFresh = isFreshForAutoSync(ds.evoconTimestamp || evoconLastSyncAt);
-  var triggerHiddenNulogySync = useCallback(function(mode) {
+  var triggerHiddenNulogySync = useCallback(function(mode, options) {
     if (hiddenSyncBusy) return;
     var nextMode = mode === "production_only" ? "production_only" : "full";
+    var origin = options && options.origin === "auto" ? "auto" : "manual";
+    if (origin === "auto") {
+      var retryUntil = Number(autoSyncRetryUntil[nextMode] || 0);
+      if (Date.now() < retryUntil) return;
+    } else if (autoSyncRetryUntil[nextMode]) {
+      setAutoSyncRetryUntil(function(prev) {
+        return Object.assign({}, prev, { [nextMode]: 0 });
+      });
+    }
+    lastHiddenSyncModeRef.current = nextMode;
     setHiddenNulogySyncMode(nextMode);
     setAutoSyncArmed(true);
     setSyncNonce(function(n) { return n + 1; });
-  }, [hiddenSyncBusy]);
+  }, [hiddenSyncBusy, autoSyncRetryUntil]);
   var triggerFullNulogySync = useCallback(function() {
-    triggerHiddenNulogySync("full");
+    triggerHiddenNulogySync("full", { origin: "manual" });
   }, [triggerHiddenNulogySync]);
   var triggerProductionRefresh = useCallback(function() {
-    triggerHiddenNulogySync("production_only");
+    triggerHiddenNulogySync("production_only", { origin: "manual" });
   }, [triggerHiddenNulogySync]);
   var freshnessVariant = freshCount === dataSourceStatus.length ? "success" : freshCount >= 3 ? "warning" : "danger";
   var freshnessLabel = freshCount === dataSourceStatus.length
@@ -440,14 +458,15 @@ export default function ProductionReadiness() {
 
   useEffect(() => {
     if (!showAutoBootstrap || !autoSyncHydrated) return;
-    if (!nulogyAutoSyncFresh) {
-      triggerFullNulogySync();
+    if (pendingHiddenSyncFailureCooldown) return;
+    if (!nulogyAutoSyncFresh && Date.now() >= fullAutoRetryUntilMs) {
+      triggerHiddenNulogySync("full", { origin: "auto" });
       return;
     }
-    if (!productionAutoSyncFresh) {
-      triggerProductionRefresh();
+    if (!productionAutoSyncFresh && Date.now() >= productionAutoRetryUntilMs) {
+      triggerHiddenNulogySync("production_only", { origin: "auto" });
     }
-  }, [showAutoBootstrap, autoSyncHydrated, nulogyAutoSyncFresh, productionAutoSyncFresh, triggerFullNulogySync, triggerProductionRefresh]);
+  }, [showAutoBootstrap, autoSyncHydrated, pendingHiddenSyncFailureCooldown, nulogyAutoSyncFresh, productionAutoSyncFresh, fullAutoRetryUntilMs, productionAutoRetryUntilMs, triggerHiddenNulogySync]);
 
   useEffect(() => {
     if (!shouldRunIntervalSync) return;
@@ -460,16 +479,35 @@ export default function ProductionReadiness() {
     var intervalId = setInterval(function() {
       if (!dockApiLoading && !dockAutoSyncFresh) fetchOpenDockApi();
       if (!evoconApiLoading && !evoconAutoSyncFresh) fetchEvoconApi();
-      if (showAutoBootstrap && !hiddenSyncBusy) {
-        if (!nulogyAutoSyncFresh) {
-          triggerFullNulogySync();
-        } else if (!productionAutoSyncFresh) {
-          triggerProductionRefresh();
+      if (showAutoBootstrap && !hiddenSyncBusy && !pendingHiddenSyncFailureCooldown) {
+        if (!nulogyAutoSyncFresh && Date.now() >= fullAutoRetryUntilMs) {
+          triggerHiddenNulogySync("full", { origin: "auto" });
+        } else if (!productionAutoSyncFresh && Date.now() >= productionAutoRetryUntilMs) {
+          triggerHiddenNulogySync("production_only", { origin: "auto" });
         }
       }
     }, AUTO_SYNC_MS);
     return function() { clearInterval(intervalId); };
-  }, [shouldRunIntervalSync, showAutoBootstrap, dockApiLoading, dockApiError, evoconApiLoading, evoconApiError, hiddenSyncBusy, fetchOpenDockApi, fetchEvoconApi, dockAutoSyncFresh, evoconAutoSyncFresh, nulogyAutoSyncFresh, productionAutoSyncFresh, triggerFullNulogySync, triggerProductionRefresh]);
+  }, [shouldRunIntervalSync, showAutoBootstrap, dockApiLoading, dockApiError, evoconApiLoading, evoconApiError, hiddenSyncBusy, pendingHiddenSyncFailureCooldown, fetchOpenDockApi, fetchEvoconApi, dockAutoSyncFresh, evoconAutoSyncFresh, nulogyAutoSyncFresh, productionAutoSyncFresh, fullAutoRetryUntilMs, productionAutoRetryUntilMs, triggerHiddenNulogySync]);
+
+  useEffect(() => {
+    if (hiddenSyncBusy) {
+      hiddenSyncWasBusyRef.current = true;
+      return;
+    }
+    if (!hiddenSyncWasBusyRef.current) return;
+    hiddenSyncWasBusyRef.current = false;
+    setAutoSyncArmed(false);
+    var failed = !!(nulogySyncState && nulogySyncState.errorCount > 0);
+    var mode = lastHiddenSyncModeRef.current === "production_only" ? "production_only" : "full";
+    setAutoSyncRetryUntil(function(prev) {
+      var nextUntil = failed
+        ? (Date.now() + (mode === "production_only" ? PRODUCTION_AUTO_SYNC_RETRY_BACKOFF_MS : FULL_AUTO_SYNC_RETRY_BACKOFF_MS))
+        : 0;
+      if (Number(prev[mode] || 0) === nextUntil) return prev;
+      return Object.assign({}, prev, { [mode]: nextUntil });
+    });
+  }, [hiddenSyncBusy, nulogySyncState, FULL_AUTO_SYNC_RETRY_BACKOFF_MS, PRODUCTION_AUTO_SYNC_RETRY_BACKOFF_MS]);
 
   var handleNulogyData = useCallback(async function(results) {
     var ts = new Date();
