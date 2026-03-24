@@ -83,6 +83,26 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
   const syncReport = useCallback(async (type) => {
     if (abortRef.current) return null;
 
+    if (type === "inventory") {
+      updateReportState(type, { status: DOWNLOADING, progress: "Pulling inventory snapshot and locator data...", error: null });
+      try {
+        const richRes = await fetch("/api/nulogy/inventory-rich");
+        const richBody = await richRes.json();
+        if (!richRes.ok) throw new Error((richBody && (richBody.error || richBody.details)) || `HTTP ${richRes.status}`);
+
+        console.log("[Nulogy] inventory-rich diagnostics:", richBody && richBody.diagnostics ? richBody.diagnostics : {});
+        updateReportState(type, {
+          status: DONE,
+          progress: `${Number(richBody && richBody.rowCount || 0).toLocaleString()} rows (inventory snapshot + locator)`,
+          rowCount: Number(richBody && richBody.rowCount) || 0
+        });
+        return { type, data: Array.isArray(richBody && richBody.data) ? richBody.data : [], rowCount: Number(richBody && richBody.rowCount) || 0 };
+      } catch (richErr) {
+        console.warn("[Nulogy] inventory-rich failed, falling back to standard inventory report:", richErr);
+        updateReportState(type, { status: CREATING, progress: "Falling back to standard inventory report...", error: null });
+      }
+    }
+
     // Step 1: Create report job
     updateReportState(type, { status: CREATING, progress: "Requesting report from Nulogy...", error: null });
 

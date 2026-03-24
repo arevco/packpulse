@@ -181,6 +181,7 @@ export default function InventoryView({ inventory, itemMaster, invMapping }) {
         row.description,
         row.location,
         row.lotCode,
+        row.expiryDate,
         row.palletNumber,
         row.customer,
         row.status
@@ -234,7 +235,7 @@ export default function InventoryView({ inventory, itemMaster, invMapping }) {
   };
 
   var exportCsv = function() {
-    var headers = ["sku", "description", "location", "lot_code", "pallet_number", "qty_on_hand", "base_uom", "status", "customer"];
+    var headers = ["sku", "description", "location", "lot_code", "expiry_date", "pallet_number", "qty_on_hand", "base_uom", "status", "customer"];
     var lines = [headers.join(",")];
     sortedRows.forEach(function(row) {
       lines.push([
@@ -242,6 +243,7 @@ export default function InventoryView({ inventory, itemMaster, invMapping }) {
         csvCell(row.description),
         csvCell(row.location),
         csvCell(row.lotCode),
+        csvCell(row.expiryDate || ""),
         csvCell(row.palletNumber),
         csvCell(String(Math.round((row.qtyOnHand || 0) * 100) / 100)),
         csvCell(row.baseUom || ""),
@@ -264,7 +266,7 @@ export default function InventoryView({ inventory, itemMaster, invMapping }) {
     <div className="space-y-4">
       <div>
         <h2 className="text-2xl font-semibold tracking-[-0.02em] text-[rgb(var(--foreground))]">Inventory Lookup</h2>
-        <p className="mt-1 text-sm text-[rgb(var(--muted))]">Search inventory by SKU, location, lot code, and pallet with on-hand quantity.</p>
+        <p className="mt-1 text-sm text-[rgb(var(--muted))]">Search inventory by SKU, location, lot code, expiry date, and pallet with on-hand quantity.</p>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -333,7 +335,7 @@ export default function InventoryView({ inventory, itemMaster, invMapping }) {
 
       {(!hasLocationColumn || !hasPalletColumn) ? (
         <div className="rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-2 text-sm text-[rgb(var(--muted))]">
-          Current inventory source includes
+          Inventory source includes
           {hasLotColumn ? " lot codes" : ""}
           {hasLotColumn && hasExpiryColumn ? " and" : ""}
           {hasExpiryColumn ? " expiry dates" : ""}
