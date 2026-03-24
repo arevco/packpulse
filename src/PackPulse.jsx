@@ -904,7 +904,6 @@ export default function ProductionReadiness() {
             {nulogySyncState && nulogySyncState.syncing && <Badge variant="secondary">Loading Nulogy…</Badge>}
             {dockApiInfo && <Badge variant="success">{dockApiInfo}</Badge>}
             {dockApiError && <Badge variant="danger">OpenDock: {dockApiError}</Badge>}
-            {nulogySyncState && nulogySyncState.errorCount > 0 && <Badge variant="danger">Nulogy sync has errors</Badge>}
             {!dockApiLoading && (!nulogySyncState || !nulogySyncState.syncing) && (
             <Button onClick={() => { setDockApiInfo(""); setDockApiError(""); triggerFullNulogySync(); fetchOpenDockApi(); fetchEvoconApi(); }} variant="outline" size="sm">
                 Retry Sync
@@ -959,54 +958,6 @@ export default function ProductionReadiness() {
           </Card>
         )}
 
-        {(!showAutoBootstrap || showDataSetup) && <div className="mt-7 border-t border-[rgb(var(--border))] pt-6">
-          <div className="mb-4 text-[15px] font-bold text-[rgb(var(--foreground))]">How PackPulse Works</div>
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4">
-
-            <Card className="px-[18px] py-4">
-              <div className="mb-1.5 text-sm font-bold text-[rgb(var(--accent))]">1. SKU Matching</div>
-              <div className="text-[13px] leading-[1.6] text-[rgb(var(--muted))]">
-                Each Work Order has a product SKU that PackPulse normalizes (lowercased, trimmed, special characters removed) and matches against your Inventory and BOM files. This means "114715", " 114715 ", and "114715.0" all match correctly.
-              </div>
-            </Card>
-
-            <Card className="px-[18px] py-4">
-              <div className="mb-1.5 text-sm font-bold text-[rgb(var(--accent))]">2. Material Readiness</div>
-              <div className="text-[13px] leading-[1.6] text-[rgb(var(--muted))]">
-                When a BOM is loaded, PackPulse explodes each Work Order into its component materials. It compares <span className="text-[rgb(var(--foreground))]">Qty Needed</span> (BOM qty per unit {"\u00D7"} order qty) against <span className="text-[rgb(var(--foreground))]">On Hand</span> from Inventory. The lowest component fill rate becomes the WO's readiness %. <span className="text-[rgb(var(--foreground))]">Can Make</span> shows the max units producible with current stock.
-              </div>
-            </Card>
-
-            <Card className="px-[18px] py-4">
-              <div className="mb-1.5 text-sm font-bold text-[rgb(var(--accent))]">3. Substitutes & Alternates</div>
-              <div className="text-[13px] leading-[1.6] text-[rgb(var(--muted))]">
-                BOMs can include substitute components. PackPulse groups primary and alternate materials together and pools their inventory {"\u2014"} if the primary is short but an approved alternate has stock, the combined quantity is used for readiness calculations.
-              </div>
-            </Card>
-
-            <Card className="px-[18px] py-4">
-              <div className="mb-1.5 text-sm font-bold text-[rgb(var(--accent))]">4. Production Progress</div>
-              <div className="text-[13px] leading-[1.6] text-[rgb(var(--muted))]">
-                Work Order fields like <span className="text-[rgb(var(--foreground))]">Units Produced</span>, <span className="text-[rgb(var(--foreground))]">Units Remaining</span>, and <span className="text-[rgb(var(--foreground))]">Standard Units/Hour</span> power the completion % and estimated run hours. Past-due detection compares due dates against today's date for WOs with remaining units.
-              </div>
-            </Card>
-
-            <Card className="px-[18px] py-4">
-              <div className="mb-1.5 text-sm font-bold text-[rgb(var(--accent))]">5. Column Auto-Detection</div>
-              <div className="text-[13px] leading-[1.6] text-[rgb(var(--muted))]">
-                PackPulse scans your column headers against known patterns (e.g., "Item Code" {"\u2192"} SKU, "Qty On Hand" {"\u2192"} stock level). If a column doesn't map correctly, use the <span className="text-[rgb(var(--foreground))]">Settings</span> panel after analysis to manually adjust any field mapping.
-              </div>
-            </Card>
-
-            <Card className="px-[18px] py-4">
-              <div className="mb-1.5 text-sm font-bold text-[rgb(var(--accent))]">6. Optional Data Sources</div>
-              <div className="text-[13px] leading-[1.6] text-[rgb(var(--muted))]">
-                <span className="text-[rgb(var(--foreground))]">BOM</span> {"\u2014"} enables component-level readiness (saved between sessions). <span className="text-[rgb(var(--foreground))]">EDR</span> {"\u2014"} inbound delivery data for the Delivery Timeline. <span className="text-[rgb(var(--foreground))]">OpenDock</span> {"\u2014"} dock appointment statuses.
-              </div>
-            </Card>
-
-          </div>
-        </div>}
       </div>)}
 
       <div id="dashboard-main">
@@ -1032,7 +983,6 @@ export default function ProductionReadiness() {
             {dockApiLoading && <Badge variant="secondary">OpenDock</Badge>}
             {dockApiInfo && syncVisualPct < 100 && <Badge variant="success">{dockApiInfo}</Badge>}
             {dockApiError && <Badge variant="danger">OpenDock: {dockApiError}</Badge>}
-            {nulogySyncState && nulogySyncState.errorCount > 0 && <Badge variant="danger">Nulogy sync has errors</Badge>}
             {!dockApiLoading && (!nulogySyncState || !nulogySyncState.syncing) && setupNeedsBootstrap && (
               <Button variant="outline" size="sm" onClick={() => { setDockApiInfo(""); setDockApiError(""); triggerFullNulogySync(); fetchOpenDockApi(); fetchEvoconApi(); }}>
                 Retry
