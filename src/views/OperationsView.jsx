@@ -166,29 +166,26 @@ function fmtMissingRevenueSkuCount(count) {
   return count + " SKU" + (count === 1 ? "" : "s") + " missing revenue";
 }
 
-function fmtMoneyPrecise(v) {
-  var amount = safeNum(v);
-  if (!Number.isFinite(amount)) return "--";
-  if (amount < 0) return "-$" + Math.abs(amount).toFixed(2);
-  return "$" + amount.toFixed(2);
-}
-
 function fmtCasesPerProductionMin(v) {
   return safeNum(v).toFixed(2) + " cs/prod min";
 }
 
-function deriveLaborStatusFromRows(finalizedRows, provisionalRows) {
-  if (provisionalRows > 0 && finalizedRows > 0) return "mixed";
-  if (provisionalRows > 0) return "provisional";
-  if (finalizedRows > 0) return "finalized";
-  return "unknown";
+function elapsedMinutesBetween(startUtc, endUtc) {
+  var start = startUtc ? new Date(startUtc) : null;
+  var end = endUtc ? new Date(endUtc) : null;
+  if (!start || !end || isNaN(start) || isNaN(end) || end <= start) return 0;
+  return Math.max(0, Math.round((end.getTime() - start.getTime()) / 60000));
 }
 
-function laborStatusShortLabel(status) {
-  if (status === "provisional") return "Provisional";
-  if (status === "mixed") return "Mixed";
-  if (status === "finalized") return "Finalized";
-  return "Unmatched";
+function formatTimeEt(value) {
+  var parts = toEasternDateTimeParts(value);
+  if (!parts) return "--";
+  var hour24 = safeNum(parts.hour);
+  var minute = String(safeNum(parts.minute)).padStart(2, "0");
+  var suffix = hour24 >= 12 ? "p" : "a";
+  var hour12 = hour24 % 12;
+  if (hour12 === 0) hour12 = 12;
+  return hour12 + ":" + minute + suffix;
 }
 
 function OperationsDailyTotalTooltipContent(props) {
@@ -298,6 +295,12 @@ function toIsoDateUTC(d) {
   var m = String(dt.getUTCMonth() + 1).padStart(2, "0");
   var day = String(dt.getUTCDate()).padStart(2, "0");
   return y + "-" + m + "-" + day;
+}
+
+function toIso(value) {
+  var dt = value instanceof Date ? value : new Date(value);
+  if (isNaN(dt)) return "";
+  return dt.toISOString();
 }
 
 function toIsoDateET(d) {
@@ -658,6 +661,10 @@ function buildRawNulogySeries(rows) {
     var sku = String(pickFieldLooseLocal(row, ["Item Code", "item_code"]) || "").trim() || "UNKNOWN";
     var itemDesc = String(pickFieldLooseLocal(row, ["Description", "description", "Item Description", "item_description"]) || "").trim();
     var wo = String(pickFieldLooseLocal(row, ["Work Order Code", "project_code", "Project Code"]) || "").trim();
+    var jobId = String(pickFieldLooseLocal(row, ["Job ID", "job_id", "Job"]) || "").trim();
+    var producedAtUtc = toIso(pickFieldLooseLocal(row, ["Produced At", "produced_at", "Produced date", "producedAt"]));
+    var jobStartAtUtc = toIso(pickFieldLooseLocal(row, ["Actual Job Start", "actual_job_start_at", "Actual Job Start At", "actualJobStartAt"]));
+    var jobEndAtUtc = toIso(pickFieldLooseLocal(row, ["Actual Job End", "actual_job_end_at", "Actual Job End At", "actualJobEndAt"])) || producedAtUtc;
 
     if (!byDay[date]) byDay[date] = { date: date, units: 0, rows: 0 };
     byDay[date].units += units;
@@ -678,13 +685,17 @@ function buildRawNulogySeries(rows) {
     byDateLine[date][line].rows += 1;
 
     rowsLite.push({
+      produced_at_utc: producedAtUtc || null,
       produced_date_et: date,
       shift_label: shift,
+      job_id: jobId || null,
       item_code: sku === "UNKNOWN" ? null : sku,
       item_desc: itemDesc || null,
       units_produced: units,
       line: line,
-      work_order_code: wo || null
+      work_order_code: wo || null,
+      job_start_at_utc: jobStartAtUtc || null,
+      job_end_at_utc: jobEndAtUtc || null
     });
   });
   var latestDate = Object.keys(byDateLine).sort().pop() || null;
@@ -1839,64 +1850,68 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
 
   var productionJobLeaderboard = useMemo(function() {
     var leaderboardMinCases = 250;
-    var leaderboardMinProductionHours = 1;
-    var sourceRows = (laborActuals && Array.isArray(laborActuals.byJob)) ? laborActuals.byJob : [];
+    var sourceRows = (filteredBreakdown && Array.isArray(filteredBreakdown.rowsLite)) ? filteredBreakdown.rowsLite : [];
     var grouped = {};
+    var normalizeShiftBucket = function(label) {
+      var text = String(label || "").toLowerCase();
+      if (text.indexOf("1") !== -1) return "shift_1";
+      if (text.indexOf("2") !== -1) return "shift_2";
+      return "unassigned";
+    };
 
     sourceRows.forEach(function(row) {
-      var date = String(row && row.date_et || "");
-      if (!inRangeIso(date, effectiveRange)) return;
+      var date = String(row && row.produced_date_et || "");
+      if (!date) return;
       var jobId = String(row && row.job_id || "").trim();
       var workOrder = String(row && row.work_order_code || "").trim();
-      var line = String(row && row.line_name || "Unknown").trim() || "Unknown";
+      var line = String(row && row.line || "Unknown").trim() || "Unknown";
       var itemCode = String(row && row.item_code || "").trim();
-      var itemDescription = formatDescriptionForDisplay(row && row.item_description) || "";
-      var key = [jobId || "--", workOrder || "--", line, itemCode || "--"].join("|");
+      var itemDescription = formatDescriptionForDisplay(row && row.item_desc) || "";
+      var key = [date, jobId || "--", workOrder || "--", line, itemCode || "--"].join("|");
       if (!grouped[key]) {
         grouped[key] = {
           key: key,
+          date: date,
           jobId: jobId || "--",
           workOrder: workOrder || "--",
           line: line,
           itemCode: itemCode || "--",
           itemDescription: itemDescription || "--",
           casesProduced: 0,
-          payableHours: 0,
-          productiveHours: 0,
-          laborCost: 0,
-          finalizedRows: 0,
-          provisionalRows: 0,
-          activeDates: {}
+          shiftSlots: {},
+          jobStartAtUtc: "",
+          jobEndAtUtc: ""
         };
       }
-      grouped[key].casesProduced += safeNum(row && row.cases_produced);
-      grouped[key].payableHours += safeNum(row && row.payable_hours);
-      grouped[key].productiveHours += safeNum(row && row.productive_hours);
-      grouped[key].laborCost += safeNum(row && row.labor_cost);
-      grouped[key].finalizedRows += safeNum(row && row.finalized_rows);
-      grouped[key].provisionalRows += safeNum(row && row.provisional_rows);
-      if (date) grouped[key].activeDates[date] = true;
+      grouped[key].casesProduced += safeNum(row && row.units_produced);
+      grouped[key].shiftSlots[normalizeShiftBucket(row && row.shift_label)] = true;
+      var rowStartAtUtc = String(row && row.job_start_at_utc || "").trim();
+      var rowEndAtUtc = String(row && (row.job_end_at_utc || row.produced_at_utc) || "").trim();
+      if (rowStartAtUtc && (!grouped[key].jobStartAtUtc || rowStartAtUtc < grouped[key].jobStartAtUtc)) grouped[key].jobStartAtUtc = rowStartAtUtc;
+      if (rowEndAtUtc && (!grouped[key].jobEndAtUtc || rowEndAtUtc > grouped[key].jobEndAtUtc)) grouped[key].jobEndAtUtc = rowEndAtUtc;
       if (grouped[key].itemDescription === "--" && itemDescription) grouped[key].itemDescription = itemDescription;
     });
 
     var ranked = Object.values(grouped)
       .map(function(row) {
         var casesProduced = safeNum(row.casesProduced);
-        var payableHours = safeNum(row.payableHours);
-        var productiveHours = safeNum(row.productiveHours);
-        var laborCost = safeNum(row.laborCost);
+        var shiftSlotCount = Math.min(2, Math.max(1, Object.keys(row.shiftSlots).length));
+        var actualElapsedMinutes = elapsedMinutesBetween(row.jobStartAtUtc, row.jobEndAtUtc);
+        var productionMinutes = actualElapsedMinutes > 0
+          ? Math.min(960, actualElapsedMinutes)
+          : (shiftSlotCount * 480);
         return Object.assign({}, row, {
-          activeDayCount: Object.keys(row.activeDates).length,
-          laborStatus: deriveLaborStatusFromRows(row.finalizedRows, row.provisionalRows),
-          casesPerPayableHour: payableHours > 0 ? (casesProduced / payableHours) : 0,
-          casesPerProductiveHour: productiveHours > 0 ? (casesProduced / productiveHours) : 0,
-          productiveMinutes: productiveHours > 0 ? (productiveHours * 60) : 0,
-          casesPerProductionMinute: productiveHours > 0 ? (casesProduced / (productiveHours * 60)) : 0,
-          laborCostPerCase: casesProduced > 0 ? (laborCost / casesProduced) : 0
+          shiftSlotCount: shiftSlotCount,
+          productionMinutes: productionMinutes,
+          hasActualWindow: actualElapsedMinutes > 0,
+          windowLabel: actualElapsedMinutes > 0
+            ? (formatTimeEt(row.jobStartAtUtc) + " - " + formatTimeEt(row.jobEndAtUtc))
+            : (shiftSlotCount + " shift bucket" + (shiftSlotCount === 1 ? "" : "s")),
+          casesPerProductionMinute: productionMinutes > 0 ? (casesProduced / productionMinutes) : 0
         });
       })
       .filter(function(row) {
-        return row.casesProduced >= leaderboardMinCases && row.productiveHours >= leaderboardMinProductionHours;
+        return row.casesProduced >= leaderboardMinCases && row.productionMinutes > 0;
       });
 
     var maxCasesProduced = ranked.reduce(function(max, row) {
@@ -1936,12 +1951,11 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
 
     return {
       minCases: leaderboardMinCases,
-      minProductionHours: leaderboardMinProductionHours,
       qualifiedCount: ranked.length,
       best: byBest.slice(0, 5),
       worst: byWorst.slice(0, 5)
     };
-  }, [laborActuals, effectiveRange]);
+  }, [filteredBreakdown]);
 
   var skuMixByDay = useMemo(function() {
     var rowsLite = (filteredBreakdown && Array.isArray(filteredBreakdown.rowsLite)) ? filteredBreakdown.rowsLite : [];
@@ -2860,31 +2874,19 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
           <div>
             <div className="text-sm font-semibold">Production Job Leaderboard</div>
             <div className="text-xs text-[rgb(var(--muted))]">
-              Ranked with yield-first weighting in the selected window: total cases carry more weight, then cases per productive minute. Qualified jobs need at least {productionJobLeaderboard.minCases.toLocaleString()} cases and {productionJobLeaderboard.minProductionHours.toFixed(1)} productive labor hour.
+              Ranked with yield-first weighting in the selected window: total cases carry more weight, then cases per production minute. Each row is one job-day run using actual job start/stop times when available, with shift buckets only as fallback.
             </div>
           </div>
           <div className="text-xs text-[rgb(var(--muted))]">
-            {productionJobLeaderboard.qualifiedCount.toLocaleString()} qualified job{productionJobLeaderboard.qualifiedCount === 1 ? "" : "s"}
+            {productionJobLeaderboard.qualifiedCount.toLocaleString()} qualified job run{productionJobLeaderboard.qualifiedCount === 1 ? "" : "s"}
           </div>
         </div>
 
-        {showProductionJobsLoading ? (
-          <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-4 text-sm text-[rgb(var(--muted))]">
-            Loading labor-matched job leaderboard...
-          </div>
-        ) : laborActuals.status === "missing_labor_events_table" ? (
-          <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-4 text-sm text-[rgb(var(--muted))]">
-            Labor actuals are not enabled yet, so the job leaderboard is unavailable.
-          </div>
-        ) : showProductionJobsError ? (
-          <div className="rounded-xl border border-[rgb(var(--danger-line))] bg-[rgb(var(--danger-soft))] px-3 py-4 text-sm text-[rgb(var(--danger))]">
-            Could not load matched labor data for the job leaderboard right now.
-          </div>
-        ) : productionJobLeaderboard.qualifiedCount ? (
+        {productionJobLeaderboard.qualifiedCount ? (
           <div className="grid gap-3 xl:grid-cols-2">
             {[
-              { key: "best", label: "Top 5 Best Jobs", rows: productionJobLeaderboard.best, tone: "success", icon: TrendingUp },
-              { key: "worst", label: "Top 5 Worst Jobs", rows: productionJobLeaderboard.worst, tone: "danger", icon: TrendingDown }
+              { key: "best", label: "Top 5 Best Job Runs", rows: productionJobLeaderboard.best, tone: "success", icon: TrendingUp },
+              { key: "worst", label: "Top 5 Worst Job Runs", rows: productionJobLeaderboard.worst, tone: "danger", icon: TrendingDown }
             ].map(function(section) {
               var Icon = section.icon;
               var headerTone = section.tone === "success"
@@ -2898,11 +2900,6 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                   </div>
                   <div className="divide-y divide-[rgb(var(--border))]">
                     {section.rows.map(function(row, idx) {
-                      var statusTone = row.laborStatus === "finalized"
-                        ? "border-[rgb(var(--success-line))] bg-[rgb(var(--success-soft))] text-[rgb(var(--success))]"
-                        : row.laborStatus === "provisional" || row.laborStatus === "mixed"
-                          ? "border-[rgb(var(--warn-line))] bg-[rgb(var(--warn-soft))] text-[rgb(var(--warn))]"
-                          : "border-[rgb(var(--border))] bg-[rgb(var(--surface))] text-[rgb(var(--muted))]";
                       return (
                         <div key={row.key} className="flex flex-wrap items-start justify-between gap-3 px-3 py-3">
                           <div className="min-w-0 flex-1">
@@ -2911,7 +2908,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                                 #{idx + 1}
                               </span>
                               <span className="truncate text-sm font-semibold text-[rgb(var(--foreground))]">{row.itemCode}</span>
-                              <span className={"inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium " + statusTone}>{laborStatusShortLabel(row.laborStatus)}</span>
+                              <span className="inline-flex rounded-full border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2 py-0.5 text-[10px] font-medium text-[rgb(var(--muted))]">{row.date}</span>
                             </div>
                             <div className="truncate text-xs text-[rgb(var(--muted))]">
                               Job {row.jobId} · WO {row.workOrder} · {row.line}
@@ -2920,8 +2917,8 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
                           </div>
                           <div className="shrink-0 text-right text-xs [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>
                             <div className={"text-sm font-semibold " + headerTone}>{fmtCasesPerProductionMin(row.casesPerProductionMinute)}</div>
-                            <div className="text-[rgb(var(--muted))]">{Math.round(safeNum(row.casesProduced)).toLocaleString()} cs · {Math.round(safeNum(row.productiveMinutes)).toLocaleString()} prod min</div>
-                            <div className="text-[rgb(var(--muted))]">{fmtMoneyPrecise(row.laborCostPerCase)}/case · {row.activeDayCount} day{row.activeDayCount === 1 ? "" : "s"}</div>
+                            <div className="text-[rgb(var(--muted))]">{Math.round(safeNum(row.casesProduced)).toLocaleString()} cs · {Math.round(safeNum(row.productionMinutes)).toLocaleString()} prod min</div>
+                            <div className="text-[rgb(var(--muted))]">{row.windowLabel}{row.hasActualWindow ? "" : " tracked"}</div>
                           </div>
                         </div>
                       );
@@ -2933,7 +2930,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
           </div>
         ) : (
           <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-4 text-sm text-[rgb(var(--muted))]">
-            No matched production jobs met the leaderboard minimums in this window.
+            No production job runs met the leaderboard minimums in this window.
           </div>
         )}
       </Card>

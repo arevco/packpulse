@@ -34,6 +34,22 @@ function sanitizeIsoDate(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : "";
 }
 
+function resolveJobWindow(row) {
+  var startRaw = pickFieldLoose(row && row.raw, [
+    "Actual Job Start", "actual_job_start_at",
+    "Actual Job Start At", "actualJobStartAt"
+  ]);
+  var endRaw = pickFieldLoose(row && row.raw, [
+    "Actual Job End", "actual_job_end_at",
+    "Actual Job End At", "actualJobEndAt",
+    "Produced At", "produced_at"
+  ]) || row && row.produced_at_utc;
+  return {
+    startAtUtc: toIso(startRaw),
+    endAtUtc: toIso(endRaw)
+  };
+}
+
 async function fetchAllProductionRows(supabase, siteId, fromDate, toDate) {
   var pageSize = 1000;
   var from = 0;
@@ -42,7 +58,7 @@ async function fetchAllProductionRows(supabase, siteId, fromDate, toDate) {
     var to = from + pageSize - 1;
     var query = supabase
       .from("production_events")
-      .select("event_key,produced_date_et,shift_label,job_id,item_code,units_produced,line,work_order_code,raw")
+      .select("event_key,produced_at_utc,produced_date_et,shift_label,job_id,item_code,units_produced,line,work_order_code,raw")
       .eq("site_id", siteId)
       .gte("produced_date_et", fromDate)
       .order("produced_date_et", { ascending: false })
@@ -119,8 +135,10 @@ export default async function handler(req, res) {
       totalRows: rows.length,
       rowsLite: rows.map(function(r) {
         var timing = resolveProductionTiming(r);
+        var window = resolveJobWindow(r);
         var itemDesc = pickFieldLoose(r.raw, ["item_description", "Item Description", "Description", "description"]);
         return {
+          produced_at_utc: r.produced_at_utc || null,
           produced_date_et: timing.date || r.produced_date_et || null,
           shift_label: timing.shift || r.shift_label || null,
           job_id: r.job_id || null,
@@ -128,7 +146,9 @@ export default async function handler(req, res) {
           item_desc: itemDesc ? String(itemDesc) : null,
           units_produced: toNum(r.units_produced),
           line: r.line || null,
-          work_order_code: r.work_order_code || null
+          work_order_code: r.work_order_code || null,
+          job_start_at_utc: window.startAtUtc || null,
+          job_end_at_utc: window.endAtUtc || null
         };
       }),
       byDaySku: Object.keys(byDaySku).sort().reduce(function(out, dayKey) {
