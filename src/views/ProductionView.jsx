@@ -235,6 +235,20 @@ function csvNumber(value, digits) {
   return digits > 0 ? amount.toFixed(digits) : String(Math.round(amount));
 }
 
+function todayEtDateKey() {
+  var parts = {};
+  new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(new Date()).forEach(function(part) {
+    if (part.type !== "literal") parts[part.type] = part.value;
+  });
+  if (!parts.year || !parts.month || !parts.day) return "";
+  return parts.year + "-" + parts.month + "-" + parts.day;
+}
+
 export default function ProductionView({ productionSegments, laborActuals, laborDataRaw, resolveRevenueForRow }) {
   const { C, mono } = useTheme();
   const { thS, tdN, tdM } = useStyles();
@@ -591,6 +605,8 @@ export default function ProductionView({ productionSegments, laborActuals, labor
       var productiveHours = payableHours > 0 ? safeNum(labor && labor.productive_hours) : 0;
       var laborCost = payableHours > 0 ? safeNum(labor && labor.labor_cost) : 0;
       var laborStatus = payableHours > 0 ? laborStatusFromMetric(labor) : "unknown";
+      var shiftMatchConfidence = payableHours > 0 ? String(labor && labor.shift_match_confidence || "") : "";
+      var canDirectMatchShift = payableHours > 0 ? !!(labor && labor.can_direct_match_shift) : false;
       if (!(payableHours > 0)) {
         laborSource = "none";
         allocationMethod = "unmatched";
@@ -624,6 +640,8 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         hasRevenue: revenue > 0,
         laborStatus: laborStatus,
         laborIsProvisional: payableHours > 0 && isProvisionalLabor(laborStatus),
+        shiftMatchConfidence: shiftMatchConfidence,
+        canDirectMatchShift: canDirectMatchShift,
         laborSource: laborSource,
         allocationMethod: allocationMethod,
         matchLevel: matchLevel
@@ -631,9 +649,39 @@ export default function ProductionView({ productionSegments, laborActuals, labor
     });
   }, [filteredJobRows, laborByJobKey, rawLaborByJobKey, productionFallbackGroups, resolveRevenueForRow]);
 
+  var jobsWithDetailLabor = useMemo(function() {
+    var todayEt = todayEtDateKey();
+    return jobsWithLabor.map(function(r) {
+      var isToday = String(r.date || "") === todayEt;
+      var trustedPastLabor = r.allocationMethod === "direct_match" && (
+        r.laborSource !== "server_by_job" ||
+        r.shiftMatchConfidence === "trusted" ||
+        r.canDirectMatchShift
+      );
+      if (!r.hasLabor || isToday || trustedPastLabor) return r;
+      return Object.assign({}, r, {
+        laborPayableHours: 0,
+        laborProductiveHours: 0,
+        laborCost: 0,
+        laborMargin: safeNum(r.revenue),
+        laborMarginPct: r.revenue > 0 ? 1 : null,
+        casesPerPayableHour: 0,
+        laborCostPerCase: 0,
+        hasLabor: false,
+        laborStatus: "unknown",
+        laborIsProvisional: false,
+        shiftMatchConfidence: "",
+        canDirectMatchShift: false,
+        laborSource: "none",
+        allocationMethod: "unmatched",
+        matchLevel: "unmatched"
+      });
+    });
+  }, [jobsWithLabor]);
+
   var shiftTotals = useMemo(function() {
     var map = {};
-    jobsWithLabor.forEach(function(r) {
+    jobsWithDetailLabor.forEach(function(r) {
       var shift = String(r.shift || "Unassigned");
       if (!map[shift]) map[shift] = { shift: shift, units: 0, jobs: 0, laborPayableHours: 0, laborCost: 0, laborJobs: 0, provisionalLaborRows: 0, finalizedLaborRows: 0 };
       map[shift].units += safeNum(r.unitsProduced);
@@ -649,12 +697,12 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         laborStatus: deriveLaborStatus(row.finalizedLaborRows, row.provisionalLaborRows)
       });
     }).sort(function(a, b) { return b.units - a.units; });
-  }, [jobsWithLabor]);
+  }, [jobsWithDetailLabor]);
 
   var lineLoad = useMemo(function() {
     var map = {};
-    var totalUnits = jobsWithLabor.reduce(function(sum, r) { return sum + safeNum(r.unitsProduced); }, 0);
-    jobsWithLabor.forEach(function(r) {
+    var totalUnits = jobsWithDetailLabor.reduce(function(sum, r) { return sum + safeNum(r.unitsProduced); }, 0);
+    jobsWithDetailLabor.forEach(function(r) {
       var line = String(r.line || "Unknown").trim() || "Unknown";
       if (!map[line]) {
         map[line] = {
@@ -702,11 +750,11 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         laborStatus: deriveLaborStatus(r.finalizedLaborRows, r.provisionalLaborRows)
       });
     }).sort(function(a, b) { return b.units - a.units; });
-  }, [jobsWithLabor]);
+  }, [jobsWithDetailLabor]);
 
   var jobRollup = useMemo(function() {
     var map = {};
-    jobsWithLabor.forEach(function(r) {
+    jobsWithDetailLabor.forEach(function(r) {
       var key = [r.jobId || "", r.workOrder || "", r.line || "", r.itemCode || ""].join("|");
       if (!map[key]) {
         map[key] = {
@@ -760,7 +808,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         laborStatus: deriveLaborStatus(r.finalizedLaborRows, r.provisionalLaborRows)
       });
     }).sort(function(a, b) { return b.unitsProduced - a.unitsProduced; });
-  }, [jobsWithLabor]);
+  }, [jobsWithDetailLabor]);
 
   var detailRowsByJobKey = useMemo(function() {
     var map = {};
@@ -771,7 +819,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
       if (normalized === "Unassigned") return 3;
       return 4;
     };
-    jobsWithLabor.forEach(function(r) {
+    jobsWithDetailLabor.forEach(function(r) {
       var key = [r.jobId || "", r.workOrder || "", r.line || "", r.itemCode || ""].join("|");
       if (!map[key]) map[key] = [];
       map[key].push(r);
@@ -788,7 +836,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
       });
     });
     return map;
-  }, [jobsWithLabor]);
+  }, [jobsWithDetailLabor]);
 
   var lineExecution = useMemo(function() {
     var jobsByLine = {};
@@ -808,13 +856,13 @@ export default function ProductionView({ productionSegments, laborActuals, labor
     });
   }, [lineLoad, jobRollup, detailRowsByJobKey]);
 
-  var totalUnitsProduced = jobsWithLabor.reduce(function(sum, r) { return sum + safeNum(r.unitsProduced); }, 0);
-  var totalRevenue = jobsWithLabor.reduce(function(sum, r) { return sum + safeNum(r.revenue); }, 0);
-  var totalLaborCost = jobsWithLabor.reduce(function(sum, r) { return sum + safeNum(r.laborCost); }, 0);
-  var totalLaborHours = jobsWithLabor.reduce(function(sum, r) { return sum + safeNum(r.laborPayableHours); }, 0);
-  var totalRevenueCoveredUnits = jobsWithLabor.reduce(function(sum, r) { return sum + safeNum(r.revenueCoveredUnits); }, 0);
-  var totalProvisionalLaborRows = jobsWithLabor.reduce(function(sum, r) { return sum + (r.hasLabor && isProvisionalLabor(r.laborStatus) ? 1 : 0); }, 0);
-  var totalFinalizedLaborRows = jobsWithLabor.reduce(function(sum, r) { return sum + (r.hasLabor && (r.laborStatus === "finalized" || r.laborStatus === "mixed") ? 1 : 0); }, 0);
+  var totalUnitsProduced = jobsWithDetailLabor.reduce(function(sum, r) { return sum + safeNum(r.unitsProduced); }, 0);
+  var totalRevenue = jobsWithDetailLabor.reduce(function(sum, r) { return sum + safeNum(r.revenue); }, 0);
+  var totalLaborCost = jobsWithDetailLabor.reduce(function(sum, r) { return sum + safeNum(r.laborCost); }, 0);
+  var totalLaborHours = jobsWithDetailLabor.reduce(function(sum, r) { return sum + safeNum(r.laborPayableHours); }, 0);
+  var totalRevenueCoveredUnits = jobsWithDetailLabor.reduce(function(sum, r) { return sum + safeNum(r.revenueCoveredUnits); }, 0);
+  var totalProvisionalLaborRows = jobsWithDetailLabor.reduce(function(sum, r) { return sum + (r.hasLabor && isProvisionalLabor(r.laborStatus) ? 1 : 0); }, 0);
+  var totalFinalizedLaborRows = jobsWithDetailLabor.reduce(function(sum, r) { return sum + (r.hasLabor && (r.laborStatus === "finalized" || r.laborStatus === "mixed") ? 1 : 0); }, 0);
   var totalLaborMargin = totalRevenue - totalLaborCost;
   var totalLaborMarginPct = totalRevenue > 0 ? (totalLaborMargin / totalRevenue) : null;
   var totalRevenueCoveragePct = totalUnitsProduced > 0 ? Math.round((totalRevenueCoveredUnits / totalUnitsProduced) * 100) : 0;
@@ -894,7 +942,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
     });
   };
   var exportLaborCsv = function() {
-    if (!jobsWithLabor.length) return;
+    if (!jobsWithDetailLabor.length) return;
     var headers = [
       "date",
       "shift",
@@ -926,7 +974,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
       "has_revenue",
       "missing_revenue"
     ];
-    var rows = jobsWithLabor.map(function(row) {
+    var rows = jobsWithDetailLabor.map(function(row) {
       return [
         row.date || "",
         row.shift || "",
@@ -992,7 +1040,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
           <option value="all">All Shifts</option>
           {shiftOptions.map(function(shift) { return <option key={shift} value={shift}>{shortShift(shift)}</option>; })}
         </select>
-        <Button onClick={exportLaborCsv} variant="outline" size="default" className="h-10 shrink-0" disabled={!jobsWithLabor.length}>
+        <Button onClick={exportLaborCsv} variant="outline" size="default" className="h-10 shrink-0" disabled={!jobsWithDetailLabor.length}>
           <Download className="mr-1.5 h-4 w-4" />
           Export Jobs Data
         </Button>
