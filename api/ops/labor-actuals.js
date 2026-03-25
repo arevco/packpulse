@@ -1,6 +1,6 @@
 import Sentry from "../_sentry.js";
 import { CACHE_SITE_ID, getAuthenticatedUser, getSupabaseAdmin, toNum, withCors } from "./_common.js";
-import { normalizeLaborRoleKey } from "../_labor.js";
+import { normalizeLaborRoleKey, pickFieldLoose } from "../_labor.js";
 
 var ET_TIME_ZONE = "America/New_York";
 
@@ -12,6 +12,32 @@ function sanitizeDate(value) {
 function sanitizeMonthKey(value) {
   var s = String(value || "").trim();
   return /^\d{4}-\d{2}$/.test(s) ? s : "";
+}
+
+function normalizeShiftLabel(value) {
+  var s = String(value || "").toLowerCase();
+  if (!s) return "";
+  if (s.indexOf("cross") !== -1) return "Cross-Shift Job";
+  if (s.indexOf("unassigned") !== -1) return "Unassigned";
+  if (s.indexOf("1") !== -1 || s.indexOf("1st") !== -1) return "Shift 1 (7a-3p)";
+  if (s.indexOf("2") !== -1 || s.indexOf("2nd") !== -1) return "Shift 2 (3p-11p)";
+  return "";
+}
+
+function isSpecificShiftLabel(value) {
+  var normalized = normalizeShiftLabel(value);
+  return normalized === "Shift 1 (7a-3p)" || normalized === "Shift 2 (3p-11p)";
+}
+
+function resolveExplicitShiftFromRaw(raw) {
+  return normalizeShiftLabel(pickFieldLoose(raw, [
+    "Shift Label",
+    "shift_label",
+    "Shift",
+    "shift",
+    "Shift Name",
+    "shift_name"
+  ]));
 }
 
 function monthRange(monthKey) {
@@ -115,16 +141,20 @@ function buildAllocatedLaborSegments(row, todayEt) {
   var productiveHours = toNum(row && row.productive_hours);
   var startMs = parseUtcMillis(row && row.clock_in_at_utc);
   var endMs = parseUtcMillis(row && row.clock_out_at_utc);
+  var explicitShift = resolveExplicitShiftFromRaw(row && row.raw);
   var fallbackDate = sanitizeDate(row && row.worked_date_et);
-  var fallbackShift = textKey(row && row.shift_label, "Unassigned");
+  var fallbackShift = explicitShift || textKey(row && row.shift_label, "Unassigned");
   var fallbackFinalized = fallbackDate ? (fallbackDate < todayEt) : false;
+  var hasSingleEndpoint = (startMs > 0) !== (endMs > 0);
 
   var buildFallback = function() {
     return [Object.assign({}, row, {
       worked_date_et: fallbackDate || "",
       shift_label: fallbackShift,
       is_finalized: fallbackFinalized,
-      allocation_method: "stored_bucket"
+      allocation_method: "stored_bucket",
+      has_trusted_shift: !!explicitShift,
+      shift_match_confidence: explicitShift ? "trusted" : (hasSingleEndpoint ? "low" : "unknown")
     })];
   };
 
@@ -164,7 +194,9 @@ function buildAllocatedLaborSegments(row, todayEt) {
         payable_hours: payableHours * share,
         productive_hours: productiveHours * share,
         is_finalized: dateKey < todayEt,
-        allocation_method: "interval_overlap"
+        allocation_method: "interval_overlap",
+        has_trusted_shift: true,
+        shift_match_confidence: "trusted"
       }));
     });
   }
@@ -224,6 +256,8 @@ function makeMetricRow(base) {
     rows: 0,
     finalized_rows: 0,
     provisional_rows: 0,
+    trusted_shift_rows: 0,
+    low_confidence_shift_rows: 0,
     availability_sum: 0,
     availability_weight: 0,
     performance_sum: 0,
@@ -258,6 +292,8 @@ function addLaborToRow(target, laborRow) {
   target.productive_hours += productive;
   target.labor_cost += laborCost;
   target.rows += 1;
+  if (laborRow && laborRow.has_trusted_shift) target.trusted_shift_rows += 1;
+  else if (isSpecificShiftLabel(laborRow && laborRow.shift_label)) target.low_confidence_shift_rows += 1;
   if (laborRow && laborRow.is_finalized) target.finalized_rows += 1;
   else target.provisional_rows += 1;
   addWeightedPct(target, payable || productive || 0, toNum(laborRow.availability_pct), toNum(laborRow.performance_pct), toNum(laborRow.line_efficiency_pct));
@@ -275,6 +311,8 @@ function finalizeMetricRow(row, casesProduced) {
     performance_pct: avgPct(row.performance_sum, row.performance_weight),
     line_efficiency_pct: avgPct(row.line_efficiency_sum, row.line_efficiency_weight),
     labor_status: deriveLaborStatus(toNum(row.finalized_rows), toNum(row.provisional_rows)),
+    can_direct_match_shift: toNum(row.trusted_shift_rows) > 0,
+    shift_match_confidence: toNum(row.trusted_shift_rows) > 0 ? "trusted" : (toNum(row.low_confidence_shift_rows) > 0 ? "low" : "aggregate")
   });
   delete out.availability_sum;
   delete out.availability_weight;
@@ -405,7 +443,7 @@ export default async function handler(req, res) {
     var supabase = getSupabaseAdmin();
     var todayEt = toEasternDateKey(new Date());
     var finalizedThroughDate = addDaysIso(todayEt, -1);
-    var laborColumns = "worked_date_et,worked_at_utc,clock_in_at_utc,clock_out_at_utc,source_snapshot_at,shift_label,line_name,job_id,work_order_code,work_order_id,item_code,item_description,item_family_name,role_name,role_key,payable_hours,productive_hours,hourly_rate,availability_pct,performance_pct,line_efficiency_pct";
+    var laborColumns = "worked_date_et,worked_at_utc,clock_in_at_utc,clock_out_at_utc,source_snapshot_at,shift_label,line_name,job_id,work_order_code,work_order_id,item_code,item_description,item_family_name,role_name,role_key,payable_hours,productive_hours,hourly_rate,availability_pct,performance_pct,line_efficiency_pct,raw";
     var laborLegacyColumns = "worked_date_et,source_snapshot_at,shift_label,line_name,job_id,work_order_code,work_order_id,item_code,item_description,item_family_name,role_name,role_key,payable_hours,productive_hours,hourly_rate,availability_pct,performance_pct,line_efficiency_pct";
     var laborQueryMode = "worked_date";
     var laborQ = await fetchAllRows(

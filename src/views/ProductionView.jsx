@@ -206,6 +206,12 @@ function laborStatusFromMetric(metric) {
   return String(metric && metric.labor_status || "unknown");
 }
 
+function canDirectMatchServerLaborRow(row) {
+  if (!row) return false;
+  if (row.can_direct_match_shift === true) return true;
+  return safeNum(row.trusted_shift_rows) > 0;
+}
+
 function isProvisionalLabor(status) {
   return status === "provisional" || status === "mixed";
 }
@@ -300,6 +306,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
     var byJobDate = {};
     laborJobRows.forEach(function(r) {
       var shiftLabel = String(r && r.shift_label || "").trim();
+      var directShiftAllowed = !isSpecificShiftLabel(shiftLabel) || canDirectMatchServerLaborRow(r);
       var exactKey = [
         normKey(r && r.job_id),
         normKey(r && r.date_et),
@@ -333,8 +340,8 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         normKey(r && r.job_id),
         normKey(r && r.date_et)
       ].join("|");
-      if (exactKey && !exact[exactKey]) exact[exactKey] = r;
-      if (slimKey && !slim[slimKey]) slim[slimKey] = r;
+      if (directShiftAllowed && exactKey && !exact[exactKey]) exact[exactKey] = r;
+      if (directShiftAllowed && slimKey && !slim[slimKey]) slim[slimKey] = r;
       if (!isSpecificShiftLabel(shiftLabel) && lineItemKey) {
         if (!byLineItem[lineItemKey]) byLineItem[lineItemKey] = { payable_hours: 0, productive_hours: 0, labor_cost: 0 };
         mergeLaborMetric(byLineItem[lineItemKey], r);

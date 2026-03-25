@@ -27,6 +27,16 @@ export function normalizeKey(value) {
   return String(value || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
 }
 
+function normalizeShiftLabel(value) {
+  var key = normalizeKey(value);
+  if (!key) return "";
+  if (key.includes("cross")) return "Cross-Shift Job";
+  if (key.includes("unassigned")) return "Unassigned";
+  if (key === "1" || key.includes("1st") || key.includes("shift1") || key.includes("first")) return "Shift 1 (7a-3p)";
+  if (key === "2" || key.includes("2nd") || key.includes("shift2") || key.includes("second")) return "Shift 2 (3p-11p)";
+  return "";
+}
+
 function timeZoneParts(date, timeZone) {
   if (!(date instanceof Date) || isNaN(date)) return null;
   var out = {};
@@ -140,6 +150,26 @@ function parseDateLoose(value) {
 
   var parsed = new Date(raw);
   return isReasonableDate(parsed) ? parsed : null;
+}
+
+function resolveDateKey(value) {
+  var raw = String(value || "").trim();
+  if (!raw) return "";
+  var isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) return isoMatch[1] + "-" + isoMatch[2] + "-" + isoMatch[3];
+  var namedMatch = raw.match(/^(\d{4})-([A-Za-z]{3})-(\d{1,2})$/i);
+  if (namedMatch) {
+    var namedMonth = MONTH_INDEX[String(namedMatch[2] || "").toLowerCase()];
+    if (Number.isFinite(namedMonth)) {
+      return namedMatch[1] + "-" + String(namedMonth + 1).padStart(2, "0") + "-" + String(parseInt(namedMatch[3], 10)).padStart(2, "0");
+    }
+  }
+  var slashMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (slashMatch) {
+    return slashMatch[3] + "-" + String(parseInt(slashMatch[1], 10)).padStart(2, "0") + "-" + String(parseInt(slashMatch[2], 10)).padStart(2, "0");
+  }
+  var parts = toEasternParts(raw);
+  return parts && parts.dateKey ? parts.dateKey : "";
 }
 
 export function stableRowHash(row) {
@@ -328,10 +358,30 @@ export function buildLaborEvents(rows, siteId, syncedAt, updatedBy) {
     ]);
     var clockInIso = toIso(clockInRaw);
     var clockOutIso = toIso(clockOutRaw);
+    var explicitShift = normalizeShiftLabel(pickFieldLoose(row, [
+      "Shift Label",
+      "shift_label",
+      "Shift",
+      "shift",
+      "Shift Name",
+      "shift_name"
+    ]));
+    var explicitDateRaw = pickFieldLoose(row, [
+      "Worked Date ET",
+      "worked_date_et",
+      "Worked Date",
+      "worked_date",
+      "Work Date",
+      "work_date",
+      "Date",
+      "date"
+    ]);
+    var explicitDateKey = resolveDateKey(explicitDateRaw);
     // If labor has no usable clock/date field, keep the timestamp null here and
     // let downstream job-timing reconciliation infer the reporting date/shift.
     var eastern = toEasternParts(clockInIso || clockOutIso);
-    var shift = classifyShiftET(eastern);
+    var hasCompleteClockWindow = !!clockInIso && !!clockOutIso;
+    var shift = explicitShift || (hasCompleteClockWindow ? classifyShiftET(eastern) : "Unassigned");
     var roleName = String(pickFieldLoose(row, ["Badge type name", "badge_type_name", "Role", "role_name"]) || "").trim();
     var badgeTypePrefix = String(pickFieldLoose(row, ["Badge type prefix", "badge_type_prefix"]) || "").trim();
     var jobId = String(pickFieldLoose(row, ["Job ID", "job_id", "Job"]) || "").trim();
@@ -353,7 +403,7 @@ export function buildLaborEvents(rows, siteId, syncedAt, updatedBy) {
       worked_at_utc: clockInIso || clockOutIso || null,
       clock_in_at_utc: clockInIso,
       clock_out_at_utc: clockOutIso,
-      worked_date_et: eastern ? eastern.dateKey : null,
+      worked_date_et: explicitDateKey || (eastern ? eastern.dateKey : null),
       shift_label: shift,
       line_name: lineName || null,
       job_id: jobId || null,
