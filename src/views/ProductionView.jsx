@@ -681,7 +681,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
 
   var shiftTotals = useMemo(function() {
     var map = {};
-    jobsWithDetailLabor.forEach(function(r) {
+    jobsWithLabor.forEach(function(r) {
       var shift = String(r.shift || "Unassigned");
       if (!map[shift]) map[shift] = { shift: shift, units: 0, jobs: 0, laborPayableHours: 0, laborCost: 0, laborJobs: 0, provisionalLaborRows: 0, finalizedLaborRows: 0 };
       map[shift].units += safeNum(r.unitsProduced);
@@ -697,7 +697,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         laborStatus: deriveLaborStatus(row.finalizedLaborRows, row.provisionalLaborRows)
       });
     }).sort(function(a, b) { return b.units - a.units; });
-  }, [jobsWithDetailLabor]);
+  }, [jobsWithLabor]);
 
   var lineLoad = useMemo(function() {
     var map = {};
@@ -856,13 +856,13 @@ export default function ProductionView({ productionSegments, laborActuals, labor
     });
   }, [lineLoad, jobRollup, detailRowsByJobKey]);
 
-  var totalUnitsProduced = jobsWithDetailLabor.reduce(function(sum, r) { return sum + safeNum(r.unitsProduced); }, 0);
-  var totalRevenue = jobsWithDetailLabor.reduce(function(sum, r) { return sum + safeNum(r.revenue); }, 0);
-  var totalLaborCost = jobsWithDetailLabor.reduce(function(sum, r) { return sum + safeNum(r.laborCost); }, 0);
-  var totalLaborHours = jobsWithDetailLabor.reduce(function(sum, r) { return sum + safeNum(r.laborPayableHours); }, 0);
-  var totalRevenueCoveredUnits = jobsWithDetailLabor.reduce(function(sum, r) { return sum + safeNum(r.revenueCoveredUnits); }, 0);
-  var totalProvisionalLaborRows = jobsWithDetailLabor.reduce(function(sum, r) { return sum + (r.hasLabor && isProvisionalLabor(r.laborStatus) ? 1 : 0); }, 0);
-  var totalFinalizedLaborRows = jobsWithDetailLabor.reduce(function(sum, r) { return sum + (r.hasLabor && (r.laborStatus === "finalized" || r.laborStatus === "mixed") ? 1 : 0); }, 0);
+  var totalUnitsProduced = jobsWithLabor.reduce(function(sum, r) { return sum + safeNum(r.unitsProduced); }, 0);
+  var totalRevenue = jobsWithLabor.reduce(function(sum, r) { return sum + safeNum(r.revenue); }, 0);
+  var totalLaborCost = jobsWithLabor.reduce(function(sum, r) { return sum + safeNum(r.laborCost); }, 0);
+  var totalLaborHours = jobsWithLabor.reduce(function(sum, r) { return sum + safeNum(r.laborPayableHours); }, 0);
+  var totalRevenueCoveredUnits = jobsWithLabor.reduce(function(sum, r) { return sum + safeNum(r.revenueCoveredUnits); }, 0);
+  var totalProvisionalLaborRows = jobsWithLabor.reduce(function(sum, r) { return sum + (r.hasLabor && isProvisionalLabor(r.laborStatus) ? 1 : 0); }, 0);
+  var totalFinalizedLaborRows = jobsWithLabor.reduce(function(sum, r) { return sum + (r.hasLabor && (r.laborStatus === "finalized" || r.laborStatus === "mixed") ? 1 : 0); }, 0);
   var totalLaborMargin = totalRevenue - totalLaborCost;
   var totalLaborMarginPct = totalRevenue > 0 ? (totalLaborMargin / totalRevenue) : null;
   var totalRevenueCoveragePct = totalUnitsProduced > 0 ? Math.round((totalRevenueCoveredUnits / totalUnitsProduced) * 100) : 0;
