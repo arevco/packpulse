@@ -651,6 +651,7 @@ var COMMAND_BOARD_PRESETS = [
   { key: "this_month", label: "This Month" },
   { key: "last_month", label: "Last Month" }
 ];
+var OPERATIONS_SNAPSHOT_CARD_KEYS = ["today", "yesterday", "this_week", "last_week", "this_month", "last_month"];
 
 function normalizeKeyLocal(s) {
   return String(s || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
@@ -1068,6 +1069,21 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     return Object.keys(wanted).sort();
   }, [range.start, range.end]);
 
+  var commandBoardFetchDays = useMemo(function() {
+    var today = todayEt;
+    var earliestNeeded = today;
+    OPERATIONS_SNAPSHOT_CARD_KEYS.forEach(function(key) {
+      var preset = presetRange(key);
+      if (preset && preset.start && preset.start < earliestNeeded) earliestNeeded = preset.start;
+      if (key === "today" || key === "this_week" || key === "this_month") {
+        var compareInfo = comparableRangeForPreset(key, preset);
+        var compareRange = compareInfo && compareInfo.range ? compareInfo.range : null;
+        if (compareRange && compareRange.start && compareRange.start < earliestNeeded) earliestNeeded = compareRange.start;
+      }
+    });
+    return Math.max(30, daysInclusive(earliestNeeded, today));
+  }, [todayEt]);
+
   var setCustomStart = function(v) {
     if (!v) return;
     setWindowPreset("custom");
@@ -1092,7 +1108,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     loadRequestRef.current = requestId;
     setErr("");
     try {
-      var fetchDays = Math.max(range.fetchDays, dailyPerfFetchDays);
+      var fetchDays = Math.max(range.fetchDays, dailyPerfFetchDays, commandBoardFetchDays);
       var laborFetchEnd = toIsoDateET(new Date());
       var laborFetchStart = shiftDays(laborFetchEnd, -(fetchDays - 1));
       var forecastKey = "v" + safeNum(serverSyncVersion) + "|" + forecastPlanMonths.join(",");
@@ -1210,7 +1226,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
 
   useEffect(function() {
     loadAll();
-  }, [windowPreset, rangeStart, rangeEnd, forecastPlanMonths.join(","), dailyPerfFetchDays, serverSyncVersion]);
+  }, [windowPreset, rangeStart, rangeEnd, forecastPlanMonths.join(","), dailyPerfFetchDays, commandBoardFetchDays, serverSyncVersion]);
 
   var localNulogySeries = useMemo(function() {
     var shiftRows = (productionSegments && Array.isArray(productionSegments.shiftRows)) ? productionSegments.shiftRows : [];
