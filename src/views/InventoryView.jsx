@@ -4,6 +4,7 @@ import { useStyles } from "../hooks/useStyles";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
+import { Card } from "../components/ui/card";
 import TableShell from "../components/ui/table-shell";
 import SortHeaderButton from "../components/ui/sort-header-button";
 import { formatDescriptionForDisplay, safeNum, triggerDownload } from "../utils";
@@ -213,6 +214,35 @@ export default function InventoryView({ inventory, itemMaster, invMapping }) {
     };
   }, [filteredRows]);
 
+  var summaryCards = useMemo(function() {
+    return [
+      {
+        key: "visible_qty",
+        label: "Visible Qty",
+        value: Math.round(summary.totalQty).toLocaleString(),
+        note: sortedRows.length.toLocaleString() + " rows visible"
+      },
+      {
+        key: "locations",
+        label: "Locations",
+        value: summary.uniqueLocations.toLocaleString(),
+        note: "Filtered location count"
+      },
+      {
+        key: "lot_codes",
+        label: "Lot Codes",
+        value: summary.uniqueLots.toLocaleString(),
+        note: "Distinct lots in view"
+      },
+      {
+        key: "skus",
+        label: "SKUs",
+        value: summary.uniqueSkus.toLocaleString(),
+        note: "Distinct items in view"
+      }
+    ];
+  }, [summary, sortedRows.length]);
+
   var hasLocationColumn = useMemo(function() {
     return preparedRows.some(function(row) { return !!String(row.location || "").trim(); });
   }, [preparedRows]);
@@ -304,27 +334,18 @@ export default function InventoryView({ inventory, itemMaster, invMapping }) {
         <Button variant="outline" size="default" onClick={exportCsv} disabled={!sortedRows.length}>CSV</Button>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <TableShell className="p-4">
-          <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[rgb(var(--muted))]">Visible Qty</div>
-          <div className="mt-2 text-4xl font-semibold text-[rgb(var(--foreground))]">{Math.round(summary.totalQty).toLocaleString()}</div>
-          <div className="mt-1 text-sm text-[rgb(var(--muted))]">{sortedRows.length.toLocaleString()} rows visible</div>
-        </TableShell>
-        <TableShell className="p-4">
-          <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[rgb(var(--muted))]">Locations</div>
-          <div className="mt-2 text-4xl font-semibold text-[rgb(var(--foreground))]">{summary.uniqueLocations.toLocaleString()}</div>
-          <div className="mt-1 text-sm text-[rgb(var(--muted))]">Filtered location count</div>
-        </TableShell>
-        <TableShell className="p-4">
-          <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[rgb(var(--muted))]">Lot Codes</div>
-          <div className="mt-2 text-4xl font-semibold text-[rgb(var(--foreground))]">{summary.uniqueLots.toLocaleString()}</div>
-          <div className="mt-1 text-sm text-[rgb(var(--muted))]">Distinct lots in view</div>
-        </TableShell>
-        <TableShell className="p-4">
-          <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[rgb(var(--muted))]">SKUs</div>
-          <div className="mt-2 text-4xl font-semibold text-[rgb(var(--foreground))]">{summary.uniqueSkus.toLocaleString()}</div>
-          <div className="mt-1 text-sm text-[rgb(var(--muted))]">Distinct items in view</div>
-        </TableShell>
+      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+        {summaryCards.map(function(card) {
+          return (
+            <Card key={card.key} className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-3">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[rgb(var(--muted))]">{card.label}</div>
+              <div className="mt-2 text-2xl font-bold [font-variant-numeric:tabular-nums] text-[rgb(var(--foreground))]" style={{ fontFamily: mono }}>
+                {card.value}
+              </div>
+              <div className="mt-1 text-xs text-[rgb(var(--muted))]">{card.note}</div>
+            </Card>
+          );
+        })}
       </div>
 
       <div className="flex flex-wrap items-center gap-2 text-sm text-[rgb(var(--muted))]">
