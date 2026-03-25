@@ -26,5 +26,5 @@ create unique index if not exists ux_forecast_versions_site_month_active
   on public.forecast_versions(site_id, month_key)
   where is_active = true;
 
-alter table public.forecast_versions disable row level security;
-
+-- Access is intended through PackPulse server routes using the service role.
+alter table public.forecast_versions enable row level security;

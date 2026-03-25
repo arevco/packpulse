@@ -23,6 +23,9 @@ create table if not exists public.ops_shift_inputs (
 create index if not exists ops_shift_inputs_site_date_idx
   on public.ops_shift_inputs (site_id, date_et desc);
 
+-- Access is intended through PackPulse server routes using the service role.
+alter table public.ops_shift_inputs enable row level security;
+
 create table if not exists public.ops_rates (
   id bigserial primary key,
   site_id text not null,
@@ -39,6 +42,9 @@ create table if not exists public.ops_rates (
 
 create index if not exists ops_rates_site_role_idx
   on public.ops_rates (site_id, role, effective_from desc);
+
+-- Access is intended through PackPulse server routes using the service role.
+alter table public.ops_rates enable row level security;
 
 create table if not exists public.ops_sku_targets (
   id bigserial primary key,
@@ -58,3 +64,5 @@ create table if not exists public.ops_sku_targets (
 create index if not exists ops_sku_targets_site_item_idx
   on public.ops_sku_targets (site_id, item_code, active_from desc);
 
+-- Access is intended through PackPulse server routes using the service role.
+alter table public.ops_sku_targets enable row level security;

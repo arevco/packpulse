@@ -34,5 +34,5 @@ for each row execute function public.set_forecast_assumptions_updated_at();
 create index if not exists idx_forecast_assumptions_site_month
   on public.forecast_assumptions(site_id, month_key);
 
-alter table public.forecast_assumptions disable row level security;
-
+-- Access is intended through PackPulse server routes using the service role.
+alter table public.forecast_assumptions enable row level security;

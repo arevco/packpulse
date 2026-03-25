@@ -19,3 +19,6 @@ create index if not exists user_login_events_site_created_idx
 
 create index if not exists user_login_events_site_email_idx
   on public.user_login_events (site_id, user_email, created_at desc);
+
+-- Access is intended through PackPulse server routes using the service role.
+alter table public.user_login_events enable row level security;

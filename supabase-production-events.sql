@@ -33,3 +33,5 @@ create index if not exists production_events_site_wo_idx
 create index if not exists production_events_site_item_idx
   on public.production_events (site_id, item_code);
 
+-- Access is intended through PackPulse server routes using the service role.
+alter table public.production_events enable row level security;

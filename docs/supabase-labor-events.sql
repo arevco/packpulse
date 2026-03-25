@@ -67,4 +67,5 @@ create trigger trg_labor_events_updated_at
 before update on public.labor_events
 for each row execute function public.set_labor_events_updated_at();
 
-alter table public.labor_events disable row level security;
+-- Access is intended through PackPulse server routes using the service role.
+alter table public.labor_events enable row level security;

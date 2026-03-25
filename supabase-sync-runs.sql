@@ -17,4 +17,5 @@ create index if not exists sync_runs_site_finished_idx
 create index if not exists sync_runs_source_finished_idx
   on public.sync_runs (source, finished_at desc);
 
-alter table public.sync_runs disable row level security;
+-- Access is intended through PackPulse server routes using the service role.
+alter table public.sync_runs enable row level security;

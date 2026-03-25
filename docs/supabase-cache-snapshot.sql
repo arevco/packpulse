@@ -31,7 +31,8 @@ for each row execute function public.set_cache_snapshots_updated_at();
 
 create index if not exists idx_cache_snapshots_site_id on public.cache_snapshots(site_id);
 
-alter table public.cache_snapshots disable row level security;
+-- Access is intended through PackPulse server routes using the service role.
+alter table public.cache_snapshots enable row level security;
 
 create table if not exists public.cache_snapshot_history (
   id uuid primary key default gen_random_uuid(),
@@ -46,4 +47,5 @@ create table if not exists public.cache_snapshot_history (
 create index if not exists idx_cache_snapshot_history_site_captured
   on public.cache_snapshot_history(site_id, captured_at desc);
 
-alter table public.cache_snapshot_history disable row level security;
+-- Access is intended through PackPulse server routes using the service role.
+alter table public.cache_snapshot_history enable row level security;

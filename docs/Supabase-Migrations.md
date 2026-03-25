@@ -14,6 +14,12 @@ Track SQL setup order and what each script provisions.
    - Operations config + labor inputs + related tables
 5. `/Users/aj/Documents/New project/supabase-user-login-events.sql`
    - User login analytics table
+6. `/Users/aj/Documents/New project/supabase-sync-runs.sql`
+   - Sync pipeline audit trail
+7. `/Users/aj/Documents/New project/docs/supabase-forecast-assumptions.sql`
+   - Forecast assumptions table
+8. `/Users/aj/Documents/New project/docs/supabase-forecast-versions.sql`
+   - Forecast version snapshots
 
 ## Required Environment Variables
 - `SUPABASE_URL`
@@ -31,6 +37,8 @@ Track SQL setup order and what each script provisions.
   - `select count(*) from ops_shift_inputs;`
 - Login events loaded:
   - `select count(*) from user_login_events;`
+- RLS status:
+  - `select schemaname, tablename, rowsecurity from pg_tables where schemaname = 'public' and tablename in ('cache_snapshots','cache_snapshot_history','production_events','labor_events','ops_shift_inputs','ops_rates','ops_sku_targets','user_login_events','forecast_versions','forecast_assumptions','sync_runs') order by tablename;`
 
 ## Common Issues
 - “Could not find table … in schema cache”
@@ -39,3 +47,5 @@ Track SQL setup order and what each script provisions.
   - Confirm vars are assigned to `packpulse` project.
 - API routes still seeing old vars.
   - Redeploy after env var updates.
+- Browser clients should not query these tables directly.
+  - PackPulse server routes use the Supabase service role, so RLS can stay enabled with no public policies.
