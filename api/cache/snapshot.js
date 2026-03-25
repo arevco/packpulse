@@ -3,38 +3,11 @@ import { createClient } from "@supabase/supabase-js";
 import Sentry from "../_sentry.js";
 import { buildLaborEvents, classifyShiftET, toEasternParts, toIso } from "../_labor.js";
 import { isMissingTableError } from "../_event-window.js";
+import { getAuthenticatedUser } from "../_session.js";
 import { writeLaborEventsSafely } from "./_labor-write.js";
 import { writeProductionEventsSafely } from "./_production-write.js";
 
-const SESSION_SECRET = process.env.SESSION_SECRET || "packpulse-default-secret-change-me";
 const CACHE_SITE_ID = process.env.CACHE_SITE_ID || "default";
-
-function parseCookies(cookieHeader) {
-  const cookies = {};
-  if (!cookieHeader) return cookies;
-  cookieHeader.split(";").forEach(function(c) {
-    const parts = c.trim().split("=");
-    const key = parts.shift();
-    if (key) cookies[key.trim()] = parts.join("=").trim();
-  });
-  return cookies;
-}
-
-function getAuthenticatedUser(req) {
-  const cookies = parseCookies(req.headers.cookie);
-  const session = cookies.pp_session;
-  if (!session) return null;
-  const parts = session.split(":");
-  if (parts.length !== 3) return null;
-  const email = parts[0];
-  const expires = parts[1];
-  const sig = parts[2];
-  const payload = email + ":" + expires;
-  const expectedSig = crypto.createHmac("sha256", SESSION_SECRET).update(payload).digest("hex");
-  if (sig !== expectedSig) return null;
-  if (Date.now() > parseInt(expires, 10)) return null;
-  return { email: email };
-}
 
 function getSupabaseAdmin() {
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";

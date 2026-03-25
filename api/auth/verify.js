@@ -1,21 +1,13 @@
 // POST /api/auth/verify
 // Verifies Google ID token, checks email domain, sets session cookie
 
-import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import Sentry from "../_sentry.js";
+import { SESSION_SECRET_MISSING_ERROR, signSession } from "../_session.js";
 
-const SESSION_SECRET = process.env.SESSION_SECRET || "packpulse-default-secret-change-me";
 const ALLOWED_DOMAIN = process.env.ALLOWED_DOMAIN || "revcopack.com";
 const SESSION_DAYS = 7;
 const CACHE_SITE_ID = process.env.CACHE_SITE_ID || "default";
-
-function signSession(email) {
-  const expires = Date.now() + SESSION_DAYS * 86400000;
-  const payload = `${email}:${expires}`;
-  const sig = crypto.createHmac("sha256", SESSION_SECRET).update(payload).digest("hex");
-  return `${payload}:${sig}`;
-}
 
 function getSupabaseAdminSafe() {
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
@@ -65,7 +57,7 @@ export default async function handler(req, res) {
     }
 
     // Create signed session cookie
-    const sessionValue = signSession(email);
+    const sessionValue = signSession(email, SESSION_DAYS);
 
     res.setHeader("Set-Cookie", [
       `pp_session=${sessionValue}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_DAYS * 86400}; ${process.env.NODE_ENV === "production" ? "Secure;" : ""}`,
@@ -98,6 +90,9 @@ export default async function handler(req, res) {
   } catch (err) {
     Sentry.captureException(err);
     console.error("Auth verify error:", err);
+    if (err && err.message === SESSION_SECRET_MISSING_ERROR) {
+      return res.status(500).json({ error: "Authentication is not configured" });
+    }
     return res.status(500).json({ error: "Authentication failed" });
   }
 }

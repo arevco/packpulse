@@ -77,6 +77,7 @@ Go to **Vercel → your project → Settings → Environment Variables** and add
 |----------|-------|----------|
 | `NULOGY_USER` | Your Nulogy integration user email | Yes |
 | `NULOGY_PASS` | Your Nulogy integration user password | Yes |
+| `SESSION_SECRET` | Long random secret used to sign PackPulse session cookies | Yes |
 | `NULOGY_SITE_UUID` | Your site UUID (if multi-site) | Optional |
 | `NULOGY_URL` | Custom Nulogy URL (default: `https://app.nulogy.net`) | Optional |
 | `EVOCON_API_KEY` | Evocon API key (Basic Auth username) | Optional |
@@ -104,6 +105,7 @@ Push to GitHub. Vercel auto-deploys. The Nulogy sync panel will appear on the Pa
 
 ### Security
 - Credentials stored as Vercel environment variables (never in browser)
+- Session cookies are signed with `SESSION_SECRET`
 - Backend proxy prevents CORS issues and credential exposure
 - HTTP Basic Auth per Nulogy API spec
 - Credential test endpoint masks the email in responses

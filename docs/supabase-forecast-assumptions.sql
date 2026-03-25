@@ -19,6 +19,7 @@ create table if not exists public.forecast_assumptions (
 create or replace function public.set_forecast_assumptions_updated_at()
 returns trigger
 language plpgsql
+set search_path = ''
 as $$
 begin
   new.updated_at = now();

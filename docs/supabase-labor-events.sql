@@ -55,6 +55,7 @@ create index if not exists idx_labor_events_site_wo
 create or replace function public.set_labor_events_updated_at()
 returns trigger
 language plpgsql
+set search_path = ''
 as $$
 begin
   new.updated_at = now();

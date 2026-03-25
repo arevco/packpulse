@@ -40,6 +40,7 @@ This file gives Codex/AI contributors a stable operating playbook for this repo.
   - `SUPABASE_URL`
   - `SUPABASE_SERVICE_ROLE_KEY`
   - `CACHE_SITE_ID`
+  - `SESSION_SECRET`
   - `OPENAI_API_KEY`
   - `OPENAI_MODEL`
 
@@ -49,4 +50,3 @@ This file gives Codex/AI contributors a stable operating playbook for this repo.
 - AI backend: `/api/ai/chat.js`
 - Ops data APIs: `/api/ops/*`
 - Snapshot/cache: `/api/cache/*`
-
