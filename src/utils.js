@@ -87,6 +87,7 @@ export const INV_PAT = {
   description:["description","desc","itemname","name"],
   qtyOnHand:["qtyonhand","onhand","basequantity","good","stock","instock","quantity","available"],
   status:["status","inventorystatus","itemstatus","lotstatus","qualitystatus","disposition"],
+  customer:["customername","customer","client"],
   location:["locationname","location","storagelocationname","storagelocation","inventorylocation","warehouselocation","binlocation","zone"],
   lotCode:["lotcode","lot","batch","lotnumber"],
   palletNumber:["palletnumber","pallet","licenseplate","lp"],
