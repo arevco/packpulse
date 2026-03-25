@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useTheme } from "../theme";
 import { useStyles } from "../hooks/useStyles";
 import { safeNum, formatDescriptionForDisplay, triggerDownload } from "../utils";
+import { Download } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { DatePicker } from "../components/ui/date-picker";
@@ -985,7 +986,8 @@ export default function ProductionView({ productionSegments, laborActuals, labor
           {shiftOptions.map(function(shift) { return <option key={shift} value={shift}>{shortShift(shift)}</option>; })}
         </select>
         <Button onClick={exportLaborCsv} variant="outline" size="default" className="h-10 shrink-0" disabled={!jobsWithLabor.length}>
-          Export Labor CSV
+          <Download className="mr-1.5 h-4 w-4" />
+          Export Jobs Data
         </Button>
       </div>
 
