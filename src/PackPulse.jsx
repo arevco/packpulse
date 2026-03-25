@@ -13,14 +13,23 @@ import { Card } from "./components/ui/card";
 import AskAiPanel from "./components/AskAiPanel";
 
 var operationsViewImportPromise = null;
+var operationsInsightsPanelImportPromise = null;
 
 function importOperationsView() {
   if (!operationsViewImportPromise) operationsViewImportPromise = import("./views/OperationsView");
   return operationsViewImportPromise;
 }
 
+function importOperationsInsightsPanel() {
+  if (!operationsInsightsPanelImportPromise) operationsInsightsPanelImportPromise = import("./views/OperationsInsightsPanel");
+  return operationsInsightsPanelImportPromise;
+}
+
 function prefetchOperationsView() {
-  return importOperationsView().catch(function() {});
+  return Promise.all([
+    importOperationsView(),
+    importOperationsInsightsPanel()
+  ]).catch(function() {});
 }
 
 function lazySafe(importer, name) {
