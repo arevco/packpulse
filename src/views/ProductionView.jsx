@@ -701,8 +701,8 @@ export default function ProductionView({ productionSegments, laborActuals, labor
 
   var lineLoad = useMemo(function() {
     var map = {};
-    var totalUnits = jobsWithDetailLabor.reduce(function(sum, r) { return sum + safeNum(r.unitsProduced); }, 0);
-    jobsWithDetailLabor.forEach(function(r) {
+    var totalUnits = jobsWithLabor.reduce(function(sum, r) { return sum + safeNum(r.unitsProduced); }, 0);
+    jobsWithLabor.forEach(function(r) {
       var line = String(r.line || "Unknown").trim() || "Unknown";
       if (!map[line]) {
         map[line] = {
@@ -750,11 +750,11 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         laborStatus: deriveLaborStatus(r.finalizedLaborRows, r.provisionalLaborRows)
       });
     }).sort(function(a, b) { return b.units - a.units; });
-  }, [jobsWithDetailLabor]);
+  }, [jobsWithLabor]);
 
   var jobRollup = useMemo(function() {
     var map = {};
-    jobsWithDetailLabor.forEach(function(r) {
+    jobsWithLabor.forEach(function(r) {
       var key = [r.jobId || "", r.workOrder || "", r.line || "", r.itemCode || ""].join("|");
       if (!map[key]) {
         map[key] = {
@@ -808,7 +808,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         laborStatus: deriveLaborStatus(r.finalizedLaborRows, r.provisionalLaborRows)
       });
     }).sort(function(a, b) { return b.unitsProduced - a.unitsProduced; });
-  }, [jobsWithDetailLabor]);
+  }, [jobsWithLabor]);
 
   var detailRowsByJobKey = useMemo(function() {
     var map = {};
