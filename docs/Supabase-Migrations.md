@@ -18,11 +18,13 @@ Track SQL setup order and what each script provisions.
    - Sync pipeline audit trail
 7. `/Users/aj/Documents/New project/docs/supabase-forecast-assumptions.sql`
    - Forecast assumptions table
-8. `/Users/aj/Documents/New project/docs/supabase-forecast-versions.sql`
+8. `/Users/aj/Documents/New project/docs/supabase-team-board.sql`
+   - Lightweight shared team board table
+9. `/Users/aj/Documents/New project/docs/supabase-forecast-versions.sql`
    - Forecast version snapshots
-9. `/Users/aj/Documents/New project/docs/supabase-ops-performance.sql`
+10. `/Users/aj/Documents/New project/docs/supabase-ops-performance.sql`
    - Covering production index + operations performance materialized views + refresh function
-10. `/Users/aj/Documents/New project/docs/supabase-query-performance.sql`
+11. `/Users/aj/Documents/New project/docs/supabase-query-performance.sql`
    - Query diagnostics extensions + latest artifact lookup index
 
 ## Required Environment Variables
@@ -41,6 +43,8 @@ Track SQL setup order and what each script provisions.
   - `select count(*) from ops_shift_inputs;`
 - Login events loaded:
   - `select count(*) from user_login_events;`
+- Team board loaded:
+  - `select count(*) from team_board_tasks;`
 - Performance materialized views loaded:
   - `select count(*) from ops_work_order_production_totals_mv;`
   - `select count(*) from ops_daily_line_metrics_mv;`
@@ -49,7 +53,7 @@ Track SQL setup order and what each script provisions.
 - Query diagnostics extensions enabled:
   - `select extname from pg_extension where extname in ('pg_stat_statements','hypopg','index_advisor') order by extname;`
 - RLS status:
-  - `select schemaname, tablename, rowsecurity from pg_tables where schemaname = 'public' and tablename in ('cache_snapshots','cache_snapshot_history','production_events','labor_events','ops_shift_inputs','ops_rates','ops_sku_targets','user_login_events','forecast_versions','forecast_assumptions','sync_runs') order by tablename;`
+  - `select schemaname, tablename, rowsecurity from pg_tables where schemaname = 'public' and tablename in ('cache_snapshots','cache_snapshot_history','production_events','labor_events','ops_shift_inputs','ops_rates','ops_sku_targets','user_login_events','team_board_tasks','forecast_versions','forecast_assumptions','sync_runs') order by tablename;`
 
 ## Common Issues
 - “Could not find table … in schema cache”
