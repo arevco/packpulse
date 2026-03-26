@@ -84,19 +84,23 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
     if (abortRef.current) return null;
 
     if (type === "inventory") {
-      updateReportState(type, { status: DOWNLOADING, progress: "Pulling enriched inventory data...", error: null });
+      updateReportState(type, { status: DOWNLOADING, progress: "Pulling compact inventory snapshot...", error: null });
       try {
-        const richRes = await fetch("/api/nulogy/inventory-rich");
+        const richRes = await fetch("/api/nulogy/inventory-rich?mode=compact");
         const richBody = await richRes.json();
         if (!richRes.ok) throw new Error((richBody && (richBody.error || richBody.details)) || `HTTP ${richRes.status}`);
 
         console.log("[Nulogy] inventory-rich diagnostics:", richBody && richBody.diagnostics ? richBody.diagnostics : {});
+        const compactRowCount = Number(richBody && richBody.rowCount) || 0;
+        const sourceRowCount = Number(richBody && richBody.diagnostics && richBody.diagnostics.sourceRowCount) || compactRowCount;
         updateReportState(type, {
           status: DONE,
-          progress: `${Number(richBody && richBody.rowCount || 0).toLocaleString()} enriched inventory rows`,
-          rowCount: Number(richBody && richBody.rowCount) || 0
+          progress: sourceRowCount !== compactRowCount
+            ? `${sourceRowCount.toLocaleString()} inventory rows (${compactRowCount.toLocaleString()} compact records)`
+            : `${compactRowCount.toLocaleString()} inventory records`,
+          rowCount: sourceRowCount
         });
-        return { type, data: Array.isArray(richBody && richBody.data) ? richBody.data : [], rowCount: Number(richBody && richBody.rowCount) || 0 };
+        return { type, data: Array.isArray(richBody && richBody.data) ? richBody.data : [], rowCount: sourceRowCount };
       } catch (richErr) {
         console.warn("[Nulogy] inventory-rich failed, falling back to standard inventory report:", richErr);
         updateReportState(type, { status: CREATING, progress: "Falling back to standard inventory report...", error: null });

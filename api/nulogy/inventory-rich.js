@@ -138,6 +138,47 @@ function toNum(value) {
   return Number.isFinite(n) ? n : 0;
 }
 
+function compactInventoryRows(rows) {
+  const grouped = {};
+  (Array.isArray(rows) ? rows : []).forEach(function(row) {
+    const sku = String(pickLooseValue(row, ["Item Code", "item_code", "Item", "item", "SKU", "sku"]) || "").trim();
+    const description = String(pickLooseValue(row, ["Description", "Item Description", "item_description"]) || "").trim();
+    const status = String(pickLooseValue(row, ["Inventory Status", "inventory_status", "Status", "status"]) || "").trim();
+    const baseUom = String(pickLooseValue(row, ["Base UOM", "Base unit of measure", "base_unit_of_measure", "UOM", "uom"]) || "").trim();
+    const qty = toNum(pickLooseValue(row, ["Qty On Hand", "qty_on_hand", "Base quantity", "base_quantity", "Quantity", "quantity", "Available", "available"]));
+    const customerName = String(pickLooseValue(row, ["Customer Name", "customer_name", "Customer", "customer"]) || "").trim();
+    const source = String(pickLooseValue(row, ["Source", "source"]) || "").trim();
+    if (!sku && !description && !(qty > 0) && !status && !customerName) return;
+
+    const key = [
+      normalizeKey(sku),
+      normalizeKey(status),
+      normalizeKey(baseUom),
+      normalizeKey(customerName)
+    ].join("|");
+    if (!grouped[key]) {
+      grouped[key] = {
+        "Item Code": sku || "--",
+        "Description": description || "--",
+        "Qty On Hand": 0,
+        "Inventory Status": status || "",
+        "Customer Name": customerName || "",
+        "Base UOM": baseUom || "",
+        "Source": source || "compact_inventory"
+      };
+    }
+    grouped[key]["Qty On Hand"] += qty;
+    if ((!grouped[key]["Description"] || grouped[key]["Description"] === "--") && description) {
+      grouped[key]["Description"] = description;
+    }
+    if (!grouped[key]["Source"] && source) grouped[key]["Source"] = source;
+    if (grouped[key]["Source"] && source && grouped[key]["Source"] !== source) {
+      grouped[key]["Source"] = "report_compact_inventory";
+    }
+  });
+  return Object.values(grouped);
+}
+
 function firstDefinedValue(values, fallback) {
   for (let i = 0; i < values.length; i++) {
     const value = values[i];
@@ -768,15 +809,19 @@ export default async function handler(req, res) {
   }
 
   const auth = Buffer.from(user + ":" + pass).toString("base64");
+  const mode = String((req.query && req.query.mode) || "detail").toLowerCase() === "compact" ? "compact" : "detail";
 
   try {
     try {
       const reportData = await fetchReportInventoryData();
+      const outputRows = mode === "compact" ? compactInventoryRows(reportData.data) : reportData.data;
       return res.status(200).json({
-        data: reportData.data,
-        rowCount: reportData.data.length,
-        columns: reportData.data.length ? Object.keys(reportData.data[0]) : [],
+        data: outputRows,
+        rowCount: outputRows.length,
+        columns: outputRows.length ? Object.keys(outputRows[0]) : [],
         diagnostics: {
+          mode: mode,
+          sourceRowCount: reportData.data.length,
           inventorySeedSource: reportData.inventorySeedSource,
           inventorySeedHeaders: reportData.inventorySeedHeaders || [],
           inventorySeedRows: reportData.inventorySeedRows || 0,
@@ -821,12 +866,15 @@ export default async function handler(req, res) {
     }
 
     const mergedRows = mergeInventoryRows(inventorySeed.rows, itemLocatorRows);
+    const outputRows = mode === "compact" ? compactInventoryRows(mergedRows) : mergedRows;
 
     return res.status(200).json({
-      data: mergedRows,
-      rowCount: mergedRows.length,
-      columns: mergedRows.length ? Object.keys(mergedRows[0]) : [],
+      data: outputRows,
+      rowCount: outputRows.length,
+      columns: outputRows.length ? Object.keys(outputRows[0]) : [],
       diagnostics: {
+        mode: mode,
+        sourceRowCount: mergedRows.length,
         inventorySeedSource: inventorySeed.sourceKey,
         inventorySeedHeaders: inventorySeed.headers || [],
         inventorySeedRows: inventorySeed.rows.length,

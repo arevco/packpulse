@@ -26,6 +26,75 @@ function areMappingsEqual(a, b) {
   return true;
 }
 
+function pickLooseInventoryValue(row, keys) {
+  if (!row || typeof row !== "object") return "";
+  var rowKeys = Object.keys(row);
+  for (var i = 0; i < keys.length; i++) {
+    var target = normalizeStr(keys[i]);
+    for (var j = 0; j < rowKeys.length; j++) {
+      var rowKey = rowKeys[j];
+      if (normalizeStr(rowKey) === target) return row[rowKey];
+    }
+  }
+  return "";
+}
+
+function shouldCompactInventoryForApp(rows, fileName) {
+  if (!Array.isArray(rows) || !rows.length) return false;
+  var name = String(fileName || "").toLowerCase();
+  if (name.includes("nulogy")) return true;
+  var sourceMarkers = 0;
+  var sampleSize = Math.min(rows.length, 40);
+  for (var i = 0; i < sampleSize; i++) {
+    var row = rows[i] || {};
+    var source = String(pickLooseInventoryValue(row, ["Source", "source"]) || "").toLowerCase();
+    if (source && (source.includes("inventory") || source.includes("locator") || source.includes("compact") || source.includes("nulogy"))) {
+      sourceMarkers += 1;
+    }
+  }
+  return sourceMarkers > 0;
+}
+
+function compactInventoryRowsForApp(rows) {
+  var grouped = {};
+  (Array.isArray(rows) ? rows : []).forEach(function(row) {
+    var sku = String(pickLooseInventoryValue(row, ["Item Code", "item_code", "SKU", "sku", "Item", "item"]) || "").trim();
+    var description = String(pickLooseInventoryValue(row, ["Description", "description", "Item Description", "item_description"]) || "").trim();
+    var qty = safeNum(pickLooseInventoryValue(row, ["Qty On Hand", "qty_on_hand", "Base quantity", "base_quantity", "Quantity", "quantity", "Available", "available"]));
+    var status = String(pickLooseInventoryValue(row, ["Inventory Status", "inventory_status", "Status", "status"]) || "").trim();
+    var customer = String(pickLooseInventoryValue(row, ["Customer Name", "customer_name", "Customer", "customer"]) || "").trim();
+    var baseUom = String(pickLooseInventoryValue(row, ["Base UOM", "base_uom", "Base unit of measure", "base_unit_of_measure", "UOM", "uom"]) || "").trim();
+    var source = String(pickLooseInventoryValue(row, ["Source", "source"]) || "").trim();
+    if (!sku && !description && !(qty > 0) && !status && !customer) return;
+    var key = [
+      normalizeStr(sku),
+      normalizeStr(status),
+      normalizeStr(customer),
+      normalizeStr(baseUom)
+    ].join("|");
+    if (!grouped[key]) {
+      grouped[key] = {
+        "Item Code": sku || "--",
+        "Description": description || "--",
+        "Qty On Hand": 0,
+        "Inventory Status": status || "",
+        "Customer Name": customer || "",
+        "Base UOM": baseUom || "",
+        "Source": source || "compact_inventory"
+      };
+    }
+    grouped[key]["Qty On Hand"] += qty;
+    if ((!grouped[key]["Description"] || grouped[key]["Description"] === "--") && description) {
+      grouped[key]["Description"] = description;
+    }
+    if (!grouped[key]["Source"] && source) grouped[key]["Source"] = source;
+    if (grouped[key]["Source"] && source && grouped[key]["Source"] !== source) {
+      grouped[key]["Source"] = "report_compact_inventory";
+    }
+  });
+  return Object.values(grouped);
+}
+
 export function useDataSources() {
   const [inventory, setInventory] = useState(null);
   const [itemMaster, setItemMaster] = useState(null);
@@ -104,11 +173,21 @@ export function useDataSources() {
     };
   }, []);
 
-  const hydrateDataSet = useCallback(function(storedValue, setData, setFileName, setTimestamp, fallbackName) {
+  const normalizeInventoryForApp = useCallback(function(rows, fileName) {
+    if (!shouldCompactInventoryForApp(rows, fileName)) return Array.isArray(rows) ? rows : [];
+    return compactInventoryRowsForApp(rows);
+  }, []);
+
+  const hydrateDataSet = useCallback(function(storedValue, setData, setFileName, setTimestamp, fallbackName, options) {
     var cached = readStoredDataSet(storedValue);
     if (!cached) return false;
-    setData(cached.data);
-    setFileName(cached.fileName || fallbackName || "Saved Data");
+    var nextFileName = cached.fileName || fallbackName || "Saved Data";
+    var nextRows = cached.data;
+    if (options && typeof options.transformRows === "function") {
+      nextRows = options.transformRows(cached.data, nextFileName);
+    }
+    setData(nextRows);
+    setFileName(nextFileName);
     setTimestamp(cached.timestamp || new Date());
     return true;
   }, [readStoredDataSet]);
@@ -141,8 +220,10 @@ export function useDataSources() {
       if (!Array.isArray(rows)) return;
       if (!rows.length && !tsVal) return;
       hasAny = hasAny || rows.length > 0;
-      setData(rows);
-      setName(meta[dataKey + "FileName"] || defaultLabel + (labelSuffix ? " (" + labelSuffix + ")" : ""));
+      var fileName = meta[dataKey + "FileName"] || defaultLabel + (labelSuffix ? " (" + labelSuffix + ")" : "");
+      var nextRows = dataKey === "inventory" ? normalizeInventoryForApp(rows, fileName) : rows;
+      setData(nextRows);
+      setName(fileName);
       setTs(tsVal || new Date());
     }
 
@@ -160,7 +241,7 @@ export function useDataSources() {
       setMappingConfirmed(meta.mappingConfirmed);
     }
     return hasAny;
-  }, []);
+  }, [normalizeInventoryForApp]);
 
   // Load shared snapshot first, then local fallback.
   useEffect(() => {
@@ -240,14 +321,18 @@ export function useDataSources() {
             preferLocal = true;
           }
           if (!preferLocal) return false;
-          setData(cached.data);
-          setName(cached.fileName || fallbackLabel || "Saved Data");
+          var nextFileName = cached.fileName || fallbackLabel || "Saved Data";
+          var nextRows = dataKey === "inventory" ? normalizeInventoryForApp(cached.data, nextFileName) : cached.data;
+          setData(nextRows);
+          setName(nextFileName);
           setTs(cached.timestamp || new Date());
           return true;
         }
 
         if (!sharedLoaded) {
-          hydrateDataSet(map[STORAGE_KEYS.inventory], setInventory, setInvFileName, setInvTimestamp, "Nulogy Sync (cached)");
+          hydrateDataSet(map[STORAGE_KEYS.inventory], setInventory, setInvFileName, setInvTimestamp, "Nulogy Sync (cached)", {
+            transformRows: normalizeInventoryForApp
+          });
           hydrateDataSet(map[STORAGE_KEYS.workOrders], setWorkOrders, setWoFileName, setWoTimestamp, "Nulogy Sync (cached)");
           hydrateDataSet(map[STORAGE_KEYS.production], setProductionData, setProductionFileName, setProductionTimestamp, "Nulogy Production (cached)");
           hydrateDataSet(map[STORAGE_KEYS.labor], setLaborData, setLaborFileName, setLaborTimestamp, "Nulogy Labor (cached)");
@@ -286,7 +371,7 @@ export function useDataSources() {
         setCacheHydrated(true);
       }
     })();
-  }, [hydrateDataSet, hydrateFromPayloadObject, readStoredDataSet]);
+  }, [hydrateDataSet, hydrateFromPayloadObject, normalizeInventoryForApp, readStoredDataSet]);
 
   // Save datasets to persistent storage whenever they change
   useEffect(() => {
@@ -344,7 +429,7 @@ export function useDataSources() {
     if (!hydrateDoneRef.current) return;
     if (!inventory || !workOrders) return;
     var payload = {
-      inventory: inventory || [],
+      inventory: normalizeInventoryForApp(inventory || [], invFileName || ""),
       workOrders: workOrders || [],
       productionData: productionData || [],
       laborData: laborData || [],
@@ -452,7 +537,7 @@ export function useDataSources() {
     inventory, workOrders, productionData, laborData, evoconData, itemMaster, boms, edrData, dockData,
     invFileName, woFileName, productionFileName, laborFileName, evoconFileName, itemMasterFileName, bomFileName, edrFileName, dockFileName,
     invTimestamp, woTimestamp, productionTimestamp, laborTimestamp, evoconTimestamp, itemMasterTimestamp, bomTimestamp, edrTimestamp, dockTimestamp,
-    mappingConfirmed
+    mappingConfirmed, normalizeInventoryForApp
   ]);
 
   const parseXlsxFile = useCallback(async (file, cb) => {

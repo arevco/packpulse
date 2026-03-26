@@ -1,4 +1,4 @@
-import { useDeferredValue, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useTheme } from "../theme";
 import { useStyles } from "../hooks/useStyles";
 import { Input } from "../components/ui/input";
@@ -160,10 +160,39 @@ function matchesInventoryFilters(row, q, filters) {
   return haystack.includes(q);
 }
 
-export default function InventoryView({ inventory, itemMaster, invMapping }) {
-  var rows = Array.isArray(inventory) ? inventory : [];
+var inventoryDetailCache = {
+  key: "",
+  rows: null
+};
+
+function inventoryRowsNeedDetailFetch(rows, fileName) {
+  if (!Array.isArray(rows) || !rows.length) return false;
+  var compactSourceRows = rows.filter(function(row) {
+    var source = String(pickLooseValue(row, ["Source", "source"]) || "").toLowerCase();
+    return source.includes("compact_inventory");
+  }).length;
+  if (compactSourceRows >= Math.max(1, Math.round(rows.length * 0.5))) return true;
+  if (String(fileName || "").toLowerCase().indexOf("nulogy") === -1) return false;
+  var detailRows = rows.filter(function(row) {
+    return !!String(pickLooseValue(row, [
+      "Location", "location",
+      "Lot Code", "lot_code",
+      "Expiry Date", "expiry_date",
+      "Pallet Number", "pallet_number"
+    ]) || "").trim();
+  }).length;
+  return detailRows < Math.max(10, Math.round(rows.length * 0.15));
+}
+
+export default function InventoryView({ inventory, itemMaster, invMapping, inventoryTimestamp, inventoryFileName }) {
+  var fallbackRows = Array.isArray(inventory) ? inventory : [];
   var itemMasterRows = Array.isArray(itemMaster) ? itemMaster : [];
   var mapping = invMapping || {};
+  var detailCacheKey = String(
+    inventoryTimestamp && inventoryTimestamp.toISOString
+      ? inventoryTimestamp.toISOString()
+      : (inventoryTimestamp || inventoryFileName || "")
+  );
   var theme = useTheme();
   var C = theme.C;
   var mono = theme.mono;
@@ -183,7 +212,69 @@ export default function InventoryView({ inventory, itemMaster, invMapping }) {
   var [positiveOnly, setPositiveOnly] = useState(true);
   var [sortField, setSortField] = useState("qtyOnHand");
   var [sortDir, setSortDir] = useState("desc");
+  var [page, setPage] = useState(1);
+  var [pageSize, setPageSize] = useState(100);
+  var [detailRows, setDetailRows] = useState(function() {
+    return inventoryDetailCache.key === detailCacheKey && Array.isArray(inventoryDetailCache.rows)
+      ? inventoryDetailCache.rows
+      : null;
+  });
+  var [detailStatus, setDetailStatus] = useState(function() {
+    return inventoryDetailCache.key === detailCacheKey && Array.isArray(inventoryDetailCache.rows) ? "ready" : "idle";
+  });
+  var [detailError, setDetailError] = useState("");
   var deferredSearch = useDeferredValue(searchTerm);
+  var shouldLoadDetail = useMemo(function() {
+    return inventoryRowsNeedDetailFetch(fallbackRows, inventoryFileName);
+  }, [fallbackRows, inventoryFileName]);
+
+  useEffect(function() {
+    if (inventoryDetailCache.key === detailCacheKey && Array.isArray(inventoryDetailCache.rows)) {
+      setDetailRows(inventoryDetailCache.rows);
+      setDetailStatus("ready");
+      setDetailError("");
+      return;
+    }
+    setDetailRows(null);
+    setDetailStatus("idle");
+    setDetailError("");
+  }, [detailCacheKey]);
+
+  useEffect(function() {
+    if (!shouldLoadDetail) return;
+    if (inventoryDetailCache.key === detailCacheKey && Array.isArray(inventoryDetailCache.rows)) return;
+    var cancelled = false;
+    setDetailStatus("loading");
+    setDetailError("");
+    fetch("/api/nulogy/inventory-rich")
+      .then(function(response) {
+        return response.json().then(function(body) {
+          return { ok: response.ok, body: body };
+        });
+      })
+      .then(function(result) {
+        if (cancelled) return;
+        if (!result.ok) {
+          throw new Error((result.body && (result.body.error || result.body.details)) || "Could not load full inventory detail");
+        }
+        var nextRows = Array.isArray(result.body && result.body.data) ? result.body.data : [];
+        inventoryDetailCache.key = detailCacheKey;
+        inventoryDetailCache.rows = nextRows;
+        setDetailRows(nextRows);
+        setDetailStatus("ready");
+      })
+      .catch(function(error) {
+        if (cancelled) return;
+        setDetailStatus("error");
+        setDetailError(error && error.message ? error.message : "Could not load full inventory detail");
+      });
+    return function() {
+      cancelled = true;
+    };
+  }, [detailCacheKey, shouldLoadDetail]);
+
+  var rows = Array.isArray(detailRows) && detailRows.length ? detailRows : fallbackRows;
+  var usingDetailRows = Array.isArray(detailRows) && detailRows.length > 0;
 
   var itemMasterDescriptionBySku = useMemo(function() {
     var out = {};
@@ -323,6 +414,22 @@ export default function InventoryView({ inventory, itemMaster, invMapping }) {
     return sortInventoryRows(filteredRawRows, sortField, sortDir);
   }, [filteredRawRows, sortField, sortDir]);
   var activeRows = viewMode === "raw" ? sortedRawRows : sortedRows;
+  var pageCount = Math.max(1, Math.ceil(activeRows.length / pageSize));
+
+  useEffect(function() {
+    setPage(1);
+  }, [viewMode, searchLower, positiveOnly, locationFilter, statusFilter, customerFilter, sourceFilter, expiryFilter, sortField, sortDir, pageSize]);
+
+  useEffect(function() {
+    if (page > pageCount) setPage(pageCount);
+  }, [page, pageCount]);
+
+  var pagedRows = useMemo(function() {
+    var start = Math.max(0, (page - 1) * pageSize);
+    return activeRows.slice(start, start + pageSize);
+  }, [activeRows, page, pageSize]);
+  var visibleStart = activeRows.length ? ((page - 1) * pageSize) + 1 : 0;
+  var visibleEnd = Math.min(activeRows.length, page * pageSize);
 
   var summary = useMemo(function() {
     var totalQty = activeRows.reduce(function(sum, row) { return sum + safeNum(row.qtyOnHand); }, 0);
@@ -599,7 +706,18 @@ export default function InventoryView({ inventory, itemMaster, invMapping }) {
         <Badge variant="secondary">{statusOptions.length.toLocaleString()} statuses</Badge>
         {customerOptions.length ? <Badge variant="secondary">{customerOptions.length.toLocaleString()} customers</Badge> : null}
         {sourceOptions.length ? <Badge variant="secondary">{sourceOptions.length.toLocaleString()} sources</Badge> : null}
+        {shouldLoadDetail ? (
+          <Badge variant={usingDetailRows ? "success" : detailStatus === "loading" ? "secondary" : detailStatus === "error" ? "warning" : "secondary"}>
+            {usingDetailRows ? "Full detail loaded" : detailStatus === "loading" ? "Loading full detail..." : detailStatus === "error" ? "Showing compact inventory" : "Compact inventory"}
+          </Badge>
+        ) : null}
       </div>
+
+      {detailStatus === "error" ? (
+        <div className="rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-2 text-sm text-[rgb(var(--muted))]">
+          Full inventory detail could not be loaded, so this view is using the compact inventory snapshot. {detailError}
+        </div>
+      ) : null}
 
       <div className="flex flex-wrap items-center gap-2 text-sm text-[rgb(var(--muted))]">
         <Badge variant="secondary">Location coverage {coveragePct(coverage.locationRows, rawRows.length)}%</Badge>
@@ -628,6 +746,32 @@ export default function InventoryView({ inventory, itemMaster, invMapping }) {
         </div>
       ) : null}
 
+      <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-[rgb(var(--muted))]">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="secondary">
+            Showing {visibleStart.toLocaleString()}-{visibleEnd.toLocaleString()} of {activeRows.length.toLocaleString()}
+          </Badge>
+          <select
+            value={String(pageSize)}
+            onChange={function(event) { setPageSize(Number(event.target.value) || 100); }}
+            style={Object.assign({}, styles.sel, { height: 36, minWidth: 120 })}
+          >
+            <option value="100">100 / page</option>
+            <option value="250">250 / page</option>
+            <option value="500">500 / page</option>
+          </select>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={function() { setPage(function(prev) { return Math.max(1, prev - 1); }); }} disabled={page <= 1}>
+            Prev
+          </Button>
+          <Badge variant="secondary">Page {page.toLocaleString()} / {pageCount.toLocaleString()}</Badge>
+          <Button variant="outline" size="sm" onClick={function() { setPage(function(prev) { return Math.min(pageCount, prev + 1); }); }} disabled={page >= pageCount}>
+            Next
+          </Button>
+        </div>
+      </div>
+
       <TableShell>
         <div className="overflow-x-auto">
           <table className="min-w-full">
@@ -649,7 +793,7 @@ export default function InventoryView({ inventory, itemMaster, invMapping }) {
               </tr>
             </thead>
             <tbody>
-              {activeRows.length ? activeRows.map(function(row) {
+              {activeRows.length ? pagedRows.map(function(row) {
                 return (
                   <tr key={row.id} className="border-b border-[rgb(var(--border))] last:border-b-0">
                     <td style={Object.assign({}, tdN, { fontWeight: 700 })}>{row.sku}</td>

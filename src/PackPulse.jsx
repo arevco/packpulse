@@ -1224,7 +1224,15 @@ export default function ProductionReadiness() {
           {activeView === "operations" && <OperationsView productionSegments={productionSegmentsForUI} productionDataRaw={ds.productionData || []} laborDataRaw={ds.laborData || []} evoconData={ds.evoconData || []} evoconTimestamp={ds.evoconTimestamp || evoconLastSyncAt} itemMaster={ds.itemMaster || []} initialFilters={operationsPermalinkState} onPermalinkChange={handleOperationsPermalinkChange} serverSyncVersion={operationsServerSyncVersion} onRefreshProduction={triggerFullNulogySync} refreshingProduction={!!(nulogySyncState && nulogySyncState.syncing)} />}
           {activeView === "forecast" && <ForecastView workOrders={ds.workOrders || []} itemMaster={ds.itemMaster || []} productionData={ds.productionData || []} laborData={ds.laborData || []} initialFilters={forecastPermalinkState} onPermalinkChange={handleForecastPermalinkChange} />}
           {activeView === "workorders" && <WorkOrdersView analysis={analysisForUI} woStatuses={woStatusesForUI} woCustomers={woCustomersForUI} recommendations={recommendationsForUI} dispatchQueue={dispatchQueue || []} inboundCoverage={inboundCoverage} initialFilters={workOrdersPermalinkState} onPermalinkChange={handleWorkOrdersPermalinkChange} />}
-          {activeView === "inventory" && <InventoryView inventory={ds.inventory || []} itemMaster={ds.itemMaster || []} invMapping={ds.invMapping || {}} />}
+          {activeView === "inventory" && (
+            <InventoryView
+              inventory={ds.inventory || []}
+              itemMaster={ds.itemMaster || []}
+              invMapping={ds.invMapping || {}}
+              inventoryTimestamp={ds.invTimestamp}
+              inventoryFileName={ds.invFileName || ""}
+            />
+          )}
           {activeView === "itemmaster" && <ItemMasterView itemMaster={ds.itemMaster || []} inventory={ds.inventory || []} />}
           {activeView === "supplyrisk" && <SupplyRiskView rawCriticalItems={criticalItemsForUI} inboundCoverage={inboundCoverage} timelineData={timelineData} deliveriesV2={deliveriesV2} />}
           {activeView === "sandbox" && <SandboxView />}

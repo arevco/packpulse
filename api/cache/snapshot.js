@@ -45,6 +45,79 @@ function compactRows(rows, opts) {
   });
 }
 
+function normalizeLooseKey(value) {
+  return String(value || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+
+function pickLooseInventoryValue(row, keys) {
+  if (!row || typeof row !== "object") return "";
+  var rowKeys = Object.keys(row);
+  for (var i = 0; i < keys.length; i++) {
+    var wanted = normalizeLooseKey(keys[i]);
+    for (var j = 0; j < rowKeys.length; j++) {
+      var rowKey = rowKeys[j];
+      if (normalizeLooseKey(rowKey) === wanted) return row[rowKey];
+    }
+  }
+  return "";
+}
+
+function shouldCompactInventoryPayload(rows, meta) {
+  if (!Array.isArray(rows) || !rows.length) return false;
+  var name = String(meta && meta.inventoryFileName || "").toLowerCase();
+  if (name.includes("nulogy")) return true;
+  var sourceMarkers = 0;
+  var sampleSize = Math.min(rows.length, 40);
+  for (var i = 0; i < sampleSize; i++) {
+    var row = rows[i] || {};
+    var source = String(pickLooseInventoryValue(row, ["Source", "source"]) || "").toLowerCase();
+    if (source && (source.includes("inventory") || source.includes("locator") || source.includes("compact") || source.includes("nulogy"))) {
+      sourceMarkers += 1;
+    }
+  }
+  return sourceMarkers > 0;
+}
+
+function compactInventoryRows(rows) {
+  var grouped = {};
+  (Array.isArray(rows) ? rows : []).forEach(function(row) {
+    var sku = String(pickLooseInventoryValue(row, ["Item Code", "item_code", "SKU", "sku", "Item", "item"]) || "").trim();
+    var description = String(pickLooseInventoryValue(row, ["Description", "description", "Item Description", "item_description"]) || "").trim();
+    var qty = toNum(pickLooseInventoryValue(row, ["Qty On Hand", "qty_on_hand", "Base quantity", "base_quantity", "Quantity", "quantity", "Available", "available"]));
+    var status = String(pickLooseInventoryValue(row, ["Inventory Status", "inventory_status", "Status", "status"]) || "").trim();
+    var customer = String(pickLooseInventoryValue(row, ["Customer Name", "customer_name", "Customer", "customer"]) || "").trim();
+    var baseUom = String(pickLooseInventoryValue(row, ["Base UOM", "base_uom", "Base unit of measure", "base_unit_of_measure", "UOM", "uom"]) || "").trim();
+    var source = String(pickLooseInventoryValue(row, ["Source", "source"]) || "").trim();
+    if (!sku && !description && !(qty > 0) && !status && !customer) return;
+    var key = [
+      normalizeLooseKey(sku),
+      normalizeLooseKey(status),
+      normalizeLooseKey(customer),
+      normalizeLooseKey(baseUom)
+    ].join("|");
+    if (!grouped[key]) {
+      grouped[key] = {
+        "Item Code": sku || "--",
+        "Description": description || "--",
+        "Qty On Hand": 0,
+        "Inventory Status": status || "",
+        "Customer Name": customer || "",
+        "Base UOM": baseUom || "",
+        "Source": source || "compact_inventory"
+      };
+    }
+    grouped[key]["Qty On Hand"] += qty;
+    if ((!grouped[key]["Description"] || grouped[key]["Description"] === "--") && description) {
+      grouped[key]["Description"] = description;
+    }
+    if (!grouped[key]["Source"] && source) grouped[key]["Source"] = source;
+    if (grouped[key]["Source"] && source && grouped[key]["Source"] !== source) {
+      grouped[key]["Source"] = "report_compact_inventory";
+    }
+  });
+  return Object.values(grouped);
+}
+
 function compactPayloadForCache(input) {
   var payload = clonePlain(input);
   var dropped = [];
@@ -52,6 +125,9 @@ function compactPayloadForCache(input) {
   var SOFT_LIMIT = 3_000_000; // Keep well below typical edge/serverless payload limits.
 
   // First pass: trim known heavy arrays while preserving useful hydration data.
+  if (Array.isArray(payload.inventory) && shouldCompactInventoryPayload(payload.inventory, payload.meta)) {
+    payload.inventory = compactInventoryRows(payload.inventory);
+  }
   if (Array.isArray(payload.productionData)) payload.productionData = compactRows(payload.productionData, { maxRows: 1400 });
   if (Array.isArray(payload.laborData)) payload.laborData = compactRows(payload.laborData, { maxRows: 1400 });
   if (Array.isArray(payload.evoconData)) payload.evoconData = compactRows(payload.evoconData, { maxRows: 1400 });
