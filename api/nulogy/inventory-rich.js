@@ -37,36 +37,16 @@ const INVENTORY_SNAPSHOT_COLUMNS = [
 const PALLET_AGING_COLUMNS = [
   "base_quantity",
   "base_unit_of_measure",
-  "case_quantity",
-  "cases_unit_of_measure",
   "customer_name",
-  "default_quantity",
-  "default_unit_of_measure",
   "expiry_date",
-  "full_pallet_quantity",
-  "full_pallets_unit_of_measure",
   "inventory_category",
   "inventory_status",
-  "inventory_value",
-  "item_alternate_code_1",
-  "item_alternate_code_2",
-  "item_category_name",
-  "item_class",
   "item_code",
   "item_description",
-  "item_family_name",
-  "item_gtin",
-  "item_type_name",
-  "item_upc",
-  "item_weight_per_case",
-  "item_weight_per_pallet",
   "location",
   "lot_code",
-  "material_cost_per_unit",
   "pallet_number",
-  "site_name",
-  "stored_since",
-  "warehouse_zone"
+  "site_name"
 ];
 
 function formatNulogyUiDateTime(date) {
