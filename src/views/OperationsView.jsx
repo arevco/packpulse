@@ -34,7 +34,9 @@ function createEmptyLaborActuals(status, productionStatus) {
     byWorkOrder: [],
     byJob: [],
     status: status || "idle",
-    productionStatus: productionStatus || "ok"
+    productionStatus: productionStatus || "ok",
+    summaryOnly: false,
+    querySource: ""
   };
 }
 
@@ -158,8 +160,25 @@ function normalizeLaborActualsPayload(ok, body) {
     byWorkOrder: Array.isArray(body.byWorkOrder) ? body.byWorkOrder : [],
     byJob: Array.isArray(body.byJob) ? body.byJob : [],
     status: body.status || "ok",
-    productionStatus: body.productionStatus || "ok"
+    productionStatus: body.productionStatus || "ok",
+    summaryOnly: !!(body && body.summaryOnly),
+    querySource: String(body && body.querySource || "")
   };
+}
+
+function withLaborActualsStatus(payload, status) {
+  var base = createEmptyLaborActuals(status, payload && payload.productionStatus);
+  return Object.assign(base, payload || {}, { status: status || (payload && payload.status) || "ok" });
+}
+
+function hasLaborActualsSummaryData(payload) {
+  if (!payload || typeof payload !== "object") return false;
+  return (
+    !!(payload.summary && Object.keys(payload.summary).length) ||
+    (Array.isArray(payload.byDay) && payload.byDay.length > 0) ||
+    (Array.isArray(payload.byShift) && payload.byShift.length > 0) ||
+    (Array.isArray(payload.byLine) && payload.byLine.length > 0)
+  );
 }
 
 function scheduleAfterPaint(callback) {
@@ -1121,7 +1140,8 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       var laborFetchStart = shiftDays(laborFetchEnd, -(fetchDays - 1));
       var forecastKey = "v" + safeNum(serverSyncVersion) + "|" + forecastPlanMonths.join(",");
       var configKey = "v" + safeNum(serverSyncVersion);
-      var laborKey = "v" + safeNum(serverSyncVersion) + "|" + laborFetchStart + "|" + laborFetchEnd;
+      var laborSummaryKey = "v" + safeNum(serverSyncVersion) + "|" + laborFetchStart + "|" + laborFetchEnd + "|summary";
+      var laborDetailKey = "v" + safeNum(serverSyncVersion) + "|" + laborFetchStart + "|" + laborFetchEnd + "|detail";
       var summaryKey = "v" + safeNum(serverSyncVersion) + "|" + fetchDays + "|summary";
       var breakdownKey = "v" + safeNum(serverSyncVersion) + "|" + fetchDays + "|detail";
 
@@ -1129,7 +1149,9 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       var cachedBreakdown = readCachedOperationsData("breakdown", breakdownKey);
       var cachedForecast = readCachedOperationsData("forecast", forecastKey);
       var cachedConfig = readCachedOperationsData("config", configKey);
-      var cachedLabor = readCachedOperationsData("labor", laborKey);
+      var cachedLaborSummary = readCachedOperationsData("labor", laborSummaryKey);
+      var cachedLaborDetail = readCachedOperationsData("labor", laborDetailKey);
+      var cachedLabor = cachedLaborDetail || (cachedLaborSummary ? withLaborActualsStatus(cachedLaborSummary, "loading") : null);
 
       if (!cachedBreakdown) setShowInsightsPanelsReady(false);
 
@@ -1146,8 +1168,10 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
         setOpsSkuTargets(cachedConfig.skuTargets);
         setItemMasterCostBySku(cachedConfig.itemMasterCostBySku);
       }
-      if (cachedLabor) {
-        setLaborActuals(cachedLabor);
+      if (cachedLaborDetail) {
+        setLaborActuals(cachedLaborDetail);
+      } else if (cachedLaborSummary) {
+        setLaborActuals(withLaborActualsStatus(cachedLaborSummary, "loading"));
       } else {
         setLaborActuals(createEmptyLaborActuals("loading", "loading"));
       }
@@ -1155,7 +1179,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
         detail: !cachedBreakdown,
         forecast: !cachedForecast && forecastPlanMonths.length > 0,
         config: !cachedConfig,
-        labor: !cachedLabor
+        labor: !cachedLaborDetail
       });
 
       var criticalPayload = cachedSummary || cachedBreakdown;
@@ -1229,18 +1253,49 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
             });
         }
 
-        if (!cachedLabor) {
-          loadCachedOperationsData("labor", laborKey, async function() {
-            var laborResult = await fetchJsonWithCredentials("/api/ops/labor-actuals?start=" + encodeURIComponent(laborFetchStart) + "&end=" + encodeURIComponent(laborFetchEnd));
-            return normalizeLaborActualsPayload(laborResult.response.ok, laborResult.body);
+        var laborSummaryPromise = cachedLaborSummary ? Promise.resolve(cachedLaborSummary) : null;
+
+        if (!cachedLaborSummary) {
+          laborSummaryPromise = loadCachedOperationsData("labor", laborSummaryKey, async function() {
+            var laborSummaryResult = await fetchJsonWithCredentials("/api/ops/labor-actuals?start=" + encodeURIComponent(laborFetchStart) + "&end=" + encodeURIComponent(laborFetchEnd) + "&summary=1");
+            if (!laborSummaryResult.response.ok) {
+              throw new Error((laborSummaryResult.body && laborSummaryResult.body.error) || "Could not load labor summary");
+            }
+            return normalizeLaborActualsPayload(true, laborSummaryResult.body);
           })
+            .then(function(nextLaborSummary) {
+              if (requestId !== loadRequestRef.current || cachedLaborDetail) return nextLaborSummary;
+              setLaborActuals(withLaborActualsStatus(nextLaborSummary, "loading"));
+              return nextLaborSummary;
+            })
+            .catch(function() {
+              return null;
+            });
+        }
+
+        if (!cachedLaborDetail) {
+          (laborSummaryPromise || Promise.resolve(null))
+            .catch(function() { return null; })
+            .then(function() {
+              return loadCachedOperationsData("labor", laborDetailKey, async function() {
+                var laborResult = await fetchJsonWithCredentials("/api/ops/labor-actuals?start=" + encodeURIComponent(laborFetchStart) + "&end=" + encodeURIComponent(laborFetchEnd));
+                if (!laborResult.response.ok) {
+                  throw new Error((laborResult.body && laborResult.body.error) || "Could not load labor actuals");
+                }
+                return normalizeLaborActualsPayload(true, laborResult.body);
+              });
+            })
             .then(function(nextLaborActuals) {
               if (requestId !== loadRequestRef.current) return;
               setLaborActuals(nextLaborActuals);
             })
             .catch(function() {
               if (requestId !== loadRequestRef.current) return;
-              setLaborActuals(createEmptyLaborActuals("error", "error"));
+              setLaborActuals(function(prev) {
+                return hasLaborActualsSummaryData(prev)
+                  ? withLaborActualsStatus(prev, "error")
+                  : createEmptyLaborActuals("error", "error");
+              });
             })
             .finally(function() {
               if (requestId !== loadRequestRef.current) return;

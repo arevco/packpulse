@@ -213,6 +213,120 @@ function isMissingTableError(tableName, err) {
   );
 }
 
+async function fetchDailyLineMetricRows(supabase, startDate, endDate) {
+  return fetchAllRows(
+    supabase,
+    "ops_daily_line_metrics_mv",
+    "date_et,shift_label,line_name,production_rows,production_jobs,production_work_orders,produced_units,labor_rows,payable_hours,productive_hours,labor_cost",
+    "date_et",
+    startDate,
+    endDate
+  );
+}
+
+function addAggregateMetric(target, metricRow) {
+  target.payable_hours += toNum(metricRow && metricRow.payable_hours);
+  target.productive_hours += toNum(metricRow && metricRow.productive_hours);
+  target.labor_cost += toNum(metricRow && metricRow.labor_cost);
+  target.rows += toNum(metricRow && metricRow.labor_rows);
+  return target;
+}
+
+function finalizeAggregateMetricRow(row, casesProduced) {
+  var out = finalizeMetricRow(row, casesProduced);
+  out.labor_status = "aggregate";
+  out.can_direct_match_shift = false;
+  out.shift_match_confidence = "aggregate";
+  return out;
+}
+
+function buildSummaryPayloadFromMetricRows(metricRows, startDate, endDate, todayEt, finalizedThroughDate) {
+  var summary = makeMetricRow({});
+  var byDayMap = {};
+  var byShiftMap = {};
+  var byLineMap = {};
+  var casesByDay = {};
+  var casesByShift = {};
+  var casesByLine = {};
+  var totalProductionCases = 0;
+  var totalLaborRows = 0;
+
+  (Array.isArray(metricRows) ? metricRows : []).forEach(function(row) {
+    var date = textKey(row && row.date_et);
+    if (!dateInRange(date, startDate, endDate)) return;
+    var shift = textKey(row && row.shift_label, "Unassigned");
+    var line = textKey(row && row.line_name, "Unknown");
+    var producedUnits = toNum(row && row.produced_units);
+    var shiftKey = date + "|" + shift;
+
+    totalProductionCases += producedUnits;
+    totalLaborRows += toNum(row && row.labor_rows);
+
+    addAggregateMetric(summary, row);
+
+    if (!byDayMap[date]) byDayMap[date] = makeMetricRow({ date_et: date });
+    addAggregateMetric(byDayMap[date], row);
+    casesByDay[date] = (casesByDay[date] || 0) + producedUnits;
+
+    if (!byShiftMap[shiftKey]) byShiftMap[shiftKey] = makeMetricRow({ date_et: date, shift_label: shift });
+    addAggregateMetric(byShiftMap[shiftKey], row);
+    casesByShift[shiftKey] = (casesByShift[shiftKey] || 0) + producedUnits;
+
+    if (!byLineMap[line]) byLineMap[line] = makeMetricRow({ line_name: line });
+    addAggregateMetric(byLineMap[line], row);
+    casesByLine[line] = (casesByLine[line] || 0) + producedUnits;
+  });
+
+  var byDay = Object.keys(byDayMap).map(function(key) {
+    return finalizeAggregateMetricRow(byDayMap[key], toNum(casesByDay[key]));
+  }).sort(function(a, b) { return String(b.date_et || "").localeCompare(String(a.date_et || "")); });
+
+  var byShift = Object.keys(byShiftMap).map(function(key) {
+    return finalizeAggregateMetricRow(byShiftMap[key], toNum(casesByShift[key]));
+  }).sort(function(a, b) {
+    if (a.date_et !== b.date_et) return String(b.date_et || "").localeCompare(String(a.date_et || ""));
+    return String(a.shift_label || "").localeCompare(String(b.shift_label || ""));
+  });
+
+  var byLine = Object.keys(byLineMap).map(function(key) {
+    return finalizeAggregateMetricRow(byLineMap[key], toNum(casesByLine[key]));
+  }).sort(function(a, b) { return b.labor_cost - a.labor_cost; });
+
+  var summaryFinal = finalizeAggregateMetricRow(summary, totalProductionCases);
+  summaryFinal.total_production_cases = totalProductionCases;
+  summaryFinal.matched_cases = null;
+  summaryFinal.coverage_pct = null;
+  summaryFinal.unique_job_count = null;
+  summaryFinal.unique_work_order_count = null;
+  summaryFinal.inferred_job_timing_rows = 0;
+  summaryFinal.cross_shift_job_rows = 0;
+  summaryFinal.duplicate_match_suppressed_rows = 0;
+  summaryFinal.labor_query_mode = "ops_daily_line_metrics_mv_summary";
+  summaryFinal.labor_rows_fetched = Array.isArray(metricRows) ? metricRows.length : 0;
+  summaryFinal.labor_rows_in_range = totalLaborRows;
+  summaryFinal.labor_segments_in_range = totalLaborRows;
+  summaryFinal.days_with_labor = byDay.length;
+  summaryFinal.latest_date = byDay.length ? byDay[0].date_et : null;
+  summaryFinal.today_et = todayEt;
+  summaryFinal.finalized_through_date = finalizedThroughDate || null;
+  summaryFinal.has_provisional_labor = null;
+
+  return {
+    status: "ok",
+    productionStatus: "ops_daily_line_metrics_mv",
+    summaryOnly: true,
+    querySource: "ops_daily_line_metrics_mv",
+    range: { start: startDate, end: endDate },
+    summary: summaryFinal,
+    byDay: byDay,
+    byShift: byShift,
+    byLine: byLine,
+    byRole: [],
+    byWorkOrder: [],
+    byJob: []
+  };
+}
+
 async function fetchAllRows(supabase, tableName, columns, dateCol, startDate, endDate) {
   var out = [];
   var pageSize = 1000;
@@ -424,6 +538,7 @@ export default async function handler(req, res) {
     var startDate = sanitizeDate(req.query && req.query.start);
     var endDate = sanitizeDate(req.query && req.query.end);
     var monthKey = sanitizeMonthKey(req.query && req.query.monthKey);
+    var summaryOnly = /^(1|true|yes)$/i.test(String((req.query && req.query.summary) || "").trim());
     if (!startDate || !endDate) {
       var mr = monthRange(monthKey);
       if (mr) {
@@ -443,6 +558,15 @@ export default async function handler(req, res) {
     var supabase = getSupabaseAdmin();
     var todayEt = toEasternDateKey(new Date());
     var finalizedThroughDate = addDaysIso(todayEt, -1);
+    if (summaryOnly) {
+      var metricQ = await fetchDailyLineMetricRows(supabase, startDate, endDate);
+      if (!metricQ.error) {
+        return res.status(200).json(buildSummaryPayloadFromMetricRows(metricQ.data, startDate, endDate, todayEt, finalizedThroughDate));
+      }
+      if (!isMissingTableError("ops_daily_line_metrics_mv", metricQ.error)) {
+        throw metricQ.error;
+      }
+    }
     var laborColumns = "worked_date_et,worked_at_utc,clock_in_at_utc,clock_out_at_utc,source_snapshot_at,shift_label,line_name,job_id,work_order_code,work_order_id,item_code,item_description,item_family_name,role_name,role_key,payable_hours,productive_hours,hourly_rate,availability_pct,performance_pct,line_efficiency_pct,raw";
     var laborLegacyColumns = "worked_date_et,source_snapshot_at,shift_label,line_name,job_id,work_order_code,work_order_id,item_code,item_description,item_family_name,role_name,role_key,payable_hours,productive_hours,hourly_rate,availability_pct,performance_pct,line_efficiency_pct";
     var laborQueryMode = "worked_date";
@@ -760,7 +884,7 @@ export default async function handler(req, res) {
     delete summaryFinal.line_efficiency_sum;
     delete summaryFinal.line_efficiency_weight;
 
-    return res.status(200).json({
+    var responseBody = {
       status: "ok",
       productionStatus: productionStatus,
       range: { start: startDate, end: endDate },
@@ -771,7 +895,15 @@ export default async function handler(req, res) {
       byRole: byRole,
       byWorkOrder: byWorkOrder,
       byJob: byJob.slice(0, 500)
-    });
+    };
+    if (summaryOnly) {
+      responseBody.summaryOnly = true;
+      responseBody.querySource = "labor_events_summary_fallback";
+      responseBody.byRole = [];
+      responseBody.byWorkOrder = [];
+      responseBody.byJob = [];
+    }
+    return res.status(200).json(responseBody);
   } catch (err) {
     Sentry.captureException(err);
     return res.status(500).json({

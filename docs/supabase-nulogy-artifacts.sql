@@ -141,6 +141,9 @@ create index if not exists idx_nulogy_artifact_reports_site_run
 create index if not exists idx_nulogy_artifact_files_site_run
   on public.nulogy_artifact_files(site_id, run_id, report_code, artifact_type);
 
+create index if not exists idx_nulogy_artifact_files_site_type_report_generated
+  on public.nulogy_artifact_files(site_id, artifact_type, report_code, generated_at desc, created_at desc);
+
 create index if not exists idx_nulogy_artifact_fields_site_norm
   on public.nulogy_artifact_report_fields(site_id, normalized_field_name, report_code, generated_at desc);
 

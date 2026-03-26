@@ -22,6 +22,8 @@ Track SQL setup order and what each script provisions.
    - Forecast version snapshots
 9. `/Users/aj/Documents/New project/docs/supabase-ops-performance.sql`
    - Covering production index + operations performance materialized views + refresh function
+10. `/Users/aj/Documents/New project/docs/supabase-query-performance.sql`
+   - Query diagnostics extensions + latest artifact lookup index
 
 ## Required Environment Variables
 - `SUPABASE_URL`
@@ -44,6 +46,8 @@ Track SQL setup order and what each script provisions.
   - `select count(*) from ops_daily_line_metrics_mv;`
 - Performance refresh function:
   - `select public.refresh_ops_performance_views();`
+- Query diagnostics extensions enabled:
+  - `select extname from pg_extension where extname in ('pg_stat_statements','hypopg','index_advisor') order by extname;`
 - RLS status:
   - `select schemaname, tablename, rowsecurity from pg_tables where schemaname = 'public' and tablename in ('cache_snapshots','cache_snapshot_history','production_events','labor_events','ops_shift_inputs','ops_rates','ops_sku_targets','user_login_events','forecast_versions','forecast_assumptions','sync_runs') order by tablename;`
 
