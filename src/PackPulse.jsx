@@ -63,6 +63,22 @@ function lazySafe(importer, name) {
   });
 }
 
+function normalizeLooseKey(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function pickLooseInventoryField(row, keys) {
+  if (!row || typeof row !== "object") return "";
+  var rowKeys = Object.keys(row);
+  for (var i = 0; i < keys.length; i++) {
+    var wanted = normalizeLooseKey(keys[i]);
+    for (var j = 0; j < rowKeys.length; j++) {
+      if (normalizeLooseKey(rowKeys[j]) === wanted) return row[rowKeys[j]];
+    }
+  }
+  return "";
+}
+
 const OperationsView = lazySafe(importOperationsView, "Operations");
 const ForecastView = lazySafe(function() { return import("./views/ForecastView"); }, "Forecast");
 const WorkOrdersView = lazySafe(function() { return import("./views/WorkOrdersView"); }, "Work Orders");
@@ -181,6 +197,7 @@ export default function ProductionReadiness() {
   const [showAskAi, setShowAskAi] = useState(false);
   const lastHiddenSyncModeRef = useRef("full");
   const hiddenSyncWasBusyRef = useRef(false);
+  const legacyInventoryRefreshRef = useRef(false);
 
   var buildPermalinkUrl = useCallback(function(nextView, woState, fcState, opsState) {
     if (typeof window === "undefined") return "";
@@ -368,6 +385,15 @@ export default function ProductionReadiness() {
   var productionAutoSyncFresh = !!latestProductionSyncMs && (Date.now() - latestProductionSyncMs) < PRODUCTION_AUTO_SYNC_FRESH_MS;
   var hiddenSyncBusy = !!(nulogySyncState && (nulogySyncState.syncing || nulogySyncState.deferredSyncing));
   var pendingHiddenSyncFailureCooldown = !hiddenSyncBusy && hiddenSyncWasBusyRef.current && !!(nulogySyncState && nulogySyncState.errorCount > 0);
+  var syncedInventoryLooksLegacy = !!(Array.isArray(ds.inventory) && ds.inventory.length && /nulogy/i.test(String(ds.invFileName || "")) && (function() {
+    var sourceRows = 0;
+    var detailRows = 0;
+    ds.inventory.forEach(function(row) {
+      if (String(pickLooseInventoryField(row, ["Source", "source"]) || "").trim()) sourceRows += 1;
+      if (String(pickLooseInventoryField(row, ["Location", "location", "Lot Code", "lot_code", "Expiry Date", "expiry_date"]) || "").trim()) detailRows += 1;
+    });
+    return sourceRows === 0 && detailRows < Math.max(10, Math.round(ds.inventory.length * 0.15));
+  })());
   var fullAutoRetryUntilMs = Number(autoSyncRetryUntil.full || 0);
   var productionAutoRetryUntilMs = Number(autoSyncRetryUntil.production_only || 0);
   var dockAutoSyncFresh = isFreshForAutoSync(ds.dockTimestamp);
@@ -477,6 +503,14 @@ export default function ProductionReadiness() {
       triggerHiddenNulogySync("production_only", { origin: "auto" });
     }
   }, [showAutoBootstrap, autoSyncHydrated, pendingHiddenSyncFailureCooldown, nulogyAutoSyncFresh, productionAutoSyncFresh, fullAutoRetryUntilMs, productionAutoRetryUntilMs, triggerHiddenNulogySync]);
+
+  useEffect(function() {
+    if (!syncedInventoryLooksLegacy) return;
+    if (!autoSyncHydrated || hiddenSyncBusy || pendingHiddenSyncFailureCooldown) return;
+    if (legacyInventoryRefreshRef.current) return;
+    legacyInventoryRefreshRef.current = true;
+    triggerHiddenNulogySync("full", { origin: "auto" });
+  }, [syncedInventoryLooksLegacy, autoSyncHydrated, hiddenSyncBusy, pendingHiddenSyncFailureCooldown, triggerHiddenNulogySync]);
 
   useEffect(() => {
     if (!shouldRunIntervalSync) return;

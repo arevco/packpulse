@@ -37,16 +37,36 @@ const INVENTORY_SNAPSHOT_COLUMNS = [
 const PALLET_AGING_COLUMNS = [
   "base_quantity",
   "base_unit_of_measure",
+  "case_quantity",
+  "cases_unit_of_measure",
   "customer_name",
+  "default_quantity",
+  "default_unit_of_measure",
   "expiry_date",
+  "full_pallet_quantity",
+  "full_pallets_unit_of_measure",
   "inventory_category",
   "inventory_status",
+  "inventory_value",
+  "item_alternate_code_1",
+  "item_alternate_code_2",
+  "item_category_name",
+  "item_class",
   "item_code",
   "item_description",
+  "item_family_name",
+  "item_gtin",
+  "item_type_name",
+  "item_upc",
+  "item_weight_per_case",
+  "item_weight_per_pallet",
   "location",
   "lot_code",
+  "material_cost_per_unit",
   "pallet_number",
-  "site_name"
+  "site_name",
+  "stored_since",
+  "warehouse_zone"
 ];
 
 function formatNulogyUiDateTime(date) {
@@ -136,6 +156,41 @@ function toNum(value) {
   if (value == null || value === "") return 0;
   const n = Number(String(value).replace(/[^0-9.\-]/g, ""));
   return Number.isFinite(n) ? n : 0;
+}
+
+function firstDefinedValue(values, fallback) {
+  for (let i = 0; i < values.length; i++) {
+    const value = values[i];
+    if (value != null && value !== "") return value;
+  }
+  return fallback;
+}
+
+function readInventoryExtras(row) {
+  return {
+    "Inventory Category": String(pickLooseValue(row, ["Inventory category", "inventory_category"]) || "").trim(),
+    "Item Category": String(pickLooseValue(row, ["Item category name", "item_category_name", "Item Category", "item_category"]) || "").trim(),
+    "Item Class": String(pickLooseValue(row, ["Item class", "item_class"]) || "").trim(),
+    "Item Family": String(pickLooseValue(row, ["Item family name", "item_family_name"]) || "").trim(),
+    "Item GTIN": String(pickLooseValue(row, ["Item GTIN", "item_gtin"]) || "").trim(),
+    "Item Type": String(pickLooseValue(row, ["Item type", "item_type", "Item type name", "item_type_name"]) || "").trim(),
+    "Item UPC": String(pickLooseValue(row, ["Item UPC", "item_upc"]) || "").trim(),
+    "Item Alternate Code 1": String(pickLooseValue(row, ["Item alternate code 1", "item_alternate_code_1"]) || "").trim(),
+    "Item Alternate Code 2": String(pickLooseValue(row, ["Item alternate code 2", "item_alternate_code_2"]) || "").trim(),
+    "Case Quantity": String(pickLooseValue(row, ["Case Quantity", "case_quantity"]) || "").trim(),
+    "Case UOM": String(pickLooseValue(row, ["Case Unit Of Measure", "Case unit of measure", "case_unit_of_measure", "cases_unit_of_measure"]) || "").trim(),
+    "Default Quantity": String(pickLooseValue(row, ["Default quantity", "default_quantity"]) || "").trim(),
+    "Default UOM": String(pickLooseValue(row, ["Default unit of measure", "default_unit_of_measure"]) || "").trim(),
+    "Full Pallet Quantity": String(pickLooseValue(row, ["Full Pallet Quantity", "Full Pallet quantity", "full_pallet_quantity"]) || "").trim(),
+    "Full Pallet UOM": String(pickLooseValue(row, ["Full Pallet Unit Of Measure", "Full Pallet unit of measure", "full_pallet_unit_of_measure", "full_pallets_unit_of_measure"]) || "").trim(),
+    "Site Name": String(pickLooseValue(row, ["Site Name", "site_name"]) || "").trim(),
+    "Stored Since": String(pickLooseValue(row, ["Stored since", "stored_since"]) || "").trim(),
+    "Zone": String(pickLooseValue(row, ["Zone", "warehouse_zone"]) || "").trim(),
+    "Inventory Value": String(pickLooseValue(row, ["Inventory value", "inventory_value"]) || "").trim(),
+    "Material Cost Per Unit": String(pickLooseValue(row, ["Material cost per unit", "material_cost_per_unit"]) || "").trim(),
+    "Item Weight Per Case": String(pickLooseValue(row, ["Item weight per case", "item_weight_per_case"]) || "").trim(),
+    "Item Weight Per Pallet": String(pickLooseValue(row, ["Item weight per pallet", "item_weight_per_pallet"]) || "").trim()
+  };
 }
 
 function pickLooseValue(row, keys) {
@@ -250,6 +305,7 @@ function parseCurrentInventoryRows(rows, sourceLabel) {
     const baseUom = String(pickLooseValue(row, ["Base UOM", "Base unit of measure", "UOM", "uom"]) || "").trim();
     const customerName = String(pickLooseValue(row, ["Customer Name", "customer_name", "Customer", "customer"]) || "").trim();
     const palletNumber = String(pickLooseValue(row, ["Pallet Number", "pallet_number", "Pallet", "pallet"]) || "").trim();
+    const extras = readInventoryExtras(row);
     let pushed = false;
     statusBuckets.forEach(function(bucket) {
       const qty = toNum(pickLooseValue(row, bucket.keys));
@@ -265,6 +321,7 @@ function parseCurrentInventoryRows(rows, sourceLabel) {
         "Inventory Status": bucket.label,
         "Customer Name": customerName || "",
         "Base UOM": baseUom || "",
+        ...extras,
         "Source": sourceLabel || "current_inventory"
       });
       pushed = true;
@@ -284,6 +341,7 @@ function parseCurrentInventoryRows(rows, sourceLabel) {
           "Inventory Status": status || "",
           "Customer Name": customerName || "",
           "Base UOM": baseUom || "",
+          ...extras,
           "Source": sourceLabel || "current_inventory"
         });
       }
@@ -311,6 +369,7 @@ function parseLocatorRows(rows, sourceLabel) {
     const singularStatus = String(pickLooseValue(row, ["Inventory Status", "inventory_status", "Status", "status"]) || "").trim();
     const singularQty = toNum(pickLooseValue(row, ["Qty On Hand", "Base quantity", "base_quantity", "Quantity", "quantity", "Qty", "qty", "Available", "available"]));
     const customerName = String(pickLooseValue(row, ["Customer Name", "customer_name", "Customer", "customer"]) || "").trim();
+    const extras = readInventoryExtras(row);
 
     let pushed = false;
     statusBuckets.forEach(function(bucket) {
@@ -327,6 +386,7 @@ function parseLocatorRows(rows, sourceLabel) {
         "Inventory Status": bucket.label,
         "Customer Name": customerName || "",
         "Base UOM": baseUom || "",
+        ...extras,
         "Source": sourceLabel || "item_locator"
       });
       pushed = true;
@@ -344,6 +404,7 @@ function parseLocatorRows(rows, sourceLabel) {
         "Inventory Status": singularStatus || "",
         "Customer Name": customerName || "",
         "Base UOM": baseUom || "",
+        ...extras,
         "Source": sourceLabel || "item_locator"
       });
     }
@@ -417,8 +478,39 @@ function coalesceRows(rows) {
     if (!grouped[key]["Customer Name"] && row["Customer Name"]) grouped[key]["Customer Name"] = row["Customer Name"];
     if (!grouped[key]["Pallet Number"] && row["Pallet Number"]) grouped[key]["Pallet Number"] = row["Pallet Number"];
     if (!grouped[key]["Location"] && row["Location"]) grouped[key]["Location"] = row["Location"];
+    if (!grouped[key]["Lot Code"] && row["Lot Code"]) grouped[key]["Lot Code"] = row["Lot Code"];
+    if (!grouped[key]["Expiry Date"] && row["Expiry Date"]) grouped[key]["Expiry Date"] = row["Expiry Date"];
+    if (!grouped[key]["Inventory Category"] && row["Inventory Category"]) grouped[key]["Inventory Category"] = row["Inventory Category"];
+    if (!grouped[key]["Item Category"] && row["Item Category"]) grouped[key]["Item Category"] = row["Item Category"];
+    if (!grouped[key]["Item Class"] && row["Item Class"]) grouped[key]["Item Class"] = row["Item Class"];
+    if (!grouped[key]["Item Family"] && row["Item Family"]) grouped[key]["Item Family"] = row["Item Family"];
+    if (!grouped[key]["Item GTIN"] && row["Item GTIN"]) grouped[key]["Item GTIN"] = row["Item GTIN"];
+    if (!grouped[key]["Item Type"] && row["Item Type"]) grouped[key]["Item Type"] = row["Item Type"];
+    if (!grouped[key]["Item UPC"] && row["Item UPC"]) grouped[key]["Item UPC"] = row["Item UPC"];
+    if (!grouped[key]["Item Alternate Code 1"] && row["Item Alternate Code 1"]) grouped[key]["Item Alternate Code 1"] = row["Item Alternate Code 1"];
+    if (!grouped[key]["Item Alternate Code 2"] && row["Item Alternate Code 2"]) grouped[key]["Item Alternate Code 2"] = row["Item Alternate Code 2"];
+    if (!grouped[key]["Case Quantity"] && row["Case Quantity"]) grouped[key]["Case Quantity"] = row["Case Quantity"];
+    if (!grouped[key]["Case UOM"] && row["Case UOM"]) grouped[key]["Case UOM"] = row["Case UOM"];
+    if (!grouped[key]["Default Quantity"] && row["Default Quantity"]) grouped[key]["Default Quantity"] = row["Default Quantity"];
+    if (!grouped[key]["Default UOM"] && row["Default UOM"]) grouped[key]["Default UOM"] = row["Default UOM"];
+    if (!grouped[key]["Full Pallet Quantity"] && row["Full Pallet Quantity"]) grouped[key]["Full Pallet Quantity"] = row["Full Pallet Quantity"];
+    if (!grouped[key]["Full Pallet UOM"] && row["Full Pallet UOM"]) grouped[key]["Full Pallet UOM"] = row["Full Pallet UOM"];
+    if (!grouped[key]["Site Name"] && row["Site Name"]) grouped[key]["Site Name"] = row["Site Name"];
+    if (!grouped[key]["Stored Since"] && row["Stored Since"]) grouped[key]["Stored Since"] = row["Stored Since"];
+    if (!grouped[key]["Zone"] && row["Zone"]) grouped[key]["Zone"] = row["Zone"];
+    if (!grouped[key]["Inventory Value"] && row["Inventory Value"]) grouped[key]["Inventory Value"] = row["Inventory Value"];
+    if (!grouped[key]["Material Cost Per Unit"] && row["Material Cost Per Unit"]) grouped[key]["Material Cost Per Unit"] = row["Material Cost Per Unit"];
+    if (!grouped[key]["Item Weight Per Case"] && row["Item Weight Per Case"]) grouped[key]["Item Weight Per Case"] = row["Item Weight Per Case"];
+    if (!grouped[key]["Item Weight Per Pallet"] && row["Item Weight Per Pallet"]) grouped[key]["Item Weight Per Pallet"] = row["Item Weight Per Pallet"];
   });
   return Object.values(grouped);
+}
+
+function mergePreferred(locatorRow, currentRow, key, fallback) {
+  return firstDefinedValue([
+    locatorRow && locatorRow[key],
+    currentRow && currentRow[key]
+  ], fallback == null ? "" : fallback);
 }
 
 function mergeInventoryRows(currentRows, locatorRows) {
@@ -438,18 +530,40 @@ function mergeInventoryRows(currentRows, locatorRows) {
     if (currentRow) usedCurrentRows.add(currentRow);
 
     return {
-      "Item Code": locatorRow["Item Code"] || (currentRow && currentRow["Item Code"]) || "--",
-      "Description": locatorRow["Description"] || (currentRow && currentRow["Description"]) || "--",
-      "Location": locatorRow["Location"] || "",
-      "Lot Code": locatorRow["Lot Code"] || (currentRow && currentRow["Lot Code"]) || "",
-      "Expiry Date": locatorRow["Expiry Date"] || (currentRow && currentRow["Expiry Date"]) || "",
-      "Pallet Number": locatorRow["Pallet Number"] || (currentRow && currentRow["Pallet Number"]) || "",
+      "Item Code": mergePreferred(locatorRow, currentRow, "Item Code", "--"),
+      "Description": mergePreferred(locatorRow, currentRow, "Description", "--"),
+      "Location": mergePreferred(locatorRow, currentRow, "Location", ""),
+      "Lot Code": mergePreferred(locatorRow, currentRow, "Lot Code", ""),
+      "Expiry Date": mergePreferred(locatorRow, currentRow, "Expiry Date", ""),
+      "Pallet Number": mergePreferred(locatorRow, currentRow, "Pallet Number", ""),
       "Qty On Hand": toNum(locatorRow["Qty On Hand"]) > 0
         ? toNum(locatorRow["Qty On Hand"])
         : (currentRow ? toNum(currentRow["Qty On Hand"]) : 0),
-      "Inventory Status": locatorRow["Inventory Status"] || (currentRow && currentRow["Inventory Status"]) || "",
-      "Customer Name": locatorRow["Customer Name"] || (currentRow && currentRow["Customer Name"]) || "",
-      "Base UOM": locatorRow["Base UOM"] || (currentRow && currentRow["Base UOM"]) || "",
+      "Inventory Status": mergePreferred(locatorRow, currentRow, "Inventory Status", ""),
+      "Customer Name": mergePreferred(locatorRow, currentRow, "Customer Name", ""),
+      "Base UOM": mergePreferred(locatorRow, currentRow, "Base UOM", ""),
+      "Inventory Category": mergePreferred(locatorRow, currentRow, "Inventory Category", ""),
+      "Item Category": mergePreferred(locatorRow, currentRow, "Item Category", ""),
+      "Item Class": mergePreferred(locatorRow, currentRow, "Item Class", ""),
+      "Item Family": mergePreferred(locatorRow, currentRow, "Item Family", ""),
+      "Item GTIN": mergePreferred(locatorRow, currentRow, "Item GTIN", ""),
+      "Item Type": mergePreferred(locatorRow, currentRow, "Item Type", ""),
+      "Item UPC": mergePreferred(locatorRow, currentRow, "Item UPC", ""),
+      "Item Alternate Code 1": mergePreferred(locatorRow, currentRow, "Item Alternate Code 1", ""),
+      "Item Alternate Code 2": mergePreferred(locatorRow, currentRow, "Item Alternate Code 2", ""),
+      "Case Quantity": mergePreferred(locatorRow, currentRow, "Case Quantity", ""),
+      "Case UOM": mergePreferred(locatorRow, currentRow, "Case UOM", ""),
+      "Default Quantity": mergePreferred(locatorRow, currentRow, "Default Quantity", ""),
+      "Default UOM": mergePreferred(locatorRow, currentRow, "Default UOM", ""),
+      "Full Pallet Quantity": mergePreferred(locatorRow, currentRow, "Full Pallet Quantity", ""),
+      "Full Pallet UOM": mergePreferred(locatorRow, currentRow, "Full Pallet UOM", ""),
+      "Site Name": mergePreferred(locatorRow, currentRow, "Site Name", ""),
+      "Stored Since": mergePreferred(locatorRow, currentRow, "Stored Since", ""),
+      "Zone": mergePreferred(locatorRow, currentRow, "Zone", ""),
+      "Inventory Value": mergePreferred(locatorRow, currentRow, "Inventory Value", ""),
+      "Material Cost Per Unit": mergePreferred(locatorRow, currentRow, "Material Cost Per Unit", ""),
+      "Item Weight Per Case": mergePreferred(locatorRow, currentRow, "Item Weight Per Case", ""),
+      "Item Weight Per Pallet": mergePreferred(locatorRow, currentRow, "Item Weight Per Pallet", ""),
       "Source": currentRow
         ? (String(locatorRow["Source"] || "") === "pallet_aging" ? "report_enriched_inventory" : "merged_inventory")
         : (locatorRow["Source"] || "item_locator")
