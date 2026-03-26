@@ -1,0 +1,917 @@
+{
+  "reportCodes": [
+    "bom",
+    "canned_inventory_transaction_history",
+    "consumption_by_lot",
+    "cycle_count_accuracy",
+    "cycle_count_discrepancy",
+    "cycle_count_history",
+    "estimate_report",
+    "inbound_stock_transfer",
+    "inbound_stock_transfer_order",
+    "inventory_adjustment",
+    "inventory_snapshot",
+    "invoice",
+    "item_master",
+    "job_downtime",
+    "job_productivity",
+    "job_profitability",
+    "labor",
+    "lot_code_audit",
+    "move_transaction",
+    "outbound_stock_transfer",
+    "pallet_aging",
+    "pallet_storage",
+    "picked_inventory",
+    "production",
+    "project_status",
+    "receipt_item",
+    "receive_order",
+    "reconciliation",
+    "reject",
+    "reject_percentage",
+    "scenario_report",
+    "ship_order",
+    "shipment_item",
+    "uom_ratios",
+    "weekly_consumption",
+    "weekly_inventory_adjustment_summary"
+  ],
+  "rowLimits": [
+    {
+      "reportCode": "bom",
+      "maximumRowsText": "250 Thousand",
+      "maximumRows": 250000
+    },
+    {
+      "reportCode": "canned_inventory_transaction_history",
+      "maximumRowsText": "250 Thousand",
+      "maximumRows": 250000
+    },
+    {
+      "reportCode": "pallet_storage",
+      "maximumRowsText": "250 Thousand",
+      "maximumRows": 250000
+    },
+    {
+      "reportCode": "item_master",
+      "maximumRowsText": "150 Thousand",
+      "maximumRows": 150000
+    },
+    {
+      "reportCode": "uom_ratios",
+      "maximumRowsText": "125 Thousand",
+      "maximumRows": 125000
+    },
+    {
+      "reportCode": "consumption_by_lot",
+      "maximumRowsText": "60 Thousand",
+      "maximumRows": 60000
+    },
+    {
+      "reportCode": "cycle_count_accuracy",
+      "maximumRowsText": "60 Thousand",
+      "maximumRows": 60000
+    },
+    {
+      "reportCode": "cycle_count_discrepancy",
+      "maximumRowsText": "60 Thousand",
+      "maximumRows": 60000
+    },
+    {
+      "reportCode": "cycle_count_history",
+      "maximumRowsText": "60 Thousand",
+      "maximumRows": 60000
+    },
+    {
+      "reportCode": "estimate_report",
+      "maximumRowsText": "60 Thousand",
+      "maximumRows": 60000
+    },
+    {
+      "reportCode": "inbound_stock_transfer",
+      "maximumRowsText": "60 Thousand",
+      "maximumRows": 60000
+    },
+    {
+      "reportCode": "inbound_stock_transfer_order",
+      "maximumRowsText": "60 Thousand",
+      "maximumRows": 60000
+    },
+    {
+      "reportCode": "inventory_adjustment",
+      "maximumRowsText": "60 Thousand",
+      "maximumRows": 60000
+    },
+    {
+      "reportCode": "inventory_snapshot",
+      "maximumRowsText": "60 Thousand",
+      "maximumRows": 60000
+    },
+    {
+      "reportCode": "invoice",
+      "maximumRowsText": "60 Thousand",
+      "maximumRows": 60000
+    },
+    {
+      "reportCode": "job_downtime",
+      "maximumRowsText": "60 Thousand",
+      "maximumRows": 60000
+    },
+    {
+      "reportCode": "job_productivity",
+      "maximumRowsText": "60 Thousand",
+      "maximumRows": 60000
+    },
+    {
+      "reportCode": "job_profitability",
+      "maximumRowsText": "60 Thousand",
+      "maximumRows": 60000
+    },
+    {
+      "reportCode": "labor",
+      "maximumRowsText": "60 Thousand",
+      "maximumRows": 60000
+    },
+    {
+      "reportCode": "lot_code_audit",
+      "maximumRowsText": "60 Thousand",
+      "maximumRows": 60000
+    },
+    {
+      "reportCode": "move_transaction",
+      "maximumRowsText": "60 Thousand",
+      "maximumRows": 60000
+    },
+    {
+      "reportCode": "outbound_stock_transfer",
+      "maximumRowsText": "60 Thousand",
+      "maximumRows": 60000
+    },
+    {
+      "reportCode": "pallet_aging",
+      "maximumRowsText": "60 Thousand",
+      "maximumRows": 60000
+    },
+    {
+      "reportCode": "picked_inventory",
+      "maximumRowsText": "60 Thousand",
+      "maximumRows": 60000
+    },
+    {
+      "reportCode": "production",
+      "maximumRowsText": "60 Thousand",
+      "maximumRows": 60000
+    },
+    {
+      "reportCode": "project_status",
+      "maximumRowsText": "60 Thousand",
+      "maximumRows": 60000
+    },
+    {
+      "reportCode": "receipt_item",
+      "maximumRowsText": "60 Thousand",
+      "maximumRows": 60000
+    },
+    {
+      "reportCode": "receive_order",
+      "maximumRowsText": "60 Thousand",
+      "maximumRows": 60000
+    },
+    {
+      "reportCode": "reconciliation",
+      "maximumRowsText": "60 Thousand",
+      "maximumRows": 60000
+    },
+    {
+      "reportCode": "reject",
+      "maximumRowsText": "60 Thousand",
+      "maximumRows": 60000
+    },
+    {
+      "reportCode": "reject_percentage",
+      "maximumRowsText": "60 Thousand",
+      "maximumRows": 60000
+    },
+    {
+      "reportCode": "scenario_report",
+      "maximumRowsText": "60 Thousand",
+      "maximumRows": 60000
+    },
+    {
+      "reportCode": "ship_order",
+      "maximumRowsText": "60 Thousand",
+      "maximumRows": 60000
+    },
+    {
+      "reportCode": "shipment_item",
+      "maximumRowsText": "60 Thousand",
+      "maximumRows": 60000
+    },
+    {
+      "reportCode": "weekly_consumption",
+      "maximumRowsText": "60 Thousand",
+      "maximumRows": 60000
+    },
+    {
+      "reportCode": "weekly_inventory_adjustment_summary",
+      "maximumRowsText": "60 Thousand",
+      "maximumRows": 60000
+    }
+  ],
+  "topSharedFields": [
+    {
+      "field": "item_code",
+      "reportCount": 26
+    },
+    {
+      "field": "item_description",
+      "reportCount": 25
+    },
+    {
+      "field": "item_category_name",
+      "reportCount": 24
+    },
+    {
+      "field": "item_family_name",
+      "reportCount": 23
+    },
+    {
+      "field": "item_type_name",
+      "reportCount": 23
+    },
+    {
+      "field": "item_gtin",
+      "reportCount": 20
+    },
+    {
+      "field": "item_upc",
+      "reportCount": 20
+    },
+    {
+      "field": "item_alternate_code_1",
+      "reportCount": 19
+    },
+    {
+      "field": "item_alternate_code_2",
+      "reportCount": 19
+    },
+    {
+      "field": "site_name",
+      "reportCount": 19
+    },
+    {
+      "field": "project_code",
+      "reportCount": 17
+    },
+    {
+      "field": "expiry_date",
+      "reportCount": 15
+    },
+    {
+      "field": "lot_code",
+      "reportCount": 15
+    },
+    {
+      "field": "unit_of_measure",
+      "reportCount": 13
+    },
+    {
+      "field": "created_at",
+      "reportCount": 12
+    },
+    {
+      "field": "customer_name",
+      "reportCount": 12
+    },
+    {
+      "field": "item_class",
+      "reportCount": 12
+    },
+    {
+      "field": "pallet_number",
+      "reportCount": 12
+    },
+    {
+      "field": "project_id",
+      "reportCount": 12
+    },
+    {
+      "field": "project_reference_1",
+      "reportCount": 12
+    },
+    {
+      "field": "project_reference_2",
+      "reportCount": 12
+    },
+    {
+      "field": "project_reference_3",
+      "reportCount": 12
+    },
+    {
+      "field": "project_reference_4",
+      "reportCount": 12
+    },
+    {
+      "field": "project_reference_5",
+      "reportCount": 12
+    },
+    {
+      "field": "job_id",
+      "reportCount": 10
+    },
+    {
+      "field": "base_unit_of_measure",
+      "reportCount": 9
+    },
+    {
+      "field": "default_unit_of_measure",
+      "reportCount": 9
+    },
+    {
+      "field": "full_pallet_quantity",
+      "reportCount": 9
+    },
+    {
+      "field": "item_customer",
+      "reportCount": 9
+    },
+    {
+      "field": "base_quantity",
+      "reportCount": 8
+    },
+    {
+      "field": "case_quantity",
+      "reportCount": 8
+    },
+    {
+      "field": "default_quantity",
+      "reportCount": 8
+    },
+    {
+      "field": "inventory_category",
+      "reportCount": 8
+    },
+    {
+      "field": "po_line_item_number",
+      "reportCount": 8
+    },
+    {
+      "field": "purchase_order_number",
+      "reportCount": 8
+    },
+    {
+      "field": "full_pallets_unit_of_measure",
+      "reportCount": 7
+    },
+    {
+      "field": "inventory_status",
+      "reportCount": 7
+    },
+    {
+      "field": "item_customer_name",
+      "reportCount": 7
+    },
+    {
+      "field": "line_name",
+      "reportCount": 7
+    },
+    {
+      "field": "location_name",
+      "reportCount": 7
+    },
+    {
+      "field": "actual_job_end_at",
+      "reportCount": 6
+    },
+    {
+      "field": "actual_job_start_at",
+      "reportCount": 6
+    },
+    {
+      "field": "cases_unit_of_measure",
+      "reportCount": 6
+    },
+    {
+      "field": "item_class_name",
+      "reportCount": 6
+    },
+    {
+      "field": "job_reference",
+      "reportCount": 6
+    },
+    {
+      "field": "notes",
+      "reportCount": 5
+    },
+    {
+      "field": "performance",
+      "reportCount": 5
+    },
+    {
+      "field": "project_customer",
+      "reportCount": 5
+    },
+    {
+      "field": "standard_units_per_hour",
+      "reportCount": 5
+    },
+    {
+      "field": "finished_good_code",
+      "reportCount": 4
+    }
+  ],
+  "joinKeyCoverage": [
+    {
+      "field": "item_code",
+      "reports": [
+        "canned_inventory_transaction_history",
+        "cycle_count_accuracy",
+        "cycle_count_discrepancy",
+        "inbound_stock_transfer",
+        "inbound_stock_transfer_order",
+        "inventory_snapshot",
+        "invoice",
+        "job_downtime",
+        "job_productivity",
+        "job_profitability",
+        "labor",
+        "move_transaction",
+        "outbound_stock_transfer",
+        "pallet_aging",
+        "pallet_storage",
+        "picked_inventory",
+        "production",
+        "project_status",
+        "receipt_item",
+        "receive_order",
+        "reconciliation",
+        "reject",
+        "reject_percentage",
+        "ship_order",
+        "shipment_item",
+        "weekly_inventory_adjustment_summary"
+      ]
+    },
+    {
+      "field": "project_code",
+      "reports": [
+        "consumption_by_lot",
+        "inbound_stock_transfer_order",
+        "invoice",
+        "job_downtime",
+        "job_productivity",
+        "job_profitability",
+        "labor",
+        "outbound_stock_transfer",
+        "picked_inventory",
+        "production",
+        "project_status",
+        "receipt_item",
+        "receive_order",
+        "reconciliation",
+        "reject",
+        "reject_percentage",
+        "weekly_consumption"
+      ]
+    },
+    {
+      "field": "job_id",
+      "reports": [
+        "consumption_by_lot",
+        "inbound_stock_transfer_order",
+        "invoice",
+        "job_downtime",
+        "labor",
+        "lot_code_audit",
+        "move_transaction",
+        "production",
+        "reject",
+        "weekly_consumption"
+      ]
+    },
+    {
+      "field": "project_id",
+      "reports": [
+        "consumption_by_lot",
+        "invoice",
+        "job_downtime",
+        "job_productivity",
+        "job_profitability",
+        "labor",
+        "picked_inventory",
+        "production",
+        "reconciliation",
+        "reject",
+        "reject_percentage",
+        "weekly_consumption"
+      ]
+    },
+    {
+      "field": "customer_name",
+      "reports": [
+        "cycle_count_accuracy",
+        "estimate_report",
+        "inbound_stock_transfer_order",
+        "inventory_snapshot",
+        "invoice",
+        "job_profitability",
+        "labor",
+        "pallet_aging",
+        "pallet_storage",
+        "production",
+        "project_status",
+        "scenario_report"
+      ]
+    },
+    {
+      "field": "lot_code",
+      "reports": [
+        "canned_inventory_transaction_history",
+        "cycle_count_accuracy",
+        "cycle_count_discrepancy",
+        "inbound_stock_transfer",
+        "inventory_snapshot",
+        "move_transaction",
+        "outbound_stock_transfer",
+        "pallet_aging",
+        "picked_inventory",
+        "production",
+        "receipt_item",
+        "reject",
+        "shipment_item",
+        "weekly_consumption",
+        "weekly_inventory_adjustment_summary"
+      ]
+    },
+    {
+      "field": "pallet_number",
+      "reports": [
+        "cycle_count_accuracy",
+        "cycle_count_discrepancy",
+        "inbound_stock_transfer",
+        "inventory_snapshot",
+        "outbound_stock_transfer",
+        "pallet_aging",
+        "pallet_storage",
+        "picked_inventory",
+        "production",
+        "receipt_item",
+        "reject",
+        "shipment_item"
+      ]
+    },
+    {
+      "field": "line",
+      "reports": [
+        "consumption_by_lot",
+        "production"
+      ]
+    },
+    {
+      "field": "line_name",
+      "reports": [
+        "job_downtime",
+        "job_productivity",
+        "job_profitability",
+        "labor",
+        "lot_code_audit",
+        "reject",
+        "weekly_consumption"
+      ]
+    },
+    {
+      "field": "reference_1",
+      "reports": [
+        "invoice",
+        "labor",
+        "production",
+        "project_status"
+      ]
+    },
+    {
+      "field": "reference",
+      "reports": [
+        "estimate_report",
+        "job_productivity",
+        "receive_order",
+        "scenario_report"
+      ]
+    },
+    {
+      "field": "item_description",
+      "reports": [
+        "canned_inventory_transaction_history",
+        "inbound_stock_transfer",
+        "inbound_stock_transfer_order",
+        "inventory_snapshot",
+        "invoice",
+        "job_downtime",
+        "job_productivity",
+        "job_profitability",
+        "labor",
+        "move_transaction",
+        "outbound_stock_transfer",
+        "pallet_aging",
+        "pallet_storage",
+        "picked_inventory",
+        "production",
+        "project_status",
+        "receipt_item",
+        "receive_order",
+        "reconciliation",
+        "reject",
+        "reject_percentage",
+        "scenario_report",
+        "ship_order",
+        "shipment_item",
+        "weekly_inventory_adjustment_summary"
+      ]
+    },
+    {
+      "field": "finished_good_code",
+      "reports": [
+        "bom",
+        "inbound_stock_transfer_order",
+        "lot_code_audit",
+        "reconciliation"
+      ]
+    },
+    {
+      "field": "subcomponent_code",
+      "reports": [
+        "bom",
+        "lot_code_audit"
+      ]
+    }
+  ],
+  "reportsWithDateFilters": [
+    {
+      "reportCode": "bom",
+      "dateLikeFilterFields": [
+        "finalized_at",
+        "release_date"
+      ]
+    },
+    {
+      "reportCode": "canned_inventory_transaction_history",
+      "dateLikeFilterFields": [
+        "created_at",
+        "expiry_date"
+      ]
+    },
+    {
+      "reportCode": "consumption_by_lot",
+      "dateLikeFilterFields": [
+        "consumed_at",
+        "consumed_date",
+        "finished_good_expiry_date",
+        "subcomponent_expiry_date"
+      ]
+    },
+    {
+      "reportCode": "cycle_count_accuracy",
+      "dateLikeFilterFields": [
+        "closed_at",
+        "created_at",
+        "expiry_date",
+        "performed_at"
+      ]
+    },
+    {
+      "reportCode": "cycle_count_discrepancy",
+      "dateLikeFilterFields": [
+        "closed_at",
+        "created_at",
+        "expiry_date"
+      ]
+    },
+    {
+      "reportCode": "cycle_count_history",
+      "dateLikeFilterFields": [
+        "performed_at"
+      ]
+    },
+    {
+      "reportCode": "inbound_stock_transfer",
+      "dateLikeFilterFields": [
+        "created_at",
+        "expiry_date",
+        "transferred_at"
+      ]
+    },
+    {
+      "reportCode": "inbound_stock_transfer_order",
+      "dateLikeFilterFields": [
+        "created_at",
+        "deliver_at"
+      ]
+    },
+    {
+      "reportCode": "inventory_adjustment",
+      "dateLikeFilterFields": [
+        "adjusted_expiry",
+        "adjustment_date",
+        "created_at",
+        "initial_expiry",
+        "initial_received_date"
+      ]
+    },
+    {
+      "reportCode": "inventory_snapshot",
+      "dateLikeFilterFields": [
+        "expiry_date",
+        "snapshot_at"
+      ]
+    },
+    {
+      "reportCode": "invoice",
+      "dateLikeFilterFields": [
+        "invoiced_at",
+        "paid_at"
+      ]
+    },
+    {
+      "reportCode": "item_master",
+      "dateLikeFilterFields": [
+        "created_at",
+        "updated_at"
+      ]
+    },
+    {
+      "reportCode": "job_downtime",
+      "dateLikeFilterFields": [
+        "actual_job_end_at",
+        "actual_job_start_at",
+        "downtime_end_at",
+        "downtime_start_at"
+      ]
+    },
+    {
+      "reportCode": "job_productivity",
+      "dateLikeFilterFields": [
+        "actual_job_end_at",
+        "actual_job_start_at",
+        "scheduled_start_at"
+      ]
+    },
+    {
+      "reportCode": "job_profitability",
+      "dateLikeFilterFields": [
+        "actual_job_end_at",
+        "actual_job_start_at",
+        "invoiced_at"
+      ]
+    },
+    {
+      "reportCode": "labor",
+      "dateLikeFilterFields": [
+        "clock_in_at",
+        "clock_out_at"
+      ]
+    },
+    {
+      "reportCode": "lot_code_audit",
+      "dateLikeFilterFields": [
+        "job_start_at",
+        "subcomponent_expiry_date"
+      ]
+    },
+    {
+      "reportCode": "move_transaction",
+      "dateLikeFilterFields": [
+        "ended_at",
+        "expiry_date",
+        "requested_at",
+        "started_at",
+        "time_completed_at"
+      ]
+    },
+    {
+      "reportCode": "outbound_stock_transfer",
+      "dateLikeFilterFields": [
+        "created_at",
+        "expiry_date",
+        "transferred_at"
+      ]
+    },
+    {
+      "reportCode": "pallet_aging",
+      "dateLikeFilterFields": [
+        "stored_since"
+      ]
+    },
+    {
+      "reportCode": "pallet_storage",
+      "dateLikeFilterFields": [
+        "stored_since"
+      ]
+    },
+    {
+      "reportCode": "picked_inventory",
+      "dateLikeFilterFields": [
+        "date_picked_at",
+        "expiry_date",
+        "pick_started_at"
+      ]
+    },
+    {
+      "reportCode": "production",
+      "dateLikeFilterFields": [
+        "actual_job_end_at",
+        "actual_job_start_at",
+        "expiry_date",
+        "produced_at"
+      ]
+    },
+    {
+      "reportCode": "project_status",
+      "dateLikeFilterFields": [
+        "created_at",
+        "due_date_at",
+        "fixed_expiry_date",
+        "last_job_completed_at",
+        "planned_start_at"
+      ]
+    },
+    {
+      "reportCode": "receipt_item",
+      "dateLikeFilterFields": [
+        "expiry_date",
+        "planned_receipt_expected_receive_at",
+        "received_at"
+      ]
+    },
+    {
+      "reportCode": "receive_order",
+      "dateLikeFilterFields": [
+        "actual_ship_at",
+        "expected_delivery_at",
+        "expected_ship_at",
+        "ro_date_at"
+      ]
+    },
+    {
+      "reportCode": "reconciliation",
+      "dateLikeFilterFields": [
+        "reconciled_date"
+      ]
+    },
+    {
+      "reportCode": "reject",
+      "dateLikeFilterFields": [
+        "actual_job_end_at",
+        "actual_job_start_at",
+        "expiry_date",
+        "rejected_at"
+      ]
+    },
+    {
+      "reportCode": "reject_percentage",
+      "dateLikeFilterFields": [
+        "rejected_at"
+      ]
+    },
+    {
+      "reportCode": "scenario_report",
+      "dateLikeFilterFields": [
+        "created_at",
+        "effective_date_at",
+        "updated_at"
+      ]
+    },
+    {
+      "reportCode": "ship_order",
+      "dateLikeFilterFields": [
+        "expected_ship_at",
+        "ship_order_created_at",
+        "shipped_at"
+      ]
+    },
+    {
+      "reportCode": "shipment_item",
+      "dateLikeFilterFields": [
+        "actual_ship_at",
+        "created_at",
+        "ship_order_date_at",
+        "ship_order_expected_ship_at",
+        "shipment_expected_ship_at"
+      ]
+    },
+    {
+      "reportCode": "weekly_consumption",
+      "dateLikeFilterFields": [
+        "consumed_at",
+        "consumed_date",
+        "expiry_date"
+      ]
+    },
+    {
+      "reportCode": "weekly_inventory_adjustment_summary",
+      "dateLikeFilterFields": [
+        "created_at",
+        "expiry_date"
+      ]
+    }
+  ]
+}
