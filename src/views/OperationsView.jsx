@@ -38,14 +38,16 @@ function createEmptyLaborActuals(status, productionStatus) {
   };
 }
 
-var EMPTY_BREAKDOWN = { rowsLite: [], bySku: [], byLine: [], latestByLine: [], latestDate: null, totalRows: 0 };
+var EMPTY_BREAKDOWN = { rowsLite: [], bySku: [], byLine: [], latestByLine: [], latestDate: null, totalRows: 0, summaryOnly: false, querySource: "" };
 var operationsResponseCache = {
+  summary: Object.create(null),
   breakdown: Object.create(null),
   forecast: Object.create(null),
   config: Object.create(null),
   labor: Object.create(null)
 };
 var operationsInFlightCache = {
+  summary: Object.create(null),
   breakdown: Object.create(null),
   forecast: Object.create(null),
   config: Object.create(null),
@@ -110,10 +112,14 @@ async function fetchJsonWithCredentials(url) {
 
 function normalizeBreakdownPayload(body) {
   var breakdownRows = Array.isArray(body && body.rowsLite) ? body.rowsLite : [];
+  var byDay = Array.isArray(body && body.byDay) ? body.byDay : aggregateBreakdownByDay(breakdownRows).slice().sort(function(a, b) {
+    return String(b.date || "").localeCompare(String(a.date || ""));
+  });
+  var byShift = Array.isArray(body && body.byShift) ? body.byShift : aggregateBreakdownByShift(breakdownRows);
   return {
     trends: {
-      byDay: aggregateBreakdownByDay(breakdownRows).slice().sort(function(a, b) { return String(b.date || "").localeCompare(String(a.date || "")); }),
-      byShift: aggregateBreakdownByShift(breakdownRows)
+      byDay: byDay,
+      byShift: byShift
     },
     breakdown: {
       rowsLite: breakdownRows,
@@ -122,6 +128,8 @@ function normalizeBreakdownPayload(body) {
       latestByLine: Array.isArray(body && body.latestByLine) ? body.latestByLine : [],
       latestDate: body && body.latestDate ? body.latestDate : null,
       totalRows: safeNum(body && body.totalRows),
+      summaryOnly: !!(body && body.summaryOnly),
+      querySource: String(body && body.querySource || "")
     }
   };
 }
@@ -999,7 +1007,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   const [opsSkuTargets, setOpsSkuTargets] = useState([]);
   const [itemMasterCostBySku, setItemMasterCostBySku] = useState({});
   const [laborActuals, setLaborActuals] = useState(function() { return createEmptyLaborActuals("idle", "ok"); });
-  const [deferredLoading, setDeferredLoading] = useState({ forecast: false, config: false, labor: false });
+  const [deferredLoading, setDeferredLoading] = useState({ detail: false, forecast: false, config: false, labor: false });
   const [showInsightsPanelsReady, setShowInsightsPanelsReady] = useState(false);
   const loadRequestRef = useRef(0);
   const [skuMixMode, setSkuMixMode] = useState("type");
@@ -1114,18 +1122,23 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       var forecastKey = "v" + safeNum(serverSyncVersion) + "|" + forecastPlanMonths.join(",");
       var configKey = "v" + safeNum(serverSyncVersion);
       var laborKey = "v" + safeNum(serverSyncVersion) + "|" + laborFetchStart + "|" + laborFetchEnd;
-      var breakdownKey = "v" + safeNum(serverSyncVersion) + "|" + fetchDays;
+      var summaryKey = "v" + safeNum(serverSyncVersion) + "|" + fetchDays + "|summary";
+      var breakdownKey = "v" + safeNum(serverSyncVersion) + "|" + fetchDays + "|detail";
 
+      var cachedSummary = readCachedOperationsData("summary", summaryKey);
       var cachedBreakdown = readCachedOperationsData("breakdown", breakdownKey);
       var cachedForecast = readCachedOperationsData("forecast", forecastKey);
       var cachedConfig = readCachedOperationsData("config", configKey);
       var cachedLabor = readCachedOperationsData("labor", laborKey);
 
-      setLoading(!cachedBreakdown);
+      if (!cachedBreakdown) setShowInsightsPanelsReady(false);
 
-      if (cachedBreakdown) {
-        setTrends(cachedBreakdown.trends);
-        setBreakdown(cachedBreakdown.breakdown);
+      setLoading(!(cachedSummary || cachedBreakdown));
+
+      if (cachedSummary || cachedBreakdown) {
+        var initialPayload = cachedSummary || cachedBreakdown;
+        setTrends(initialPayload.trends);
+        setBreakdown(cachedBreakdown ? cachedBreakdown.breakdown : initialPayload.breakdown);
       }
       if (cachedForecast) setForecastPlans(cachedForecast);
       else if (!forecastPlanMonths.length) setForecastPlans({});
@@ -1139,28 +1152,49 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
         setLaborActuals(createEmptyLaborActuals("loading", "loading"));
       }
       setDeferredLoading({
+        detail: !cachedBreakdown,
         forecast: !cachedForecast && forecastPlanMonths.length > 0,
         config: !cachedConfig,
         labor: !cachedLabor
       });
 
-      var criticalPayload = cachedBreakdown;
+      var criticalPayload = cachedSummary || cachedBreakdown;
       if (!criticalPayload) {
-        criticalPayload = await loadCachedOperationsData("breakdown", breakdownKey, async function() {
-          var breakdownResult = await fetchJsonWithCredentials("/api/ops/production-breakdown?days=" + fetchDays);
-          if (!breakdownResult.response.ok) {
-            throw new Error((breakdownResult.body && breakdownResult.body.error) || "Could not load production breakdown");
+        criticalPayload = await loadCachedOperationsData("summary", summaryKey, async function() {
+          var summaryResult = await fetchJsonWithCredentials("/api/ops/production-breakdown?days=" + fetchDays + "&summary=1");
+          if (!summaryResult.response.ok) {
+            throw new Error((summaryResult.body && summaryResult.body.error) || "Could not load production summary");
           }
-          return normalizeBreakdownPayload(breakdownResult.body);
+          return normalizeBreakdownPayload(summaryResult.body);
         });
       }
       if (requestId !== loadRequestRef.current) return;
       setTrends(criticalPayload.trends);
-      setBreakdown(criticalPayload.breakdown);
+      setBreakdown(cachedBreakdown ? cachedBreakdown.breakdown : criticalPayload.breakdown);
       setLoading(false);
 
       var cancelDeferred = scheduleAfterPaint(function() {
         if (requestId !== loadRequestRef.current) return;
+
+        if (!cachedBreakdown) {
+          loadCachedOperationsData("breakdown", breakdownKey, async function() {
+            var breakdownResult = await fetchJsonWithCredentials("/api/ops/production-breakdown?days=" + fetchDays);
+            if (!breakdownResult.response.ok) {
+              throw new Error((breakdownResult.body && breakdownResult.body.error) || "Could not load production breakdown");
+            }
+            return normalizeBreakdownPayload(breakdownResult.body);
+          })
+            .then(function(detailPayload) {
+              if (requestId !== loadRequestRef.current) return;
+              setTrends(detailPayload.trends);
+              setBreakdown(detailPayload.breakdown);
+            })
+            .catch(function() {})
+            .finally(function() {
+              if (requestId !== loadRequestRef.current) return;
+              setDeferredLoading(function(prev) { return Object.assign({}, prev, { detail: false }); });
+            });
+        }
 
         if (!cachedForecast && forecastPlanMonths.length) {
           loadCachedOperationsData("forecast", forecastKey, async function() {
@@ -1218,7 +1252,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     } catch (e) {
       if (requestId !== loadRequestRef.current) return;
       setErr(e && e.message ? e.message : "Failed loading Operations data");
-      setDeferredLoading({ forecast: false, config: false, labor: false });
+      setDeferredLoading({ detail: false, forecast: false, config: false, labor: false });
     } finally {
       if (requestId === loadRequestRef.current) setLoading(false);
     }
@@ -2664,12 +2698,13 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
 
   var hasCriticalOperationsData = (effectiveTrends && Array.isArray(effectiveTrends.byDay) && effectiveTrends.byDay.length > 0)
     || (effectiveBreakdown && Array.isArray(effectiveBreakdown.rowsLite) && effectiveBreakdown.rowsLite.length > 0);
-  var isDeferredLoading = !!(deferredLoading.forecast || deferredLoading.config || deferredLoading.labor);
+  var detailReadyForInsights = !deferredLoading.detail;
+  var isDeferredLoading = !!(deferredLoading.detail || deferredLoading.forecast || deferredLoading.config || deferredLoading.labor);
   var showProductionJobsLoading = deferredLoading.labor && laborActuals.status === "loading";
   var showProductionJobsError = laborActuals.status === "error" && !showProductionJobsLoading;
 
   useEffect(function() {
-    if (showInsightsPanelsReady || !hasCriticalOperationsData) return;
+    if (showInsightsPanelsReady || !hasCriticalOperationsData || !detailReadyForInsights) return;
     var cancelled = false;
     var cancel = scheduleAfterPaint(function() {
       importOperationsInsightsPanel().catch(function() {});
@@ -2679,7 +2714,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       cancelled = true;
       cancel();
     };
-  }, [showInsightsPanelsReady, hasCriticalOperationsData]);
+  }, [showInsightsPanelsReady, hasCriticalOperationsData, detailReadyForInsights]);
 
   if (!hasCriticalOperationsData && (loading || err)) {
     return (
@@ -2705,7 +2740,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {loading ? <div className="text-xs text-[rgb(var(--muted))]">Refreshing production snapshot...</div> : null}
-            {isDeferredLoading ? <div className="text-xs text-[rgb(var(--muted))]">Loading labor, forecast, and cost overlays...</div> : null}
+            {isDeferredLoading ? <div className="text-xs text-[rgb(var(--muted))]">Loading production detail, labor, forecast, and cost overlays...</div> : null}
             {onRefreshProduction ? (
               <Button variant="outline" size="sm" onClick={onRefreshProduction} disabled={!!refreshingProduction}>
                 <span className="mr-1" aria-hidden="true">↻</span>
@@ -2731,7 +2766,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
 
       {!showInsightsPanelsReady ? (
         <Card className="px-4 py-4 text-sm text-[rgb(var(--muted))]">
-          Preparing production jobs and charts...
+          {deferredLoading.detail ? "Loading detailed production rows for jobs and charts..." : "Preparing production jobs and charts..."}
         </Card>
       ) : (
         <Suspense fallback={<Card className="px-4 py-4 text-sm text-[rgb(var(--muted))]">Loading production jobs and charts...</Card>}>
