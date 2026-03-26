@@ -4,6 +4,7 @@ import Sentry from "../_sentry.js";
 import { classifyShiftET, toEasternParts, toIso } from "../_labor.js";
 import { isMissingTableError } from "../_event-window.js";
 import { getAuthenticatedUser } from "../_session.js";
+import { refreshOpsPerformanceViews } from "./_performance-views.js";
 import { writeProductionEventsSafely } from "./_production-write.js";
 
 const CACHE_SITE_ID = process.env.CACHE_SITE_ID || "default";
@@ -121,6 +122,18 @@ export default async function handler(req, res) {
         events: events,
         correctionDays: Number(process.env.PRODUCTION_EVENT_CORRECTION_DAYS || process.env.NULOGY_EVENT_CORRECTION_DAYS || 60)
       });
+      var refreshResult = { status: "noop", details: null };
+      if (writeResult.written > 0) {
+        try {
+          refreshResult = await refreshOpsPerformanceViews(supabase);
+        } catch (refreshErr) {
+          Sentry.captureException(refreshErr);
+          refreshResult = {
+            status: "refresh_failed",
+            details: refreshErr && refreshErr.message ? refreshErr.message : "unknown"
+          };
+        }
+      }
       return res.status(200).json({
         ok: true,
         submitted: rows.length,
@@ -130,7 +143,9 @@ export default async function handler(req, res) {
         written: writeResult.written,
         deletedWindowStart: writeResult.deletedWindowStart,
         deletedWindowEnd: writeResult.deletedWindowEnd,
-        guardedDateKeys: writeResult.guardedDateKeys || []
+        guardedDateKeys: writeResult.guardedDateKeys || [],
+        performanceViewRefreshStatus: refreshResult.status,
+        performanceViewRefreshDetails: refreshResult.details
       });
     } catch (writeErr) {
       if (isMissingTableError("production_events", writeErr)) {

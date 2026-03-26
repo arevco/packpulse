@@ -43,6 +43,15 @@ function chunk(list, size) {
   return out;
 }
 
+function isMissingWorkOrderTotalsViewError(error) {
+  var msg = String((error && (error.message || error.details || error.hint)) || "").toLowerCase();
+  return msg.indexOf("ops_work_order_production_totals_mv") !== -1 && (
+    msg.indexOf("schema cache") !== -1 ||
+    msg.indexOf("could not find the table") !== -1 ||
+    msg.indexOf("relation") !== -1
+  );
+}
+
 async function fetchRowsByWorkOrderChunk(supabase, workOrderCodes) {
   var pageSize = 1000;
   var from = 0;
@@ -52,6 +61,28 @@ async function fetchRowsByWorkOrderChunk(supabase, workOrderCodes) {
     var q = await supabase
       .from("production_events")
       .select("work_order_code,item_code,units_produced")
+      .eq("site_id", CACHE_SITE_ID)
+      .in("work_order_code", workOrderCodes)
+      .range(from, to);
+    if (q.error) throw q.error;
+    var rows = Array.isArray(q.data) ? q.data : [];
+    out = out.concat(rows);
+    if (rows.length < pageSize) break;
+    from += pageSize;
+    if (from > 500000) break;
+  }
+  return out;
+}
+
+async function fetchAggregateRowsByWorkOrderChunk(supabase, workOrderCodes) {
+  var pageSize = 1000;
+  var from = 0;
+  var out = [];
+  while (true) {
+    var to = from + pageSize - 1;
+    var q = await supabase
+      .from("ops_work_order_production_totals_mv")
+      .select("work_order_code,item_code,total_units_produced,row_count")
       .eq("site_id", CACHE_SITE_ID)
       .in("work_order_code", workOrderCodes)
       .range(from, to);
@@ -108,16 +139,31 @@ export async function fetchProductionTotalsForWorkOrders(supabase, workOrders) {
   var byWorkOrder = {};
   var bySku = {};
   var matchedRows = 0;
+  var querySource = "ops_work_order_production_totals_mv";
 
   var groups = chunk(uniqueRawCodes, 100);
   for (var i = 0; i < groups.length; i++) {
-    var rows = await fetchRowsByWorkOrderChunk(supabase, groups[i]);
+    var rows = [];
+    try {
+      rows = querySource === "ops_work_order_production_totals_mv"
+        ? await fetchAggregateRowsByWorkOrderChunk(supabase, groups[i])
+        : await fetchRowsByWorkOrderChunk(supabase, groups[i]);
+    } catch (error) {
+      if (querySource === "ops_work_order_production_totals_mv" && isMissingWorkOrderTotalsViewError(error)) {
+        querySource = "production_events";
+        i -= 1;
+        continue;
+      }
+      throw error;
+    }
     rows.forEach(function(row) {
-      var units = toNum(row && row.units_produced);
+      var units = toNum(querySource === "ops_work_order_production_totals_mv" ? row && row.total_units_produced : row && row.units_produced);
       if (!(units > 0)) return;
       var woKey = normalizeWorkOrderCode(row && row.work_order_code);
       var skuKey = normalizeSkuCode(row && row.item_code);
-      matchedRows += 1;
+      matchedRows += querySource === "ops_work_order_production_totals_mv"
+        ? Math.max(1, Number(row && row.row_count) || 0)
+        : 1;
       if (woKey) byWorkOrder[woKey] = (byWorkOrder[woKey] || 0) + units;
       if (skuKey) bySku[skuKey] = (bySku[skuKey] || 0) + units;
     });
@@ -127,6 +173,7 @@ export async function fetchProductionTotalsForWorkOrders(supabase, workOrders) {
     requestedRows: refs.length,
     matchedRows: matchedRows,
     byWorkOrder: byWorkOrder,
-    bySku: bySku
+    bySku: bySku,
+    querySource: querySource
   };
 }

@@ -19,7 +19,8 @@ export default async function handler(req, res) {
       requestedRows: totals.requestedRows,
       matchedRows: totals.matchedRows,
       byWorkOrder: totals.byWorkOrder,
-      bySku: totals.bySku
+      bySku: totals.bySku,
+      querySource: totals.querySource || "production_events"
     });
   } catch (err) {
     Sentry.captureException(err);

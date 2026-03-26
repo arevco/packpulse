@@ -70,6 +70,7 @@ export default async function handler(req, res) {
     var supabase = getSupabaseAdmin();
     var plans = {};
     var unresolved = monthKeys.slice();
+    var productionActualsSource = null;
 
     var versionsQ = await supabase
       .from("forecast_versions")
@@ -115,6 +116,7 @@ export default async function handler(req, res) {
         var workOrders = Array.isArray(payload.workOrders) ? payload.workOrders : [];
         var itemMaster = Array.isArray(payload.itemMaster) ? payload.itemMaster : [];
         var productionActuals = await fetchProductionTotalsForWorkOrders(supabase, workOrders);
+        productionActualsSource = productionActuals.querySource || "production_events";
         var pricing = await getPricingRows(supabase);
         assumptionsMonths.forEach(function(monthKey) {
           var row = assumptionsByMonth[monthKey] || {};
@@ -142,7 +144,8 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       plans: plans,
-      requested: monthKeys
+      requested: monthKeys,
+      productionActualsSource: productionActualsSource
     });
   } catch (err) {
     Sentry.captureException(err);

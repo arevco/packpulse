@@ -4,6 +4,7 @@ import Sentry from "../_sentry.js";
 import { buildLaborEvents, classifyShiftET, toEasternParts, toIso } from "../_labor.js";
 import { isMissingTableError } from "../_event-window.js";
 import { getAuthenticatedUser } from "../_session.js";
+import { refreshOpsPerformanceViews } from "./_performance-views.js";
 import { writeLaborEventsSafely } from "./_labor-write.js";
 import { writeProductionEventsSafely } from "./_production-write.js";
 
@@ -413,6 +414,8 @@ export default async function handler(req, res) {
       var laborDeletedWindowStart = null;
       var laborDeletedWindowEnd = null;
       var laborGuardedDateKeys = [];
+      var performanceViewRefreshStatus = "noop";
+      var performanceViewRefreshDetails = null;
       if (productionEvents.length > 0) {
         try {
           var productionWrite = await writeProductionEventsSafely(supabase, {
@@ -457,6 +460,20 @@ export default async function handler(req, res) {
           }
         }
       }
+      if (
+        (productionWritten > 0 || laborWritten > 0) &&
+        (productionStatus === "ok" || laborStatus === "ok")
+      ) {
+        try {
+          var refreshResult = await refreshOpsPerformanceViews(supabase);
+          performanceViewRefreshStatus = refreshResult.status;
+          performanceViewRefreshDetails = refreshResult.details;
+        } catch (refreshErr) {
+          performanceViewRefreshStatus = "refresh_failed";
+          performanceViewRefreshDetails = refreshErr && refreshErr.message ? refreshErr.message : "unknown";
+          Sentry.captureException(refreshErr);
+        }
+      }
       var syncRun = await logSyncRun(supabase, {
         site_id: CACHE_SITE_ID,
         source: "snapshot",
@@ -484,6 +501,8 @@ export default async function handler(req, res) {
           laborDeletedWindowStart: laborDeletedWindowStart,
           laborDeletedWindowEnd: laborDeletedWindowEnd,
           laborGuardedDateKeys: laborGuardedDateKeys,
+          performanceViewRefreshStatus: performanceViewRefreshStatus,
+          performanceViewRefreshDetails: performanceViewRefreshDetails,
           snapshotVersion: snapshotVersion,
           cachePayloadBytes: compacted.bytes,
           cacheDroppedDatasets: compacted.dropped

@@ -103,6 +103,7 @@ export default async function handler(req, res) {
         snapshotSyncedAt: snapshot && snapshot.synced_at ? snapshot.synced_at : null,
         workOrders: workOrders.length,
         attributedWorkOrders: Object.keys(productionActuals.byWorkOrder || {}).length,
+        productionActualsSource: productionActuals.querySource || "production_events",
         itemMaster: itemMaster.length,
         pricing: pricing.length,
         laborTemplates: laborTemplates.length

@@ -20,6 +20,8 @@ Track SQL setup order and what each script provisions.
    - Forecast assumptions table
 8. `/Users/aj/Documents/New project/docs/supabase-forecast-versions.sql`
    - Forecast version snapshots
+9. `/Users/aj/Documents/New project/docs/supabase-ops-performance.sql`
+   - Covering production index + operations performance materialized views + refresh function
 
 ## Required Environment Variables
 - `SUPABASE_URL`
@@ -37,12 +39,19 @@ Track SQL setup order and what each script provisions.
   - `select count(*) from ops_shift_inputs;`
 - Login events loaded:
   - `select count(*) from user_login_events;`
+- Performance materialized views loaded:
+  - `select count(*) from ops_work_order_production_totals_mv;`
+  - `select count(*) from ops_daily_line_metrics_mv;`
+- Performance refresh function:
+  - `select public.refresh_ops_performance_views();`
 - RLS status:
   - `select schemaname, tablename, rowsecurity from pg_tables where schemaname = 'public' and tablename in ('cache_snapshots','cache_snapshot_history','production_events','labor_events','ops_shift_inputs','ops_rates','ops_sku_targets','user_login_events','forecast_versions','forecast_assumptions','sync_runs') order by tablename;`
 
 ## Common Issues
 - “Could not find table … in schema cache”
   - Run migration SQL in correct project/schema.
+- Materialized views stay stale after sync writes.
+  - Run `select public.refresh_ops_performance_views();` once, or let PackPulse refresh them automatically after future event syncs.
 - Env vars set at team scope but not attached to project.
   - Confirm vars are assigned to `packpulse` project.
 - API routes still seeing old vars.
