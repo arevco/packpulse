@@ -578,15 +578,15 @@ export default function InventoryView({ inventory, itemMaster, invMapping }) {
         <Button variant="outline" size="default" onClick={exportAllFieldsCsv} disabled={!filteredRawRows.length}>Raw CSV</Button>
       </div>
 
-      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-5">
         {summaryCards.map(function(card) {
           return (
-            <Card key={card.key} className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-3">
-              <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[rgb(var(--muted))]">{card.label}</div>
-              <div className="mt-2 text-2xl font-bold [font-variant-numeric:tabular-nums] text-[rgb(var(--foreground))]" style={{ fontFamily: mono }}>
+            <Card key={card.key} className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-2.5">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[rgb(var(--muted))]">{card.label}</div>
+              <div className="mt-1.5 text-[2rem] font-bold leading-none [font-variant-numeric:tabular-nums] text-[rgb(var(--foreground))]" style={{ fontFamily: mono }}>
                 {card.value}
               </div>
-              <div className="mt-1 text-xs text-[rgb(var(--muted))]">{card.note}</div>
+              <div className="mt-1 text-[11px] leading-tight text-[rgb(var(--muted))]">{card.note}</div>
             </Card>
           );
         })}
