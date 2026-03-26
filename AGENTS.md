@@ -9,6 +9,15 @@ This file gives Codex/AI contributors a stable operating playbook for this repo.
 - Never expose secrets in client-side code (`VITE_*` for public only).
 - Prefer minimal diffs and avoid broad refactors unless explicitly requested.
 
+## React/Vite Performance Checklist
+- Parallelize independent fetches and await late.
+- Prefer summary-first/detail-later APIs for large datasets.
+- Keep heavy views and optional libraries lazy-loaded or deferred.
+- Prefetch likely next views when the user hovers/focuses likely navigation targets.
+- Paginate or virtualize large tables before shipping.
+- Use `useDeferredValue` or `startTransition` for expensive filter/search updates.
+- See `/docs/React-Performance-Checklist.md` for the repo-specific checklist used in reviews.
+
 ## Stack
 - Frontend: React + Vite + Tailwind + shadcn-style UI
 - APIs: Vercel serverless routes in `/api`

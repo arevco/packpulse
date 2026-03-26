@@ -14,6 +14,8 @@ import AskAiPanel from "./components/AskAiPanel";
 
 var operationsViewImportPromise = null;
 var operationsInsightsPanelImportPromise = null;
+var forecastViewImportPromise = null;
+var inventoryViewImportPromise = null;
 
 function importOperationsView() {
   if (!operationsViewImportPromise) operationsViewImportPromise = import("./views/OperationsView");
@@ -25,11 +27,41 @@ function importOperationsInsightsPanel() {
   return operationsInsightsPanelImportPromise;
 }
 
+function importForecastView() {
+  if (!forecastViewImportPromise) forecastViewImportPromise = import("./views/ForecastView");
+  return forecastViewImportPromise;
+}
+
+function importInventoryView() {
+  if (!inventoryViewImportPromise) inventoryViewImportPromise = import("./views/InventoryView");
+  return inventoryViewImportPromise;
+}
+
 function prefetchOperationsView() {
   return Promise.all([
     importOperationsView(),
     importOperationsInsightsPanel()
   ]).catch(function() {});
+}
+
+function prefetchForecastView() {
+  return importForecastView().catch(function() {});
+}
+
+function prefetchInventoryView() {
+  return importInventoryView().catch(function() {});
+}
+
+function prefetchLikelyNextViews(activeView) {
+  var prefetchers = [];
+  if (activeView !== "operations") prefetchers.push(prefetchOperationsView);
+  if (activeView !== "inventory") prefetchers.push(prefetchInventoryView);
+  if (activeView !== "forecast") prefetchers.push(prefetchForecastView);
+  return prefetchers.reduce(function(chain, prefetch) {
+    return chain.then(function() {
+      return prefetch();
+    });
+  }, Promise.resolve());
 }
 
 function lazySafe(importer, name) {
@@ -80,9 +112,9 @@ function pickLooseInventoryField(row, keys) {
 }
 
 const OperationsView = lazySafe(importOperationsView, "Operations");
-const ForecastView = lazySafe(function() { return import("./views/ForecastView"); }, "Forecast");
+const ForecastView = lazySafe(importForecastView, "Forecast");
 const WorkOrdersView = lazySafe(function() { return import("./views/WorkOrdersView"); }, "Work Orders");
-const InventoryView = lazySafe(function() { return import("./views/InventoryView"); }, "Inventory");
+const InventoryView = lazySafe(importInventoryView, "Inventory");
 const SupplyRiskView = lazySafe(function() { return import("./views/SupplyRiskView"); }, "Supply Risk");
 const ItemMasterView = lazySafe(function() { return import("./views/ItemMasterView"); }, "Item Master");
 const FlagsView = lazySafe(function() { return import("./views/FlagsView"); }, "Data Flags");
@@ -251,12 +283,12 @@ export default function ProductionReadiness() {
   }, [activeView, workOrdersPermalinkState, forecastPermalinkState, operationsPermalinkState, updatePermalink]);
 
   useEffect(function() {
-    if (typeof window === "undefined" || activeView === "operations") return;
+    if (typeof window === "undefined") return;
     var cancelled = false;
     var timerId = null;
     var queuePrefetch = function() {
       if (cancelled) return;
-      prefetchOperationsView();
+      prefetchLikelyNextViews(activeView);
     };
     if (typeof window.requestIdleCallback === "function") {
       timerId = window.requestIdleCallback(queuePrefetch, { timeout: 1500 });
@@ -272,12 +304,18 @@ export default function ProductionReadiness() {
     };
   }, [activeView]);
 
+  var navPrefetchers = {
+    operations: prefetchOperationsView,
+    inventory: prefetchInventoryView,
+    forecast: prefetchForecastView,
+  };
+
   var navItems = [{key:"workorders",label:"Work Orders",count:null},{key:"inventory",label:"Inventory",count:null},{key:"operations",label:"Operations",count:null,alert:false},{key:"supplyrisk",label:"Supply Risk",count:null,alert:false},{key:"forecast",label:"Forecast",count:null,alert:false},{key:"aicopilot",label:"AI Copilot",count:null,alert:false}]
     .concat([{key:"sandbox",label:"Sandbox",count:null,alert:false}])
     .map(function(item) {
       return Object.assign({}, item, {
         href: buildPermalinkUrl(item.key, workOrdersPermalinkState, forecastPermalinkState, operationsPermalinkState),
-        onPrefetch: item.key === "operations" ? prefetchOperationsView : undefined
+        onPrefetch: navPrefetchers[item.key]
       });
     });
 
