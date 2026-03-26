@@ -23,6 +23,7 @@ async function main() {
   loadLocalEnv(process.cwd());
 
   const args = parseArgs(process.argv.slice(2));
+  const uploadSupabase = isTruthy(args["upload-supabase"]);
   const metadataPath = path.resolve(args.metadata || DEFAULT_METADATA);
   const proxyBaseUrl = String(args["proxy-base-url"] || DEFAULT_PROXY_BASE_URL || "").trim().replace(/\/$/, "");
   const proxyRoute = String(args["proxy-route"] || "legacy").trim().toLowerCase();
@@ -123,6 +124,19 @@ async function main() {
 
   await writeJson(path.join(outputDir, "manifest.json"), manifest);
 
+  let supabaseUpload = null;
+  if (uploadSupabase) {
+    const { uploadArtifactRun } = await import("./upload-artifacts-to-supabase.mjs");
+    supabaseUpload = await uploadArtifactRun({
+      cwd: process.cwd(),
+      runDir: outputDir,
+      siteId: args["site-id"] || args["supabase-site-id"] || "",
+      bucket: args["supabase-bucket"] || "",
+      createdBy: args["created-by"] || "",
+      dryRun: isTruthy(args["supabase-dry-run"]),
+    });
+  }
+
   process.stdout.write(
     JSON.stringify(
       {
@@ -131,6 +145,7 @@ async function main() {
         outputDir,
         succeeded: manifest.reports.filter((report) => report.ok).length,
         failed: manifest.reports.filter((report) => !report.ok).length,
+        supabaseUpload,
       },
       null,
       2,
@@ -158,6 +173,10 @@ function parseArgs(argv) {
 function parseInteger(value, fallback) {
   const numeric = Number(value);
   return Number.isFinite(numeric) && numeric > 0 ? Math.round(numeric) : fallback;
+}
+
+function isTruthy(value) {
+  return /^(1|true|yes)$/i.test(String(value || "").trim());
 }
 
 function loadLocalEnv(cwd) {

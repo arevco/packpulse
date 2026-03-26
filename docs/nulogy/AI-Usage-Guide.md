@@ -7,6 +7,7 @@ Use these rules whenever PackPulse work needs Nulogy data and the feature depend
 ## Selection Rules
 
 - Start from `docs/nulogy/reports-api-metadata.json`, not memory.
+- If Supabase artifact metadata is populated, query the artifact index before rerunning reports.
 - Choose the primary fact report first. Do not begin by merging dimensions together.
 - Prefer reports whose grain matches the user question: inventory snapshot, work order status, production event, labor entry, shipment line, receipt line, reject event.
 - If a required field is not present in the metadata for the current integration user, treat it as unavailable.
@@ -24,6 +25,7 @@ Use these rules whenever PackPulse work needs Nulogy data and the feature depend
 - Request all documented data fields for a report unless a smaller field set is intentional and justified.
 - Omit fixed fields from the requested column list; they are already included by the report.
 - Save the raw CSV artifact before creating transformed JSON or feature-specific tables.
+- Upload completed runs to Supabase Storage plus metadata tables when they should be shared across sessions or reused by other AI tools.
 - If row count is near the documented maximum, plan partitioned reruns before trusting the data as complete.
 - If you run through the current deployed proxy, compare returned headers with the metadata catalog before assuming full field coverage.
 
@@ -58,4 +60,24 @@ Run the full catalog after the generic proxy routes are deployed:
 
 ```bash
 npm run nulogy:artifacts -- --mode proxy --proxy-route generic --proxy-base-url https://packpulse.revcopack.com
+```
+
+Upload the latest run into the Supabase artifact store:
+
+```bash
+npm run nulogy:artifacts:upload
+```
+
+Run a catalog pull and upload it immediately:
+
+```bash
+npm run nulogy:artifacts -- --mode proxy --proxy-route generic --proxy-base-url https://packpulse.revcopack.com --upload-supabase true
+```
+
+Query uploaded artifact metadata through the app API:
+
+```bash
+curl -sS https://packpulse.revcopack.com/api/nulogy/artifact-runs?limit=5
+curl -sS "https://packpulse.revcopack.com/api/nulogy/artifact-reports?latest=true&field=lot_code"
+curl -sS "https://packpulse.revcopack.com/api/nulogy/artifact-file?latest=true&reportCode=inventory_snapshot&artifactType=raw_csv"
 ```

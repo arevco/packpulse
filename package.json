@@ -12,7 +12,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "nulogy:docs": "node scripts/nulogy/extract-reports-api-docs.mjs",
-    "nulogy:artifacts": "node scripts/nulogy/run-report-catalog.mjs"
+    "nulogy:artifacts": "node scripts/nulogy/run-report-catalog.mjs",
+    "nulogy:artifacts:upload": "node scripts/nulogy/upload-artifacts-to-supabase.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.2.0",

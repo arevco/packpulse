@@ -11,13 +11,15 @@ This repo keeps the Nulogy API workflow in versioned docs and scripts instead of
 
 1. Read `docs/nulogy/Implementation-Strategy.md` for execution rules, partitioning guidance, and artifact layout.
 2. Read `docs/nulogy/AI-Usage-Guide.md` for report selection and merge heuristics.
-3. Use `docs/nulogy/reports-api-metadata.json` or `docs/nulogy/Reports-API-Catalog.md` to inspect report fields and filters before changing code.
-4. If fresh source artifacts are needed, use `/api/nulogy/run-report` or `node scripts/nulogy/run-report-catalog.mjs` sequentially. Never plan concurrent Nulogy report runs.
+3. If the Supabase artifact store is populated, query `/api/nulogy/artifact-runs`, `/api/nulogy/artifact-reports`, or `/api/nulogy/artifact-file` before rerunning reports.
+4. Use `docs/nulogy/reports-api-metadata.json` or `docs/nulogy/Reports-API-Catalog.md` to inspect report fields and filters before changing code.
+5. If fresh source artifacts are needed, use `/api/nulogy/run-report` or `node scripts/nulogy/run-report-catalog.mjs` sequentially. Never plan concurrent Nulogy report runs.
 
 ## Guardrails
 
 - Prefer deterministic calculations after extraction. Do not treat model output as authoritative numeric logic.
 - Save raw CSV artifacts before building transforms or summaries.
+- Upload reusable runs with `node scripts/nulogy/upload-artifacts-to-supabase.mjs` or `node scripts/nulogy/run-report-catalog.mjs --upload-supabase true` when other AI tools need shared access.
 - Treat `project_code`, `job_id`, `item_code`, `lot_code`, and `pallet_number` as candidate join keys, but verify coverage in the metadata before coding.
 - If a report reaches its documented max rows, assume truncation risk and plan a partitioned pull rather than trusting the result.
 - Keep report-specific transforms separate from raw artifacts so new features can reuse the source extract.
