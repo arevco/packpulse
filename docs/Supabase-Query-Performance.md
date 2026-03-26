@@ -12,7 +12,9 @@ This enables:
 - `HypoPG`
 - `index_advisor`
 
-It also adds the latest-artifact lookup index used by [artifact-file.js](/Users/aj/Documents/New project/api/nulogy/artifact-file.js).
+It also adds:
+- the `production_events(site_id, source_snapshot_at desc)` index suggested by Query Performance for the latest-snapshot read path
+- the latest-artifact lookup index used by [artifact-file.js](/Users/aj/Documents/New project/api/nulogy/artifact-file.js)
 
 ## What To Inspect First
 Use Supabase Dashboard:
@@ -24,6 +26,7 @@ Use Supabase Dashboard:
 Priority PackPulse paths:
 - production summary/detail reads behind [production-breakdown.js](/Users/aj/Documents/New project/api/ops/production-breakdown.js)
 - labor matching reads behind [labor-actuals.js](/Users/aj/Documents/New project/api/ops/labor-actuals.js)
+- latest production snapshot reads behind [production-trends.js](/Users/aj/Documents/New project/api/cache/production-trends.js)
 - artifact latest-file reads behind [artifact-file.js](/Users/aj/Documents/New project/api/nulogy/artifact-file.js)
 
 ## How To Use The Results

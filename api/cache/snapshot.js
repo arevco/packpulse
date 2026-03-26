@@ -373,7 +373,7 @@ export default async function handler(req, res) {
           synced_at: syncedAt,
           updated_by: user.email,
         }, { onConflict: "site_id" })
-        .select("site_id,row_counts,synced_at,updated_by,payload")
+        .select("site_id,row_counts,synced_at,updated_by")
         .single();
       if (up.error) throw up.error;
       const hist = await supabase
@@ -514,7 +514,7 @@ export default async function handler(req, res) {
       return res.status(200).json({
         ok: true,
         snapshot: Object.assign({}, up.data, {
-          snapshot_version: (up.data && up.data.payload && up.data.payload.meta && up.data.payload.meta.snapshotVersion) || snapshotVersion
+          snapshot_version: snapshotVersion
         }),
         historyStatus: historyStatus,
         productionStatus: productionStatus,
