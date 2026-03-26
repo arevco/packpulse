@@ -1,4 +1,5 @@
 import Sentry from "../_sentry.js";
+import { executeReportRun } from "./_runner.js";
 
 const NULOGY_URL = process.env.NULOGY_URL || "https://app.nulogy.net";
 const INVENTORY_SNAPSHOT_PATH = process.env.NULOGY_INVENTORY_SNAPSHOT_PATH || "";
@@ -32,6 +33,20 @@ const INVENTORY_SNAPSHOT_COLUMNS = [
   "item_upc",
   "lot_code",
   "pallet_number"
+];
+const PALLET_AGING_COLUMNS = [
+  "base_quantity",
+  "base_unit_of_measure",
+  "customer_name",
+  "expiry_date",
+  "inventory_category",
+  "inventory_status",
+  "item_code",
+  "item_description",
+  "location",
+  "lot_code",
+  "pallet_number",
+  "site_name"
 ];
 
 function formatNulogyUiDateTime(date) {
@@ -277,7 +292,7 @@ function parseCurrentInventoryRows(rows, sourceLabel) {
   return out;
 }
 
-function parseLocatorRows(rows) {
+function parseLocatorRows(rows, sourceLabel) {
   const out = [];
   const statusBuckets = [
     { label: "Good", keys: ["Good", "good"] },
@@ -312,7 +327,7 @@ function parseLocatorRows(rows) {
         "Inventory Status": bucket.label,
         "Customer Name": customerName || "",
         "Base UOM": baseUom || "",
-        "Source": "item_locator"
+        "Source": sourceLabel || "item_locator"
       });
       pushed = true;
     });
@@ -329,7 +344,7 @@ function parseLocatorRows(rows) {
         "Inventory Status": singularStatus || "",
         "Customer Name": customerName || "",
         "Base UOM": baseUom || "",
-        "Source": "item_locator"
+        "Source": sourceLabel || "item_locator"
       });
     }
   });
@@ -435,7 +450,9 @@ function mergeInventoryRows(currentRows, locatorRows) {
       "Inventory Status": locatorRow["Inventory Status"] || (currentRow && currentRow["Inventory Status"]) || "",
       "Customer Name": locatorRow["Customer Name"] || (currentRow && currentRow["Customer Name"]) || "",
       "Base UOM": locatorRow["Base UOM"] || (currentRow && currentRow["Base UOM"]) || "",
-      "Source": currentRow ? "merged_inventory" : "item_locator"
+      "Source": currentRow
+        ? (String(locatorRow["Source"] || "") === "pallet_aging" ? "report_enriched_inventory" : "merged_inventory")
+        : (locatorRow["Source"] || "item_locator")
     };
   });
 
@@ -461,6 +478,119 @@ async function fetchNulogyText(path, auth) {
   return {
     text: await response.text(),
     contentType: response.headers.get("content-type") || ""
+  };
+}
+
+function summarizeReportFailure(result, report) {
+  const body = result && result.body ? result.body : {};
+  const messages = Array.isArray(body.failureMessages) ? body.failureMessages.filter(Boolean) : [];
+  if (messages.length) return messages.join(" | ");
+  if (body.error) return String(body.error);
+  return "Failed to run " + report + ".";
+}
+
+async function fetchReportCsv(report, columns) {
+  const executed = await executeReportRun({
+    report: report,
+    columns: columns,
+    waitForCompletion: true,
+    pollIntervalMs: 2500,
+    maxPolls: 60
+  });
+  if (!executed.ok) {
+    throw new Error(summarizeReportFailure(executed, report));
+  }
+  const body = executed.body || {};
+  if (!body.downloadUrl) {
+    throw new Error("Completed " + report + " run did not return a download URL.");
+  }
+  const downloadResponse = await fetch(body.downloadUrl, {
+    method: "GET",
+    headers: {
+      "Accept": "text/csv,text/plain"
+    }
+  });
+  if (!downloadResponse.ok) {
+    const text = await downloadResponse.text().catch(function() { return ""; });
+    throw new Error("Failed to download " + report + " CSV (" + downloadResponse.status + "): " + String(text || "").slice(0, 180));
+  }
+  const csvText = await downloadResponse.text();
+  const parsedRows = parseCSV(csvText);
+  return {
+    report: report,
+    rows: parsedRows,
+    headers: parsedRows.length ? Object.keys(parsedRows[0]) : [],
+    warnings: Array.isArray(body.warnings) ? body.warnings : [],
+    statusHistory: Array.isArray(body.statusHistory) ? body.statusHistory : []
+  };
+}
+
+async function fetchReportInventoryData() {
+  const attempts = [];
+  let snapshotRows = [];
+  let snapshotHeaders = [];
+  let palletRows = [];
+  let palletHeaders = [];
+
+  try {
+    const inventorySnapshot = await fetchReportCsv("inventory_snapshot", INVENTORY_SNAPSHOT_COLUMNS);
+    snapshotHeaders = inventorySnapshot.headers || [];
+    snapshotRows = parseCurrentInventoryRows(inventorySnapshot.rows, "inventory_snapshot_report");
+    attempts.push({
+      key: "inventory_snapshot_report",
+      format: "csv",
+      headers: snapshotHeaders,
+      rowCount: snapshotRows.length,
+      warnings: inventorySnapshot.warnings || []
+    });
+  } catch (error) {
+    attempts.push({
+      key: "inventory_snapshot_report",
+      error: error && error.message ? error.message : "unknown"
+    });
+    Sentry.captureException(error);
+  }
+
+  try {
+    const palletAging = await fetchReportCsv("pallet_aging", PALLET_AGING_COLUMNS);
+    palletHeaders = palletAging.headers || [];
+    palletRows = parseLocatorRows(palletAging.rows, "pallet_aging");
+    attempts.push({
+      key: "pallet_aging_report",
+      format: "csv",
+      headers: palletHeaders,
+      rowCount: palletRows.length,
+      warnings: palletAging.warnings || []
+    });
+  } catch (error) {
+    attempts.push({
+      key: "pallet_aging_report",
+      error: error && error.message ? error.message : "unknown"
+    });
+    Sentry.captureException(error);
+  }
+
+  const mergedRows = snapshotRows.length && palletRows.length
+    ? mergeInventoryRows(snapshotRows, palletRows)
+    : (palletRows.length ? coalesceRows(palletRows) : coalesceRows(snapshotRows));
+
+  if (!mergedRows.length) {
+    const detail = attempts.map(function(attempt) {
+      return attempt.key + ":" + (attempt.error || ("0 rows (" + (attempt.format || "unknown") + ")"));
+    }).join(" | ");
+    const error = new Error("No usable report-backed inventory source returned rows. " + detail);
+    error.attempts = attempts;
+    throw error;
+  }
+
+  return {
+    data: mergedRows,
+    attempts: attempts,
+    inventorySeedSource: snapshotRows.length ? "inventory_snapshot_report" : (palletRows.length ? "pallet_aging_report" : ""),
+    inventorySeedHeaders: snapshotHeaders,
+    inventorySeedRows: snapshotRows.length,
+    itemLocatorHeaders: palletHeaders,
+    itemLocatorRows: palletRows.length
   };
 }
 
@@ -546,6 +676,38 @@ export default async function handler(req, res) {
   const auth = Buffer.from(user + ":" + pass).toString("base64");
 
   try {
+    try {
+      const reportData = await fetchReportInventoryData();
+      return res.status(200).json({
+        data: reportData.data,
+        rowCount: reportData.data.length,
+        columns: reportData.data.length ? Object.keys(reportData.data[0]) : [],
+        diagnostics: {
+          inventorySeedSource: reportData.inventorySeedSource,
+          inventorySeedHeaders: reportData.inventorySeedHeaders || [],
+          inventorySeedRows: reportData.inventorySeedRows || 0,
+          inventorySeedFormat: "csv",
+          inventorySeedContentType: "text/csv",
+          inventorySeedAttempts: (reportData.attempts || []).map(function(attempt) {
+            return {
+              key: attempt.key,
+              format: attempt.format,
+              headers: attempt.headers,
+              rowCount: attempt.rowCount,
+              error: attempt.error,
+              warnings: attempt.warnings
+            };
+          }),
+          itemLocatorHeaders: reportData.itemLocatorHeaders || [],
+          itemLocatorRows: reportData.itemLocatorRows || 0,
+          itemLocatorFormat: "csv",
+          itemLocatorError: ""
+        }
+      });
+    } catch (reportErr) {
+      Sentry.captureException(reportErr);
+    }
+
     const inventorySeed = await fetchInventorySeed(auth);
 
     let itemLocatorHeaders = [];
@@ -557,7 +719,7 @@ export default async function handler(req, res) {
       const locatorPayload = await fetchNulogyText(ITEM_LOCATOR_PATH, auth);
       const locatorParsed = parseUnknownInventoryPayload(locatorPayload.text, locatorPayload.contentType);
       itemLocatorHeaders = locatorParsed.headers || [];
-      itemLocatorRows = parseLocatorRows(locatorParsed.rows);
+      itemLocatorRows = parseLocatorRows(locatorParsed.rows, "item_locator");
       itemLocatorFormat = locatorParsed.format || "";
     } catch (locatorErr) {
       itemLocatorError = locatorErr && locatorErr.message ? locatorErr.message : "unknown_locator_error";

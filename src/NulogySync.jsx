@@ -84,7 +84,7 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
     if (abortRef.current) return null;
 
     if (type === "inventory") {
-      updateReportState(type, { status: DOWNLOADING, progress: "Pulling inventory snapshot and locator data...", error: null });
+      updateReportState(type, { status: DOWNLOADING, progress: "Pulling enriched inventory data...", error: null });
       try {
         const richRes = await fetch("/api/nulogy/inventory-rich");
         const richBody = await richRes.json();
@@ -93,7 +93,7 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
         console.log("[Nulogy] inventory-rich diagnostics:", richBody && richBody.diagnostics ? richBody.diagnostics : {});
         updateReportState(type, {
           status: DONE,
-          progress: `${Number(richBody && richBody.rowCount || 0).toLocaleString()} rows (inventory snapshot + locator)`,
+          progress: `${Number(richBody && richBody.rowCount || 0).toLocaleString()} enriched inventory rows`,
           rowCount: Number(richBody && richBody.rowCount) || 0
         });
         return { type, data: Array.isArray(richBody && richBody.data) ? richBody.data : [], rowCount: Number(richBody && richBody.rowCount) || 0 };

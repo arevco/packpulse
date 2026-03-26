@@ -513,7 +513,7 @@ export default function InventoryView({ inventory, itemMaster, invMapping }) {
           {!hasLotColumn && !hasExpiryColumn ? " quantity/status rows" : ""}
           , but it does not include
           {!hasLocationColumn && !hasPalletColumn ? " location or pallet data" : (!hasLocationColumn ? " location data" : " pallet data")}
-          . Full location lookup requires the richer snapshot + locator merge to succeed.
+          . Full location lookup depends on the report-backed inventory enrichment succeeding.
         </div>
       ) : null}
 
