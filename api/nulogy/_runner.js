@@ -6,6 +6,7 @@ const DEFAULT_POLL_INTERVAL_MS = 2500;
 const DEFAULT_MAX_POLLS = 12;
 const MAX_POLL_INTERVAL_MS = 10000;
 const MAX_MAX_POLLS = 90;
+const DEFAULT_FULL_HISTORY_FROM = "2000-01-01T00:00:00";
 
 export function withNulogyCors(res, methods) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -48,6 +49,7 @@ export function normalizeRunReportRequest(input, defaults) {
   var waitForCompletion = body.waitForCompletion !== false;
   var pollIntervalMs = clampNumber(body.pollIntervalMs, DEFAULT_POLL_INTERVAL_MS, 250, MAX_POLL_INTERVAL_MS);
   var maxPolls = clampNumber(body.maxPolls, DEFAULT_MAX_POLLS, 1, MAX_MAX_POLLS);
+  filters = applyDefaultReportFilters(report, filters, warnings);
 
   var requestBody = {
     report: report,
@@ -193,15 +195,16 @@ export async function executeReportRun(input) {
       };
     }
     if (!created.ok) {
+      var createFailure = classifyNulogyFailure(created.text);
       return {
         ok: false,
-        statusCode: created.status || 502,
-        body: {
+        statusCode: createFailure.blocked ? 409 : (created.status || 502),
+        body: Object.assign({
           error: "Failed to create Nulogy report run.",
           report: normalized.report,
           requestBody: normalized.requestBody,
           nulogyResponse: created.text.slice(0, 1000)
-        }
+        }, createFailure)
       };
     }
 
@@ -248,10 +251,11 @@ export async function executeReportRun(input) {
 
     var polled = await pollReportRun(statusUrl, authHeader, normalized);
     if (!polled.ok) {
+      var pollFailure = classifyNulogyFailure(polled.error || "");
       return {
         ok: false,
-        statusCode: 502,
-        body: Object.assign({}, baseBody, {
+        statusCode: pollFailure.blocked ? 409 : 502,
+        body: Object.assign({}, baseBody, pollFailure, {
           error: polled.error,
           statusHistory: polled.statusHistory || []
         })
@@ -374,6 +378,115 @@ function normalizeLocale(value) {
 
 function normalizeOptionalString(value) {
   return String(value == null ? "" : value).trim();
+}
+
+function applyDefaultReportFilters(report, filters, warnings) {
+  var existing = Array.isArray(filters) ? filters.slice() : [];
+  if (report === "consumption_by_lot" && !hasAnyFilter(existing, ["consumed_at", "consumed_date", "finished_good_pallet", "subcomponent_consumption_pallet"])) {
+    warnings.push("Auto-applied consumption_by_lot consumed_at filter window because Nulogy requires one.");
+    return existing.concat([buildRecentDateTimeWindow("consumed_at", Number(process.env.NULOGY_CONSUMPTION_BY_LOT_LOOKBACK_DAYS || 31))]);
+  }
+  if (report === "weekly_consumption" && !hasAnyFilter(existing, ["consumed_at", "consumed_date"])) {
+    warnings.push("Auto-applied weekly_consumption consumed_at filter window because Nulogy requires one.");
+    return existing.concat([buildRecentDateTimeWindow("consumed_at", Number(process.env.NULOGY_WEEKLY_CONSUMPTION_LOOKBACK_DAYS || 10))]);
+  }
+  if (report === "weekly_inventory_adjustment_summary" && !hasAnyFilter(existing, ["created_at"])) {
+    warnings.push("Auto-applied weekly_inventory_adjustment_summary created_at filter window because Nulogy requires one.");
+    return existing.concat([buildRecentDateTimeWindow("created_at", Number(process.env.NULOGY_WEEKLY_INVENTORY_ADJUSTMENT_LOOKBACK_DAYS || 10))]);
+  }
+  if (report === "pallet_storage" && !hasAnyFilter(existing, ["stored_since"])) {
+    warnings.push("Auto-applied pallet_storage stored_since filter window because Nulogy fails without it.");
+    return existing.concat([buildFullHistoryDateTimeWindow("stored_since", process.env.NULOGY_PALLET_STORAGE_FROM_DATE || DEFAULT_FULL_HISTORY_FROM)]);
+  }
+  return existing;
+}
+
+function hasAnyFilter(filters, columns) {
+  var lookup = {};
+  columns.forEach(function(column) {
+    lookup[String(column || "").trim()] = true;
+  });
+  return (filters || []).some(function(filter) {
+    return !!lookup[String(filter && filter.column || "").trim()];
+  });
+}
+
+function buildRecentDateTimeWindow(column, lookbackDays) {
+  var end = new Date();
+  end.setDate(end.getDate() + 1);
+  var start = new Date(end.getTime() - Math.max(1, lookbackDays) * 24 * 60 * 60 * 1000);
+  return {
+    column: column,
+    operator: "between",
+    from_threshold: formatNulogyDateTime(start),
+    to_threshold: formatNulogyDateTime(end)
+  };
+}
+
+function buildFullHistoryDateTimeWindow(column, fromValue) {
+  var start = new Date(fromValue || DEFAULT_FULL_HISTORY_FROM);
+  if (isNaN(start)) start = new Date(DEFAULT_FULL_HISTORY_FROM);
+  var end = new Date();
+  end.setDate(end.getDate() + 1);
+  return {
+    column: column,
+    operator: "between",
+    from_threshold: formatNulogyDateTime(start),
+    to_threshold: formatNulogyDateTime(end)
+  };
+}
+
+function formatNulogyDateTime(date) {
+  var d = date instanceof Date ? date : new Date(date);
+  if (isNaN(d)) return "";
+  var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  var year = d.getFullYear();
+  var month = months[d.getMonth()];
+  var day = String(d.getDate()).padStart(2, "0");
+  var hour24 = d.getHours();
+  var minute = String(d.getMinutes()).padStart(2, "0");
+  var ampm = hour24 >= 12 ? "PM" : "AM";
+  var hour12 = hour24 % 12;
+  if (hour12 === 0) hour12 = 12;
+  return year + "-" + month + "-" + day + " " + hour12 + ":" + minute + " " + ampm;
+}
+
+function classifyNulogyFailure(text) {
+  var messages = extractFailureMessages(text);
+  var joined = messages.join(" ").toLowerCase();
+  var details = {};
+  if (!messages.length) return details;
+  details.failureMessages = messages;
+  if (joined.indexOf("custom units of measure enabled") >= 0) {
+    details.blocked = true;
+    details.blockedReason = "account_feature_disabled";
+  }
+  if (joined.indexOf("must be added") >= 0 || joined.indexOf("your search must include") >= 0) {
+    details.requiresFilters = true;
+  }
+  return details;
+}
+
+function extractFailureMessages(text) {
+  var value = String(text || "").trim();
+  if (!value) return [];
+  try {
+    var parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) return parsed.map(String);
+    if (parsed && typeof parsed === "object") {
+      if (Array.isArray(parsed.errors)) return parsed.errors.map(String);
+      if (Array.isArray(parsed.failureMessages)) return parsed.failureMessages.map(String);
+      if (typeof parsed.error === "string") return [parsed.error];
+      if (typeof parsed.nulogyResponse === "string") return extractFailureMessages(parsed.nulogyResponse);
+    }
+  } catch (error) {
+    // Ignore JSON parsing failure and fall back to regex extraction below.
+  }
+  var quoted = value.match(/"([^"]+)"/g);
+  if (quoted && quoted.length) {
+    return quoted.map(function(entry) { return entry.slice(1, -1); });
+  }
+  return [value];
 }
 
 function clampNumber(value, fallback, min, max) {

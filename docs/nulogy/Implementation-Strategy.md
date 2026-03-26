@@ -45,6 +45,14 @@ Example from the live proxy pull:
 
 That behavior is a limitation of the current PackPulse proxy, not of the Nulogy documentation parser.
 
+Some reports also have hidden operational constraints that are not fully expressed by the generated documentation. Current known cases:
+
+- `consumption_by_lot` requires a pallet or consumption-date filter and limits `consumed_at` windows to 31 days
+- `weekly_consumption` requires a consumption filter and limits the window to 10 days
+- `weekly_inventory_adjustment_summary` requires an adjusted-date filter and limits the window to 10 days
+- `pallet_storage` fails without a `stored_since` range
+- `uom_ratios` is blocked entirely when the tenant does not have custom units of measure enabled
+
 ## Data Extraction Model
 
 ### 1. Metadata first

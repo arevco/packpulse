@@ -39,6 +39,11 @@ Notes:
 - `sort_by` accepts only one column. Extra entries are ignored and returned as warnings.
 - `waitForCompletion: false` returns quickly with `statusUrl`.
 - `waitForCompletion: true` returns `200` when completed or `202` when polling timed out.
+- Some reports auto-apply required filters when you omit them:
+  - `consumption_by_lot`: recent `consumed_at` window
+  - `weekly_consumption`: recent `consumed_at` window
+  - `weekly_inventory_adjustment_summary`: recent `created_at` window
+  - `pallet_storage`: broad `stored_since` window
 
 ### `POST /api/nulogy/run-catalog`
 

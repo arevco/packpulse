@@ -39,7 +39,8 @@ export default async function handler(req, res) {
     // When COMPLETED, the download URL may be exposed as either url or download_url
     return res.status(200).json({
       status: data.status,
-      downloadUrl: data.download_url || data.url || null
+      downloadUrl: data.download_url || data.url || null,
+      errors: Array.isArray(data.errors) ? data.errors : null
     });
 
   } catch (err) {
