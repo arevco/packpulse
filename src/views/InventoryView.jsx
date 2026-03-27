@@ -569,8 +569,6 @@ export default function InventoryView({ inventory, itemMaster, invMapping, inven
       "qty_on_hand",
       "base_uom",
       "status",
-      "source",
-      "site_name",
       "zone"
     ];
     var lines = [headers.join(",")];
@@ -588,8 +586,6 @@ export default function InventoryView({ inventory, itemMaster, invMapping, inven
         csvCell(String(Math.round((row.qtyOnHand || 0) * 100) / 100)),
         csvCell(row.baseUom || ""),
         csvCell(row.status),
-        csvCell(row.source || ""),
-        csvCell(row.siteName || ""),
         csvCell(row.zone || "")
       ].join(","));
     });
@@ -724,7 +720,7 @@ export default function InventoryView({ inventory, itemMaster, invMapping, inven
           <Button variant="outline" size="sm" onClick={resetFilters}>Clear</Button>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="sm" onClick={exportCsv} disabled={!activeRows.length}>CSV</Button>
+          <Button variant="outline" size="sm" onClick={exportCsv} disabled={!activeRows.length}>Export CSV</Button>
           <Button variant="outline" size="sm" onClick={exportAllFieldsCsv} disabled={!filteredRawRows.length}>Raw CSV</Button>
         </div>
       </div>
@@ -829,11 +825,9 @@ export default function InventoryView({ inventory, itemMaster, invMapping, inven
                 {hasLotColumn ? <th style={thC(sortField === "lotCode")}><SortHeaderButton onClick={function() { handleSort("lotCode"); }}>Lot Code</SortHeaderButton></th> : null}
                 {hasExpiryColumn ? <th style={thC(sortField === "daysToExpiry")}><SortHeaderButton onClick={function() { handleSort("daysToExpiry"); }}>Expiry</SortHeaderButton></th> : null}
                 {hasPalletColumn ? <th style={thC(sortField === "palletNumber")}><SortHeaderButton onClick={function() { handleSort("palletNumber"); }}>Pallet</SortHeaderButton></th> : null}
-                {viewMode === "raw" && hasSiteColumn ? <th style={thC(sortField === "siteName")}><SortHeaderButton onClick={function() { handleSort("siteName"); }}>Site</SortHeaderButton></th> : null}
                 {viewMode === "raw" && hasZoneColumn ? <th style={thC(sortField === "zone")}><SortHeaderButton onClick={function() { handleSort("zone"); }}>Zone</SortHeaderButton></th> : null}
                 <th style={thC(sortField === "qtyOnHand")}><SortHeaderButton onClick={function() { handleSort("qtyOnHand"); }}>Qty On Hand</SortHeaderButton></th>
                 <th style={thC(sortField === "status")}><SortHeaderButton onClick={function() { handleSort("status"); }}>Status</SortHeaderButton></th>
-                {viewMode === "raw" && hasSourceColumn ? <th style={thC(sortField === "source")}><SortHeaderButton onClick={function() { handleSort("source"); }}>Source</SortHeaderButton></th> : null}
               </tr>
             </thead>
             <tbody>
@@ -857,19 +851,17 @@ export default function InventoryView({ inventory, itemMaster, invMapping, inven
                       </td>
                     ) : null}
                     {hasPalletColumn ? <td style={Object.assign({}, tdN, { fontFamily: mono })}>{row.palletNumber || "--"}</td> : null}
-                    {viewMode === "raw" && hasSiteColumn ? <td style={Object.assign({}, tdN, truncate(140))}>{row.siteName || "--"}</td> : null}
                     {viewMode === "raw" && hasZoneColumn ? <td style={Object.assign({}, tdN, truncate(120))}>{row.zone || "--"}</td> : null}
                     <td style={Object.assign({}, tdM, { fontWeight: 700, color: C.ok })}>
                       {Math.round((row.qtyOnHand || 0) * 100) / 100}
                       {row.baseUom ? <span style={{ marginLeft: 6, color: C.dim, fontWeight: 500 }}>{row.baseUom}</span> : null}
                     </td>
                     <td style={tdN}><Badge variant={statusVariant(row.status)}>{row.status}</Badge></td>
-                    {viewMode === "raw" && hasSourceColumn ? <td style={Object.assign({}, tdN, truncate(180))}>{row.source || "--"}</td> : null}
                   </tr>
                 );
               }) : (
                 <tr>
-                  <td colSpan={2 + (hasCustomerColumn ? 1 : 0) + (viewMode === "raw" && hasItemCategoryColumn ? 1 : 0) + (hasLocationColumn ? 1 : 0) + (hasLotColumn ? 1 : 0) + (hasExpiryColumn ? 1 : 0) + (hasPalletColumn ? 1 : 0) + (viewMode === "raw" && hasSiteColumn ? 1 : 0) + (viewMode === "raw" && hasZoneColumn ? 1 : 0) + 2 + (viewMode === "raw" && hasSourceColumn ? 1 : 0)} style={Object.assign({}, tdN, { padding: "28px 16px", textAlign: "center", color: C.dim })}>
+                  <td colSpan={2 + (hasCustomerColumn ? 1 : 0) + (viewMode === "raw" && hasItemCategoryColumn ? 1 : 0) + (hasLocationColumn ? 1 : 0) + (hasLotColumn ? 1 : 0) + (hasExpiryColumn ? 1 : 0) + (hasPalletColumn ? 1 : 0) + (viewMode === "raw" && hasZoneColumn ? 1 : 0) + 2} style={Object.assign({}, tdN, { padding: "28px 16px", textAlign: "center", color: C.dim })}>
                     No inventory rows match the current filters.
                   </td>
                 </tr>
