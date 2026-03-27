@@ -44,6 +44,12 @@ function createBlankTask(boardKey) {
   };
 }
 
+function createDraftTask(boardKey, ownerEmail) {
+  var task = createBlankTask(boardKey);
+  if (ownerEmail) task.owner_email = ownerEmail;
+  return task;
+}
+
 function sortRows(rows) {
   return (Array.isArray(rows) ? rows.slice() : []).sort(function(a, b) {
     var boardCompare = String(a.board_key || "").localeCompare(String(b.board_key || ""));
@@ -81,16 +87,73 @@ function nextStatus(status) {
   return "todo";
 }
 
+function nextStatusLabel(status) {
+  if (status === "todo") return "Start";
+  if (status === "working") return "Mark Waiting";
+  if (status === "waiting") return "Mark Done";
+  return "Reopen";
+}
+
+function normalizeSearchText(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function rowMatchesSearch(row, query) {
+  if (!query) return true;
+  var haystack = [
+    row.title,
+    row.owner_email,
+    row.customer_name,
+    row.project_name,
+    row.notes
+  ].join(" ").toLowerCase();
+  return haystack.indexOf(query) !== -1;
+}
+
+function isOverdue(row) {
+  if (!row || !row.due_date || row.status === "done") return false;
+  var today = new Date();
+  var current = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  var due = new Date(String(row.due_date) + "T00:00:00").getTime();
+  return Number.isFinite(due) && due < current;
+}
+
+function isDueSoon(row) {
+  if (!row || !row.due_date || row.status === "done") return false;
+  var today = new Date();
+  var current = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  var due = new Date(String(row.due_date) + "T00:00:00").getTime();
+  if (!Number.isFinite(due)) return false;
+  var diffDays = Math.round((due - current) / 86400000);
+  return diffDays >= 0 && diffDays <= 3;
+}
+
+function dueBadge(row) {
+  if (isOverdue(row)) return { label: "Overdue", variant: "danger" };
+  if (isDueSoon(row)) return { label: "Due Soon", variant: "warning" };
+  if (row && row.due_date) return { label: "Due " + formatDateLabel(row.due_date), variant: "secondary" };
+  return null;
+}
+
 export default function TeamBoardView() {
   var [boardKey, setBoardKey] = useState("recurring");
   var [cadenceFilter, setCadenceFilter] = useState("all");
+  var [searchQuery, setSearchQuery] = useState("");
+  var [showOnlyMine, setShowOnlyMine] = useState(false);
+  var [showOnlyUrgent, setShowOnlyUrgent] = useState(false);
+  var [currentUserEmail, setCurrentUserEmail] = useState("");
   var [rows, setRows] = useState([]);
   var [loading, setLoading] = useState(true);
   var [saving, setSaving] = useState(false);
   var [error, setError] = useState("");
   var [statusMessage, setStatusMessage] = useState("");
   var [apiStatus, setApiStatus] = useState("");
-  var [draft, setDraft] = useState(createBlankTask("recurring"));
+  var [draft, setDraft] = useState(createDraftTask("recurring", ""));
+
+  useEffect(function() {
+    if (typeof window === "undefined" || !window.__ppUser || !window.__ppUser.email) return;
+    setCurrentUserEmail(String(window.__ppUser.email || "").trim().toLowerCase());
+  }, []);
 
   var loadRows = useCallback(async function() {
     setLoading(true);
@@ -117,18 +180,25 @@ export default function TeamBoardView() {
 
   useEffect(function() {
     setCadenceFilter("all");
+    setSearchQuery("");
+    setShowOnlyMine(false);
+    setShowOnlyUrgent(false);
     setDraft(function(prev) {
-      return prev && prev.id && prev.board_key === boardKey ? prev : createBlankTask(boardKey);
+      return prev && prev.id && prev.board_key === boardKey ? prev : createDraftTask(boardKey, currentUserEmail);
     });
-  }, [boardKey]);
+  }, [boardKey, currentUserEmail]);
 
   var boardRows = useMemo(function() {
+    var query = normalizeSearchText(searchQuery);
     return rows.filter(function(row) {
       if (row.board_key !== boardKey) return false;
-      if (boardKey !== "recurring" || cadenceFilter === "all") return true;
-      return row.cadence === cadenceFilter;
+      if (boardKey === "recurring" && cadenceFilter !== "all" && row.cadence !== cadenceFilter) return false;
+      if (showOnlyMine && currentUserEmail && String(row.owner_email || "").trim().toLowerCase() !== currentUserEmail) return false;
+      if (showOnlyUrgent && !isOverdue(row) && !isDueSoon(row)) return false;
+      if (!rowMatchesSearch(row, query)) return false;
+      return true;
     });
-  }, [rows, boardKey, cadenceFilter]);
+  }, [rows, boardKey, cadenceFilter, searchQuery, showOnlyMine, showOnlyUrgent, currentUserEmail]);
 
   var summary = useMemo(function() {
     return STATUS_COLUMNS.reduce(function(out, column) {
@@ -154,8 +224,8 @@ export default function TeamBoardView() {
   };
 
   var resetDraft = useCallback(function(nextBoardKey) {
-    setDraft(createBlankTask(nextBoardKey || boardKey));
-  }, [boardKey]);
+    setDraft(createDraftTask(nextBoardKey || boardKey, currentUserEmail));
+  }, [boardKey, currentUserEmail]);
 
   var upsertLocalRow = function(row) {
     setRows(function(prev) {
@@ -296,6 +366,21 @@ export default function TeamBoardView() {
     }
   }, []);
 
+  var mineVisibleCount = useMemo(function() {
+    if (!currentUserEmail) return 0;
+    return boardRows.filter(function(row) {
+      return String(row.owner_email || "").trim().toLowerCase() === currentUserEmail;
+    }).length;
+  }, [boardRows, currentUserEmail]);
+
+  var urgentVisibleCount = useMemo(function() {
+    return boardRows.filter(function(row) {
+      return isOverdue(row) || isDueSoon(row);
+    }).length;
+  }, [boardRows]);
+
+  var showBoardEmptyState = !loading && apiStatus !== "missing_team_board_table" && boardRows.length === 0;
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -332,6 +417,19 @@ export default function TeamBoardView() {
           })}
         </div>
       ) : null}
+
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr),auto] lg:items-center">
+        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr),auto,auto]">
+          <Input value={searchQuery} onChange={function(event) { setSearchQuery(event.target.value); }} placeholder="Search title, owner, customer, project, or notes" />
+          <Button size="sm" variant={showOnlyMine ? "active" : "outline"} onClick={function() { setShowOnlyMine(function(prev) { return !prev; }); }} disabled={!currentUserEmail}>
+            {currentUserEmail ? "My Tasks (" + mineVisibleCount + ")" : "My Tasks"}
+          </Button>
+          <Button size="sm" variant={showOnlyUrgent ? "active" : "outline"} onClick={function() { setShowOnlyUrgent(function(prev) { return !prev; }); }}>
+            Urgent ({urgentVisibleCount})
+          </Button>
+        </div>
+        <div className="text-xs text-[rgb(var(--muted))]">{boardRows.length} visible tasks</div>
+      </div>
 
       {error ? <Card className="border-[rgb(var(--danger))] p-3 text-sm text-[rgb(var(--danger))]">{error}</Card> : null}
       {statusMessage ? <Card className="border-[rgb(var(--border))] p-3 text-sm text-[rgb(var(--muted))]">{statusMessage}</Card> : null}
@@ -441,61 +539,82 @@ export default function TeamBoardView() {
 
             <div className="flex flex-wrap gap-2 pt-1">
               <Button size="sm" variant="default" onClick={handleSave} disabled={saving}>{draft.id ? "Save Changes" : "Add Task"}</Button>
-              <Button size="sm" variant="outline" onClick={function() { resetDraft(boardKey); }} disabled={saving}>Reset</Button>
+              <Button size="sm" variant="outline" onClick={function() { resetDraft(boardKey); }} disabled={saving}>{draft.id ? "Cancel Edit" : "Reset"}</Button>
             </div>
           </CardContent>
         </Card>
 
-        <div className="grid gap-4 xl:grid-cols-4">
-          {columns.map(function(column) {
-            return (
-              <div key={column.key} className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="text-sm font-semibold text-[rgb(var(--foreground))]">{column.label}</div>
-                  <Badge variant={statusVariant(column.key)}>{column.rows.length}</Badge>
-                </div>
-                {loading ? (
-                  <Card className="p-4 text-sm text-[rgb(var(--muted))]">Loading tasks...</Card>
-                ) : column.rows.length ? (
-                  column.rows.map(function(row) {
-                    return (
-                      <Card key={row.id}>
-                        <CardHeader className="pb-2">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="text-sm font-semibold text-[rgb(var(--foreground))]">{row.title}</div>
-                            <Badge variant={priorityVariant(row.priority)}>{row.priority}</Badge>
-                          </div>
-                        </CardHeader>
-                        <CardContent className="space-y-3">
-                          <div className="flex flex-wrap gap-2">
-                            <Badge variant={statusVariant(row.status)}>{row.status}</Badge>
-                            <Badge variant="secondary">{row.cadence === "adhoc" ? "Ad hoc" : row.cadence}</Badge>
-                            {row.customer_name ? <Badge variant="info">{row.customer_name}</Badge> : null}
-                            {row.project_name ? <Badge variant="info">{row.project_name}</Badge> : null}
-                          </div>
-                          {(row.owner_email || row.due_date) ? (
-                            <div className="text-xs text-[rgb(var(--muted))]">
-                              {row.owner_email ? <div>{row.owner_email}</div> : null}
-                              {row.due_date ? <div>Due {formatDateLabel(row.due_date)}</div> : null}
+        {showBoardEmptyState ? (
+          <Card className="p-6">
+            <div className="text-base font-semibold text-[rgb(var(--foreground))]">No matching tasks yet</div>
+            <div className="mt-2 max-w-2xl text-sm text-[rgb(var(--muted))]">
+              {rows.length
+                ? "Your current filters removed everything from view. Clear the filters or add a new task for this board."
+                : "Start with starter tasks, or add your first task manually. Keep recurring items short and actionable so the board stays easy to maintain."}
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {!rows.length ? <Button size="sm" variant="outline" onClick={handleSeed} disabled={saving}>Seed Starter Tasks</Button> : null}
+              <Button size="sm" variant="soft" onClick={function() {
+                setSearchQuery("");
+                setShowOnlyMine(false);
+                setShowOnlyUrgent(false);
+                setCadenceFilter("all");
+                resetDraft(boardKey);
+              }}>Clear Filters</Button>
+            </div>
+          </Card>
+        ) : (
+          <div className="grid gap-4 xl:grid-cols-4">
+            {columns.map(function(column) {
+              return (
+                <div key={column.key} className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm font-semibold text-[rgb(var(--foreground))]">{column.label}</div>
+                    <Badge variant={statusVariant(column.key)}>{column.rows.length}</Badge>
+                  </div>
+                  {loading ? (
+                    <Card className="p-4 text-sm text-[rgb(var(--muted))]">Loading tasks...</Card>
+                  ) : column.rows.length ? (
+                    column.rows.map(function(row) {
+                      var due = dueBadge(row);
+                      return (
+                        <Card key={row.id}>
+                          <CardHeader className="pb-2">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="text-sm font-semibold text-[rgb(var(--foreground))]">{row.title}</div>
+                              <Badge variant={priorityVariant(row.priority)}>{row.priority}</Badge>
                             </div>
-                          ) : null}
-                          {row.notes ? <div className="text-sm text-[rgb(var(--muted))]">{row.notes}</div> : null}
-                          <div className="flex flex-wrap gap-2">
-                            <Button size="sm" variant="outline" onClick={function() { handleStatusAdvance(row); }} disabled={saving}>{row.status === "done" ? "Reopen" : "Move Next"}</Button>
-                            <Button size="sm" variant="soft" onClick={function() { handleEdit(row); }} disabled={saving}>Edit</Button>
-                            <Button size="sm" variant="ghost" onClick={function() { handleArchive(row); }} disabled={saving}>Archive</Button>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    );
-                  })
-                ) : (
-                  <Card className="p-4 text-sm text-[rgb(var(--muted))]">No tasks in this column yet.</Card>
-                )}
-              </div>
-            );
-          })}
-        </div>
+                          </CardHeader>
+                          <CardContent className="space-y-3">
+                            <div className="flex flex-wrap gap-2">
+                              <Badge variant="secondary">{row.cadence === "adhoc" ? "Ad hoc" : row.cadence}</Badge>
+                              {due ? <Badge variant={due.variant}>{due.label}</Badge> : null}
+                              {row.customer_name ? <Badge variant="info">{row.customer_name}</Badge> : null}
+                              {row.project_name ? <Badge variant="info">{row.project_name}</Badge> : null}
+                            </div>
+                            {row.owner_email ? (
+                              <div className="text-xs text-[rgb(var(--muted))]">
+                                <div>{row.owner_email}</div>
+                              </div>
+                            ) : null}
+                            {row.notes ? <div className="text-sm text-[rgb(var(--muted))]">{row.notes}</div> : null}
+                            <div className="flex flex-wrap gap-2">
+                              <Button size="sm" variant="outline" onClick={function() { handleStatusAdvance(row); }} disabled={saving}>{nextStatusLabel(row.status)}</Button>
+                              <Button size="sm" variant="soft" onClick={function() { handleEdit(row); }} disabled={saving}>Edit</Button>
+                              <Button size="sm" variant="ghost" onClick={function() { handleArchive(row); }} disabled={saving}>Archive</Button>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })
+                  ) : (
+                    <Card className="p-4 text-sm text-[rgb(var(--muted))]">No tasks in this column yet.</Card>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
