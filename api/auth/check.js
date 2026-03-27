@@ -24,7 +24,7 @@ export default function handler(req, res) {
       return res.status(401).json({ authenticated: false });
     }
 
-    let userInfo = { email: user.email, access: null };
+    let userInfo = { email: user.email };
     try {
       const userCookie = cookies.pp_user;
       if (userCookie) userInfo = JSON.parse(decodeURIComponent(userCookie));

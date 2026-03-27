@@ -4,8 +4,8 @@
 import { createClient } from "@supabase/supabase-js";
 import Sentry from "../_sentry.js";
 import { SESSION_SECRET_MISSING_ERROR, signSession } from "../_session.js";
-import { normalizeEmail, resolveEmailAccess } from "./_access.js";
 
+const ALLOWED_DOMAIN = process.env.ALLOWED_DOMAIN || "revcopack.com";
 const SESSION_DAYS = 7;
 const CACHE_SITE_ID = process.env.CACHE_SITE_ID || "default";
 
@@ -43,26 +43,25 @@ export default async function handler(req, res) {
     }
 
     const tokenData = await verifyRes.json();
-    const email = normalizeEmail(tokenData.email || "");
+    const email = (tokenData.email || "").toLowerCase();
     const name = tokenData.name || "";
     const picture = tokenData.picture || "";
 
-    const accessDecision = resolveEmailAccess(email);
-    if (!accessDecision.ok) {
+    // Check email domain
+    const domain = email.split("@")[1];
+    if (domain !== ALLOWED_DOMAIN.toLowerCase()) {
       return res.status(403).json({
-        error: accessDecision.error,
-        email: email,
-        access: accessDecision.access || null,
+        error: `Access restricted to @${ALLOWED_DOMAIN} accounts`,
+        email: email
       });
     }
 
     // Create signed session cookie
     const sessionValue = signSession(email, SESSION_DAYS);
-    const userPayload = { email, name, picture, access: accessDecision.access };
 
     res.setHeader("Set-Cookie", [
       `pp_session=${sessionValue}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_DAYS * 86400}; ${process.env.NODE_ENV === "production" ? "Secure;" : ""}`,
-      `pp_user=${encodeURIComponent(JSON.stringify(userPayload))}; Path=/; SameSite=Lax; Max-Age=${SESSION_DAYS * 86400}; ${process.env.NODE_ENV === "production" ? "Secure;" : ""}`
+      `pp_user=${encodeURIComponent(JSON.stringify({ email, name, picture }))}; Path=/; SameSite=Lax; Max-Age=${SESSION_DAYS * 86400}; ${process.env.NODE_ENV === "production" ? "Secure;" : ""}`
     ]);
 
     // Best-effort login audit trail. Never block authentication on audit write failures.
@@ -86,7 +85,7 @@ export default async function handler(req, res) {
       Sentry.captureException(auditErr);
     }
 
-    return res.status(200).json({ ok: true, email, name, picture, access: accessDecision.access });
+    return res.status(200).json({ ok: true, email, name, picture });
 
   } catch (err) {
     Sentry.captureException(err);
