@@ -417,6 +417,22 @@ export default function InventoryView({ inventory, itemMaster, invMapping, inven
   var pageCount = Math.max(1, Math.ceil(activeRows.length / pageSize));
 
   useEffect(function() {
+    if (locationFilter !== "all" && locationOptions.indexOf(locationFilter) === -1) setLocationFilter("all");
+  }, [locationFilter, locationOptions]);
+
+  useEffect(function() {
+    if (statusFilter !== "all" && statusOptions.indexOf(statusFilter) === -1) setStatusFilter("all");
+  }, [statusFilter, statusOptions]);
+
+  useEffect(function() {
+    if (customerFilter !== "all" && customerOptions.indexOf(customerFilter) === -1) setCustomerFilter("all");
+  }, [customerFilter, customerOptions]);
+
+  useEffect(function() {
+    if (sourceFilter !== "all" && sourceOptions.indexOf(sourceFilter) === -1) setSourceFilter("all");
+  }, [sourceFilter, sourceOptions]);
+
+  useEffect(function() {
     setPage(1);
   }, [viewMode, searchLower, positiveOnly, locationFilter, statusFilter, customerFilter, sourceFilter, expiryFilter, sortField, sortDir, pageSize]);
 
@@ -539,13 +555,31 @@ export default function InventoryView({ inventory, itemMaster, invMapping, inven
     }
   };
 
-  var exportGroupedCsv = function() {
-    var headers = ["sku", "description", "location", "lot_code", "expiry_date", "days_to_expiry", "pallet_number", "qty_on_hand", "base_uom", "status", "customer", "source"];
+  var exportVisibleCsv = function() {
+    var headers = [
+      "sku",
+      "description",
+      "customer",
+      "item_category",
+      "location",
+      "lot_code",
+      "expiry_date",
+      "days_to_expiry",
+      "pallet_number",
+      "qty_on_hand",
+      "base_uom",
+      "status",
+      "source",
+      "site_name",
+      "zone"
+    ];
     var lines = [headers.join(",")];
-    sortedRows.forEach(function(row) {
+    activeRows.forEach(function(row) {
       lines.push([
         csvCell(row.sku),
         csvCell(row.description),
+        csvCell(row.customer),
+        csvCell(row.itemCategory || ""),
         csvCell(row.location),
         csvCell(row.lotCode),
         csvCell(row.expiryDate || ""),
@@ -554,12 +588,13 @@ export default function InventoryView({ inventory, itemMaster, invMapping, inven
         csvCell(String(Math.round((row.qtyOnHand || 0) * 100) / 100)),
         csvCell(row.baseUom || ""),
         csvCell(row.status),
-        csvCell(row.customer),
-        csvCell(row.source || "")
+        csvCell(row.source || ""),
+        csvCell(row.siteName || ""),
+        csvCell(row.zone || "")
       ].join(","));
     });
     var stamp = new Date().toISOString().slice(0, 10);
-    triggerDownload(lines.join("\n"), "inventory_lookup_" + stamp + ".csv", "text/csv");
+    triggerDownload(lines.join("\n"), "inventory_lookup_visible_" + stamp + ".csv", "text/csv");
   };
 
   var exportAllFieldsCsv = function() {
@@ -582,11 +617,7 @@ export default function InventoryView({ inventory, itemMaster, invMapping, inven
   };
 
   var exportCsv = function() {
-    if (viewMode === "raw") {
-      exportAllFieldsCsv();
-      return;
-    }
-    exportGroupedCsv();
+    exportVisibleCsv();
   };
 
   var resetFilters = function() {
@@ -596,7 +627,11 @@ export default function InventoryView({ inventory, itemMaster, invMapping, inven
     setCustomerFilter("all");
     setExpiryFilter("all");
     setSourceFilter("all");
+    setViewMode("grouped");
     setPositiveOnly(true);
+    setSortField("qtyOnHand");
+    setSortDir("desc");
+    setPageSize(100);
   };
 
   return (
@@ -606,18 +641,18 @@ export default function InventoryView({ inventory, itemMaster, invMapping, inven
         <p className="mt-1 text-sm text-[rgb(var(--muted))]">Search inventory by SKU, customer, location, lot code, expiry date, pallet, and report source.</p>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="grid gap-2 xl:grid-cols-[minmax(0,1fr),repeat(5,minmax(0,190px))]">
         <Input
           type="text"
           placeholder="Search SKU / description / customer / lot / pallet"
           value={searchTerm}
           onChange={function(event) { setSearchTerm(event.target.value); }}
-          className="h-10 min-w-[280px] flex-1 text-sm"
+          className="h-10 min-w-0 text-sm"
         />
         <select
           value={locationFilter}
           onChange={function(event) { setLocationFilter(event.target.value); }}
-          style={Object.assign({}, styles.sel, { height: 40, minWidth: 190 })}
+          style={Object.assign({}, styles.sel, { height: 40, minWidth: 0, width: "100%" })}
         >
           <option value="all">All Locations</option>
           {locationOptions.map(function(option) {
@@ -627,7 +662,7 @@ export default function InventoryView({ inventory, itemMaster, invMapping, inven
         <select
           value={statusFilter}
           onChange={function(event) { setStatusFilter(event.target.value); }}
-          style={Object.assign({}, styles.sel, { height: 40, minWidth: 170 })}
+          style={Object.assign({}, styles.sel, { height: 40, minWidth: 0, width: "100%" })}
         >
           <option value="all">All Statuses</option>
           {statusOptions.map(function(option) {
@@ -638,7 +673,7 @@ export default function InventoryView({ inventory, itemMaster, invMapping, inven
           <select
             value={customerFilter}
             onChange={function(event) { setCustomerFilter(event.target.value); }}
-            style={Object.assign({}, styles.sel, { height: 40, minWidth: 190 })}
+            style={Object.assign({}, styles.sel, { height: 40, minWidth: 0, width: "100%" })}
           >
             <option value="all">All Customers</option>
             {customerOptions.map(function(option) {
@@ -649,7 +684,7 @@ export default function InventoryView({ inventory, itemMaster, invMapping, inven
         <select
           value={expiryFilter}
           onChange={function(event) { setExpiryFilter(event.target.value); }}
-          style={Object.assign({}, styles.sel, { height: 40, minWidth: 170 })}
+          style={Object.assign({}, styles.sel, { height: 40, minWidth: 0, width: "100%" })}
         >
           <option value="all">All Expiry</option>
           <option value="expired">Expired</option>
@@ -663,7 +698,7 @@ export default function InventoryView({ inventory, itemMaster, invMapping, inven
           <select
             value={sourceFilter}
             onChange={function(event) { setSourceFilter(event.target.value); }}
-            style={Object.assign({}, styles.sel, { height: 40, minWidth: 180 })}
+            style={Object.assign({}, styles.sel, { height: 40, minWidth: 0, width: "100%" })}
           >
             <option value="all">All Sources</option>
             {sourceOptions.map(function(option) {
@@ -671,18 +706,27 @@ export default function InventoryView({ inventory, itemMaster, invMapping, inven
             })}
           </select>
         ) : null}
-        <Button variant={viewMode === "grouped" ? "active" : "outline"} size="default" onClick={function() { setViewMode("grouped"); }}>
-          Grouped
-        </Button>
-        <Button variant={viewMode === "raw" ? "active" : "outline"} size="default" onClick={function() { setViewMode("raw"); }}>
-          Raw Rows
-        </Button>
-        <Button variant={positiveOnly ? "active" : "outline"} size="default" onClick={function() { setPositiveOnly(function(prev) { return !prev; }); }}>
-          Positive Qty
-        </Button>
-        <Button variant="outline" size="default" onClick={resetFilters}>Clear</Button>
-        <Button variant="outline" size="default" onClick={exportCsv} disabled={!activeRows.length}>{viewMode === "raw" ? "CSV (All Fields)" : "CSV"}</Button>
-        <Button variant="outline" size="default" onClick={exportAllFieldsCsv} disabled={!filteredRawRows.length}>Raw CSV</Button>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-1">
+            <Button variant={viewMode === "grouped" ? "active" : "ghost"} size="sm" onClick={function() { setViewMode("grouped"); }}>
+              Grouped
+            </Button>
+            <Button variant={viewMode === "raw" ? "active" : "ghost"} size="sm" onClick={function() { setViewMode("raw"); }}>
+              Raw Rows
+            </Button>
+          </div>
+          <Button variant={positiveOnly ? "active" : "outline"} size="sm" onClick={function() { setPositiveOnly(function(prev) { return !prev; }); }}>
+            Positive Qty
+          </Button>
+          <Button variant="outline" size="sm" onClick={resetFilters}>Clear</Button>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" onClick={exportCsv} disabled={!activeRows.length}>CSV</Button>
+          <Button variant="outline" size="sm" onClick={exportAllFieldsCsv} disabled={!filteredRawRows.length}>Raw CSV</Button>
+        </div>
       </div>
 
       <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-5">
