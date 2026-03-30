@@ -616,6 +616,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
       var revenueMatch = typeof resolveRevenueForRow === "function" ? resolveRevenueForRow(r.itemCode, r.date) : null;
       var revenuePerCase = safeNum(revenueMatch && revenueMatch.value);
       var revenue = revenuePerCase > 0 && unitsProduced > 0 ? (unitsProduced * revenuePerCase) : 0;
+      var revenueCoveredUnits = revenue > 0 ? unitsProduced : 0;
       var laborMargin = revenue - laborCost;
       var laborMarginPct = revenue > 0 ? (laborMargin / revenue) : null;
       var missingRevenue = unitsProduced > 0 && !(revenue > 0);
@@ -625,7 +626,8 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         laborProductiveHours: productiveHours,
         laborCost: laborCost,
         revenue: revenue,
-        revenueCoveredUnits: revenue > 0 ? unitsProduced : 0,
+        revenueCoveredUnits: revenueCoveredUnits,
+        revenueCoveragePct: unitsProduced > 0 ? Math.round((revenueCoveredUnits / unitsProduced) * 100) : 0,
         pricePerUnit: revenue > 0 && unitsProduced > 0 ? (revenue / unitsProduced) : null,
         laborMargin: laborMargin,
         laborMarginPct: laborMarginPct,
