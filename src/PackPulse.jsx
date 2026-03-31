@@ -75,31 +75,69 @@ function prefetchLikelyNextViews(activeView) {
   }, Promise.resolve());
 }
 
+function lazyViewRecoveryKey(name) {
+  return "packpulse:lazy-view-recovery:" + String(name || "").toLowerCase().replace(/[^a-z0-9]+/g, "_");
+}
+
+function scheduleLazyViewRecovery(name) {
+  if (typeof window === "undefined" || !window.sessionStorage) return false;
+  var key = lazyViewRecoveryKey(name);
+  if (window.sessionStorage.getItem(key) === "1") return false;
+  window.sessionStorage.setItem(key, "1");
+  window.setTimeout(function() {
+    try {
+      window.location.reload();
+    } catch (_error) {}
+  }, 0);
+  return true;
+}
+
+function clearLazyViewRecovery(name) {
+  if (typeof window === "undefined" || !window.sessionStorage) return;
+  window.sessionStorage.removeItem(lazyViewRecoveryKey(name));
+}
+
 function lazySafe(importer, name) {
   return lazy(function() {
     return importer()
       .then(function(mod) {
-        if (mod && mod.default) return mod;
+        if (mod && mod.default) {
+          clearLazyViewRecovery(name);
+          return mod;
+        }
         if (mod && typeof mod === "object") {
           var keys = Object.keys(mod);
           for (var i = 0; i < keys.length; i++) {
             var k = keys[i];
             var candidate = mod[k];
             if (typeof candidate === "function") {
+              clearLazyViewRecovery(name);
               return { default: candidate };
             }
           }
         }
+        console.error("[PackPulse] Lazy view module missing component export:", name, mod);
+        var isRecoveringMissing = scheduleLazyViewRecovery(name);
         return {
           default: function MissingView() {
-            return <Card className="mt-3 p-4 text-sm text-[rgb(var(--danger))]">Could not load {name} view.</Card>;
+            return (
+              <Card className="mt-3 p-4 text-sm text-[rgb(var(--danger))]">
+                {isRecoveringMissing ? ("Refreshing " + name + " view...") : ("Could not load " + name + " view.")}
+              </Card>
+            );
           }
         };
       })
-      .catch(function() {
+      .catch(function(error) {
+        console.error("[PackPulse] Lazy view import failed:", name, error);
+        var isRecoveringFailed = scheduleLazyViewRecovery(name);
         return {
           default: function FailedView() {
-            return <Card className="mt-3 p-4 text-sm text-[rgb(var(--danger))]">Failed to load {name} view.</Card>;
+            return (
+              <Card className="mt-3 p-4 text-sm text-[rgb(var(--danger))]">
+                {isRecoveringFailed ? ("Refreshing " + name + " view...") : ("Failed to load " + name + " view.")}
+              </Card>
+            );
           }
         };
       });
