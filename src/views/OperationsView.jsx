@@ -488,6 +488,7 @@ function monthStart(dateIso) {
 
 function monthEnd(dateIso) {
   var d = new Date(dateIso + "T00:00:00Z");
+  d.setUTCDate(1);
   d.setUTCMonth(d.getUTCMonth() + 1);
   d.setUTCDate(0);
   return toIsoDateUTC(d);
