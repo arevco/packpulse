@@ -442,15 +442,28 @@ function toEasternDateTimeParts(d) {
   };
 }
 
-function productionDayElapsedMinutesET(d) {
+var PRODUCTION_DAY_START_MINUTES = 7 * 60;
+var PRODUCTION_DAY_END_MINUTES = 23 * 60;
+
+function productionDayStatusET(d) {
   var parts = toEasternDateTimeParts(d);
-  if (!parts) return 0;
+  if (!parts) return null;
   var totalMinutes = (safeNum(parts.hour) * 60) + safeNum(parts.minute);
-  var productionStart = 7 * 60;
-  var productionEnd = 23 * 60;
-  if (totalMinutes <= productionStart) return 0;
-  if (totalMinutes >= productionEnd) return 960;
-  return Math.max(0, Math.min(960, totalMinutes - productionStart));
+  return {
+    calendarDate: parts.date,
+    productionDate: totalMinutes < PRODUCTION_DAY_START_MINUTES ? shiftDays(parts.date, -1) : parts.date,
+    totalMinutes: totalMinutes,
+    inProgress: totalMinutes >= PRODUCTION_DAY_START_MINUTES && totalMinutes < PRODUCTION_DAY_END_MINUTES
+  };
+}
+
+function productionDayElapsedMinutesET(d) {
+  var status = productionDayStatusET(d);
+  if (!status) return 0;
+  var totalProductionMinutes = PRODUCTION_DAY_END_MINUTES - PRODUCTION_DAY_START_MINUTES;
+  if (status.totalMinutes <= PRODUCTION_DAY_START_MINUTES) return 0;
+  if (status.totalMinutes >= PRODUCTION_DAY_END_MINUTES) return totalProductionMinutes;
+  return Math.max(0, Math.min(totalProductionMinutes, status.totalMinutes - PRODUCTION_DAY_START_MINUTES));
 }
 
 function shiftDays(dateIso, n) {
@@ -1615,13 +1628,22 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     var byShift = filteredTrends.byShift || [];
     var totalUnits = byDay.reduce(function(sum, d) { return sum + safeNum(d.units); }, 0);
     var avgDailyUnits = byDay.length ? Math.round(totalUnits / byDay.length) : 0;
-    var today = toIsoDateET(new Date());
+    var productionDayStatus = productionDayStatusET(new Date());
+    var today = productionDayStatus && productionDayStatus.calendarDate
+      ? productionDayStatus.calendarDate
+      : toIsoDateET(new Date());
+    var projectionReferenceDate = productionDayStatus && productionDayStatus.productionDate
+      ? productionDayStatus.productionDate
+      : today;
     var productionDates = allByDay.map(function(d) { return String(d.date || ""); }).filter(Boolean).sort();
-    var latestProductionDate = productionDates[productionDates.length - 1] || "";
-    var latestCompletedProductionDate = latestProductionDate === today
-      ? (productionDates[productionDates.length - 2] || "")
-      : latestProductionDate;
-    var projectionReferenceDate = latestProductionDate || effectiveRange.end || today;
+    var eligibleProductionDates = productionDates.filter(function(date) {
+      return date <= projectionReferenceDate;
+    });
+    var latestEligibleProductionDate = eligibleProductionDates[eligibleProductionDates.length - 1] || "";
+    var latestCompletedProductionDate = latestEligibleProductionDate;
+    if (productionDayStatus && productionDayStatus.inProgress && latestEligibleProductionDate === projectionReferenceDate) {
+      latestCompletedProductionDate = eligibleProductionDates[eligibleProductionDates.length - 2] || "";
+    }
     var monthAnchor = latestCompletedProductionDate;
     var monthBusinessDays = businessDaysBetween(monthStart(projectionReferenceDate), monthEnd(projectionReferenceDate));
     var trailingProductionDays = allByDay
@@ -1636,7 +1658,11 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       if (monthAnchor && date >= monthStart(projectionReferenceDate) && date <= monthAnchor) return sum + safeNum(d.units);
       return sum;
     }, 0);
-    var projectionStartDate = monthAnchor ? shiftDays(monthAnchor, 1) : projectionReferenceDate;
+    var projectionStartDate = projectionReferenceDate;
+    if (monthAnchor) {
+      var nextProjectionDay = shiftDays(monthAnchor, 1);
+      projectionStartDate = nextProjectionDay > projectionReferenceDate ? nextProjectionDay : projectionReferenceDate;
+    }
     var remainingBusinessDays = businessDaysBetween(projectionStartDate, monthEnd(projectionReferenceDate));
     var monthlyRunRate = monthActualUnits + (trailingDailyVelocity * remainingBusinessDays);
     var selectedPlanInfo = forecastPlanForRange(effectiveRange, avgDailyUnits);
@@ -1647,7 +1673,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     return {
       totalUnits: totalUnits,
       avgDailyUnits: avgDailyUnits,
-      latestProductionDate: monthAnchor || projectionReferenceDate,
+      latestProductionDate: monthAnchor || latestEligibleProductionDate,
       trailingProductionDays: trailingProductionDays.length,
       trailingDailyVelocity: trailingDailyVelocity,
       weeklyRunRate: weeklyRunRate,
