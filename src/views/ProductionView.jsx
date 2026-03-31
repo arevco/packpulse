@@ -25,6 +25,14 @@ var MONTH_INDEX = {
   dec: 11
 };
 
+var LABOR_SHIFT_CONFIG = {
+  shift1_start_minute: 7 * 60,
+  shift1_end_minute: 15 * 60,
+  shift2_start_minute: 15 * 60,
+  shift2_end_minute: 23 * 60,
+  start_grace_minutes: 10
+};
+
 function fmtMoneyWhole(value) {
   var rounded = Math.round(safeNum(value));
   if (rounded < 0) return "-$" + Math.abs(rounded).toLocaleString();
@@ -111,8 +119,15 @@ function normalizeShiftLabel(value) {
 
 function classifyShiftFromHour(hour, minute) {
   var totalMinutes = (Number(hour || 0) * 60) + Number(minute || 0);
-  if (totalMinutes >= (7 * 60) && totalMinutes <= ((15 * 60) + 5)) return "Shift 1 (7a-3p)";
-  if (totalMinutes >= ((15 * 60) + 6) && totalMinutes <= ((23 * 60) + 59)) return "Shift 2 (3p-11p)";
+  var shift1Start = LABOR_SHIFT_CONFIG.shift1_start_minute;
+  var shift1End = LABOR_SHIFT_CONFIG.shift1_end_minute;
+  var shift2Start = LABOR_SHIFT_CONFIG.shift2_start_minute;
+  var shift2End = LABOR_SHIFT_CONFIG.shift2_end_minute;
+  var grace = LABOR_SHIFT_CONFIG.start_grace_minutes;
+  if (Math.abs(totalMinutes - shift1Start) <= grace) return "Shift 1 (7a-3p)";
+  if (Math.abs(totalMinutes - shift2Start) <= grace) return "Shift 2 (3p-11p)";
+  if (totalMinutes > (shift1Start + grace) && totalMinutes < shift1End) return "Shift 1 (7a-3p)";
+  if (totalMinutes > (shift2Start + grace) && totalMinutes < shift2End) return "Shift 2 (3p-11p)";
   return "Unassigned";
 }
 

@@ -1,6 +1,6 @@
 import Sentry from "../_sentry.js";
 import { CACHE_SITE_ID, getAuthenticatedUser, getSupabaseAdmin, toNum, withCors } from "./_common.js";
-import { normalizeLaborRoleKey, pickFieldLoose } from "../_labor.js";
+import { LABOR_SHIFT_CONFIG, classifyLaborShiftFromPunchET, normalizeLaborRoleKey, pickFieldLoose } from "../_labor.js";
 
 var ET_TIME_ZONE = "America/New_York";
 
@@ -158,6 +158,33 @@ function buildAllocatedLaborSegments(row, todayEt) {
     })];
   };
 
+  var buildAssignedSegment = function(dateKey, shiftLabel, method, confidence) {
+    return [Object.assign({}, row, {
+      worked_date_et: dateKey || "",
+      shift_label: shiftLabel || "Unassigned",
+      is_finalized: !!dateKey && dateKey < todayEt,
+      allocation_method: method,
+      has_trusted_shift: confidence === "trusted",
+      shift_match_confidence: confidence
+    })];
+  };
+
+  var shiftWindowBounds = function(dateKey, shiftLabel) {
+    if (shiftLabel === "Shift 1 (7a-3p)") {
+      return {
+        start: easternWallClockToDate(dateKey, 7, 0, 0),
+        end: easternWallClockToDate(dateKey, 15, 0, 0)
+      };
+    }
+    if (shiftLabel === "Shift 2 (3p-11p)") {
+      return {
+        start: easternWallClockToDate(dateKey, 15, 0, 0),
+        end: easternWallClockToDate(dateKey, 23, 0, 0)
+      };
+    }
+    return null;
+  };
+
   if (!(startMs > 0) || !(endMs > startMs)) return buildFallback();
 
   var startDateEt = toEasternDateKey(new Date(startMs));
@@ -165,6 +192,62 @@ function buildAllocatedLaborSegments(row, todayEt) {
   if (!startDateEt || !endDateEt) return buildFallback();
 
   var totalMs = endMs - startMs;
+  var buildOverlapSegments = function() {
+    var segments = [];
+    for (var dateKey = startDateEt; dateKey && dateKey <= endDateEt; dateKey = addDaysIso(dateKey, 1)) {
+      var dayStart = easternWallClockToDate(dateKey, 0, 0, 0);
+      var nextDayStart = easternWallClockToDate(addDaysIso(dateKey, 1), 0, 0, 0);
+      if (!dayStart || !nextDayStart || isNaN(dayStart) || isNaN(nextDayStart)) continue;
+      var dayMs = overlapMillis(startMs, endMs, dayStart.getTime(), nextDayStart.getTime());
+      if (!(dayMs > 0)) continue;
+
+      var shift1Start = easternWallClockToDate(dateKey, 7, 0, 0);
+      var shift1End = easternWallClockToDate(dateKey, 15, 0, 0);
+      var shift2Start = easternWallClockToDate(dateKey, 15, 0, 0);
+      var shift2End = easternWallClockToDate(dateKey, 23, 0, 0);
+      var shift1Ms = overlapMillis(startMs, endMs, shift1Start.getTime(), shift1End.getTime());
+      var shift2Ms = overlapMillis(startMs, endMs, shift2Start.getTime(), shift2End.getTime());
+      var unassignedMs = Math.max(0, dayMs - shift1Ms - shift2Ms);
+
+      [
+        { shift: "Shift 1 (7a-3p)", ms: shift1Ms },
+        { shift: "Shift 2 (3p-11p)", ms: shift2Ms },
+        { shift: "Unassigned", ms: unassignedMs }
+      ].forEach(function(bucket) {
+        if (!(bucket.ms > 0)) return;
+        var share = bucket.ms / totalMs;
+        segments.push(Object.assign({}, row, {
+          worked_date_et: dateKey,
+          shift_label: bucket.shift,
+          payable_hours: payableHours * share,
+          productive_hours: productiveHours * share,
+          is_finalized: dateKey < todayEt,
+          allocation_method: "cross_shift_split",
+          has_trusted_shift: bucket.shift !== "Unassigned",
+          shift_match_confidence: bucket.shift === "Unassigned" ? "low" : "trusted"
+        }));
+      });
+    }
+    return segments;
+  };
+
+  if (explicitShift && startDateEt === endDateEt && isSpecificShiftLabel(explicitShift)) {
+    return buildAssignedSegment(startDateEt, explicitShift, "explicit_shift", "trusted");
+  }
+
+  var punchInParts = timeZoneParts(new Date(startMs), ET_TIME_ZONE);
+  var punchInShift = classifyLaborShiftFromPunchET(punchInParts);
+  if (startDateEt === endDateEt && isSpecificShiftLabel(punchInShift)) {
+    var overlapSegments = buildOverlapSegments();
+    var otherShift = punchInShift === "Shift 1 (7a-3p)" ? "Shift 2 (3p-11p)" : "Shift 1 (7a-3p)";
+    var otherWindow = shiftWindowBounds(startDateEt, otherShift);
+    var spillMs = otherWindow
+      ? overlapMillis(startMs, endMs, otherWindow.start.getTime(), otherWindow.end.getTime())
+      : 0;
+    if (spillMs > (LABOR_SHIFT_CONFIG.cross_shift_split_minutes * 60 * 1000)) return overlapSegments;
+    return buildAssignedSegment(startDateEt, punchInShift, "punch_in_grace", "trusted");
+  }
+
   var segments = [];
   for (var dateKey = startDateEt; dateKey && dateKey <= endDateEt; dateKey = addDaysIso(dateKey, 1)) {
     var dayStart = easternWallClockToDate(dateKey, 0, 0, 0);
@@ -174,9 +257,9 @@ function buildAllocatedLaborSegments(row, todayEt) {
     if (!(dayMs > 0)) continue;
 
     var shift1Start = easternWallClockToDate(dateKey, 7, 0, 0);
-    var shift1End = easternWallClockToDate(dateKey, 15, 6, 0);
-    var shift2Start = easternWallClockToDate(dateKey, 15, 6, 0);
-    var shift2End = easternWallClockToDate(addDaysIso(dateKey, 1), 0, 0, 0);
+    var shift1End = easternWallClockToDate(dateKey, 15, 0, 0);
+    var shift2Start = easternWallClockToDate(dateKey, 15, 0, 0);
+    var shift2End = easternWallClockToDate(dateKey, 23, 0, 0);
     var shift1Ms = overlapMillis(startMs, endMs, shift1Start.getTime(), shift1End.getTime());
     var shift2Ms = overlapMillis(startMs, endMs, shift2Start.getTime(), shift2End.getTime());
     var unassignedMs = Math.max(0, dayMs - shift1Ms - shift2Ms);
@@ -194,9 +277,9 @@ function buildAllocatedLaborSegments(row, todayEt) {
         payable_hours: payableHours * share,
         productive_hours: productiveHours * share,
         is_finalized: dateKey < todayEt,
-        allocation_method: "interval_overlap",
-        has_trusted_shift: true,
-        shift_match_confidence: "trusted"
+        allocation_method: bucket.shift === "Unassigned" ? "stored_bucket" : "cross_shift_split",
+        has_trusted_shift: bucket.shift !== "Unassigned",
+        shift_match_confidence: bucket.shift === "Unassigned" ? "low" : "trusted"
       }));
     });
   }

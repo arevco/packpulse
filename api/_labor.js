@@ -16,6 +16,16 @@ var MONTH_INDEX = {
   dec: 11
 };
 
+export var LABOR_SHIFT_CONFIG = Object.freeze({
+  shift1_start_minute: 7 * 60,
+  shift1_end_minute: 15 * 60,
+  shift2_start_minute: 15 * 60,
+  shift2_end_minute: 23 * 60,
+  start_grace_minutes: 10,
+  end_grace_minutes: 10,
+  cross_shift_split_minutes: 30
+});
+
 export function toNum(value) {
   if (typeof value === "number") return Number.isFinite(value) ? value : 0;
   if (value == null || value === "") return 0;
@@ -282,6 +292,24 @@ export function classifyShiftET(parts) {
   return "Unassigned";
 }
 
+export function classifyLaborShiftFromPunchET(parts) {
+  if (!parts) return "Unassigned";
+  var hour = Number(parts.hour || 0);
+  var minute = Number(parts.minute || 0);
+  var totalMinutes = (hour * 60) + minute;
+  var shift1Start = LABOR_SHIFT_CONFIG.shift1_start_minute;
+  var shift1End = LABOR_SHIFT_CONFIG.shift1_end_minute;
+  var shift2Start = LABOR_SHIFT_CONFIG.shift2_start_minute;
+  var shift2End = LABOR_SHIFT_CONFIG.shift2_end_minute;
+  var grace = LABOR_SHIFT_CONFIG.start_grace_minutes;
+
+  if (Math.abs(totalMinutes - shift1Start) <= grace) return "Shift 1 (7a-3p)";
+  if (Math.abs(totalMinutes - shift2Start) <= grace) return "Shift 2 (3p-11p)";
+  if (totalMinutes > (shift1Start + grace) && totalMinutes < shift1End) return "Shift 1 (7a-3p)";
+  if (totalMinutes > (shift2Start + grace) && totalMinutes < shift2End) return "Shift 2 (3p-11p)";
+  return "Unassigned";
+}
+
 export function parseDurationHours(value) {
   if (value == null || value === "") return 0;
   if (typeof value === "number") return Number.isFinite(value) ? value : 0;
@@ -381,7 +409,7 @@ export function buildLaborEvents(rows, siteId, syncedAt, updatedBy) {
     // let downstream job-timing reconciliation infer the reporting date/shift.
     var eastern = toEasternParts(clockInIso || clockOutIso);
     var hasCompleteClockWindow = !!clockInIso && !!clockOutIso;
-    var shift = explicitShift || (hasCompleteClockWindow ? classifyShiftET(eastern) : "Unassigned");
+    var shift = explicitShift || (clockInIso ? classifyLaborShiftFromPunchET(toEasternParts(clockInIso)) : (hasCompleteClockWindow ? classifyLaborShiftFromPunchET(eastern) : "Unassigned"));
     var roleName = String(pickFieldLoose(row, ["Badge type name", "badge_type_name", "Role", "role_name"]) || "").trim();
     var badgeTypePrefix = String(pickFieldLoose(row, ["Badge type prefix", "badge_type_prefix"]) || "").trim();
     var jobId = String(pickFieldLoose(row, ["Job ID", "job_id", "Job"]) || "").trim();
