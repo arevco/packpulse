@@ -1117,7 +1117,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
   /* ====== INBOUND COVERAGE (CRITICAL ITEMS) ====== */
   var inboundCoverage = useMemo(() => {
     if (!analysis || !criticalItems || !criticalItems.length) return null;
-    var horizonDays = 30;
+    var horizonDays = 60;
     var now = new Date();
     var horizonEnd = new Date(now.getTime() + horizonDays * 86400000);
     var windowStart = new Date(now);

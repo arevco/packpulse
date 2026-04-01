@@ -18,8 +18,8 @@ const REPORT_TYPES = [
   { key: "production", label: "Production", required: false },
   { key: "labor", label: "Labor", required: false }
 ];
-const CORE_REPORT_TYPES = ["inventory", "workorders", "production"];
-const OPTIONAL_DEFERRED_TYPES = ["itemmaster", "bom", "receiveorders", "labor"];
+const CORE_REPORT_TYPES = ["inventory", "workorders", "receiveorders", "production"];
+const OPTIONAL_DEFERRED_TYPES = ["itemmaster", "bom", "labor"];
 
 const POLL_INTERVAL = 4000; // 4 seconds between polls
 const MAX_POLLS = 60; // max ~4 minutes of polling
