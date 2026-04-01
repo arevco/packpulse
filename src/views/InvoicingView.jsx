@@ -1,4 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Download, FilterX } from "lucide-react";
 
 import { formatDescriptionForDisplay, safeNum, triggerDownload } from "../utils";
@@ -25,6 +26,13 @@ var MONTH_INDEX = {
 };
 
 var DETAIL_ROW_LIMIT = 250;
+var REVENUE_CONFIG_STALE_MS = 15 * 60 * 1000;
+var moneyFormatter = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2
+});
 
 function normalizeLooseKey(value) {
   return String(value || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
@@ -42,6 +50,10 @@ function normalizeLookupKey(value) {
   var raw = String(value || "").trim();
   if (!raw) return "";
   return raw.replace(/\.0+$/, "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+
+function normalizeItemCode(value) {
+  return normalizeLookupKey(value);
 }
 
 function pickFieldLoose(row, keys) {
@@ -82,6 +94,10 @@ function formatDateLabel(value) {
     day: "numeric",
     year: "numeric"
   });
+}
+
+function formatMoney(value) {
+  return moneyFormatter.format(safeNum(value));
 }
 
 function csvCell(value) {
@@ -213,6 +229,81 @@ function pluralize(count, singular, plural) {
 function candidateStatusMeta(status) {
   if (status === "review") return { label: "Review", variant: "warning" };
   return { label: "Ready", variant: "success" };
+}
+
+function revenueSourceMeta(source) {
+  if (source === "pricing") return { label: "Pricing", variant: "success" };
+  if (source === "item_master_cost_per_unit") return { label: "Item Master Fallback", variant: "info" };
+  if (source === "mixed") return { label: "Mixed Sources", variant: "warning" };
+  return { label: "Missing", variant: "danger" };
+}
+
+async function fetchJsonWithCredentials(url) {
+  var response = await fetch(url, { credentials: "include" });
+  var body = {};
+  try {
+    body = await response.json();
+  } catch (_error) {
+    body = {};
+  }
+  return { response: response, body: body };
+}
+
+function normalizeRevenueConfigPayload(body) {
+  return {
+    skuTargets: body && Array.isArray(body.skuTargets) ? body.skuTargets : [],
+    itemMasterCostBySku: body && body.itemMasterCostBySku && typeof body.itemMasterCostBySku === "object"
+      ? body.itemMasterCostBySku
+      : {}
+  };
+}
+
+async function fetchInvoicingRevenueConfig() {
+  var result = await fetchJsonWithCredentials("/api/ops/config");
+  return normalizeRevenueConfigPayload(result.response.ok ? result.body : {});
+}
+
+function buildRevenueTargetsBySku(rows) {
+  var map = {};
+  (Array.isArray(rows) ? rows : []).forEach(function(row) {
+    var sku = normalizeItemCode((row && (row.item_code || row.sku || row.code)) || "");
+    if (!sku) return;
+    if (!map[sku]) map[sku] = [];
+    map[sku].push({
+      customer: String(row && row.customer || "").trim(),
+      revenue_per_case: safeNum(row && row.revenue_per_case),
+      active_from: String(row && row.active_from || "").slice(0, 10),
+      active_to: String(row && row.active_to || "").slice(0, 10)
+    });
+  });
+  Object.keys(map).forEach(function(sku) {
+    map[sku].sort(function(left, right) {
+      if (!!left.customer !== !!right.customer) return left.customer ? 1 : -1;
+      return String(right.active_from || "").localeCompare(String(left.active_from || ""));
+    });
+  });
+  return map;
+}
+
+function resolveRevenuePerUnit(itemCode, dateIso, revenueTargetsBySku, itemMasterCostBySku) {
+  var sku = normalizeItemCode(itemCode);
+  if (!sku) return { value: 0, source: "missing" };
+  var pricingRows = revenueTargetsBySku[sku] || [];
+  var day = String(dateIso || "").slice(0, 10);
+  var best = 0;
+  for (var i = 0; i < pricingRows.length; i += 1) {
+    var row = pricingRows[i];
+    if (!(safeNum(row.revenue_per_case) > 0)) continue;
+    var start = String(row.active_from || "1900-01-01");
+    var end = String(row.active_to || "9999-12-31");
+    if (day && day < start) continue;
+    if (day && day > end) continue;
+    if (safeNum(row.revenue_per_case) > best) best = safeNum(row.revenue_per_case);
+  }
+  if (best > 0) return { value: best, source: "pricing" };
+  var itemMasterValue = safeNum(itemMasterCostBySku && itemMasterCostBySku[sku]);
+  if (itemMasterValue > 0) return { value: itemMasterValue, source: "item_master_cost_per_unit" };
+  return { value: 0, source: "missing" };
 }
 
 function buildSearchHaystack(row) {
@@ -389,6 +480,7 @@ function buildNormalizedProductionRow(row, index, fallbacks) {
   return {
     raw: row,
     rowIndex: index,
+    itemCodeRaw: sku,
     customer: customerLabel,
     customerKey: normalizeGroupValue(customerLabel),
     sku: skuLabel,
@@ -455,6 +547,20 @@ export default function InvoicingView(props) {
     });
   }, [onPermalinkChange, startDate, endDate, customerFilter, statusFilter, searchTerm]);
 
+  var revenueConfigQuery = useQuery({
+    queryKey: ["invoicing", "revenue-config"],
+    queryFn: fetchInvoicingRevenueConfig,
+    staleTime: REVENUE_CONFIG_STALE_MS
+  });
+
+  var revenueConfig = revenueConfigQuery.data || { skuTargets: [], itemMasterCostBySku: {} };
+  var revenueTargetsBySku = useMemo(function() {
+    return buildRevenueTargetsBySku(revenueConfig.skuTargets);
+  }, [revenueConfig.skuTargets]);
+  var itemMasterCostBySku = revenueConfig.itemMasterCostBySku && typeof revenueConfig.itemMasterCostBySku === "object"
+    ? revenueConfig.itemMasterCostBySku
+    : {};
+
   var fieldFallbacks = useMemo(function() {
     var workOrderFallbacks = buildWorkOrderFallbacks(workOrders);
     return {
@@ -479,27 +585,39 @@ export default function InvoicingView(props) {
       });
   }, [productionData, fieldFallbacks]);
 
+  var revenueReadyRows = useMemo(function() {
+    return normalizedRows.map(function(row) {
+      var revenueMatch = resolveRevenuePerUnit(row.itemCodeRaw || row.sku, row.producedDate, revenueTargetsBySku, itemMasterCostBySku);
+      var revenuePerUnit = safeNum(revenueMatch && revenueMatch.value);
+      return Object.assign({}, row, {
+        revenuePerUnit: revenuePerUnit,
+        revenueSource: revenueMatch && revenueMatch.source ? revenueMatch.source : "missing",
+        estimatedRevenue: revenuePerUnit > 0 ? row.unitsProduced * revenuePerUnit : 0
+      });
+    });
+  }, [normalizedRows, revenueTargetsBySku, itemMasterCostBySku]);
+
   var availableDateRange = useMemo(function() {
-    return normalizedRows.reduce(function(acc, row) {
+    return revenueReadyRows.reduce(function(acc, row) {
       if (!row.producedDate) return acc;
       return {
         min: updateMinDate(acc.min, row.producedDate),
         max: updateMaxDate(acc.max, row.producedDate)
       };
     }, { min: "", max: "" });
-  }, [normalizedRows]);
+  }, [revenueReadyRows]);
 
   var searchNeedle = normalizeSearchValue(deferredSearchTerm);
 
   var filteredRows = useMemo(function() {
-    return normalizedRows.filter(function(row) {
+    return revenueReadyRows.filter(function(row) {
       if (startDate && (!row.producedDate || row.producedDate < startDate)) return false;
       if (endDate && (!row.producedDate || row.producedDate > endDate)) return false;
       if (customerFilter !== "all" && row.customer !== customerFilter) return false;
       if (searchNeedle && row.searchHaystack.indexOf(searchNeedle) === -1) return false;
       return true;
     });
-  }, [normalizedRows, startDate, endDate, customerFilter, searchNeedle]);
+  }, [revenueReadyRows, startDate, endDate, customerFilter, searchNeedle]);
 
   var invoiceCandidates = useMemo(function() {
     var grouped = {};
@@ -527,7 +645,12 @@ export default function InvoicingView(props) {
           missingPurchaseOrderRows: 0,
           missingUnitOfMeasureRows: 0,
           missingCustomerRows: 0,
-          missingSkuRows: 0
+          missingSkuRows: 0,
+          pricedUnits: 0,
+          pricingUnits: 0,
+          itemMasterFallbackUnits: 0,
+          missingRevenueUnits: 0,
+          estimatedRevenue: 0
         };
       }
       var group = grouped[key];
@@ -549,6 +672,14 @@ export default function InvoicingView(props) {
       if (!row.customer || row.customer === "Unassigned customer") group.missingCustomerRows += 1;
       if (!row.sku || row.sku === "Missing SKU") group.missingSkuRows += 1;
       if (!row.producedDate) group.missingProducedDateRows += 1;
+      if (safeNum(row.revenuePerUnit) > 0) {
+        group.pricedUnits += row.unitsProduced;
+        group.estimatedRevenue += row.estimatedRevenue;
+        if (row.revenueSource === "pricing") group.pricingUnits += row.unitsProduced;
+        else if (row.revenueSource === "item_master_cost_per_unit") group.itemMasterFallbackUnits += row.unitsProduced;
+      } else {
+        group.missingRevenueUnits += row.unitsProduced;
+      }
     });
 
     return Object.values(grouped).map(function(group) {
@@ -566,8 +697,16 @@ export default function InvoicingView(props) {
       else if (group.missingPurchaseOrderRows > 0) advisoryIssues.push(group.missingPurchaseOrderRows + " " + pluralize(group.missingPurchaseOrderRows, "row") + " missing PO");
       if (group.missingWorkOrderRows > 0 && group.workOrders.size > 0) advisoryIssues.push(group.missingWorkOrderRows + " " + pluralize(group.missingWorkOrderRows, "row") + " missing work order");
       if (group.lines.size > 1) advisoryIssues.push(group.lines.size + " production lines");
+      if (group.missingRevenueUnits > 0) advisoryIssues.push(formatUnits(group.missingRevenueUnits) + " units missing revenue");
+      if (group.itemMasterFallbackUnits > 0) advisoryIssues.push(formatUnits(group.itemMasterFallbackUnits) + " units using item master fallback");
 
       var status = blockingIssues.length ? "review" : "ready";
+      var coveragePct = group.unitsProduced > 0 ? Math.round((group.pricedUnits / group.unitsProduced) * 100) : 0;
+      var avgRevenuePerUnit = group.pricedUnits > 0 ? (group.estimatedRevenue / group.pricedUnits) : 0;
+      var primaryRevenueSource = "missing";
+      if (group.pricingUnits > 0 && group.itemMasterFallbackUnits > 0) primaryRevenueSource = "mixed";
+      else if (group.pricingUnits > 0) primaryRevenueSource = "pricing";
+      else if (group.itemMasterFallbackUnits > 0) primaryRevenueSource = "item_master_cost_per_unit";
       return {
         key: group.key,
         customer: group.customer,
@@ -583,6 +722,14 @@ export default function InvoicingView(props) {
         lineCount: group.lines.size,
         unitOfMeasure: group.unitMeasures.size === 1 ? setToArray(group.unitMeasures)[0] : (group.unitMeasures.size ? "Mixed" : "--"),
         status: status,
+        estimatedRevenue: group.estimatedRevenue,
+        pricedUnits: group.pricedUnits,
+        missingRevenueUnits: group.missingRevenueUnits,
+        itemMasterFallbackUnits: group.itemMasterFallbackUnits,
+        pricingUnits: group.pricingUnits,
+        revenueCoveragePct: coveragePct,
+        revenuePerUnitAvg: avgRevenuePerUnit,
+        revenueSource: primaryRevenueSource,
         blockingIssues: blockingIssues,
         advisoryIssues: advisoryIssues,
         issueSummary: blockingIssues.concat(advisoryIssues).join(" | ")
@@ -626,14 +773,20 @@ export default function InvoicingView(props) {
           readyLines: 0,
           reviewLines: 0,
           jobs: 0,
-          workOrders: 0
+          workOrders: 0,
+          estimatedRevenue: 0,
+          pricedUnits: 0,
+          totalUnits: 0
         };
       }
       var group = grouped[candidate.customer];
       group.unitsProduced += candidate.unitsProduced;
+      group.totalUnits += candidate.unitsProduced;
       group.invoiceLines += 1;
       group.jobs += candidate.jobCount;
       group.workOrders += candidate.workOrderCount;
+      group.estimatedRevenue += candidate.estimatedRevenue;
+      group.pricedUnits += candidate.pricedUnits;
       if (candidate.status === "review") group.reviewLines += 1;
       else group.readyLines += 1;
     });
@@ -669,21 +822,32 @@ export default function InvoicingView(props) {
     var uniqueJobs = {};
     var readyCount = 0;
     var reviewCount = 0;
+    var estimatedRevenue = 0;
+    var pricedUnits = 0;
+    var fallbackUnits = 0;
     visibleInvoiceCandidates.forEach(function(candidate) {
       customers[candidate.customer] = true;
       if (candidate.status === "review") reviewCount += 1;
       else readyCount += 1;
+      estimatedRevenue += candidate.estimatedRevenue;
+      pricedUnits += candidate.pricedUnits;
+      if (candidate.revenueSource === "item_master_cost_per_unit" || candidate.revenueSource === "mixed") fallbackUnits += candidate.itemMasterFallbackUnits || 0;
     });
     detailRows.forEach(function(row) {
       if (row.jobId) uniqueJobs[row.jobId] = true;
     });
+    var totalUnits = visibleInvoiceCandidates.reduce(function(sum, candidate) { return sum + candidate.unitsProduced; }, 0);
     return {
-      unitsProduced: visibleInvoiceCandidates.reduce(function(sum, candidate) { return sum + candidate.unitsProduced; }, 0),
+      unitsProduced: totalUnits,
       customers: Object.keys(customers).length,
       invoiceLines: visibleInvoiceCandidates.length,
       readyLines: readyCount,
       reviewLines: reviewCount,
-      jobs: Object.keys(uniqueJobs).length
+      jobs: Object.keys(uniqueJobs).length,
+      estimatedRevenue: estimatedRevenue,
+      pricedUnits: pricedUnits,
+      revenueCoveragePct: totalUnits > 0 ? Math.round((pricedUnits / totalUnits) * 100) : 0,
+      fallbackUnits: fallbackUnits
     };
   }, [visibleInvoiceCandidates, detailRows]);
 
@@ -728,6 +892,11 @@ export default function InvoicingView(props) {
       "sku",
       "item_description",
       "units_produced",
+      "priced_units",
+      "revenue_coverage_pct",
+      "revenue_per_unit",
+      "estimated_revenue",
+      "revenue_source",
       "unit_of_measure",
       "work_order_count",
       "purchase_order_count",
@@ -744,6 +913,11 @@ export default function InvoicingView(props) {
         candidate.sku,
         candidate.description,
         candidate.unitsProduced.toFixed(2),
+        candidate.pricedUnits.toFixed(2),
+        candidate.revenueCoveragePct,
+        candidate.revenuePerUnitAvg.toFixed(4),
+        candidate.estimatedRevenue.toFixed(2),
+        candidate.revenueSource,
         candidate.unitOfMeasure,
         candidate.workOrderCount,
         candidate.purchaseOrderCount,
@@ -765,6 +939,9 @@ export default function InvoicingView(props) {
       "sku",
       "item_description",
       "units_produced",
+      "revenue_per_unit",
+      "estimated_revenue",
+      "revenue_source",
       "unit_of_measure",
       "job_id",
       "work_order_code",
@@ -781,6 +958,9 @@ export default function InvoicingView(props) {
         row.sku,
         row.description,
         row.unitsProduced.toFixed(2),
+        row.revenuePerUnit.toFixed(4),
+        row.estimatedRevenue.toFixed(2),
+        row.revenueSource,
         row.unitOfMeasure,
         row.jobId,
         row.workOrderCode,
@@ -836,6 +1016,14 @@ export default function InvoicingView(props) {
             <Badge variant={summary.reviewLines > 0 ? "warning" : "success"}>
               {summary.readyLines.toLocaleString()} ready / {summary.reviewLines.toLocaleString()} review
             </Badge>
+            <Badge variant={summary.revenueCoveragePct >= 100 ? "success" : summary.revenueCoveragePct > 0 ? "warning" : "danger"}>
+              Revenue coverage {summary.revenueCoveragePct}%
+            </Badge>
+            {revenueConfigQuery.isError ? (
+              <Badge variant="danger">Revenue config unavailable</Badge>
+            ) : revenueConfigQuery.isLoading ? (
+              <Badge variant="secondary">Loading revenue config</Badge>
+            ) : null}
             {props.productionTimestamp ? (
               <Badge variant="secondary">Production synced {new Date(props.productionTimestamp).toLocaleString()}</Badge>
             ) : null}
@@ -916,13 +1104,14 @@ export default function InvoicingView(props) {
         </CardContent>
       </Card>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
         {[
           metricCard("Units Produced", formatUnits(summary.unitsProduced), "Finished-good output in the selected billing window.", "default"),
           metricCard("Customers", summary.customers.toLocaleString(), "Distinct customers represented in visible invoice lines.", "default"),
           metricCard("Invoice Lines", summary.invoiceLines.toLocaleString(), "Customer and SKU rollups ready for accounting review.", "success"),
+          metricCard("Estimated Revenue", formatMoney(summary.estimatedRevenue), summary.revenueCoveragePct >= 100 ? "All visible units have revenue coverage." : "Based on priced units only; uncovered units remain excluded.", summary.revenueCoveragePct >= 100 ? "success" : "warning"),
+          metricCard("Revenue Coverage", summary.revenueCoveragePct + "%", summary.pricedUnits ? (formatUnits(summary.pricedUnits) + " priced units in the current result set.") : "No priced units found for the current result set.", summary.revenueCoveragePct >= 100 ? "success" : "warning"),
           metricCard("Needs Review", summary.reviewLines.toLocaleString(), summary.reviewLines ? "Lines missing traceability or billing fields." : "No blockers in the current result set.", summary.reviewLines ? "warning" : "success"),
-          metricCard("Underlying Jobs", summary.jobs.toLocaleString(), "Unique production jobs behind the visible invoice lines.", "default")
         ]}
       </div>
 
@@ -942,6 +1131,7 @@ export default function InvoicingView(props) {
                     <tr>
                       <th className="px-4 py-3 text-left font-medium">Customer</th>
                       <th className="px-4 py-3 text-right font-medium">Units</th>
+                      <th className="px-4 py-3 text-right font-medium">Revenue</th>
                       <th className="px-4 py-3 text-right font-medium">Lines</th>
                       <th className="px-4 py-3 text-right font-medium">Ready</th>
                       <th className="px-4 py-3 text-right font-medium">Review</th>
@@ -966,6 +1156,7 @@ export default function InvoicingView(props) {
                             </div>
                           </td>
                           <td className="px-4 py-3 text-right font-medium text-[rgb(var(--foreground))]">{formatUnits(row.unitsProduced)}</td>
+                          <td className="px-4 py-3 text-right font-medium text-[rgb(var(--foreground))]">{formatMoney(row.estimatedRevenue)}</td>
                           <td className="px-4 py-3 text-right text-[rgb(var(--muted))]">{row.invoiceLines.toLocaleString()}</td>
                           <td className="px-4 py-3 text-right text-[rgb(var(--success))]">{row.readyLines.toLocaleString()}</td>
                           <td className="px-4 py-3 text-right text-[rgb(var(--warning))]">{row.reviewLines.toLocaleString()}</td>
@@ -973,7 +1164,7 @@ export default function InvoicingView(props) {
                       );
                     }) : (
                       <tr>
-                        <td colSpan={5} className="px-4 py-6 text-center text-sm text-[rgb(var(--muted))]">
+                        <td colSpan={6} className="px-4 py-6 text-center text-sm text-[rgb(var(--muted))]">
                           No customers match the current filters.
                         </td>
                       </tr>
@@ -1010,6 +1201,8 @@ export default function InvoicingView(props) {
                       <th className="px-4 py-3 text-left font-medium">Status</th>
                       <th className="px-4 py-3 text-left font-medium">Customer / SKU</th>
                       <th className="px-4 py-3 text-right font-medium">Units</th>
+                      <th className="px-4 py-3 text-right font-medium">Rev/Unit</th>
+                      <th className="px-4 py-3 text-right font-medium">Est Revenue</th>
                       <th className="px-4 py-3 text-left font-medium">UOM</th>
                       <th className="px-4 py-3 text-right font-medium">WOs</th>
                       <th className="px-4 py-3 text-right font-medium">POs</th>
@@ -1037,11 +1230,19 @@ export default function InvoicingView(props) {
                               {candidate.customer} | {candidate.sku}
                             </div>
                             <div className="mt-1 text-xs text-[rgb(var(--muted))]">{candidate.description}</div>
+                            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                              <Badge variant={revenueSourceMeta(candidate.revenueSource).variant}>{revenueSourceMeta(candidate.revenueSource).label}</Badge>
+                              <span className="text-[rgb(var(--muted))]">{candidate.revenueCoveragePct}% coverage</span>
+                            </div>
                             {candidate.issueSummary ? (
                               <div className="mt-2 text-xs text-[rgb(var(--muted))]">{candidate.issueSummary}</div>
                             ) : null}
                           </td>
                           <td className="px-4 py-3 text-right font-medium text-[rgb(var(--foreground))]">{formatUnits(candidate.unitsProduced)}</td>
+                          <td className="px-4 py-3 text-right font-medium text-[rgb(var(--foreground))]">
+                            {candidate.pricedUnits > 0 ? formatMoney(candidate.revenuePerUnitAvg) : "--"}
+                          </td>
+                          <td className="px-4 py-3 text-right font-medium text-[rgb(var(--foreground))]">{candidate.pricedUnits > 0 ? formatMoney(candidate.estimatedRevenue) : "--"}</td>
                           <td className="px-4 py-3 text-[rgb(var(--muted))]">{candidate.unitOfMeasure}</td>
                           <td className="px-4 py-3 text-right text-[rgb(var(--muted))]">{candidate.workOrderCount.toLocaleString()}</td>
                           <td className="px-4 py-3 text-right text-[rgb(var(--muted))]">{candidate.purchaseOrderCount.toLocaleString()}</td>
@@ -1053,7 +1254,7 @@ export default function InvoicingView(props) {
                       );
                     }) : (
                       <tr>
-                        <td colSpan={8} className="px-4 py-6 text-center text-sm text-[rgb(var(--muted))]">
+                        <td colSpan={10} className="px-4 py-6 text-center text-sm text-[rgb(var(--muted))]">
                           No invoice candidates match the current filters.
                         </td>
                       </tr>
@@ -1093,6 +1294,9 @@ export default function InvoicingView(props) {
                     <th className="px-4 py-3 text-left font-medium">Produced</th>
                     <th className="px-4 py-3 text-left font-medium">Customer / SKU</th>
                     <th className="px-4 py-3 text-right font-medium">Units</th>
+                    <th className="px-4 py-3 text-right font-medium">Rev/Unit</th>
+                    <th className="px-4 py-3 text-right font-medium">Revenue</th>
+                    <th className="px-4 py-3 text-left font-medium">Source</th>
                     <th className="px-4 py-3 text-left font-medium">Job</th>
                     <th className="px-4 py-3 text-left font-medium">Work Order</th>
                     <th className="px-4 py-3 text-left font-medium">PO</th>
@@ -1112,6 +1316,15 @@ export default function InvoicingView(props) {
                         <td className="px-4 py-3 text-right font-medium text-[rgb(var(--foreground))]">
                           {formatUnits(row.unitsProduced)} {row.unitOfMeasure || ""}
                         </td>
+                        <td className="px-4 py-3 text-right font-medium text-[rgb(var(--foreground))]">
+                          {row.revenuePerUnit > 0 ? formatMoney(row.revenuePerUnit) : "--"}
+                        </td>
+                        <td className="px-4 py-3 text-right font-medium text-[rgb(var(--foreground))]">
+                          {row.estimatedRevenue > 0 ? formatMoney(row.estimatedRevenue) : "--"}
+                        </td>
+                        <td className="px-4 py-3">
+                          <Badge variant={revenueSourceMeta(row.revenueSource).variant}>{revenueSourceMeta(row.revenueSource).label}</Badge>
+                        </td>
                         <td className="px-4 py-3 text-[rgb(var(--muted))]">{row.jobId || "--"}</td>
                         <td className="px-4 py-3 text-[rgb(var(--muted))]">{row.workOrderCode || row.workOrderId || "--"}</td>
                         <td className="px-4 py-3 text-[rgb(var(--muted))]">{row.purchaseOrderNumber || "--"}</td>
@@ -1123,7 +1336,7 @@ export default function InvoicingView(props) {
                     );
                   }) : (
                     <tr>
-                      <td colSpan={8} className="px-4 py-6 text-center text-sm text-[rgb(var(--muted))]">
+                      <td colSpan={11} className="px-4 py-6 text-center text-sm text-[rgb(var(--muted))]">
                         No production detail rows match the current filters.
                       </td>
                     </tr>
