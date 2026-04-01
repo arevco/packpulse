@@ -256,6 +256,31 @@ function updateMaxDate(current, next) {
   return current;
 }
 
+function buildCandidateRateKey(value) {
+  var amount = safeNum(value);
+  return amount > 0 ? amount.toFixed(4) : "missing";
+}
+
+function buildCandidateExportKey(candidate) {
+  var source = candidate && typeof candidate === "object" ? candidate : {};
+  var key = String(source.key || "").trim() || "candidate";
+  var firstProducedDate = String(source.firstProducedDate || "").slice(0, 10) || "--";
+  var lastProducedDate = String(source.lastProducedDate || "").slice(0, 10) || "--";
+  var unitsProduced = safeNum(source.unitsProduced).toFixed(4);
+  var revenuePerUnit = safeNum(source.revenuePerUnitAvg != null ? source.revenuePerUnitAvg : source.revenuePerUnit).toFixed(4);
+  var estimatedRevenue = safeNum(source.estimatedRevenue).toFixed(2);
+  var detailRows = String(Math.max(0, Math.round(safeNum(source.detailRows != null ? source.detailRows : source.lineCount))));
+  return [
+    key,
+    firstProducedDate,
+    lastProducedDate,
+    unitsProduced,
+    revenuePerUnit,
+    estimatedRevenue,
+    detailRows
+  ].join("|");
+}
+
 function setToArray(setValue) {
   return Array.from(setValue || []).filter(Boolean);
 }
@@ -267,6 +292,19 @@ function pluralize(count, singular, plural) {
 function candidateStatusMeta(status) {
   if (status === "review") return { label: "Review", variant: "warning" };
   return { label: "Ready", variant: "success" };
+}
+
+function quickBooksStateMeta(state) {
+  if (state === "already_pushed") return { label: "Already Pushed", variant: "warning" };
+  if (state === "missing_mapping") return { label: "Missing QBO Mapping", variant: "warning" };
+  return null;
+}
+
+function candidateCanPreviewQuickBooks(candidate) {
+  if (!candidate || candidate.status !== "ready") return false;
+  if (candidate.quickBooksState === "already_pushed") return false;
+  if (candidate.quickBooksState === "missing_mapping") return false;
+  return true;
 }
 
 function revenueSourceMeta(source) {
@@ -400,13 +438,17 @@ function sortInvoiceCandidates(rows, sortField, sortDir) {
     if (right.unitsProduced !== left.unitsProduced) return right.unitsProduced - left.unitsProduced;
     comparison = compareTextValues(left.customer, right.customer);
     if (comparison) return comparison;
+    comparison = compareTextValues(left.purchaseOrderReference, right.purchaseOrderReference);
+    if (comparison) return comparison;
     comparison = compareTextValues(left.sku, right.sku);
     if (comparison) return comparison;
     comparison = compareTextValues(left.lotCode, right.lotCode);
     if (comparison) return comparison;
+    comparison = compareNumberValues(left.revenuePerUnitAvg, right.revenuePerUnitAvg);
+    if (comparison) return comparison;
     comparison = compareTextValues(left.workOrderReference, right.workOrderReference);
     if (comparison) return comparison;
-    return compareTextValues(left.purchaseOrderReference, right.purchaseOrderReference);
+    return 0;
   });
 }
 
@@ -419,6 +461,22 @@ async function fetchJsonWithCredentials(url) {
     body = {};
   }
   return { response: response, body: body };
+}
+
+async function postJsonWithCredentials(url, body) {
+  var response = await fetch(url, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body || {})
+  });
+  var responseBody = {};
+  try {
+    responseBody = await response.json();
+  } catch (_error) {
+    responseBody = {};
+  }
+  return { response: response, body: responseBody };
 }
 
 function normalizeRevenueConfigPayload(body) {
@@ -488,6 +546,41 @@ async function fetchInvoicingProductionHistory(startDate, endDate) {
     throw new Error((result.body && (result.body.error || result.body.details)) || "Could not load invoicing production history");
   }
   return normalizeInvoicingProductionPayload(result.body);
+}
+
+async function fetchQuickBooksInvoicePreview(payload) {
+  var result = await postJsonWithCredentials("/api/accounting/qbo/preview-invoices", payload);
+  if (!result.response.ok) {
+    throw new Error((result.body && (result.body.error || result.body.details)) || "Could not build QuickBooks invoice preview");
+  }
+  return result.body && typeof result.body === "object" ? result.body : {};
+}
+
+function normalizeQuickBooksPersistencePayload(body) {
+  var source = body && typeof body === "object" ? body : {};
+  var summary = source.summary && typeof source.summary === "object" ? source.summary : {};
+  return {
+    warnings: Array.isArray(source.warnings) ? source.warnings : [],
+    tablesReady: source.tablesReady !== false,
+    mappingTableReady: source.mappingTableReady !== false,
+    exportTableReady: source.exportTableReady !== false,
+    summary: {
+      candidateCount: Number(summary.candidateCount || 0),
+      exportReadyCount: Number(summary.exportReadyCount || 0),
+      alreadyPushedCount: Number(summary.alreadyPushedCount || 0),
+      missingCustomerMappings: Number(summary.missingCustomerMappings || 0),
+      missingItemMappings: Number(summary.missingItemMappings || 0)
+    },
+    candidateStates: source.candidateStates && typeof source.candidateStates === "object" ? source.candidateStates : {}
+  };
+}
+
+async function fetchQuickBooksPersistenceState(payload) {
+  var result = await postJsonWithCredentials("/api/accounting/qbo/export-state", payload);
+  if (!result.response.ok) {
+    throw new Error((result.body && (result.body.error || result.body.details)) || "Could not load QuickBooks export state");
+  }
+  return normalizeQuickBooksPersistencePayload(result.body);
 }
 
 function buildRevenueTargetsBySku(rows) {
@@ -936,6 +1029,10 @@ export default function InvoicingView(props) {
   var [candidateSortDir, setCandidateSortDir] = useState(DEFAULT_CANDIDATE_SORT_DIR);
   var [candidateColumnFilters, setCandidateColumnFilters] = useState(createDefaultCandidateColumnFilters);
   var [showCandidateColumnFilters, setShowCandidateColumnFilters] = useState(false);
+  var [selectedCandidateKeys, setSelectedCandidateKeys] = useState({});
+  var [invoicePreviewState, setInvoicePreviewState] = useState(function() {
+    return { loading: false, error: "", data: null };
+  });
 
   var deferredSearchTerm = useDeferredValue(searchTerm);
   var deferredCandidateColumnFilters = useDeferredValue(candidateColumnFilters);
@@ -1009,13 +1106,6 @@ export default function InvoicingView(props) {
       .map(function(row, index) {
         var normalized = buildNormalizedProductionRow(row, index, fieldFallbacks);
         normalized.searchHaystack = buildSearchHaystack(normalized);
-        normalized.candidateKey = [
-          normalized.customerKey,
-          normalized.skuKey,
-          normalized.lotCodeKey,
-          normalized.workOrderKey,
-          normalized.purchaseOrderKey
-        ].join("|");
         return normalized;
       })
       .filter(function(row) {
@@ -1027,7 +1117,17 @@ export default function InvoicingView(props) {
     return normalizedRows.map(function(row) {
       var revenueMatch = resolveRevenuePerUnit(row.itemCodeRaw || row.sku, row.producedDate, revenueTargetsBySku, itemMasterCostBySku);
       var revenuePerUnit = safeNum(revenueMatch && revenueMatch.value);
+      var rateKey = buildCandidateRateKey(revenuePerUnit);
       return Object.assign({}, row, {
+        searchHaystack: ((row.searchHaystack || "") + " " + rateKey).trim().toLowerCase(),
+        candidateRateKey: rateKey,
+        candidateKey: [
+          row.customerKey,
+          row.purchaseOrderKey,
+          row.skuKey,
+          row.lotCodeKey,
+          rateKey
+        ].join("|"),
         revenuePerUnit: revenuePerUnit,
         revenueSource: revenueMatch && revenueMatch.source ? revenueMatch.source : "missing",
         estimatedRevenue: revenuePerUnit > 0 ? row.unitsProduced * revenuePerUnit : 0
@@ -1064,7 +1164,7 @@ export default function InvoicingView(props) {
     });
   }, [revenueReadyRows, startDate, endDate, customerFilter, searchNeedle]);
 
-  var invoiceCandidates = useMemo(function() {
+  var baseInvoiceCandidates = useMemo(function() {
     var grouped = {};
     filteredRows.forEach(function(row) {
       var key = row.candidateKey;
@@ -1142,13 +1242,12 @@ export default function InvoicingView(props) {
       if (group.lotCodes.size > 1) blockingIssues.push("Multiple finished good lot codes in one invoice line");
       if (!group.unitMeasures.size) blockingIssues.push("Missing unit of measure");
       if (group.unitMeasures.size > 1) blockingIssues.push("Multiple unit measures in one invoice line");
-      if (!group.workOrders.size) blockingIssues.push("No work order reference in the selected period");
-      if (group.workOrders.size > 1) blockingIssues.push("Multiple work orders in one invoice line");
       if (!group.purchaseOrders.size) blockingIssues.push("No purchase order attached");
       if (group.purchaseOrders.size > 1) blockingIssues.push("Multiple purchase orders in one invoice line");
 
       if (group.missingPurchaseOrderRows > 0 && group.purchaseOrders.size > 0) advisoryIssues.push(group.missingPurchaseOrderRows + " " + pluralize(group.missingPurchaseOrderRows, "row") + " missing PO");
       if (group.missingWorkOrderRows > 0 && group.workOrders.size > 0) advisoryIssues.push(group.missingWorkOrderRows + " " + pluralize(group.missingWorkOrderRows, "row") + " missing work order");
+      if (group.workOrders.size > 1) advisoryIssues.push(group.workOrders.size + " work orders rolled into one PO lot line");
       if (group.lines.size > 1) advisoryIssues.push(group.lines.size + " production lines");
       if (group.missingRevenueUnits > 0) advisoryIssues.push(formatUnits(group.missingRevenueUnits) + " units missing revenue");
       if (group.itemMasterFallbackUnits > 0) advisoryIssues.push(formatUnits(group.itemMasterFallbackUnits) + " units using item master fallback");
@@ -1160,7 +1259,7 @@ export default function InvoicingView(props) {
       if (group.pricingUnits > 0 && group.itemMasterFallbackUnits > 0) primaryRevenueSource = "mixed";
       else if (group.pricingUnits > 0) primaryRevenueSource = "pricing";
       else if (group.itemMasterFallbackUnits > 0) primaryRevenueSource = "item_master_cost_per_unit";
-      return {
+      var candidate = {
         key: group.key,
         customer: group.customer,
         sku: group.sku,
@@ -1190,16 +1289,133 @@ export default function InvoicingView(props) {
         advisoryIssues: advisoryIssues,
         issueSummary: blockingIssues.concat(advisoryIssues).join(" | ")
       };
+      candidate.exportAuditKey = buildCandidateExportKey(candidate);
+      return candidate;
     }).sort(function(left, right) {
       if (left.status !== right.status) return left.status === "review" ? -1 : 1;
       if (right.unitsProduced !== left.unitsProduced) return right.unitsProduced - left.unitsProduced;
       if (left.customer !== right.customer) return left.customer.localeCompare(right.customer);
+      if (left.purchaseOrderReference !== right.purchaseOrderReference) return left.purchaseOrderReference.localeCompare(right.purchaseOrderReference);
       if (left.sku !== right.sku) return left.sku.localeCompare(right.sku);
       if (left.lotCode !== right.lotCode) return left.lotCode.localeCompare(right.lotCode);
+      if (left.revenuePerUnitAvg !== right.revenuePerUnitAvg) return left.revenuePerUnitAvg - right.revenuePerUnitAvg;
       if (left.workOrderReference !== right.workOrderReference) return left.workOrderReference.localeCompare(right.workOrderReference);
-      return left.purchaseOrderReference.localeCompare(right.purchaseOrderReference);
+      return 0;
     });
   }, [filteredRows]);
+
+  var invoiceCandidateStateSignature = useMemo(function() {
+    return baseInvoiceCandidates
+      .map(function(candidate) { return candidate.exportAuditKey; })
+      .sort()
+      .join("|");
+  }, [baseInvoiceCandidates]);
+
+  var quickBooksPersistenceQuery = useQuery({
+    queryKey: ["invoicing", "quickbooks-persistence", startDate, endDate, invoiceCandidateStateSignature],
+    queryFn: function() {
+      return fetchQuickBooksPersistenceState({
+        billingWindow: {
+          startDate: startDate || "",
+          endDate: endDate || ""
+        },
+        invoiceCandidates: baseInvoiceCandidates.map(function(candidate) {
+          return {
+            key: candidate.key,
+            candidateExportKey: candidate.exportAuditKey,
+            customer: candidate.customer,
+            sku: candidate.sku,
+            unitsProduced: candidate.unitsProduced,
+            estimatedRevenue: candidate.estimatedRevenue,
+            revenuePerUnitAvg: candidate.revenuePerUnitAvg,
+            detailRows: candidate.detailRows,
+            lineCount: candidate.lineCount,
+            firstProducedDate: candidate.firstProducedDate,
+            lastProducedDate: candidate.lastProducedDate,
+            status: candidate.status
+          };
+        })
+      });
+    },
+    enabled: hasValidDateRange && baseInvoiceCandidates.length > 0,
+    staleTime: 30 * 1000
+  });
+
+  var quickBooksPersistence = quickBooksPersistenceQuery.data || normalizeQuickBooksPersistencePayload({});
+
+  var invoiceCandidates = useMemo(function() {
+    return baseInvoiceCandidates.map(function(candidate) {
+      var state = quickBooksPersistence.candidateStates[candidate.key] || {};
+      var quickBooksIssues = Array.isArray(state.issues) ? state.issues : [];
+      var combinedIssueSummary = [candidate.issueSummary].concat(quickBooksIssues).filter(Boolean).join(" | ");
+      var quickBooksState = String(state.quickBooksState || "");
+      return Object.assign({}, candidate, {
+        quickBooksState: quickBooksState,
+        quickBooksStateKnown: !!state.stateKnown,
+        mappingStateKnown: !!state.mappingStateKnown,
+        exportStateKnown: !!state.exportStateKnown,
+        quickBooksReady: quickBooksIssues.length === 0 && candidateCanPreviewQuickBooks({ status: candidate.status, quickBooksState: quickBooksState }),
+        customerMapped: state.customerMapped,
+        itemMapped: state.itemMapped,
+        alreadyPushed: !!state.alreadyPushed,
+        exportStatus: String(state.exportStatus || ""),
+        externalInvoiceId: String(state.externalInvoiceId || ""),
+        externalDocNumber: String(state.externalDocNumber || ""),
+        exportedAt: String(state.exportedAt || ""),
+        quickBooksIssues: quickBooksIssues,
+        issueSummary: combinedIssueSummary
+      });
+    });
+  }, [baseInvoiceCandidates, quickBooksPersistence.candidateStates]);
+
+  var candidateByKey = useMemo(function() {
+    var out = {};
+    invoiceCandidates.forEach(function(candidate) {
+      out[candidate.key] = candidate;
+    });
+    return out;
+  }, [invoiceCandidates]);
+
+  var selectedInvoiceCandidates = useMemo(function() {
+    return Object.keys(selectedCandidateKeys).map(function(key) {
+      return candidateByKey[key];
+    }).filter(Boolean);
+  }, [selectedCandidateKeys, candidateByKey]);
+
+  var selectedCandidateCount = selectedInvoiceCandidates.length;
+  var selectedReadyCandidateCount = useMemo(function() {
+    return selectedInvoiceCandidates.filter(function(candidate) { return candidateCanPreviewQuickBooks(candidate); }).length;
+  }, [selectedInvoiceCandidates]);
+  var selectedReviewCandidateCount = useMemo(function() {
+    return selectedInvoiceCandidates.filter(function(candidate) { return candidate.status !== "ready"; }).length;
+  }, [selectedInvoiceCandidates]);
+  var selectedQuickBooksBlockedCount = useMemo(function() {
+    return selectedInvoiceCandidates.filter(function(candidate) {
+      return candidate.status === "ready" && !candidateCanPreviewQuickBooks(candidate);
+    }).length;
+  }, [selectedInvoiceCandidates]);
+  var selectedCandidateSignature = useMemo(function() {
+    return selectedInvoiceCandidates.map(function(candidate) { return candidate.key; }).sort().join("|");
+  }, [selectedInvoiceCandidates]);
+
+  useEffect(function() {
+    setSelectedCandidateKeys(function(previous) {
+      var next = {};
+      var changed = false;
+      Object.keys(previous || {}).forEach(function(key) {
+        if (candidateCanPreviewQuickBooks(candidateByKey[key])) next[key] = true;
+        else changed = true;
+      });
+      return changed ? next : previous;
+    });
+  }, [candidateByKey]);
+
+  useEffect(function() {
+    setInvoicePreviewState(function(previous) {
+      if (!previous.loading && !previous.error && !previous.data) return previous;
+      return { loading: false, error: "", data: null };
+    });
+  }, [selectedCandidateSignature, startDate, endDate]);
 
   var statusScopedInvoiceCandidates = useMemo(function() {
     return invoiceCandidates.filter(function(candidate) {
@@ -1231,6 +1447,22 @@ export default function InvoicingView(props) {
     });
     return out;
   }, [statusScopedInvoiceCandidates]);
+
+  var visibleReadyCandidates = useMemo(function() {
+    return visibleInvoiceCandidates.filter(function(candidate) {
+      return candidateCanPreviewQuickBooks(candidate);
+    });
+  }, [visibleInvoiceCandidates]);
+
+  var selectedVisibleReadyCount = useMemo(function() {
+    var count = 0;
+    visibleReadyCandidates.forEach(function(candidate) {
+      if (selectedCandidateKeys[candidate.key]) count += 1;
+    });
+    return count;
+  }, [visibleReadyCandidates, selectedCandidateKeys]);
+
+  var allVisibleReadySelected = visibleReadyCandidates.length > 0 && selectedVisibleReadyCount === visibleReadyCandidates.length;
 
   var customerRollups = useMemo(function() {
     var grouped = {};
@@ -1373,6 +1605,77 @@ export default function InvoicingView(props) {
     setCandidateColumnFilters(createDefaultCandidateColumnFilters());
   }
 
+  function toggleCandidateSelection(key, checked) {
+    if (!key) return;
+    setSelectedCandidateKeys(function(previous) {
+      var next = Object.assign({}, previous);
+      if (checked) next[key] = true;
+      else delete next[key];
+      return next;
+    });
+  }
+
+  function toggleVisibleReadySelection(checked) {
+    setSelectedCandidateKeys(function(previous) {
+      var next = Object.assign({}, previous);
+      visibleReadyCandidates.forEach(function(candidate) {
+        if (checked) next[candidate.key] = true;
+        else delete next[candidate.key];
+      });
+      return next;
+    });
+  }
+
+  function clearSelectedCandidates() {
+    setSelectedCandidateKeys({});
+  }
+
+  async function buildInvoicePreview() {
+    if (!selectedInvoiceCandidates.length) return;
+    setInvoicePreviewState({ loading: true, error: "", data: null });
+    try {
+      var payload = {
+        billingWindow: {
+          startDate: startDate || "",
+          endDate: endDate || ""
+        },
+        invoiceDate: endDate || startDate || "",
+        selectedCandidates: selectedInvoiceCandidates.map(function(candidate) {
+          return {
+            key: candidate.key,
+            candidateExportKey: candidate.exportAuditKey,
+            customer: candidate.customer,
+            sku: candidate.sku,
+            description: candidate.description,
+            unitsProduced: candidate.unitsProduced,
+            estimatedRevenue: candidate.estimatedRevenue,
+            revenuePerUnitAvg: candidate.revenuePerUnitAvg,
+            unitOfMeasure: candidate.unitOfMeasure,
+            lotCode: candidate.lotCode,
+            purchaseOrderReference: candidate.purchaseOrderReference,
+            workOrderReference: candidate.workOrderReference,
+            workOrderCount: candidate.workOrderCount,
+            jobCount: candidate.jobCount,
+            lineCount: candidate.lineCount,
+            detailRows: candidate.detailRows,
+            status: candidate.status,
+            firstProducedDate: candidate.firstProducedDate,
+            lastProducedDate: candidate.lastProducedDate,
+            issueSummary: candidate.issueSummary
+          };
+        })
+      };
+      var preview = await fetchQuickBooksInvoicePreview(payload);
+      setInvoicePreviewState({ loading: false, error: "", data: preview });
+    } catch (error) {
+      setInvoicePreviewState({
+        loading: false,
+        error: error && error.message ? error.message : "Could not build QuickBooks preview.",
+        data: null
+      });
+    }
+  }
+
   function handleCandidateSort(field) {
     if (candidateSortField === field) {
       setCandidateSortDir(function(previous) {
@@ -1442,8 +1745,8 @@ export default function InvoicingView(props) {
       "revenue_source",
       "unit_of_measure",
       "finished_good_lot_code",
-      "work_order",
       "purchase_order",
+      "work_order",
       "job_count",
       "line_count",
       "first_produced_date",
@@ -1464,8 +1767,8 @@ export default function InvoicingView(props) {
         candidate.revenueSource,
         candidate.unitOfMeasure,
         candidate.lotCode,
-        candidate.workOrderReference,
         candidate.purchaseOrderReference,
+        candidate.workOrderReference,
         candidate.jobCount,
         candidate.lineCount,
         candidate.firstProducedDate,
@@ -1528,7 +1831,7 @@ export default function InvoicingView(props) {
         <CardHeader className="border-b border-[rgb(var(--border))] pb-4">
           <div className="text-lg font-semibold text-[rgb(var(--foreground))]">Invoicing Workflow</div>
           <div className="mt-1 max-w-3xl text-sm text-[rgb(var(--muted))]">
-            Review customer SKU output for a billing period, assign each line to a work order and purchase order, and export accounting-ready invoice detail.
+            Review billable production for a billing period, preserve PO and lot traceability, and export accounting-ready invoice detail.
           </div>
         </CardHeader>
         <CardContent className="px-4 py-4">
@@ -1567,7 +1870,7 @@ export default function InvoicingView(props) {
         <CardHeader className="border-b border-[rgb(var(--border))] pb-4">
           <div className="text-lg font-semibold text-[rgb(var(--foreground))]">Invoicing Workflow</div>
           <div className="mt-1 max-w-3xl text-sm text-[rgb(var(--muted))]">
-            Review customer SKU output for a billing period, assign each line to a work order and purchase order, and export accounting-ready invoice detail.
+            Review billable production for a billing period, preserve PO and lot traceability, and export accounting-ready invoice detail.
           </div>
         </CardHeader>
         <CardContent className="px-4 py-4">
@@ -1596,13 +1899,13 @@ export default function InvoicingView(props) {
       ? "This environment does not have the `production_events` table available yet, so invoicing cannot load historical production rows."
       : hasAvailableHistory
         ? "The selected billing window falls outside the currently stored production history, or there were no positive-unit production rows in that period."
-        : "Run the Nulogy sync and include the Production report. Once rows are stored in historical production events, this page will assemble customer, SKU, work order, and purchase order invoice lines automatically.";
+        : "Run the Nulogy sync and include the Production report. Once rows are stored in historical production events, this page will assemble customer, PO, SKU, lot, and billed-rate invoice lines automatically.";
     return (
       <Card className="mt-3">
         <CardHeader className="border-b border-[rgb(var(--border))] pb-4">
           <div className="text-lg font-semibold text-[rgb(var(--foreground))]">Invoicing Workflow</div>
           <div className="mt-1 max-w-3xl text-sm text-[rgb(var(--muted))]">
-            Review customer SKU output for a billing period, assign each line to a work order and purchase order, and export accounting-ready invoice detail.
+            Review billable production for a billing period, preserve PO and lot traceability, and export accounting-ready invoice detail.
           </div>
         </CardHeader>
         <CardContent className="px-4 py-4">
@@ -1640,7 +1943,7 @@ export default function InvoicingView(props) {
               </div>
               <div className="rounded-lg border border-[rgb(var(--border))] bg-white px-3 py-3">
                 <div className="text-xs font-medium uppercase tracking-[0.12em] text-[rgb(var(--muted))]">Needed For Invoice Lines</div>
-                <div className="mt-2 text-sm font-medium text-[rgb(var(--foreground))]">Production rows with SKU, lot code, WO, and PO references</div>
+                <div className="mt-2 text-sm font-medium text-[rgb(var(--foreground))]">Production rows with SKU, lot code, purchase order, and pricing references</div>
               </div>
             </div>
           </div>
@@ -1656,7 +1959,7 @@ export default function InvoicingView(props) {
           <div>
             <div className="text-lg font-semibold text-[rgb(var(--foreground))]">Invoicing Workflow</div>
             <div className="mt-1 max-w-3xl text-sm text-[rgb(var(--muted))]">
-              Review customer SKU output for a billing period, surface lines that need cleanup, and export invoice-ready summaries or job-level detail.
+              Review billable production for a billing period, surface lines that need cleanup, and export invoice-ready summaries or detail rows.
             </div>
             <div className="mt-2 max-w-3xl text-xs text-[rgb(var(--muted))]">
               Candidates in this view are derived from production output. They do not yet reconcile against posted or open invoice records.
@@ -1752,7 +2055,7 @@ export default function InvoicingView(props) {
                   onChange={function(event) {
                     setSearchTerm(event.target.value);
                   }}
-                  placeholder="Customer, SKU, lot, WO, PO, job..."
+                  placeholder="Customer, SKU, lot, PO, rate, WO, job..."
                 />
               </div>
             </div>
@@ -1807,12 +2110,185 @@ export default function InvoicingView(props) {
         {[
           metricCard("Units Produced", formatUnits(summary.unitsProduced), "Finished-good output in the selected billing window.", "default"),
           metricCard("Customers", summary.customers.toLocaleString(), "Distinct customers represented in visible invoice lines.", "default"),
-          metricCard("Invoice Lines", summary.invoiceLines.toLocaleString(), "Customer, SKU, lot, WO, and PO line items ready for accounting review.", "success"),
+          metricCard("Invoice Lines", summary.invoiceLines.toLocaleString(), "Customer, PO, SKU, lot, and rate line items ready for accounting review.", "success"),
           metricCard("Estimated Revenue", formatMoney(summary.estimatedRevenue), summary.revenueCoveragePct >= 100 ? "All visible units have revenue coverage." : "Based on priced units only; uncovered units remain excluded.", summary.revenueCoveragePct >= 100 ? "success" : "warning"),
           metricCard("Revenue Coverage", summary.revenueCoveragePct + "%", summary.pricedUnits ? (formatUnits(summary.pricedUnits) + " priced units in the current result set.") : "No priced units found for the current result set.", summary.revenueCoveragePct >= 100 ? "success" : "warning"),
           metricCard("Needs Review", summary.reviewLines.toLocaleString(), summary.reviewLines ? "Lines missing traceability or billing fields." : "No blockers in the current result set.", summary.reviewLines ? "warning" : "success"),
         ]}
       </div>
+
+      <Card>
+        <CardHeader className="flex flex-col gap-3 border-b border-[rgb(var(--border))] pb-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="text-base font-semibold text-[rgb(var(--foreground))]">QuickBooks Preview</div>
+            <div className="mt-1 text-sm text-[rgb(var(--muted))]">
+              Select export-ready invoice candidates, then preview draft invoices grouped by customer and purchase order before we wire the live QuickBooks create call.
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant={selectedCandidateCount ? "info" : "secondary"}>
+              {selectedCandidateCount.toLocaleString()} selected
+            </Badge>
+            {Number(quickBooksPersistence.summary.alreadyPushedCount || 0) ? (
+              <Badge variant="warning">{Number(quickBooksPersistence.summary.alreadyPushedCount || 0).toLocaleString()} already pushed</Badge>
+            ) : null}
+            {Number(quickBooksPersistence.summary.missingCustomerMappings || 0) || Number(quickBooksPersistence.summary.missingItemMappings || 0) ? (
+              <Badge variant="warning">
+                {(Number(quickBooksPersistence.summary.missingCustomerMappings || 0) + Number(quickBooksPersistence.summary.missingItemMappings || 0)).toLocaleString()} mapping gap{(Number(quickBooksPersistence.summary.missingCustomerMappings || 0) + Number(quickBooksPersistence.summary.missingItemMappings || 0)) === 1 ? "" : "s"}
+              </Badge>
+            ) : null}
+            {selectedReviewCandidateCount ? (
+              <Badge variant="warning">{selectedReviewCandidateCount.toLocaleString()} needs review</Badge>
+            ) : null}
+            {selectedQuickBooksBlockedCount ? (
+              <Badge variant="warning">{selectedQuickBooksBlockedCount.toLocaleString()} blocked for QuickBooks</Badge>
+            ) : null}
+            <Button
+              onClick={function() {
+                toggleVisibleReadySelection(!allVisibleReadySelected);
+              }}
+              variant="outline"
+              size="sm"
+              disabled={!visibleReadyCandidates.length}
+            >
+              {allVisibleReadySelected ? "Unselect Visible Export-Ready" : "Select Visible Export-Ready"}
+            </Button>
+            <Button onClick={clearSelectedCandidates} variant="ghost" size="sm" disabled={!selectedCandidateCount}>
+              Clear Selection
+            </Button>
+            <Button onClick={buildInvoicePreview} variant="default" size="sm" disabled={!selectedReadyCandidateCount || invoicePreviewState.loading}>
+              {invoicePreviewState.loading ? "Building Preview..." : "Preview QuickBooks Draft"}
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4 px-4 py-4">
+          {quickBooksPersistenceQuery.error ? (
+            <div className="rounded-md border border-[rgb(var(--danger))]/20 bg-[color-mix(in_oklab,rgb(var(--danger))_6%,white)] p-4 text-sm text-[rgb(var(--foreground))]">
+              Could not load QuickBooks persistence state. Preview still works, but duplicate detection and mapping checks are unavailable right now.
+            </div>
+          ) : null}
+
+          {!quickBooksPersistenceQuery.error && Array.isArray(quickBooksPersistence.warnings) && quickBooksPersistence.warnings.length ? (
+            <div className="rounded-md border border-[rgb(var(--warning))]/25 bg-[color-mix(in_oklab,rgb(var(--warning))_7%,white)] p-4">
+              <div className="text-sm font-medium text-[rgb(var(--foreground))]">QuickBooks Persistence Setup</div>
+              <div className="mt-2 space-y-1 text-xs text-[rgb(var(--muted))]">
+                {quickBooksPersistence.warnings.map(function(warning, index) {
+                  return <div key={"qbo-warning-" + index}>{warning}</div>;
+                })}
+              </div>
+            </div>
+          ) : null}
+
+          {!selectedCandidateCount ? (
+            <div className="rounded-md border border-dashed border-[rgb(var(--border))] bg-[color-mix(in_oklab,rgb(var(--surface))_70%,white)] p-4 text-sm text-[rgb(var(--muted))]">
+              Select export-ready invoice candidates from the table below to build a QuickBooks draft preview.
+            </div>
+          ) : null}
+
+          {selectedCandidateCount ? (
+            <div className="grid gap-3 md:grid-cols-4">
+              {[
+                metricCard("Selected Lines", selectedCandidateCount.toLocaleString(), "Invoice candidates currently selected for preview.", "default"),
+                metricCard("Selected Units", formatUnits(selectedInvoiceCandidates.reduce(function(sum, candidate) { return sum + candidate.unitsProduced; }, 0)), "Total billed quantity across selected candidates.", "default"),
+                metricCard("Selected Revenue", formatMoney(selectedInvoiceCandidates.reduce(function(sum, candidate) { return sum + candidate.estimatedRevenue; }, 0)), "Estimated invoice amount from the selected candidates.", "success"),
+                metricCard("Selected Exportable", selectedReadyCandidateCount.toLocaleString(), selectedReviewCandidateCount ? "Some selected candidates still need invoice review." : (selectedQuickBooksBlockedCount ? "Some selected candidates are blocked by QuickBooks mappings or prior exports." : "All selected candidates are export-ready."), (selectedReviewCandidateCount || selectedQuickBooksBlockedCount) ? "warning" : "success")
+              ]}
+            </div>
+          ) : null}
+
+          {invoicePreviewState.error ? (
+            <div className="rounded-md border border-[rgb(var(--danger))]/20 bg-[color-mix(in_oklab,rgb(var(--danger))_6%,white)] p-4 text-sm text-[rgb(var(--foreground))]">
+              {invoicePreviewState.error}
+            </div>
+          ) : null}
+
+          {invoicePreviewState.data && Array.isArray(invoicePreviewState.data.validationIssues) && invoicePreviewState.data.validationIssues.length ? (
+            <div className="rounded-md border border-[rgb(var(--warning))]/25 bg-[color-mix(in_oklab,rgb(var(--warning))_7%,white)] p-4">
+              <div className="text-sm font-medium text-[rgb(var(--foreground))]">Validation Issues</div>
+              <div className="mt-2 space-y-1 text-xs text-[rgb(var(--muted))]">
+                {invoicePreviewState.data.validationIssues.map(function(issue, index) {
+                  return <div key={String(issue && issue.key || "issue") + "-" + index}>{issue && issue.message ? issue.message : "Unknown preview issue."}</div>;
+                })}
+              </div>
+            </div>
+          ) : null}
+
+          {invoicePreviewState.data && Array.isArray(invoicePreviewState.data.invoiceGroups) && invoicePreviewState.data.invoiceGroups.length ? (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="success">{Number(invoicePreviewState.data.groupCount || 0).toLocaleString()} draft invoice{Number(invoicePreviewState.data.groupCount || 0) === 1 ? "" : "s"}</Badge>
+                <Badge variant="info">{Number(invoicePreviewState.data.lineCount || 0).toLocaleString()} line{Number(invoicePreviewState.data.lineCount || 0) === 1 ? "" : "s"}</Badge>
+                <Badge variant="secondary">{formatUnits(invoicePreviewState.data.totalUnits || 0)} units</Badge>
+                <Badge variant="secondary">{formatMoney(invoicePreviewState.data.totalAmount || 0)}</Badge>
+              </div>
+              {invoicePreviewState.data.invoiceGroups.map(function(group) {
+                return (
+                  <div key={group.key} className="rounded-lg border border-[rgb(var(--border))] bg-white p-4">
+                    <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+                      <div>
+                        <div className="text-sm font-semibold text-[rgb(var(--foreground))]">{group.customer}</div>
+                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[rgb(var(--muted))]">
+                          <Badge variant="info">PO {group.purchaseOrderNumber || "--"}</Badge>
+                          <span>{group.lineCount} line{group.lineCount === 1 ? "" : "s"}</span>
+                          <span>{formatUnits(group.totalUnits)} units</span>
+                          <span>{formatMoney(group.totalAmount)}</span>
+                        </div>
+                        {group.customerMemo ? (
+                          <div className="mt-2 text-xs text-[rgb(var(--muted))]">Customer memo: {group.customerMemo}</div>
+                        ) : null}
+                      </div>
+                      <div className="text-xs text-[rgb(var(--muted))]">
+                        Invoice date {formatDateLabel(group.invoiceDate)}
+                      </div>
+                    </div>
+                    <TableShell className="mt-3">
+                      <div className="overflow-auto">
+                        <table className="min-w-full text-xs">
+                          <thead className="bg-[rgb(var(--surface))] text-[rgb(var(--muted))]">
+                            <tr>
+                              <th className="px-3 py-2 text-left font-medium">SKU / Description</th>
+                              <th className="px-3 py-2 text-left font-medium">Lot / PO</th>
+                              <th className="px-3 py-2 text-right font-medium">Qty</th>
+                              <th className="px-3 py-2 text-right font-medium">Rate</th>
+                              <th className="px-3 py-2 text-right font-medium">Amount</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {group.lines.map(function(line) {
+                              return (
+                                <tr key={line.key} className="border-t border-[rgb(var(--border))] align-top">
+                                  <td className="px-3 py-2">
+                                    <div className="font-medium text-[rgb(var(--foreground))]">{line.sku}</div>
+                                    <div className="mt-1 text-[rgb(var(--muted))]">{line.description}</div>
+                                  </td>
+                                  <td className="px-3 py-2 text-[rgb(var(--muted))]">
+                                    <div className="font-mono text-[rgb(var(--foreground))]">{line.lotCode}</div>
+                                    <div className="mt-1">PO {line.purchaseOrderNumber || "--"}</div>
+                                    {line.workOrderSummary ? <div className="mt-1">{line.workOrderSummary}</div> : null}
+                                  </td>
+                                  <td className="px-3 py-2 text-right tabular-nums text-[rgb(var(--foreground))]">{formatUnits(line.unitsProduced)}</td>
+                                  <td className="px-3 py-2 text-right tabular-nums text-[rgb(var(--foreground))]">{formatMoney(line.revenuePerUnit)}</td>
+                                  <td className="px-3 py-2 text-right tabular-nums font-medium text-[rgb(var(--foreground))]">{formatMoney(line.amount)}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </TableShell>
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+
+          {selectedCandidateCount && !invoicePreviewState.loading && !invoicePreviewState.error && !invoicePreviewState.data ? (
+            <div className="rounded-md border border-dashed border-[rgb(var(--border))] bg-[color-mix(in_oklab,rgb(var(--surface))_70%,white)] p-4 text-sm text-[rgb(var(--muted))]">
+              Preview has not been generated yet for the current selection.
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 2xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.4fr)]">
         <Card>
@@ -1881,7 +2357,7 @@ export default function InvoicingView(props) {
                 <div className="text-base font-semibold text-[rgb(var(--foreground))]">Invoice Candidates</div>
                 <div className="mt-1 text-sm text-[rgb(var(--muted))]">
                   {customerFilter === "all"
-                    ? "Grouped by customer, SKU, finished-good lot, work order, and purchase order for the selected billing period."
+                    ? "Grouped by customer, purchase order, SKU, finished-good lot, and billed rate for the selected billing period. Work orders roll up for audit."
                     : ("Focused on " + customerFilter + ".")}
                 </div>
                 <div className="mt-2 text-xs text-[rgb(var(--muted))]">
@@ -1893,6 +2369,9 @@ export default function InvoicingView(props) {
                   {visibleInvoiceCandidates.length === statusScopedInvoiceCandidates.length
                     ? (visibleInvoiceCandidates.length.toLocaleString() + " line items")
                     : ("Showing " + visibleInvoiceCandidates.length.toLocaleString() + " of " + statusScopedInvoiceCandidates.length.toLocaleString())}
+                </Badge>
+                <Badge variant={selectedVisibleReadyCount ? "info" : "secondary"}>
+                  {selectedVisibleReadyCount.toLocaleString()} visible ready selected
                 </Badge>
                 <Button
                   onClick={function() {
@@ -1923,6 +2402,16 @@ export default function InvoicingView(props) {
                 <table className="min-w-full text-sm">
                   <thead className="bg-[rgb(var(--surface))] text-[rgb(var(--muted))]">
                     <tr className="border-b border-[rgb(var(--border))]">
+                      <th className="px-4 py-3 text-center font-medium">
+                        <input
+                          type="checkbox"
+                          checked={allVisibleReadySelected}
+                          onChange={function(event) {
+                            toggleVisibleReadySelection(!!event.target.checked);
+                          }}
+                          aria-label="Select visible export-ready invoice candidates"
+                        />
+                      </th>
                       <th className="px-4 py-3 text-left font-medium">
                         <SortHeaderButton onClick={function() { handleCandidateSort("status"); }} className="w-full">
                           Status{candidateSortField === "status" ? (candidateSortDir === "asc" ? " ↑" : " ↓") : ""}
@@ -1959,13 +2448,13 @@ export default function InvoicingView(props) {
                         </SortHeaderButton>
                       </th>
                       <th className="px-4 py-3 text-left font-medium">
-                        <SortHeaderButton onClick={function() { handleCandidateSort("workOrderReference"); }} className="w-full">
-                          Work Order{candidateSortField === "workOrderReference" ? (candidateSortDir === "asc" ? " ↑" : " ↓") : ""}
+                        <SortHeaderButton onClick={function() { handleCandidateSort("purchaseOrderReference"); }} className="w-full">
+                          Purchase Order{candidateSortField === "purchaseOrderReference" ? (candidateSortDir === "asc" ? " ↑" : " ↓") : ""}
                         </SortHeaderButton>
                       </th>
                       <th className="px-4 py-3 text-left font-medium">
-                        <SortHeaderButton onClick={function() { handleCandidateSort("purchaseOrderReference"); }} className="w-full">
-                          Purchase Order{candidateSortField === "purchaseOrderReference" ? (candidateSortDir === "asc" ? " ↑" : " ↓") : ""}
+                        <SortHeaderButton onClick={function() { handleCandidateSort("workOrderReference"); }} className="w-full">
+                          Work Order{candidateSortField === "workOrderReference" ? (candidateSortDir === "asc" ? " ↑" : " ↓") : ""}
                         </SortHeaderButton>
                       </th>
                       <th className="px-4 py-3 text-right font-medium">
@@ -1981,6 +2470,7 @@ export default function InvoicingView(props) {
                     </tr>
                     {showCandidateFilterRow ? (
                       <tr className="border-b border-[rgb(var(--border))] bg-[color-mix(in_oklab,rgb(var(--surface))_72%,white)]">
+                        <th className="px-4 py-3" />
                         <th className="px-4 py-3">
                           <select
                             value={candidateColumnFilters.status}
@@ -2045,16 +2535,16 @@ export default function InvoicingView(props) {
                         </th>
                         <th className="px-4 py-3">
                           <Input
-                            value={candidateColumnFilters.workOrder}
-                            onChange={function(event) { updateCandidateColumnFilter("workOrder", event.target.value); }}
+                            value={candidateColumnFilters.purchaseOrder}
+                            onChange={function(event) { updateCandidateColumnFilter("purchaseOrder", event.target.value); }}
                             placeholder="Filter..."
                             className="h-8 min-w-[140px] px-2 text-xs"
                           />
                         </th>
                         <th className="px-4 py-3">
                           <Input
-                            value={candidateColumnFilters.purchaseOrder}
-                            onChange={function(event) { updateCandidateColumnFilter("purchaseOrder", event.target.value); }}
+                            value={candidateColumnFilters.workOrder}
+                            onChange={function(event) { updateCandidateColumnFilter("workOrder", event.target.value); }}
                             placeholder="Filter..."
                             className="h-8 min-w-[140px] px-2 text-xs"
                           />
@@ -2082,11 +2572,24 @@ export default function InvoicingView(props) {
                   <tbody>
                     {visibleInvoiceCandidates.length ? visibleInvoiceCandidates.map(function(candidate) {
                       var statusMeta = candidateStatusMeta(candidate.status);
+                      var selectable = candidateCanPreviewQuickBooks(candidate);
+                      var quickBooksMeta = quickBooksStateMeta(candidate.quickBooksState);
                       return (
                         <tr
                           key={candidate.key}
                           className="border-t border-[rgb(var(--border))] align-top hover:bg-[rgb(var(--surface))] odd:bg-[color-mix(in_oklab,rgb(var(--surface))_40%,white)]"
                         >
+                          <td className="px-4 py-3 text-center">
+                            <input
+                              type="checkbox"
+                              checked={!!selectedCandidateKeys[candidate.key]}
+                              disabled={!selectable}
+                              onChange={function(event) {
+                                toggleCandidateSelection(candidate.key, !!event.target.checked);
+                              }}
+                              aria-label={"Select invoice candidate " + candidate.customer + " " + candidate.purchaseOrderReference + " " + candidate.sku}
+                            />
+                          </td>
                           <td className="px-4 py-3">
                             <Badge variant={statusMeta.variant}>{statusMeta.label}</Badge>
                           </td>
@@ -2097,6 +2600,8 @@ export default function InvoicingView(props) {
                             <div className="mt-1 text-xs text-[rgb(var(--muted))]">{candidate.description}</div>
                             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
                               <Badge variant={revenueSourceMeta(candidate.revenueSource).variant}>{revenueSourceMeta(candidate.revenueSource).label}</Badge>
+                              {quickBooksMeta ? <Badge variant={quickBooksMeta.variant}>{quickBooksMeta.label}</Badge> : null}
+                              {candidate.externalDocNumber ? <span className="text-[rgb(var(--muted))]">QB #{candidate.externalDocNumber}</span> : null}
                               <span className="text-[rgb(var(--muted))]">{candidate.revenueCoveragePct}% coverage</span>
                             </div>
                             {candidate.issueSummary ? (
@@ -2110,8 +2615,8 @@ export default function InvoicingView(props) {
                           <td className="px-4 py-3 text-right font-medium tabular-nums text-[rgb(var(--foreground))]">{candidate.pricedUnits > 0 ? formatMoney(candidate.estimatedRevenue) : "--"}</td>
                           <td className="px-4 py-3 text-[rgb(var(--muted))]">{candidate.unitOfMeasure}</td>
                           <td className="px-4 py-3 font-mono text-xs text-[rgb(var(--foreground))]">{candidate.lotCode}</td>
-                          <td className="px-4 py-3 font-mono text-xs text-[rgb(var(--foreground))]">{candidate.workOrderReference}</td>
                           <td className="px-4 py-3 font-mono text-xs text-[rgb(var(--foreground))]">{candidate.purchaseOrderReference}</td>
+                          <td className="px-4 py-3 font-mono text-xs text-[rgb(var(--foreground))]">{candidate.workOrderReference}</td>
                           <td className="px-4 py-3 text-right tabular-nums text-[rgb(var(--muted))]">{candidate.jobCount.toLocaleString()}</td>
                           <td className="px-4 py-3 text-[rgb(var(--muted))]">
                             {formatDateLabel(candidate.firstProducedDate)} to {formatDateLabel(candidate.lastProducedDate)}
@@ -2120,7 +2625,7 @@ export default function InvoicingView(props) {
                       );
                     }) : (
                       <tr>
-                        <td colSpan={11} className="px-4 py-6 text-center text-sm text-[rgb(var(--muted))]">
+                        <td colSpan={12} className="px-4 py-6 text-center text-sm text-[rgb(var(--muted))]">
                           {statusScopedInvoiceCandidates.length
                             ? "No invoice candidates match the current table controls."
                             : "No invoice candidates match the current filters."}
