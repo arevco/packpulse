@@ -14,7 +14,7 @@ function introByView(activeView) {
     return "Ask the copilot to frame output pace, loss signals, recovery moves, or a shift handoff from current operations data.";
   }
   if (activeView === "aicopilot") {
-    return "Use the copilot like a command center: standup briefs, run sequencing, risk radar, executive recaps, and fast follow-up questions.";
+    return "Use the copilot like a command center: diagnose the operation, recommend moves, simulate scenarios, ideate new options, and still generate standup or executive briefs on demand.";
   }
   return "Ask the copilot to summarize this view, explain what changed, or recommend the next best move from the current dashboard context.";
 }
@@ -43,6 +43,18 @@ function buildPrototypeReply(text, context, mode) {
   }
   if (q.includes("run next") || q.includes("what should we run") || activeMode === "run_next") {
     return "Fallback answer: prioritize WOs with the strongest mix of due urgency, material coverage, and shared-family sequencing opportunity.";
+  }
+  if (activeMode === "diagnose" || q.includes("diagnose")) {
+    return "Fallback answer: read the current story through four lenses first: output pace, shortage pressure, queue pressure, and data confidence.";
+  }
+  if (activeMode === "recommend" || q.includes("recommend")) {
+    return "Fallback answer: choose the smallest set of actions that protects output, reduces risk, and avoids unnecessary resequencing.";
+  }
+  if (activeMode === "simulate" || q.includes("what if") || q.includes("scenario")) {
+    return "Fallback answer: compare three what-if paths: resolve the top shortage, run the strongest batch family, or recover the biggest throughput loss.";
+  }
+  if (activeMode === "ideate" || q.includes("brainstorm") || q.includes("ideate")) {
+    return "Fallback answer: generate ideas around batching, shortage triage, and daily decision rituals, then test them against current risks before acting.";
   }
   if (q.includes("batch") || q.includes("changeover") || activeMode === "batch_plan") {
     return "Fallback answer: group open work orders by repeated SKU families, then pull the earliest due date to the front inside each family.";
@@ -154,6 +166,34 @@ function suggestionSet(activeView) {
   if (activeView === "aicopilot") {
     return [
       {
+        label: "Diagnose",
+        tag: "Analyst",
+        mode: "diagnose",
+        prompt: "Diagnose what is going on in the operation right now.",
+        description: "Interpret the current story before deciding what to do."
+      },
+      {
+        label: "Recommend",
+        tag: "Decision",
+        mode: "recommend",
+        prompt: "Recommend the best next moves from the current operational data.",
+        description: "Turn the evidence into actions and tradeoffs."
+      },
+      {
+        label: "Simulate",
+        tag: "Scenarios",
+        mode: "simulate",
+        prompt: "Simulate the most useful what-if scenarios from the current operation.",
+        description: "Model shortage, sequencing, and throughput paths."
+      },
+      {
+        label: "Ideate",
+        tag: "Explore",
+        mode: "ideate",
+        prompt: "Ideate grounded ways to improve flow, sequencing, and risk management.",
+        description: "Generate practical ideas without pretending they are already validated."
+      },
+      {
         label: "Standup Brief",
         tag: "Shift pulse",
         mode: "standup",
@@ -168,18 +208,11 @@ function suggestionSet(activeView) {
         description: "A tighter recap for managers and escalations."
       },
       {
-        label: "Run Next",
-        tag: "Dispatch",
-        mode: "run_next",
-        prompt: "What should we run next and why?",
-        description: "Bring sequencing and batching into the same answer."
-      },
-      {
-        label: "Risk Radar",
-        tag: "Shortages",
-        mode: "risk_radar",
-        prompt: "Which risks can derail today's plan?",
-        description: "Show the highest-leverage risks and actions."
+        label: "Explain Change",
+        tag: "Delta",
+        mode: "explain_change",
+        prompt: "Explain what changed versus last week and what is driving it.",
+        description: "Interpret the delta, not just the current snapshot."
       }
     ];
   }
@@ -484,8 +517,19 @@ export default function AskAiPanel(props) {
                       {m.meta ? (
                         <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-[rgb(var(--muted))]">
                           {m.meta.modeLabel ? <Badge variant={m.meta.deterministic ? "success" : "info"}>{m.meta.modeLabel}</Badge> : null}
+                          {m.meta.provider ? <Badge variant="secondary">{m.meta.provider}</Badge> : null}
                           {m.meta.sourceLabel ? <span>{m.meta.sourceLabel}</span> : null}
                           {m.meta.dataTimestamp ? <span>{renderMetaTimestamp(m.meta.dataTimestamp)}</span> : null}
+                        </div>
+                      ) : null}
+                      {m.meta && m.meta.analysisSummary ? (
+                        <div className="mt-2 text-xs leading-5 text-[rgb(var(--muted))]">{m.meta.analysisSummary}</div>
+                      ) : null}
+                      {m.meta && m.meta.toolsUsed && m.meta.toolsUsed.length ? (
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {m.meta.toolsUsed.map(function(tool) {
+                            return <Badge key={tool} variant="secondary">{tool}</Badge>;
+                          })}
                         </div>
                       ) : null}
                       {Array.isArray(m.followUps) && m.followUps.length ? (

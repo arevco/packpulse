@@ -5,6 +5,7 @@ import { useDataSources } from "./hooks/useDataSources";
 import { useAnalysis } from "./hooks/useAnalysis";
 import ColumnMapper from "./components/ColumnMapper";
 import FileUploader from "./components/FileUploader";
+import { normalizeInboundRows } from "./lib/inboundData";
 import { Button } from "./components/ui/button";
 import { Badge } from "./components/ui/badge";
 import { Progress } from "./components/ui/progress";
@@ -488,7 +489,7 @@ export default function ProductionReadiness() {
     { k:"labor", l:"Labor", ts:ds.laborTimestamp, cad:"daily", ref:null },
     { k:"evocon", l:"Evocon", ts:ds.evoconTimestamp || evoconLastSyncAt, cad:"daily", ref:null, forceFresh: !!(ds.evoconTimestamp || evoconLastSyncAt || evoconApiInfo) },
     { k:"bom", l:"BOMs", ts:ds.bomTimestamp, cad:"rare", ref:() => window.__bomR && window.__bomR.click() },
-    { k:"edr", l:"EDR", ts:ds.edrTimestamp, cad:"monthly", ref:() => window.__edrR && window.__edrR.click() },
+    { k:"edr", l:"Inbound", ts:ds.edrTimestamp, cad:"monthly", ref:() => window.__edrR && window.__edrR.click() },
     { k:"dock", l:"OpenDock", ts:ds.dockTimestamp, cad:"daily", ref:() => window.__dockR && window.__dockR.click() },
   ];
   var staleSources = dataSourceStatus.filter(function(s) {
@@ -825,6 +826,14 @@ export default function ProductionReadiness() {
         ds.setBomTimestamp(ts);
       }
     }
+    if (results.receiveorders) {
+      var receiveOrderRows = normalizeInboundRows(getRows(results.receiveorders), "receiveorders");
+      if (!areStructuredValuesEqual(ds.edrData || [], receiveOrderRows)) {
+        ds.setEdrData(receiveOrderRows);
+        ds.setEdrFileName("Nulogy Receive Orders");
+        ds.setEdrTimestamp(ts);
+      }
+    }
     // Only promote the user out of setup when the sync actually changed core data
     // and the sync was user-visible.
     if (results.inventory && results.workorders && coreDataChanged && hiddenNulogySyncOrigin !== "auto") {
@@ -843,7 +852,7 @@ export default function ProductionReadiness() {
       await Promise.allSettled(serverWrites);
       setOperationsServerSyncVersion(function(v) { return v + 1; });
     }
-  }, [hiddenNulogySyncMode, hiddenNulogySyncOrigin, ds.inventory, ds.inventoryDetailData, ds.workOrders, ds.itemMaster, ds.productionData, ds.laborData, ds.boms]);
+  }, [hiddenNulogySyncMode, hiddenNulogySyncOrigin, ds.inventory, ds.inventoryDetailData, ds.workOrders, ds.itemMaster, ds.productionData, ds.laborData, ds.boms, ds.edrData]);
   var analysisForUI = analysis || { results:[], flags:[], diagnostics:{} };
   var summaryForUI = summary || { total:0, ready:0, partial:0, blocked:0, nobom:0 };
   var criticalItemsForUI = criticalItems || [];
@@ -943,6 +952,8 @@ export default function ProductionReadiness() {
       shortQty: toNumSafe(item && (item.totalShort != null ? item.totalShort : item.shortQty)),
       unitsAtRisk: toNumSafe(item && item.unitsAtRisk),
       dueDate: item && item.earliestDueDate ? item.earliestDueDate : "",
+      customerLabel: item && item.customerLabel ? item.customerLabel : "",
+      affectedWOCount: toNumSafe(item && item.affectedWOCount),
       recommendation: item && (item.recommendedAction || item.recommendation) ? (item.recommendedAction || item.recommendation) : "",
       status: item && item.status ? item.status : "",
     };
@@ -1332,7 +1343,7 @@ export default function ProductionReadiness() {
         <div className="mb-5 grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-2">
           <FileUploader label="Item Master" uploaded={!!ds.itemMaster} fileName={ds.itemMasterFileName} onData={(d,n) => {ds.setItemMaster(d);ds.setItemMasterFileName(n);ds.setItemMasterTimestamp(new Date());}} subtitle="SKU master incl. cost fields (.csv, .xlsx)" acceptTypes=".csv,.xlsx,.xls" />
           <FileUploader label="Bill of Materials" uploaded={!!ds.boms} fileName={ds.bomFileName} onData={(d,n) => {ds.setBoms(d);ds.setBomFileName(n);ds.setBomTimestamp(new Date());}} subtitle={ds.boms ? ("Saved \u00b7 Re-upload to update") : "BOM structure (.csv, .xlsx)"} acceptTypes=".csv,.xlsx,.xls" />
-          <FileUploader label="EDR" uploaded={!!ds.edrData} fileName={ds.edrFileName} onData={(d,n) => {ds.setEdrData(d);ds.setEdrFileName(n);ds.setEdrTimestamp(new Date());}} subtitle="Inbound deliveries (.xlsx)" acceptTypes=".xlsx,.xls,.csv" parseWorkbook={ds.parseEdrWorkbook} />
+          <FileUploader label="Receive Orders" uploaded={!!ds.edrData} fileName={ds.edrFileName} onData={(d,n) => {ds.setEdrData(normalizeInboundRows(d, n));ds.setEdrFileName(n);ds.setEdrTimestamp(new Date());}} subtitle="Receive Orders export or legacy EDR (.csv, .xlsx)" acceptTypes=".xlsx,.xls,.csv" parseWorkbook={ds.parseEdrWorkbook} />
           <FileUploader label="OpenDock" uploaded={!!ds.dockData} fileName={ds.dockFileName} onData={(d,n) => {ds.setDockData(d);ds.setDockFileName(n);ds.setDockTimestamp(new Date());}} subtitle="Dock appointments (.xlsx)" acceptTypes=".xlsx,.xls,.csv" />
         </div>
         <div className="-mt-2.5 mb-4 flex flex-wrap items-center gap-2.5">

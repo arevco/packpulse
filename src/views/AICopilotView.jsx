@@ -1,10 +1,14 @@
 import { useMemo, useState } from "react";
 import {
   ArrowRight,
+  BrainCircuit,
   BriefcaseBusiness,
   ClipboardList,
+  FlaskConical,
   Layers3,
+  Lightbulb,
   Radar,
+  Search,
   Sparkles,
   TrendingUp,
 } from "lucide-react";
@@ -204,7 +208,7 @@ export default function AICopilotView(props) {
   var onNavigate = typeof props.onNavigate === "function" ? props.onNavigate : function() {};
   const { mono } = useTheme();
 
-  const [selectedMode, setSelectedMode] = useState("standup");
+  const [selectedMode, setSelectedMode] = useState("diagnose");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState("");
   const [aiResult, setAiResult] = useState({
@@ -431,6 +435,46 @@ export default function AICopilotView(props) {
 
   var playbooks = useMemo(function() {
     return [
+      {
+        id: "diagnose",
+        label: "Diagnose",
+        description: "Interpret what is happening before jumping to action.",
+        kicker: "Analyst",
+        icon: Search,
+        prompt: "Diagnose what is going on in the operation right now. Interpret the data, name likely drivers, and tell me what you would check next."
+      },
+      {
+        id: "recommend",
+        label: "Recommend",
+        description: "Turn the evidence into the best next moves and tradeoffs.",
+        kicker: "Decision",
+        icon: BrainCircuit,
+        prompt: "Recommend the best next moves from the current operational data. Include tradeoffs and owner-specific actions."
+      },
+      {
+        id: "simulate",
+        label: "Simulate",
+        description: "Model useful what-if scenarios from current queue, risk, and flow signals.",
+        kicker: "Scenarios",
+        icon: FlaskConical,
+        prompt: "Simulate the most useful what-if scenarios from the current operation. Compare shortage recovery, batching, and throughput recovery options."
+      },
+      {
+        id: "ideate",
+        label: "Ideate",
+        description: "Generate creative but grounded ideas to improve flow and decision quality.",
+        kicker: "Explore",
+        icon: Lightbulb,
+        prompt: "Ideate practical, grounded ways to improve flow, sequencing, and risk management from the current data."
+      },
+      {
+        id: "explain_change",
+        label: "Explain Change",
+        description: "Explain what changed and what is most likely driving it.",
+        kicker: "Delta",
+        icon: TrendingUp,
+        prompt: "Explain what changed versus last week and what is most likely driving the change."
+      },
       {
         id: "standup",
         label: "Standup Brief",
@@ -674,10 +718,24 @@ export default function AICopilotView(props) {
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
               {aiResult.meta && aiResult.meta.deterministic ? <Badge variant="success">Deterministic</Badge> : <Badge variant="info">AI + Grounding</Badge>}
+              {aiResult.meta && aiResult.meta.provider ? <Badge variant="secondary">{aiResult.meta.provider}</Badge> : null}
+              {aiResult.meta && aiResult.meta.toolsUsed && aiResult.meta.toolsUsed.length ? <Badge variant="secondary">{aiResult.meta.toolsUsed.length} tools</Badge> : null}
               {aiResult.meta && aiResult.meta.dataTimestamp ? <Badge variant="secondary">{formatMetaTimestamp(aiResult.meta.dataTimestamp)}</Badge> : null}
               <Badge variant="secondary">{aiResult.meta && aiResult.meta.modeLabel ? aiResult.meta.modeLabel : selectedPlaybook.label}</Badge>
             </div>
           </div>
+          {aiResult.meta && (aiResult.meta.analysisSummary || (aiResult.meta.toolsUsed && aiResult.meta.toolsUsed.length)) ? (
+            <div className="mb-4 rounded-xl border border-[rgb(var(--border))] bg-white/70 px-3 py-3 text-xs text-[rgb(var(--muted))]">
+              {aiResult.meta.analysisSummary ? <div className="mb-2 text-sm text-[rgb(var(--foreground))]">{aiResult.meta.analysisSummary}</div> : null}
+              {aiResult.meta.toolsUsed && aiResult.meta.toolsUsed.length ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {aiResult.meta.toolsUsed.map(function(tool) {
+                    return <Badge key={tool} variant="secondary">{tool}</Badge>;
+                  })}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
 
           {aiBriefSections.length ? (
             <div className="grid gap-3 xl:grid-cols-3">
@@ -750,7 +808,7 @@ export default function AICopilotView(props) {
             <div>
               <div className="text-sm font-semibold">No Copilot Output Yet</div>
               <div className="mt-1 max-w-2xl text-sm leading-6 text-[rgb(var(--muted))]">
-                Start with <strong>{selectedPlaybook.label}</strong> if you want the fastest way to turn today’s signals into a usable plan. The result will come back grouped into sections with follow-up prompts you can keep drilling into.
+                Start with <strong>{selectedPlaybook.label}</strong> if you want the fastest way to turn today’s signals into an interpreted plan. The result will come back from an analyst loop that plans, gathers evidence, and then writes the conclusion with follow-up prompts you can keep drilling into.
               </div>
             </div>
             <Button size="sm" variant="outline" onClick={function() { runCopilot(selectedPlaybook.id); }} disabled={aiLoading}>
