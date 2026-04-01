@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTheme } from "../theme";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -99,7 +100,60 @@ function normalizeLegacyHeadcountMap(map) {
   return out;
 }
 
+var FORECAST_PRIMARY_STALE_MS = 5 * 60 * 1000;
+var FORECAST_CONFIG_STALE_MS = 15 * 60 * 1000;
+
+async function fetchJsonWithCredentials(url, options) {
+  var response = await fetch(url, Object.assign({ credentials: "include" }, options || {}));
+  var body = {};
+  try {
+    body = await response.json();
+  } catch (_error) {
+    body = {};
+  }
+  return { response: response, body: body };
+}
+
+async function fetchForecastVersions(monthKey) {
+  var result = await fetchJsonWithCredentials("/api/ops/forecast-versions?monthKey=" + encodeURIComponent(monthKey));
+  if (!result.response.ok) throw new Error((result.body && result.body.error) || "Could not load forecast versions");
+  return {
+    versions: Array.isArray(result.body && result.body.versions) ? result.body.versions : [],
+    status: String((result.body && result.body.status) || "")
+  };
+}
+
+async function fetchForecastAssumptions(monthKey) {
+  var result = await fetchJsonWithCredentials("/api/ops/forecast-assumptions?monthKey=" + encodeURIComponent(monthKey));
+  if (!result.response.ok) throw new Error((result.body && result.body.error) || "Could not load assumptions");
+  return result.body || {};
+}
+
+async function fetchForecastConfig(monthKey) {
+  var result = await fetchJsonWithCredentials("/api/ops/config?monthKey=" + encodeURIComponent(monthKey));
+  if (!result.response.ok) throw new Error((result.body && result.body.error) || "Could not load forecast config");
+  return result.body || {};
+}
+
+async function fetchForecastLaborActuals(monthKey) {
+  var result = await fetchJsonWithCredentials("/api/ops/labor-actuals?monthKey=" + encodeURIComponent(monthKey));
+  if (!result.response.ok) throw new Error((result.body && result.body.error) || "Could not load labor actuals");
+  return result.body || {};
+}
+
+async function fetchForecastProductionActuals(monthKey) {
+  var range = monthRange(monthKey);
+  if (!range.start || !range.end) {
+    return { status: "error", byDaySku: [], error: "Invalid month range", totalRows: 0 };
+  }
+  var url = "/api/ops/production-breakdown?start=" + encodeURIComponent(range.start) + "&end=" + encodeURIComponent(range.end);
+  var result = await fetchJsonWithCredentials(url);
+  if (!result.response.ok) throw new Error((result.body && result.body.error) || "Could not load production actuals");
+  return result.body || {};
+}
+
 export default function ForecastView(props) {
+  var queryClient = useQueryClient();
   var C = useTheme().C;
   var workOrders = Array.isArray(props.workOrders) ? props.workOrders : [];
   var itemMaster = Array.isArray(props.itemMaster) ? props.itemMaster : [];
@@ -119,12 +173,8 @@ export default function ForecastView(props) {
   var [assumptionsLoading, setAssumptionsLoading] = useState(false);
   var [autosaveStatus, setAutosaveStatus] = useState("idle");
   var [autosaveError, setAutosaveError] = useState("");
-  var [versions, setVersions] = useState([]);
-  var [versionsLoading, setVersionsLoading] = useState(false);
   var [versionsMsg, setVersionsMsg] = useState("");
   var [publishLoading, setPublishLoading] = useState(false);
-  var [laborActuals, setLaborActuals] = useState({ status: "idle", summary: {} });
-  var [productionActuals, setProductionActuals] = useState({ status: "idle", byDaySku: [] });
   var didLoadMonthRef = useRef({});
   var [expandedRows, setExpandedRows] = useState({});
   var [dirtyRows, setDirtyRows] = useState({});
@@ -184,43 +234,12 @@ export default function ForecastView(props) {
     return true;
   }, [applySavedAssumptions]);
 
-  var loadAssumptions = useCallback(async function(targetMonthKey) {
-    var mk = String(targetMonthKey || monthKey || "").trim();
-    if (!mk) return;
-    setAssumptionsLoading(true);
-    setAutosaveError("");
-    setAutosaveStatus("loading");
-    try {
-      var res = await fetch("/api/ops/forecast-assumptions?monthKey=" + encodeURIComponent(mk), { credentials: "include" });
-      var body = await res.json();
-      if (!res.ok) throw new Error((body && body.error) || "Could not load assumptions");
-      if (body && body.status === "missing_forecast_assumptions_table") {
-        setAutosaveStatus("error");
-        setAutosaveError("Assumptions table not set up yet.");
-        didLoadMonthRef.current[mk] = true;
-        return;
-      }
-      if (body && body.row) {
-        applySavedAssumptions(body.row);
-      }
-      didLoadMonthRef.current[mk] = true;
-      setAutosaveStatus("idle");
-    } catch (err) {
-      setAutosaveStatus("error");
-      setAutosaveError(err && err.message ? err.message : "Could not load assumptions.");
-      didLoadMonthRef.current[mk] = true;
-    } finally {
-      setAssumptionsLoading(false);
-    }
-  }, [monthKey, applySavedAssumptions]);
-
   var saveAssumptions = useCallback(async function() {
     try {
       setAutosaveStatus("saving");
       setAutosaveError("");
-      var res = await fetch("/api/ops/forecast-assumptions", {
+      var result = await fetchJsonWithCredentials("/api/ops/forecast-assumptions", {
         method: "POST",
-        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           monthKey: monthKey,
@@ -233,141 +252,186 @@ export default function ForecastView(props) {
           overrides: overrides
         })
       });
-      var body = await res.json();
-      if (!res.ok) throw new Error((body && body.error) || "Could not save assumptions");
+      var body = result.body;
+      if (!result.response.ok) throw new Error((body && body.error) || "Could not save assumptions");
       if (body && body.status === "missing_forecast_assumptions_table") {
         setAutosaveStatus("error");
         setAutosaveError("Assumptions table not set up yet.");
         return;
       }
+      queryClient.invalidateQueries({ queryKey: ["forecast", "assumptions", monthKey] });
       setAutosaveStatus("saved");
     } catch (err) {
       setAutosaveStatus("error");
       setAutosaveError(err && err.message ? err.message : "Could not save assumptions.");
     }
-  }, [monthKey, overheadGlobal, cogsNonLabor, equipmentRental, laborTemplates, overrides]);
+  }, [monthKey, overheadGlobal, cogsNonLabor, equipmentRental, laborTemplates, overrides, queryClient]);
 
-  var loadVersions = useCallback(async function(targetMonthKey, opts) {
-    var options = opts && typeof opts === "object" ? opts : {};
-    var hydrate = !!options.hydrate;
-    var mk = String(targetMonthKey || monthKey || "").trim();
-    if (!mk) return;
-    setVersionsLoading(true);
-    if (hydrate) {
-      setAssumptionsLoading(true);
-      setAutosaveError("");
-      setAutosaveStatus("loading");
-    }
-    try {
-      var res = await fetch("/api/ops/forecast-versions?monthKey=" + encodeURIComponent(mk), { credentials: "include" });
-      var body = await res.json();
-      if (!res.ok) throw new Error((body && body.error) || "Could not load forecast versions");
-      var list = Array.isArray(body && body.versions) ? body.versions : [];
-      setVersions(list);
-      if (body && body.status === "missing_forecast_versions_table") {
-        setVersionsMsg("Run docs/supabase-forecast-versions.sql in Supabase to enable publishing.");
-      }
-      if (hydrate) {
-        var picked = null;
-        list.forEach(function(v) {
-          if (picked) return;
-          if (v && v.is_active) picked = v;
-        });
-        if (!picked && list.length) picked = list[0];
-        if (picked && picked.snapshot && typeof picked.snapshot === "object") {
-          applyForecastSnapshot(picked.snapshot);
-          didLoadMonthRef.current[mk] = true;
-          setAutosaveStatus("idle");
-          setVersionsMsg("Loaded published version v" + String(picked.version_no || "") + " for " + mk + ".");
-        } else {
-          await loadAssumptions(mk);
-        }
-      }
-    } catch (err) {
-      if (hydrate) {
-        await loadAssumptions(mk);
-      } else {
-        setVersionsMsg(err && err.message ? err.message : "Could not load forecast versions.");
-      }
-    } finally {
-      setVersionsLoading(false);
-      if (hydrate) setAssumptionsLoading(false);
-    }
-  }, [monthKey, applyForecastSnapshot, loadAssumptions]);
+  var versionsQuery = useQuery({
+    queryKey: ["forecast", "versions", monthKey],
+    queryFn: function() {
+      return fetchForecastVersions(monthKey);
+    },
+    enabled: !!monthKey,
+    staleTime: FORECAST_PRIMARY_STALE_MS
+  });
+  var versions = versionsQuery.data && Array.isArray(versionsQuery.data.versions) ? versionsQuery.data.versions : [];
+  var versionsLoading = versionsQuery.isPending;
+  var selectedVersion = useMemo(function() {
+    var picked = null;
+    versions.forEach(function(v) {
+      if (picked) return;
+      if (v && v.is_active) picked = v;
+    });
+    if (!picked && versions.length) picked = versions[0];
+    return picked;
+  }, [versions]);
+  var hasSelectedSnapshot = !!(selectedVersion && selectedVersion.snapshot && typeof selectedVersion.snapshot === "object");
+
+  var assumptionsQuery = useQuery({
+    queryKey: ["forecast", "assumptions", monthKey],
+    queryFn: function() {
+      return fetchForecastAssumptions(monthKey);
+    },
+    enabled: !!monthKey && !hasSelectedSnapshot && (versionsQuery.status === "success" || versionsQuery.status === "error"),
+    staleTime: FORECAST_PRIMARY_STALE_MS
+  });
 
   useEffect(function() {
-    var cancelled = false;
-    (async function() {
-      try {
-        var res = await fetch("/api/ops/config?monthKey=" + encodeURIComponent(monthKey), { credentials: "include" });
-        var body = await res.json();
-        if (!res.ok || cancelled) return;
-        var rates = Array.isArray(body && body.rates) ? body.rates : [];
-        var headcountDefaults = body && body.headcountDefaults && typeof body.headcountDefaults === "object"
-          ? body.headcountDefaults
-          : {};
-        var lineHeadcountDefaults = body && body.lineHeadcountDefaults && typeof body.lineHeadcountDefaults === "object"
-          ? body.lineHeadcountDefaults
-          : {};
-        if (!rates.length) return;
-        var seenRoles = {};
-        var roles = [];
-        var rateByRole = {};
-        rates.forEach(function(r) {
-          var role = normalizeRoleKey(r.role);
-          if (!role) return;
-          if (!seenRoles[role]) {
-            seenRoles[role] = true;
-            roles.push(role);
-          }
-          rateByRole[role] = (safeNum(r.hourly_rate) * (1 + safeNum(r.markup_pct))).toFixed(2);
-        });
-        FORECAST_ROLE_ORDER.forEach(function(role) {
-          if (seenRoles[role]) return;
-          roles.push(role);
-          if (!rateByRole[role]) rateByRole[role] = "0.00";
-        });
-        var combos = {};
-        workOrders.forEach(function(w) {
-          var status = String((w && (w["Work Order Status"] || w.project_status || w.status)) || "").trim();
-          if (statusLooksClosed(status)) return;
-          var line = String((w && (w["Line"] || w.line || w["Line Name"] || w.line_name)) || "").trim();
-          var sku = String((w && (w["Item Code"] || w.item_code || w.code || w["Code"])) || "").trim();
-          var desc = String((w && (w["Description"] || w.description || w.item_description || w["Item Description"])) || "").trim();
-          var pack = detectPackType(desc || sku, sku);
-          if (!line) return;
-          combos[line + "::" + pack] = { line_name: line, pack_type: pack || "" };
-        });
-        var comboList = Object.keys(combos).map(function(k) { return combos[k]; });
-        if (!comboList.length) comboList = [{ line_name: "", pack_type: "" }];
-        var seeded = [];
-        comboList.forEach(function(c) {
-          roles.forEach(function(role) {
-            var lineDefaults = lineHeadcountDefaults[c.line_name] || {};
-            var hc = safeNum(lineDefaults[role]);
-            if (!(hc > 0)) hc = safeNum(headcountDefaults[role]);
-            if (!(hc > 0)) hc = safeNum(DEFAULT_MICRO_HEADCOUNT[role]);
-            seeded.push({
-              sku: "",
-              product_family: "",
-              pack_type: c.pack_type || "",
-              line_name: c.line_name || "",
-              role: role,
-              labor_bucket: defaultLaborBucketForRole(role),
-              headcount_assumed: hc > 0 ? hc : 1,
-              hourly_rate: rateByRole[role] || "0.00"
-            });
-          });
-        });
-        setLaborTemplates(function(prev) {
-          return Array.isArray(prev) && prev.length ? prev : seeded;
-        });
-      } catch (e) {
-        // noop
+    if (!monthKey) return;
+    didLoadMonthRef.current[monthKey] = false;
+    setAssumptionsLoading(true);
+    setAutosaveError("");
+    setAutosaveStatus("loading");
+    setVersionsMsg("");
+  }, [monthKey]);
+
+  useEffect(function() {
+    var mk = String(monthKey || "").trim();
+    if (!mk || didLoadMonthRef.current[mk]) return;
+    if (versionsQuery.isPending) return;
+
+    if (versionsQuery.data && versionsQuery.data.status === "missing_forecast_versions_table") {
+      setVersionsMsg("Run docs/supabase-forecast-versions.sql in Supabase to enable publishing.");
+    }
+
+    if (hasSelectedSnapshot) {
+      applyForecastSnapshot(selectedVersion.snapshot);
+      didLoadMonthRef.current[mk] = true;
+      setAssumptionsLoading(false);
+      setAutosaveStatus("idle");
+      setVersionsMsg("Loaded published version v" + String(selectedVersion.version_no || "") + " for " + mk + ".");
+      return;
+    }
+
+    if (assumptionsQuery.isPending) return;
+    if (assumptionsQuery.isSuccess) {
+      var body = assumptionsQuery.data || {};
+      if (body && body.status === "missing_forecast_assumptions_table") {
+        setAutosaveStatus("error");
+        setAutosaveError("Assumptions table not set up yet.");
+      } else {
+        if (body && body.row) applySavedAssumptions(body.row);
+        setAutosaveStatus("idle");
       }
-    })();
-    return function() { cancelled = true; };
-  }, [monthKey, workOrders]);
+      didLoadMonthRef.current[mk] = true;
+      setAssumptionsLoading(false);
+      return;
+    }
+    if (assumptionsQuery.isError) {
+      setAutosaveStatus("error");
+      setAutosaveError(assumptionsQuery.error && assumptionsQuery.error.message ? assumptionsQuery.error.message : "Could not load assumptions.");
+      didLoadMonthRef.current[mk] = true;
+      setAssumptionsLoading(false);
+    }
+  }, [
+    monthKey,
+    versionsQuery.isPending,
+    versionsQuery.data,
+    assumptionsQuery.isPending,
+    assumptionsQuery.isSuccess,
+    assumptionsQuery.isError,
+    assumptionsQuery.data,
+    assumptionsQuery.error,
+    selectedVersion,
+    hasSelectedSnapshot,
+    applyForecastSnapshot,
+    applySavedAssumptions
+  ]);
+
+  var configQuery = useQuery({
+    queryKey: ["forecast", "config", monthKey],
+    queryFn: function() {
+      return fetchForecastConfig(monthKey);
+    },
+    enabled: !!monthKey,
+    staleTime: FORECAST_CONFIG_STALE_MS
+  });
+
+  useEffect(function() {
+    var body = configQuery.data;
+    if (!body || typeof body !== "object") return;
+    var rates = Array.isArray(body && body.rates) ? body.rates : [];
+    var headcountDefaults = body && body.headcountDefaults && typeof body.headcountDefaults === "object"
+      ? body.headcountDefaults
+      : {};
+    var lineHeadcountDefaults = body && body.lineHeadcountDefaults && typeof body.lineHeadcountDefaults === "object"
+      ? body.lineHeadcountDefaults
+      : {};
+    if (!rates.length) return;
+    var seenRoles = {};
+    var roles = [];
+    var rateByRole = {};
+    rates.forEach(function(r) {
+      var role = normalizeRoleKey(r.role);
+      if (!role) return;
+      if (!seenRoles[role]) {
+        seenRoles[role] = true;
+        roles.push(role);
+      }
+      rateByRole[role] = (safeNum(r.hourly_rate) * (1 + safeNum(r.markup_pct))).toFixed(2);
+    });
+    FORECAST_ROLE_ORDER.forEach(function(role) {
+      if (seenRoles[role]) return;
+      roles.push(role);
+      if (!rateByRole[role]) rateByRole[role] = "0.00";
+    });
+    var combos = {};
+    workOrders.forEach(function(w) {
+      var status = String((w && (w["Work Order Status"] || w.project_status || w.status)) || "").trim();
+      if (statusLooksClosed(status)) return;
+      var line = String((w && (w["Line"] || w.line || w["Line Name"] || w.line_name)) || "").trim();
+      var sku = String((w && (w["Item Code"] || w.item_code || w.code || w["Code"])) || "").trim();
+      var desc = String((w && (w["Description"] || w.description || w.item_description || w["Item Description"])) || "").trim();
+      var pack = detectPackType(desc || sku, sku);
+      if (!line) return;
+      combos[line + "::" + pack] = { line_name: line, pack_type: pack || "" };
+    });
+    var comboList = Object.keys(combos).map(function(k) { return combos[k]; });
+    if (!comboList.length) comboList = [{ line_name: "", pack_type: "" }];
+    var seeded = [];
+    comboList.forEach(function(c) {
+      roles.forEach(function(role) {
+        var lineDefaults = lineHeadcountDefaults[c.line_name] || {};
+        var hc = safeNum(lineDefaults[role]);
+        if (!(hc > 0)) hc = safeNum(headcountDefaults[role]);
+        if (!(hc > 0)) hc = safeNum(DEFAULT_MICRO_HEADCOUNT[role]);
+        seeded.push({
+          sku: "",
+          product_family: "",
+          pack_type: c.pack_type || "",
+          line_name: c.line_name || "",
+          role: role,
+          labor_bucket: defaultLaborBucketForRole(role),
+          headcount_assumed: hc > 0 ? hc : 1,
+          hourly_rate: rateByRole[role] || "0.00"
+        });
+      });
+    });
+    setLaborTemplates(function(prev) {
+      return Array.isArray(prev) && prev.length ? prev : seeded;
+    });
+  }, [configQuery.data, workOrders]);
 
   var runForecast = useCallback(async function() {
     setLoading(true);
@@ -437,79 +501,36 @@ export default function ForecastView(props) {
         return;
       }
       setVersionsMsg("Published forecast version for " + monthKey + ".");
-      loadVersions(monthKey);
+      queryClient.invalidateQueries({ queryKey: ["forecast", "versions", monthKey] });
     } catch (err) {
       setVersionsMsg(err && err.message ? err.message : "Could not publish forecast version.");
     } finally {
       setPublishLoading(false);
     }
-  }, [monthKey, payload, summary, overheadGlobal, cogsNonLabor, equipmentRental, laborTemplates, overrides, loadVersions]);
+  }, [monthKey, payload, summary, overheadGlobal, cogsNonLabor, equipmentRental, laborTemplates, overrides, queryClient]);
 
   useEffect(function() {
     if (!workOrders.length) return;
     runForecast();
   }, [runForecast, workOrders.length]);
 
-  useEffect(function() {
-    if (!monthKey) return;
-    didLoadMonthRef.current[monthKey] = false;
-    loadVersions(monthKey, { hydrate: true });
-  }, [monthKey, loadVersions]);
+  var laborActualsQuery = useQuery({
+    queryKey: ["forecast", "labor-actuals", monthKey, Array.isArray(laborData) ? laborData.length : 0],
+    queryFn: function() {
+      return fetchForecastLaborActuals(monthKey);
+    },
+    enabled: !!monthKey,
+    staleTime: FORECAST_PRIMARY_STALE_MS
+  });
 
-  useEffect(function() {
-    var cancelled = false;
-    if (!monthKey) return;
-    (async function() {
-      try {
-        var res = await fetch("/api/ops/labor-actuals?monthKey=" + encodeURIComponent(monthKey), { credentials: "include" });
-        var body = await res.json();
-        if (cancelled) return;
-        if (!res.ok) throw new Error((body && body.error) || "Could not load labor actuals");
-        setLaborActuals({
-          status: body.status || "ok",
-          summary: body.summary || {},
-          byWorkOrder: Array.isArray(body.byWorkOrder) ? body.byWorkOrder : [],
-          byJob: Array.isArray(body.byJob) ? body.byJob : []
-        });
-      } catch (err) {
-        if (cancelled) return;
-        setLaborActuals({ status: "error", summary: {}, byWorkOrder: [], byJob: [], error: err && err.message ? err.message : "Could not load labor actuals" });
-      }
-    })();
-    return function() { cancelled = true; };
-  }, [monthKey, laborData]);
-
-  useEffect(function() {
-    var cancelled = false;
-    if (!monthKey) return;
-    var range = monthRange(monthKey);
-    if (!range.start || !range.end) {
-      setProductionActuals({ status: "error", byDaySku: [], error: "Invalid month range" });
-      return;
-    }
-    (async function() {
-      try {
-        var url = "/api/ops/production-breakdown?start=" + encodeURIComponent(range.start) + "&end=" + encodeURIComponent(range.end);
-        var res = await fetch(url, { credentials: "include" });
-        var body = await res.json();
-        if (cancelled) return;
-        if (!res.ok) throw new Error((body && body.error) || "Could not load production actuals");
-        setProductionActuals({
-          status: "ok",
-          byDaySku: Array.isArray(body.byDaySku) ? body.byDaySku : [],
-          totalRows: Number(body.totalRows || 0)
-        });
-      } catch (err) {
-        if (cancelled) return;
-        setProductionActuals({
-          status: "error",
-          byDaySku: [],
-          error: err && err.message ? err.message : "Could not load production actuals"
-        });
-      }
-    })();
-    return function() { cancelled = true; };
-  }, [monthKey]);
+  var productionActualsQuery = useQuery({
+    queryKey: ["forecast", "production-actuals", monthKey, Array.isArray(productionData) ? productionData.length : 0],
+    queryFn: function() {
+      return fetchForecastProductionActuals(monthKey);
+    },
+    enabled: !!monthKey,
+    staleTime: FORECAST_PRIMARY_STALE_MS
+  });
 
   useEffect(function() {
     if (!monthKey) return;
@@ -521,6 +542,26 @@ export default function ForecastView(props) {
     return function() { clearTimeout(id); };
   }, [monthKey, overheadGlobal, cogsNonLabor, equipmentRental, laborTemplates, overrides, assumptionsLoading, saveAssumptions]);
 
+  var laborActuals = laborActualsQuery.data
+    ? {
+        status: laborActualsQuery.data.status || "ok",
+        summary: laborActualsQuery.data.summary || {},
+        byWorkOrder: Array.isArray(laborActualsQuery.data.byWorkOrder) ? laborActualsQuery.data.byWorkOrder : [],
+        byJob: Array.isArray(laborActualsQuery.data.byJob) ? laborActualsQuery.data.byJob : []
+      }
+    : laborActualsQuery.isError
+      ? { status: "error", summary: {}, byWorkOrder: [], byJob: [], error: laborActualsQuery.error && laborActualsQuery.error.message ? laborActualsQuery.error.message : "Could not load labor actuals" }
+      : { status: "idle", summary: {} };
+  var productionActuals = productionActualsQuery.data
+    ? {
+        status: productionActualsQuery.data.status || "ok",
+        byDaySku: Array.isArray(productionActualsQuery.data.byDaySku) ? productionActualsQuery.data.byDaySku : [],
+        totalRows: Number(productionActualsQuery.data.totalRows || 0),
+        error: productionActualsQuery.data.error || ""
+      }
+    : productionActualsQuery.isError
+      ? { status: "error", byDaySku: [], error: productionActualsQuery.error && productionActualsQuery.error.message ? productionActualsQuery.error.message : "Could not load production actuals" }
+      : { status: "idle", byDaySku: [] };
   var forecast = payload && payload.forecast ? payload.forecast : null;
   var summary = forecast && forecast.summary ? forecast.summary : null;
   var actualLaborSummary = laborActuals && laborActuals.summary && typeof laborActuals.summary === "object" ? laborActuals.summary : {};

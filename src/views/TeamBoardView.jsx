@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import TabsNav from "../components/ui/tabs-nav";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -58,6 +59,19 @@ function sortRows(rows) {
     if (sortCompare) return sortCompare;
     return String(b.updated_at || "").localeCompare(String(a.updated_at || ""));
   });
+}
+
+var TEAM_BOARD_QUERY_KEY = ["team-board"];
+var TEAM_BOARD_STALE_MS = 5 * 60 * 1000;
+
+async function fetchTeamBoard() {
+  var res = await fetch("/api/team/board", { credentials: "include" });
+  var body = await res.json();
+  if (!res.ok) throw new Error(body && body.error ? body.error : "Could not load team board");
+  return {
+    rows: sortRows(body && Array.isArray(body.rows) ? body.rows : []),
+    status: String((body && body.status) || "")
+  };
 }
 
 function statusVariant(status) {
@@ -136,47 +150,35 @@ function dueBadge(row) {
 }
 
 export default function TeamBoardView() {
+  var queryClient = useQueryClient();
   var [boardKey, setBoardKey] = useState("recurring");
   var [cadenceFilter, setCadenceFilter] = useState("all");
   var [searchQuery, setSearchQuery] = useState("");
   var [showOnlyMine, setShowOnlyMine] = useState(false);
   var [showOnlyUrgent, setShowOnlyUrgent] = useState(false);
   var [currentUserEmail, setCurrentUserEmail] = useState("");
-  var [rows, setRows] = useState([]);
-  var [loading, setLoading] = useState(true);
   var [saving, setSaving] = useState(false);
   var [error, setError] = useState("");
   var [statusMessage, setStatusMessage] = useState("");
-  var [apiStatus, setApiStatus] = useState("");
   var [draft, setDraft] = useState(createDraftTask("recurring", ""));
+
+  var teamBoardQuery = useQuery({
+    queryKey: TEAM_BOARD_QUERY_KEY,
+    queryFn: fetchTeamBoard,
+    staleTime: TEAM_BOARD_STALE_MS
+  });
+  var queryPayload = teamBoardQuery.data || { rows: [], status: "" };
+  var rows = queryPayload.rows;
+  var loading = teamBoardQuery.isPending;
+  var apiStatus = queryPayload.status;
+  var queryError = teamBoardQuery.isError
+    ? (teamBoardQuery.error && teamBoardQuery.error.message ? teamBoardQuery.error.message : "Could not load team board")
+    : "";
 
   useEffect(function() {
     if (typeof window === "undefined" || !window.__ppUser || !window.__ppUser.email) return;
     setCurrentUserEmail(String(window.__ppUser.email || "").trim().toLowerCase());
   }, []);
-
-  var loadRows = useCallback(async function() {
-    setLoading(true);
-    setError("");
-    try {
-      var res = await fetch("/api/team/board", { credentials: "include" });
-      var body = await res.json();
-      if (!res.ok) throw new Error(body && body.error ? body.error : "Could not load team board");
-      setRows(sortRows(body && Array.isArray(body.rows) ? body.rows : []));
-      setApiStatus(String((body && body.status) || ""));
-      if (body && body.status === "missing_team_board_table") {
-        setStatusMessage("Team board table is not set up yet.");
-      }
-    } catch (err) {
-      setError(err && err.message ? err.message : "Could not load team board");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(function() {
-    loadRows();
-  }, [loadRows]);
 
   useEffect(function() {
     setCadenceFilter("all");
@@ -227,10 +229,20 @@ export default function TeamBoardView() {
     setDraft(createDraftTask(nextBoardKey || boardKey, currentUserEmail));
   }, [boardKey, currentUserEmail]);
 
+  var updateBoardCache = function(updateRows, nextStatus) {
+    queryClient.setQueryData(TEAM_BOARD_QUERY_KEY, function(prev) {
+      var current = prev && typeof prev === "object" ? prev : { rows: [], status: "" };
+      var nextRows = typeof updateRows === "function" ? updateRows(current.rows || []) : (current.rows || []);
+      return {
+        rows: sortRows(nextRows),
+        status: nextStatus != null ? String(nextStatus || "") : String(current.status || "")
+      };
+    });
+  };
+
   var upsertLocalRow = function(row) {
-    setRows(function(prev) {
-      var next = prev.filter(function(item) { return item.id !== row.id; }).concat([row]);
-      return sortRows(next);
+    updateBoardCache(function(prevRows) {
+      return prevRows.filter(function(item) { return item.id !== row.id; }).concat([row]);
     });
   };
 
@@ -255,7 +267,7 @@ export default function TeamBoardView() {
       var body = await res.json();
       if (!res.ok) throw new Error(body && body.error ? body.error : "Could not save task");
       if (body && body.status === "missing_team_board_table") {
-        setApiStatus("missing_team_board_table");
+        updateBoardCache(function(prevRows) { return prevRows; }, "missing_team_board_table");
         setStatusMessage("Team board table is not set up yet.");
         return;
       }
@@ -283,13 +295,13 @@ export default function TeamBoardView() {
       var body = await res.json();
       if (!res.ok) throw new Error(body && body.error ? body.error : "Could not seed starter tasks");
       if (body && body.status === "missing_team_board_table") {
-        setApiStatus("missing_team_board_table");
+        updateBoardCache(function(prevRows) { return prevRows; }, "missing_team_board_table");
         setStatusMessage("Team board table is not set up yet.");
         return;
       }
       var inserted = Array.isArray(body && body.rows) ? body.rows : [];
       if (inserted.length) {
-        setRows(function(prev) { return sortRows(prev.concat(inserted)); });
+        updateBoardCache(function(prevRows) { return prevRows.concat(inserted); });
         setStatusMessage("Starter tasks added.");
       } else {
         setStatusMessage("Starter tasks already exist.");
@@ -314,7 +326,9 @@ export default function TeamBoardView() {
       });
       var body = await res.json();
       if (!res.ok) throw new Error(body && body.error ? body.error : "Could not archive task");
-      setRows(function(prev) { return prev.filter(function(item) { return item.id !== row.id; }); });
+      updateBoardCache(function(prevRows) {
+        return prevRows.filter(function(item) { return item.id !== row.id; });
+      });
       setStatusMessage("Task archived.");
       if (draft.id === row.id) resetDraft(boardKey);
     } catch (err) {
@@ -431,7 +445,7 @@ export default function TeamBoardView() {
         <div className="text-xs text-[rgb(var(--muted))]">{boardRows.length} visible tasks</div>
       </div>
 
-      {error ? <Card className="border-[rgb(var(--danger))] p-3 text-sm text-[rgb(var(--danger))]">{error}</Card> : null}
+      {queryError || error ? <Card className="border-[rgb(var(--danger))] p-3 text-sm text-[rgb(var(--danger))]">{queryError || error}</Card> : null}
       {statusMessage ? <Card className="border-[rgb(var(--border))] p-3 text-sm text-[rgb(var(--muted))]">{statusMessage}</Card> : null}
 
       {apiStatus === "missing_team_board_table" ? (

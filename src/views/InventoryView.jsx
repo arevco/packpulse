@@ -1,4 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTheme } from "../theme";
 import { useStyles } from "../hooks/useStyles";
 import { Input } from "../components/ui/input";
@@ -160,10 +161,16 @@ function matchesInventoryFilters(row, q, filters) {
   return haystack.includes(q);
 }
 
-var inventoryDetailCache = {
-  key: "",
-  rows: null
-};
+var INVENTORY_DETAIL_STALE_MS = 15 * 60 * 1000;
+
+async function fetchInventoryDetailRows() {
+  var response = await fetch("/api/nulogy/inventory-rich");
+  var body = await response.json();
+  if (!response.ok) {
+    throw new Error((body && (body.error || body.details)) || "Could not load full inventory detail");
+  }
+  return Array.isArray(body && body.data) ? body.data : [];
+}
 
 function inventoryRowsNeedDetailFetch(rows, fileName) {
   if (!Array.isArray(rows) || !rows.length) return false;
@@ -193,6 +200,7 @@ export default function InventoryView({
   inventoryTimestamp,
   inventoryFileName
 }) {
+  var queryClient = useQueryClient();
   var fallbackRows = Array.isArray(inventory) ? inventory : [];
   var cachedDetailRows = Array.isArray(inventoryDetailRows) ? inventoryDetailRows : [];
   var itemMasterRows = Array.isArray(itemMaster) ? itemMaster : [];
@@ -229,75 +237,38 @@ export default function InventoryView({
   var [sortDir, setSortDir] = useState("desc");
   var [page, setPage] = useState(1);
   var [pageSize, setPageSize] = useState(100);
-  var [detailRows, setDetailRows] = useState(function() {
-    if (hasMatchingPropDetail) return cachedDetailRows;
-    return inventoryDetailCache.key === detailCacheKey && Array.isArray(inventoryDetailCache.rows)
-      ? inventoryDetailCache.rows
-      : null;
-  });
-  var [detailStatus, setDetailStatus] = useState(function() {
-    if (hasMatchingPropDetail) return "ready";
-    return inventoryDetailCache.key === detailCacheKey && Array.isArray(inventoryDetailCache.rows) ? "ready" : "idle";
-  });
-  var [detailError, setDetailError] = useState("");
   var deferredSearch = useDeferredValue(searchTerm);
   var shouldLoadDetail = useMemo(function() {
     return inventoryRowsNeedDetailFetch(fallbackRows, inventoryFileName);
   }, [fallbackRows, inventoryFileName]);
 
-  useEffect(function() {
-    if (hasMatchingPropDetail) {
-      inventoryDetailCache.key = detailCacheKey;
-      inventoryDetailCache.rows = cachedDetailRows;
-      setDetailRows(cachedDetailRows);
-      setDetailStatus("ready");
-      setDetailError("");
-      return;
-    }
-    if (inventoryDetailCache.key === detailCacheKey && Array.isArray(inventoryDetailCache.rows)) {
-      setDetailRows(inventoryDetailCache.rows);
-      setDetailStatus("ready");
-      setDetailError("");
-      return;
-    }
-    setDetailRows(null);
-    setDetailStatus("idle");
-    setDetailError("");
-  }, [cachedDetailRows, detailCacheKey, hasMatchingPropDetail]);
+  var detailQueryKey = useMemo(function() {
+    return ["inventory", "detail", detailCacheKey];
+  }, [detailCacheKey]);
 
   useEffect(function() {
-    if (!shouldLoadDetail) return;
-    if (hasMatchingPropDetail) return;
-    if (inventoryDetailCache.key === detailCacheKey && Array.isArray(inventoryDetailCache.rows)) return;
-    var cancelled = false;
-    setDetailStatus("loading");
-    setDetailError("");
-    fetch("/api/nulogy/inventory-rich")
-      .then(function(response) {
-        return response.json().then(function(body) {
-          return { ok: response.ok, body: body };
-        });
-      })
-      .then(function(result) {
-        if (cancelled) return;
-        if (!result.ok) {
-          throw new Error((result.body && (result.body.error || result.body.details)) || "Could not load full inventory detail");
-        }
-        var nextRows = Array.isArray(result.body && result.body.data) ? result.body.data : [];
-        inventoryDetailCache.key = detailCacheKey;
-        inventoryDetailCache.rows = nextRows;
-        setDetailRows(nextRows);
-        setDetailStatus("ready");
-      })
-      .catch(function(error) {
-        if (cancelled) return;
-        setDetailStatus("error");
-        setDetailError(error && error.message ? error.message : "Could not load full inventory detail");
-      });
-    return function() {
-      cancelled = true;
-    };
-  }, [detailCacheKey, hasMatchingPropDetail, shouldLoadDetail]);
+    if (!hasMatchingPropDetail || !cachedDetailRows.length) return;
+    queryClient.setQueryData(detailQueryKey, cachedDetailRows);
+  }, [hasMatchingPropDetail, cachedDetailRows, detailQueryKey, queryClient]);
+
+  var detailQuery = useQuery({
+    queryKey: detailQueryKey,
+    queryFn: fetchInventoryDetailRows,
+    enabled: shouldLoadDetail && !hasMatchingPropDetail,
+    staleTime: INVENTORY_DETAIL_STALE_MS
+  });
+
+  var detailRows = hasMatchingPropDetail ? cachedDetailRows : (Array.isArray(detailQuery.data) ? detailQuery.data : null);
+  var detailStatus = hasMatchingPropDetail || (Array.isArray(detailRows) && detailRows.length)
+    ? "ready"
+    : detailQuery.isError
+      ? "error"
+      : detailQuery.isFetching
+        ? "loading"
+        : "idle";
+  var detailError = detailQuery.isError
+    ? (detailQuery.error && detailQuery.error.message ? detailQuery.error.message : "Could not load full inventory detail")
+    : "";
 
   var rows = Array.isArray(detailRows) && detailRows.length ? detailRows : fallbackRows;
   var usingDetailRows = Array.isArray(detailRows) && detailRows.length > 0;
