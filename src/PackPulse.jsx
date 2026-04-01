@@ -46,6 +46,7 @@ var operationsInsightsPanelImportPromise = null;
 var forecastViewImportPromise = null;
 var inventoryViewImportPromise = null;
 var teamBoardViewImportPromise = null;
+var invoicingViewImportPromise = null;
 
 function importOperationsView() {
   if (!operationsViewImportPromise) operationsViewImportPromise = import("./views/OperationsView");
@@ -72,6 +73,11 @@ function importTeamBoardView() {
   return teamBoardViewImportPromise;
 }
 
+function importInvoicingView() {
+  if (!invoicingViewImportPromise) invoicingViewImportPromise = import("./views/InvoicingView");
+  return invoicingViewImportPromise;
+}
+
 function prefetchOperationsView() {
   return Promise.all([
     importOperationsView(),
@@ -91,12 +97,17 @@ function prefetchTeamBoardView() {
   return importTeamBoardView().catch(function() {});
 }
 
+function prefetchInvoicingView() {
+  return importInvoicingView().catch(function() {});
+}
+
 function prefetchLikelyNextViews(activeView) {
   var prefetchers = [];
   if (activeView !== "operations") prefetchers.push(prefetchOperationsView);
   if (activeView !== "inventory") prefetchers.push(prefetchInventoryView);
   if (activeView !== "forecast") prefetchers.push(prefetchForecastView);
   if (activeView !== "teamboard") prefetchers.push(prefetchTeamBoardView);
+  if (activeView !== "invoicing") prefetchers.push(prefetchInvoicingView);
   return prefetchers.reduce(function(chain, prefetch) {
     return chain.then(function() {
       return prefetch();
@@ -194,6 +205,7 @@ const ForecastView = lazySafe(importForecastView, "Forecast");
 const WorkOrdersView = lazySafe(function() { return import("./views/WorkOrdersView"); }, "Work Orders");
 const InventoryView = lazySafe(importInventoryView, "Inventory");
 const TeamBoardView = lazySafe(importTeamBoardView, "Team Board");
+const InvoicingView = lazySafe(importInvoicingView, "Invoicing");
 const SupplyRiskView = lazySafe(function() { return import("./views/SupplyRiskView"); }, "Supply Risk");
 const ItemMasterView = lazySafe(function() { return import("./views/ItemMasterView"); }, "Item Master");
 const FlagsView = lazySafe(function() { return import("./views/FlagsView"); }, "Data Flags");
@@ -219,9 +231,9 @@ export default function ProductionReadiness() {
   });
 
   var parseInitialPermalink = function() {
-    if (typeof window === "undefined") return { view: "workorders", wo: {} };
+    if (typeof window === "undefined") return { view: "workorders", wo: {}, forecast: {}, operations: {}, invoicing: {} };
     var qs = new URLSearchParams(window.location.search || "");
-    var allowedViews = { aicopilot:true, operations:true, forecast:true, workorders:true, inventory:true, teamboard:true, supplyrisk:true, sandbox:true, flags:true, itemmaster:true };
+    var allowedViews = { aicopilot:true, operations:true, invoicing:true, forecast:true, workorders:true, inventory:true, teamboard:true, supplyrisk:true, sandbox:true, flags:true, itemmaster:true };
     var rawView = String(qs.get("view") || "workorders");
     if (rawView === "overview") rawView = "workorders";
     var view = allowedViews[rawView] ? rawView : "workorders";
@@ -278,12 +290,20 @@ export default function ProductionReadiness() {
       start: String(qs.get("ops_start") || ""),
       end: String(qs.get("ops_end") || "")
     };
-    return { view: view, wo: wo, forecast: forecast, operations: operations };
+    var invoicing = {
+      start: String(qs.get("iv_start") || ""),
+      end: String(qs.get("iv_end") || ""),
+      customer: String(qs.get("iv_customer") || "all"),
+      status: String(qs.get("iv_status") || "all"),
+      q: String(qs.get("iv_q") || "")
+    };
+    return { view: view, wo: wo, forecast: forecast, operations: operations, invoicing: invoicing };
   };
   const [activeView, setActiveView] = useState(function() { return parseInitialPermalink().view; });
   const [workOrdersPermalinkState, setWorkOrdersPermalinkState] = useState(function() { return parseInitialPermalink().wo; });
   const [forecastPermalinkState, setForecastPermalinkState] = useState(function() { return parseInitialPermalink().forecast || {}; });
   const [operationsPermalinkState, setOperationsPermalinkState] = useState(function() { return parseInitialPermalink().operations || {}; });
+  const [invoicingPermalinkState, setInvoicingPermalinkState] = useState(function() { return parseInitialPermalink().invoicing || {}; });
   const [operationsServerSyncVersion, setOperationsServerSyncVersion] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
   const [showDataSetup, setShowDataSetup] = useState(false);
@@ -318,7 +338,7 @@ export default function ProductionReadiness() {
     production_only: readAutoSyncCheckpoint("production_only")
   });
 
-  var buildPermalinkUrl = useCallback(function(nextView, woState, fcState, opsState) {
+  var buildPermalinkUrl = useCallback(function(nextView, woState, fcState, opsState, ivState) {
     if (typeof window === "undefined") return "";
     var params = new URLSearchParams(window.location.search || "");
     var view = String(nextView || "workorders");
@@ -356,18 +376,24 @@ export default function ProductionReadiness() {
     setOrDelete("ops_preset", ops.preset || "last_14", "last_14");
     setOrDelete("ops_start", ops.start || "", "");
     setOrDelete("ops_end", ops.end || "", "");
+    var iv = Object.assign({}, ivState || {});
+    setOrDelete("iv_start", iv.start || "", "");
+    setOrDelete("iv_end", iv.end || "", "");
+    setOrDelete("iv_customer", iv.customer || "all", "all");
+    setOrDelete("iv_status", iv.status || "all", "all");
+    setOrDelete("iv_q", iv.q || "", "");
     return window.location.pathname + "?" + params.toString();
   }, []);
 
-  var updatePermalink = useCallback(function(nextView, woState, fcState, opsState) {
+  var updatePermalink = useCallback(function(nextView, woState, fcState, opsState, ivState) {
     if (typeof window === "undefined") return;
-    var nextUrl = buildPermalinkUrl(nextView, woState, fcState, opsState);
+    var nextUrl = buildPermalinkUrl(nextView, woState, fcState, opsState, ivState);
     window.history.replaceState(null, "", nextUrl);
   }, [buildPermalinkUrl]);
 
   useEffect(function() {
-    updatePermalink(activeView, workOrdersPermalinkState, forecastPermalinkState, operationsPermalinkState);
-  }, [activeView, workOrdersPermalinkState, forecastPermalinkState, operationsPermalinkState, updatePermalink]);
+    updatePermalink(activeView, workOrdersPermalinkState, forecastPermalinkState, operationsPermalinkState, invoicingPermalinkState);
+  }, [activeView, workOrdersPermalinkState, forecastPermalinkState, operationsPermalinkState, invoicingPermalinkState, updatePermalink]);
 
   useEffect(function() {
     if (typeof window === "undefined") return;
@@ -393,16 +419,17 @@ export default function ProductionReadiness() {
 
   var navPrefetchers = {
     operations: prefetchOperationsView,
+    invoicing: prefetchInvoicingView,
     inventory: prefetchInventoryView,
     forecast: prefetchForecastView,
     teamboard: prefetchTeamBoardView,
   };
 
-  var navItems = [{key:"workorders",label:"Work Orders",count:null},{key:"inventory",label:"Inventory",count:null},{key:"teamboard",label:"Team Board",count:null},{key:"operations",label:"Operations",count:null,alert:false},{key:"supplyrisk",label:"Supply Risk",count:null,alert:false},{key:"forecast",label:"Forecast",count:null,alert:false},{key:"aicopilot",label:"AI Copilot",count:null,alert:false}]
+  var navItems = [{key:"workorders",label:"Work Orders",count:null},{key:"inventory",label:"Inventory",count:null},{key:"teamboard",label:"Team Board",count:null},{key:"operations",label:"Operations",count:null,alert:false},{key:"invoicing",label:"Invoicing",count:null,alert:false},{key:"supplyrisk",label:"Supply Risk",count:null,alert:false},{key:"forecast",label:"Forecast",count:null,alert:false},{key:"aicopilot",label:"AI Copilot",count:null,alert:false}]
     .concat([{key:"sandbox",label:"Sandbox",count:null,alert:false}])
     .map(function(item) {
       return Object.assign({}, item, {
-        href: buildPermalinkUrl(item.key, workOrdersPermalinkState, forecastPermalinkState, operationsPermalinkState),
+        href: buildPermalinkUrl(item.key, workOrdersPermalinkState, forecastPermalinkState, operationsPermalinkState, invoicingPermalinkState),
         onPrefetch: navPrefetchers[item.key]
       });
     });
@@ -415,6 +442,9 @@ export default function ProductionReadiness() {
   }, []);
   var handleOperationsPermalinkChange = useCallback(function(opsState) {
     setOperationsPermalinkState(opsState || {});
+  }, []);
+  var handleInvoicingPermalinkChange = useCallback(function(ivState) {
+    setInvoicingPermalinkState(ivState || {});
   }, []);
 
   var showAutoBootstrap = autoBootstrapEnabled;
@@ -1408,6 +1438,7 @@ export default function ProductionReadiness() {
         <Suspense fallback={<Card className="mt-3 p-4 text-sm text-[rgb(var(--muted))]">Loading view...</Card>}>
           {activeView === "aicopilot" && <AICopilotView summary={summaryForUI} criticalItems={criticalItemsForUI} dispatchQueue={dispatchQueue || []} productionSegments={productionSegmentsForUI} evoconData={ds.evoconData || []} workOrders={analysisForUI.results || []} onNavigate={setActiveView} />}
           {activeView === "operations" && <OperationsView productionSegments={productionSegmentsForUI} productionDataRaw={ds.productionData || []} laborDataRaw={ds.laborData || []} evoconData={ds.evoconData || []} evoconTimestamp={ds.evoconTimestamp || evoconLastSyncAt} itemMaster={ds.itemMaster || []} initialFilters={operationsPermalinkState} onPermalinkChange={handleOperationsPermalinkChange} serverSyncVersion={operationsServerSyncVersion} onRefreshProduction={triggerFullNulogySync} refreshingProduction={visibleNulogySyncBusy} />}
+          {activeView === "invoicing" && <InvoicingView productionData={ds.productionData || []} productionTimestamp={ds.productionTimestamp} initialFilters={invoicingPermalinkState} onPermalinkChange={handleInvoicingPermalinkChange} />}
           {activeView === "forecast" && <ForecastView workOrders={ds.workOrders || []} itemMaster={ds.itemMaster || []} productionData={ds.productionData || []} laborData={ds.laborData || []} initialFilters={forecastPermalinkState} onPermalinkChange={handleForecastPermalinkChange} />}
           {activeView === "workorders" && <WorkOrdersView analysis={analysisForUI} woStatuses={woStatusesForUI} woCustomers={woCustomersForUI} recommendations={recommendationsForUI} dispatchQueue={dispatchQueue || []} inboundCoverage={inboundCoverage} initialFilters={workOrdersPermalinkState} onPermalinkChange={handleWorkOrdersPermalinkChange} />}
           {activeView === "inventory" && (
