@@ -522,6 +522,7 @@ function buildWorkOrderFallbacks(workOrders) {
   var customerBySku = createCountIndex();
   var unitByWorkOrder = createCountIndex();
   var unitBySku = createCountIndex();
+  var fixedLotByWorkOrder = createCountIndex();
 
   (Array.isArray(workOrders) ? workOrders : []).forEach(function(row) {
     var workOrderCode = String(pickFieldLoose(row, [
@@ -544,10 +545,16 @@ function buildWorkOrderFallbacks(workOrders) {
       "Unit of Measure", "unit_of_measure",
       "Unit Of Measure", "uom"
     ]) || "").trim();
+    var fixedLotCode = String(pickFieldLoose(row, [
+      "Fixed Lot Code", "fixed_lot_code",
+      "Fixed lot code"
+    ]) || "").trim();
     addIndexedValue(customerByWorkOrder, workOrderCode, customer);
     addIndexedValue(customerByWorkOrder, workOrderId, customer);
     addIndexedValue(unitByWorkOrder, workOrderCode, unitOfMeasure);
     addIndexedValue(unitByWorkOrder, workOrderId, unitOfMeasure);
+    addIndexedValue(fixedLotByWorkOrder, workOrderCode, fixedLotCode);
+    addIndexedValue(fixedLotByWorkOrder, workOrderId, fixedLotCode);
     addIndexedValue(customerBySku, sku, customer);
     addIndexedValue(unitBySku, sku, unitOfMeasure);
   });
@@ -556,8 +563,148 @@ function buildWorkOrderFallbacks(workOrders) {
     customerByWorkOrder: customerByWorkOrder,
     customerBySku: customerBySku,
     unitByWorkOrder: unitByWorkOrder,
-    unitBySku: unitBySku
+    unitBySku: unitBySku,
+    fixedLotByWorkOrder: fixedLotByWorkOrder
   };
+}
+
+function pickStrictIndexedValue(index, key) {
+  if (!index) return "";
+  var bucket = index[normalizeLookupKey(key)] || null;
+  if (!bucket) return "";
+  var values = Object.keys(bucket).filter(Boolean);
+  return values.length === 1 ? values[0] : "";
+}
+
+function buildLotFallbackKey(parts) {
+  return (Array.isArray(parts) ? parts : []).map(function(part) {
+    return String(part || "").trim();
+  }).join("|");
+}
+
+function buildProductionLotFallbacks(rows, workOrders) {
+  var lotByJobSkuDateLine = createCountIndex();
+  var lotByJobSkuDate = createCountIndex();
+  var lotByJobSku = createCountIndex();
+  var lotByWorkOrderSkuDateLine = createCountIndex();
+  var lotByWorkOrderSkuDate = createCountIndex();
+  var lotByWorkOrderSku = createCountIndex();
+  var fixedLotByWorkOrder = createCountIndex();
+
+  (Array.isArray(rows) ? rows : []).forEach(function(row) {
+    var lotCode = String(pickFieldLoose(row, [
+      "Lot Code", "Lot code", "lot_code",
+      "Finished Good Lot Code", "finished_good_lot_code"
+    ]) || "").trim();
+    if (!lotCode) return;
+
+    var jobId = String(pickFieldLoose(row, [
+      "Job", "job_id",
+      "Job ID"
+    ]) || "").trim();
+    var sku = String(pickFieldLoose(row, [
+      "Item Code", "Item code", "item_code",
+      "SKU", "sku",
+      "finished_good_item_code"
+    ]) || "").trim();
+    var producedRaw = pickFieldLoose(row, [
+      "Produced Date ET", "produced_date_et",
+      "Produced date", "produced_date",
+      "Produced At", "produced_at",
+      "produced_at_utc",
+      "Actual Job end date", "actual_job_end_at"
+    ]);
+    var producedDate = resolveProducedDateKey(producedRaw);
+    var line = String(pickFieldLoose(row, [
+      "Line", "line",
+      "line_name", "Line Name"
+    ]) || "").trim();
+    var workOrderCode = String(pickFieldLoose(row, [
+      "Work Order Code", "Work Order code", "work_order_code",
+      "project_code", "Project Code"
+    ]) || "").trim();
+    var workOrderId = String(pickFieldLoose(row, [
+      "Work Order", "work_order",
+      "Work Order ID", "work_order_id"
+    ]) || "").trim();
+
+    addIndexedValue(lotByJobSkuDateLine, buildLotFallbackKey([jobId, sku, producedDate, line]), lotCode);
+    addIndexedValue(lotByJobSkuDate, buildLotFallbackKey([jobId, sku, producedDate]), lotCode);
+    addIndexedValue(lotByJobSku, buildLotFallbackKey([jobId, sku]), lotCode);
+    addIndexedValue(lotByWorkOrderSkuDateLine, buildLotFallbackKey([workOrderCode, sku, producedDate, line]), lotCode);
+    addIndexedValue(lotByWorkOrderSkuDateLine, buildLotFallbackKey([workOrderId, sku, producedDate, line]), lotCode);
+    addIndexedValue(lotByWorkOrderSkuDate, buildLotFallbackKey([workOrderCode, sku, producedDate]), lotCode);
+    addIndexedValue(lotByWorkOrderSkuDate, buildLotFallbackKey([workOrderId, sku, producedDate]), lotCode);
+    addIndexedValue(lotByWorkOrderSku, buildLotFallbackKey([workOrderCode, sku]), lotCode);
+    addIndexedValue(lotByWorkOrderSku, buildLotFallbackKey([workOrderId, sku]), lotCode);
+  });
+
+  (Array.isArray(workOrders) ? workOrders : []).forEach(function(row) {
+    var workOrderCode = String(pickFieldLoose(row, [
+      "Work Order Code", "work_order_code",
+      "project_code", "Project Code"
+    ]) || "").trim();
+    var workOrderId = String(pickFieldLoose(row, [
+      "Work Order ID", "work_order_id",
+      "Work Order", "work_order"
+    ]) || "").trim();
+    var fixedLotCode = String(pickFieldLoose(row, [
+      "Fixed Lot Code", "fixed_lot_code",
+      "Fixed lot code"
+    ]) || "").trim();
+    addIndexedValue(fixedLotByWorkOrder, workOrderCode, fixedLotCode);
+    addIndexedValue(fixedLotByWorkOrder, workOrderId, fixedLotCode);
+  });
+
+  return {
+    lotByJobSkuDateLine: lotByJobSkuDateLine,
+    lotByJobSkuDate: lotByJobSkuDate,
+    lotByJobSku: lotByJobSku,
+    lotByWorkOrderSkuDateLine: lotByWorkOrderSkuDateLine,
+    lotByWorkOrderSkuDate: lotByWorkOrderSkuDate,
+    lotByWorkOrderSku: lotByWorkOrderSku,
+    fixedLotByWorkOrder: fixedLotByWorkOrder
+  };
+}
+
+function resolveLotCodeFallback(row, fallbacks) {
+  if (!row || !fallbacks) return "";
+  var sku = row.itemCodeRaw || row.sku || "";
+  var producedDate = row.producedDate || "";
+  var line = row.line && row.line !== "--" ? row.line : "";
+  var workOrderCode = row.workOrderCode || "";
+  var workOrderId = row.workOrderId || "";
+  var jobId = row.jobId || "";
+  var keys = [
+    buildLotFallbackKey([jobId, sku, producedDate, line]),
+    buildLotFallbackKey([jobId, sku, producedDate]),
+    buildLotFallbackKey([jobId, sku]),
+    buildLotFallbackKey([workOrderCode, sku, producedDate, line]),
+    buildLotFallbackKey([workOrderId, sku, producedDate, line]),
+    buildLotFallbackKey([workOrderCode, sku, producedDate]),
+    buildLotFallbackKey([workOrderId, sku, producedDate]),
+    buildLotFallbackKey([workOrderCode, sku]),
+    buildLotFallbackKey([workOrderId, sku])
+  ];
+
+  for (var i = 0; i < keys.length; i += 1) {
+    var key = keys[i];
+    if (!key) continue;
+    var strictMatch =
+      pickStrictIndexedValue(fallbacks.lotByJobSkuDateLine, key) ||
+      pickStrictIndexedValue(fallbacks.lotByJobSkuDate, key) ||
+      pickStrictIndexedValue(fallbacks.lotByJobSku, key) ||
+      pickStrictIndexedValue(fallbacks.lotByWorkOrderSkuDateLine, key) ||
+      pickStrictIndexedValue(fallbacks.lotByWorkOrderSkuDate, key) ||
+      pickStrictIndexedValue(fallbacks.lotByWorkOrderSku, key);
+    if (strictMatch) return strictMatch;
+  }
+
+  return (
+    pickStrictIndexedValue(fallbacks.fixedLotByWorkOrder, workOrderCode) ||
+    pickStrictIndexedValue(fallbacks.fixedLotByWorkOrder, workOrderId) ||
+    ""
+  );
 }
 
 function buildItemMasterCustomerIndex(itemMaster) {
@@ -644,6 +791,14 @@ function buildNormalizedProductionRow(row, index, fallbacks) {
   var fallbackUnitOfMeasure = unitOfMeasure ||
     pickIndexedValue(fallbacks && fallbacks.unitByWorkOrder, workOrderCode || workOrderId, true) ||
     pickIndexedValue(fallbacks && fallbacks.unitBySku, sku, false);
+  var fallbackLotCode = lotCode || resolveLotCodeFallback({
+    itemCodeRaw: sku,
+    producedDate: producedDate,
+    workOrderCode: workOrderCode,
+    workOrderId: workOrderId,
+    jobId: jobId,
+    line: line
+  }, fallbacks);
   var customerLabel = customer || "Unassigned customer";
   if (fallbackCustomer) customerLabel = fallbackCustomer;
   var skuLabel = sku || "Missing SKU";
@@ -654,7 +809,7 @@ function buildNormalizedProductionRow(row, index, fallbacks) {
   if (!producedDate) rowIssues.push("Missing produced date");
   if (!(unitsProduced > 0)) rowIssues.push("No produced quantity");
   if (!fallbackUnitOfMeasure) rowIssues.push("Missing unit of measure");
-  if (!lotCode) rowIssues.push("Missing finished good lot code");
+  if (!fallbackLotCode) rowIssues.push("Missing finished good lot code");
   if (!workOrderCode && !workOrderId) rowIssues.push("Missing work order");
   return {
     raw: row,
@@ -672,8 +827,8 @@ function buildNormalizedProductionRow(row, index, fallbacks) {
     workOrderId: workOrderId,
     workOrderReference: workOrderReference,
     workOrderKey: normalizeGroupValue(workOrderReference || "missing work order"),
-    lotCode: lotCode || "--",
-    lotCodeKey: normalizeGroupValue(lotCode || "missing finished good lot code"),
+    lotCode: fallbackLotCode || "--",
+    lotCodeKey: normalizeGroupValue(fallbackLotCode || "missing finished good lot code"),
     purchaseOrderNumber: purchaseOrderNumber,
     purchaseOrderKey: normalizeGroupValue(purchaseOrderNumber || "missing purchase order"),
     jobId: jobId,
@@ -704,6 +859,7 @@ function metricCard(label, value, helper, tone) {
 }
 
 export default function InvoicingView(props) {
+  var productionData = Array.isArray(props.productionData) ? props.productionData : [];
   var workOrders = Array.isArray(props.workOrders) ? props.workOrders : [];
   var itemMaster = Array.isArray(props.itemMaster) ? props.itemMaster : [];
   var initialFilters = props.initialFilters || {};
@@ -768,14 +924,22 @@ export default function InvoicingView(props) {
 
   var fieldFallbacks = useMemo(function() {
     var workOrderFallbacks = buildWorkOrderFallbacks(workOrders);
+    var lotFallbacks = buildProductionLotFallbacks(productionData, workOrders);
     return {
       customerByWorkOrder: workOrderFallbacks.customerByWorkOrder,
       customerBySku: workOrderFallbacks.customerBySku,
       unitByWorkOrder: workOrderFallbacks.unitByWorkOrder,
       unitBySku: workOrderFallbacks.unitBySku,
-      itemMasterCustomerBySku: buildItemMasterCustomerIndex(itemMaster)
+      fixedLotByWorkOrder: workOrderFallbacks.fixedLotByWorkOrder,
+      itemMasterCustomerBySku: buildItemMasterCustomerIndex(itemMaster),
+      lotByJobSkuDateLine: lotFallbacks.lotByJobSkuDateLine,
+      lotByJobSkuDate: lotFallbacks.lotByJobSkuDate,
+      lotByJobSku: lotFallbacks.lotByJobSku,
+      lotByWorkOrderSkuDateLine: lotFallbacks.lotByWorkOrderSkuDateLine,
+      lotByWorkOrderSkuDate: lotFallbacks.lotByWorkOrderSkuDate,
+      lotByWorkOrderSku: lotFallbacks.lotByWorkOrderSku
     };
-  }, [workOrders, itemMaster]);
+  }, [productionData, workOrders, itemMaster]);
 
   var normalizedRows = useMemo(function() {
     return productionRows
