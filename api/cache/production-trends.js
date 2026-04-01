@@ -125,6 +125,44 @@ function businessDateDaysAgo(days) {
   return d;
 }
 
+function errorMessage(error) {
+  return String((error && (error.message || error.details || error.hint)) || "").toLowerCase();
+}
+
+function isMissingDailyMetricsViewError(error) {
+  var msg = errorMessage(error);
+  return msg.indexOf("ops_daily_line_metrics_mv") !== -1 && (
+    msg.indexOf("schema cache") !== -1 ||
+    msg.indexOf("could not find the table") !== -1 ||
+    msg.indexOf("relation") !== -1 ||
+    msg.indexOf("does not exist") !== -1
+  );
+}
+
+async function fetchDailyMetricRows(supabase, siteId, fromDate) {
+  var pageSize = 1000;
+  var from = 0;
+  var out = [];
+  while (true) {
+    var to = from + pageSize - 1;
+    var query = supabase
+      .from("ops_daily_line_metrics_mv")
+      .select("date_et,shift_label,line_name,produced_units,production_rows")
+      .eq("site_id", siteId)
+      .order("date_et", { ascending: false })
+      .range(from, to);
+    if (fromDate) query = query.gte("date_et", fromDate);
+    var q = await query;
+    if (q.error) return { error: q.error, data: out };
+    var rows = Array.isArray(q.data) ? q.data : [];
+    out = out.concat(rows);
+    if (rows.length < pageSize) break;
+    from += pageSize;
+    if (from > 200000) break;
+  }
+  return { error: null, data: out };
+}
+
 async function fetchAllProductionEvents(supabase, siteId, fromDate) {
   var pageSize = 1000;
   var from = 0;
@@ -149,6 +187,52 @@ async function fetchAllProductionEvents(supabase, siteId, fromDate) {
   return { error: null, data: out };
 }
 
+function buildTrendsFromMetricRows(rows, days, operatingDays, fromDate) {
+  var byDay = {};
+  var byShift = {};
+  var totalRows = 0;
+
+  (Array.isArray(rows) ? rows : []).forEach(function(row) {
+    var date = String(row && row.date_et || "");
+    var shift = String(row && row.shift_label || "Unassigned");
+    var units = toNum(row && row.produced_units);
+    var rowCount = toNum(row && row.production_rows);
+    if (!date || (!(units > 0) && !(rowCount > 0))) return;
+    totalRows += rowCount;
+    if (!byDay[date]) byDay[date] = { date: date, units: 0, rows: 0 };
+    byDay[date].units += units;
+    byDay[date].rows += rowCount;
+    var key = date + "|" + shift;
+    if (!byShift[key]) byShift[key] = { date: date, shift: shift, units: 0, rows: 0 };
+    byShift[key].units += units;
+    byShift[key].rows += rowCount;
+  });
+
+  return {
+    trends: {
+      days: days,
+      operatingDays: operatingDays,
+      fromDate: fromDate,
+      totalRows: totalRows,
+      byDay: Object.values(byDay).sort(function(a, b) { return a.date < b.date ? 1 : -1; }),
+      byShift: Object.values(byShift).sort(function(a, b) {
+        if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+        return a.shift < b.shift ? -1 : 1;
+      }),
+      diagnostics: {
+        summarySource: "ops_daily_line_metrics_mv",
+        totalRowsInTable: totalRows,
+        metricRowsFetched: Array.isArray(rows) ? rows.length : 0,
+        rowsMissingProducedDateEt: 0,
+        backfilledRows: 0,
+        backfillError: null,
+        snapshotProductionRows: 0,
+        snapshotSyncedAt: null
+      }
+    }
+  };
+}
+
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", req.headers.origin || "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
@@ -170,6 +254,14 @@ export default async function handler(req, res) {
       return cd;
     })();
     const fromDate = toEasternDateKey(from);
+    const metricQ = await fetchDailyMetricRows(supabase, CACHE_SITE_ID, fromDate);
+
+    if (metricQ.error && !isMissingDailyMetricsViewError(metricQ.error)) {
+      throw metricQ.error;
+    }
+    if (!metricQ.error && Array.isArray(metricQ.data) && metricQ.data.length) {
+      return res.status(200).json(buildTrendsFromMetricRows(metricQ.data, days, operatingDays, fromDate));
+    }
 
     const q = await fetchAllProductionEvents(supabase, CACHE_SITE_ID, fromDate);
 
@@ -260,6 +352,7 @@ export default async function handler(req, res) {
           return a.shift < b.shift ? -1 : 1;
         }),
         diagnostics: {
+          summarySource: "production_events",
           totalRowsInTable: rows.length,
           rowsMissingProducedDateEt: rowsMissingProducedDate,
           backfilledRows: backfilledRows,

@@ -1,4 +1,5 @@
 import Sentry from "../_sentry.js";
+import { classifyShiftET, pickFieldLoose, toEasternParts, toIso } from "../_labor.js";
 import { CACHE_SITE_ID, getAuthenticatedUser, getSupabaseAdmin, withCors } from "../ops/_common.js";
 
 function toText(value) {
@@ -124,6 +125,10 @@ function isBatchOpportunityQuestion(prompt) {
     q.includes("changeover") ||
     q.includes("batching opportunity")
   );
+}
+
+function needsProductionDetailPrompt(prompt) {
+  return isTopSkuQuestion(prompt) || isRevenueQuestion(prompt) || isMissingRevenueQuestion(prompt);
 }
 
 function detectPeriodLabel(prompt) {
@@ -410,45 +415,362 @@ function buildBatchOpportunitiesFromSnapshot(payload) {
     });
 }
 
-async function loadSupabaseAiContext() {
+function errorMessage(error) {
+  return String((error && (error.message || error.details || error.hint)) || "").toLowerCase();
+}
+
+function isMissingSupabaseRelationError(name, error) {
+  var msg = errorMessage(error);
+  return msg.indexOf(String(name || "").toLowerCase()) !== -1 && (
+    msg.indexOf("schema cache") !== -1 ||
+    msg.indexOf("could not find the table") !== -1 ||
+    msg.indexOf("relation") !== -1 ||
+    msg.indexOf("does not exist") !== -1
+  );
+}
+
+async function fetchAllRowsByDateWindow(supabase, options) {
+  var table = toText(options && options.table);
+  var columns = toText(options && options.columns) || "*";
+  var dateColumn = toText(options && options.dateColumn);
+  var siteId = toText(options && options.siteId) || CACHE_SITE_ID;
+  var startDate = toText(options && options.startDate);
+  var endDate = toText(options && options.endDate);
+  var pageSize = Math.max(1, Number(options && options.pageSize) || 1000);
+  var maxRows = Math.max(pageSize, Number(options && options.maxRows) || 50000);
+  var out = [];
+  var from = 0;
+
+  while (true) {
+    var to = from + pageSize - 1;
+    var q = supabase
+      .from(table)
+      .select(columns)
+      .eq("site_id", siteId)
+      .order(dateColumn, { ascending: false })
+      .range(from, to);
+    if (startDate) q = q.gte(dateColumn, startDate);
+    if (endDate) q = q.lte(dateColumn, endDate);
+    var resp = await q;
+    if (resp.error) return { error: resp.error, data: out };
+    var rows = Array.isArray(resp.data) ? resp.data : [];
+    out = out.concat(rows);
+    if (rows.length < pageSize || out.length >= maxRows) break;
+    from += pageSize;
+    if (from > maxRows) break;
+  }
+
+  return { error: null, data: out.slice(0, maxRows) };
+}
+
+function snapshotDatasetState(snapshotPayload, snapshotRowCounts, key) {
+  var rows = snapshotPayload && Array.isArray(snapshotPayload[key]) ? snapshotPayload[key] : [];
+  var payloadMeta = snapshotPayload && snapshotPayload.meta && typeof snapshotPayload.meta === "object"
+    ? snapshotPayload.meta
+    : {};
+  var dropped = Array.isArray(payloadMeta.cacheDroppedDatasets) && payloadMeta.cacheDroppedDatasets.indexOf(key) !== -1;
+  var totalRows = Math.max(0, Number(snapshotRowCounts && snapshotRowCounts[key]) || 0);
+  var truncated = !dropped && totalRows > 0 && rows.length > 0 && rows.length < totalRows;
+  return {
+    rows: rows,
+    totalRows: totalRows,
+    dropped: dropped,
+    truncated: truncated,
+    complete: !dropped && (!totalRows || rows.length >= totalRows)
+  };
+}
+
+function buildProductionDetailRowsFromSnapshot(snapshotPayload, startDate, endDate, fallbackValue) {
+  var rows = snapshotPayload && Array.isArray(snapshotPayload.productionData) ? snapshotPayload.productionData : [];
+  var out = [];
+
+  rows.forEach(function(row) {
+    var units = toNum(firstField(row, [
+      "Units Produced", "units_produced", "unitsProduced", "Produced Units", "Quantity Produced", "Qty Produced"
+    ]));
+    if (!(units > 0)) return;
+
+    var producedRaw = pickFieldLoose(row, [
+      "Produced date", "producedAt",
+      "Produced At", "produced_at",
+      "Actual Job End", "actual_job_end_at"
+    ]);
+    var producedIso = toIso(producedRaw);
+    var eastern = toEasternParts(producedIso || producedRaw || fallbackValue);
+    var dateKey = eastern && eastern.dateKey ? eastern.dateKey : parseDateIso(producedRaw || fallbackValue);
+    if (!dateKey || (startDate && dateKey < startDate) || (endDate && dateKey > endDate)) return;
+
+    out.push({
+      produced_date_et: dateKey,
+      shift_label: eastern ? classifyShiftET(eastern) : (toText(firstField(row, ["Shift", "shift_label", "shift"])) || "Unassigned"),
+      line: toText(firstField(row, ["Line", "line", "line_name", "Line Name"])) || "Unknown",
+      job_id: toText(firstField(row, ["Job ID", "job_id", "Job"])) || null,
+      work_order_code: toText(firstField(row, ["Work Order Code", "project_code", "Project Code"])) || null,
+      item_code: toText(firstField(row, ["Item Code", "item_code", "SKU", "sku", "Product SKU"])) || null,
+      units_produced: units,
+    });
+  });
+
+  return out;
+}
+
+function buildProductionSummary(metricRows, detailRows, resolveRevenuePerCase, detailSource) {
+  var rows = Array.isArray(metricRows) ? metricRows : [];
+  var detail = Array.isArray(detailRows) ? detailRows : [];
+  var byDay = {};
+  var lineTotals = {};
+  var totalRows = 0;
+
+  rows.forEach(function(row) {
+    var date = toText(row && row.date_et);
+    var units = toNum(row && row.produced_units);
+    var rowCount = toNum(row && row.production_rows);
+    if (!date || (!(units > 0) && !(rowCount > 0))) return;
+    totalRows += rowCount;
+    if (!byDay[date]) byDay[date] = { date: date, units: 0, rows: 0 };
+    byDay[date].units += units;
+    byDay[date].rows += rowCount;
+    var line = toText(row && row.line_name) || "Unknown";
+    if (!lineTotals[line]) lineTotals[line] = { line: line, units: 0, rows: 0 };
+    lineTotals[line].units += units;
+    lineTotals[line].rows += rowCount;
+  });
+
+  var dayPairs = Object.keys(byDay).sort().map(function(date) {
+    return byDay[date];
+  });
+  var latestProdDate = dayPairs.length ? dayPairs[dayPairs.length - 1].date : "";
+  var latestProdUnits = latestProdDate ? toNum(byDay[latestProdDate] && byDay[latestProdDate].units) : 0;
+  var last7 = dayPairs.slice(-7);
+  var lineTop = Object.keys(lineTotals)
+    .map(function(line) { return lineTotals[line]; })
+    .sort(function(a, b) { return b.units - a.units; })
+    .slice(0, 5);
+  var skuTotals = {};
+  detail.forEach(function(row) {
+    var sku = toText(row && row.item_code) || "Unknown";
+    var units = toNum(row && row.units_produced);
+    if (!(units > 0)) return;
+    skuTotals[sku] = (skuTotals[sku] || 0) + units;
+  });
+  var skuTop = Object.keys(skuTotals)
+    .map(function(sku) { return { sku: sku, units: skuTotals[sku] }; })
+    .sort(function(a, b) { return b.units - a.units; })
+    .slice(0, 8);
+
+  function rangeTotals(start, end) {
+    if (!start || !end) {
+      return {
+        totalCases: 0,
+        totalRevenue: 0,
+        revenueCoveredUnits: 0,
+        byLineTop: [],
+        bySkuTop: [],
+        byShift: [],
+        missingRevenueSkus: [],
+        productionDays: 0,
+        rows: 0,
+        hasSkuDetail: false
+      };
+    }
+
+    var rangeRows = rows.filter(function(row) {
+      var date = toText(row && row.date_et);
+      return date && date >= start && date <= end;
+    });
+    var totalCases = 0;
+    var lineMap = {};
+    var shiftMap = {};
+    var dayMap = {};
+    var totalRowCount = 0;
+
+    rangeRows.forEach(function(row) {
+      var units = toNum(row && row.produced_units);
+      var rowCount = toNum(row && row.production_rows);
+      var date = toText(row && row.date_et);
+      var line = toText(row && row.line_name) || "Unknown";
+      var shift = toText(row && row.shift_label) || "Unassigned";
+      totalCases += units;
+      totalRowCount += rowCount;
+      if (!lineMap[line]) lineMap[line] = { line: line, units: 0, rows: 0 };
+      lineMap[line].units += units;
+      lineMap[line].rows += rowCount;
+      shiftMap[shift] = (shiftMap[shift] || 0) + units;
+      if (date) dayMap[date] = true;
+    });
+
+    var detailRangeRows = detail.filter(function(row) {
+      var date = toText(row && row.produced_date_et);
+      return date && date >= start && date <= end;
+    });
+    var totalRevenue = 0;
+    var revenueCoveredUnits = 0;
+    var skuMap = {};
+    var missingRevenueSkus = {};
+
+    detailRangeRows.forEach(function(row) {
+      var units = toNum(row && row.units_produced);
+      if (!(units > 0)) return;
+      var date = toText(row && row.produced_date_et);
+      var sku = toText(row && row.item_code) || "Unknown";
+      var revenue = resolveRevenuePerCase(sku, date);
+      var revenueValue = toNum(revenue && revenue.value) * units;
+      if (!skuMap[sku]) skuMap[sku] = { sku: sku, units: 0, revenue: 0 };
+      skuMap[sku].units += units;
+      skuMap[sku].revenue += revenueValue;
+      if (revenueValue > 0) {
+        totalRevenue += revenueValue;
+        revenueCoveredUnits += units;
+      } else {
+        missingRevenueSkus[sku] = (missingRevenueSkus[sku] || 0) + units;
+      }
+    });
+
+    return {
+      totalCases: totalCases,
+      totalRevenue: totalRevenue,
+      revenueCoveredUnits: revenueCoveredUnits,
+      byLineTop: Object.keys(lineMap).map(function(key) { return lineMap[key]; }).sort(function(a, b) { return b.units - a.units; }).slice(0, 5),
+      bySkuTop: Object.keys(skuMap).map(function(key) { return skuMap[key]; }).sort(function(a, b) { return b.units - a.units; }).slice(0, 8),
+      byShift: Object.keys(shiftMap).map(function(key) { return { shift: key, units: shiftMap[key] }; }).sort(function(a, b) { return b.units - a.units; }),
+      missingRevenueSkus: Object.keys(missingRevenueSkus).map(function(key) {
+        return { sku: key, units: missingRevenueSkus[key] };
+      }).sort(function(a, b) { return b.units - a.units; }).slice(0, 10),
+      productionDays: Object.keys(dayMap).length,
+      rows: totalRowCount,
+      hasSkuDetail: detailRangeRows.length > 0
+    };
+  }
+
+  return {
+    totalRows: totalRows,
+    latestDate: latestProdDate,
+    latestDateUnits: latestProdUnits,
+    byDayLast7: last7,
+    topLines: lineTop,
+    topSkus: skuTop,
+    summarySource: "ops_daily_line_metrics_mv",
+    detailSource: detailSource || "",
+    range: rangeTotals,
+  };
+}
+
+function buildLaborSummary(metricRows) {
+  var rows = Array.isArray(metricRows) ? metricRows : [];
+  var laborByDate = {};
+  var totalRows = 0;
+  var latestLaborDate = "";
+
+  rows.forEach(function(row) {
+    var date = toText(row && row.date_et);
+    var laborRows = toNum(row && row.labor_rows);
+    if (!date || !(laborRows > 0)) return;
+    totalRows += laborRows;
+    laborByDate[date] = (laborByDate[date] || 0) + laborRows;
+    if (!latestLaborDate || date > latestLaborDate) latestLaborDate = date;
+  });
+
+  function laborRange(start, end) {
+    if (!start || !end) return { payableHours: 0, productiveHours: 0, laborCost: 0, rows: 0, byLineTop: [] };
+    var payableHours = 0;
+    var productiveHours = 0;
+    var laborCost = 0;
+    var rowCount = 0;
+    var byLine = {};
+
+    rows.forEach(function(row) {
+      var date = toText(row && row.date_et);
+      if (!date || date < start || date > end) return;
+      var payable = toNum(row && row.payable_hours);
+      var productive = toNum(row && row.productive_hours);
+      var cost = toNum(row && row.labor_cost);
+      var laborRows = toNum(row && row.labor_rows);
+      var line = toText(row && row.line_name) || "Unknown";
+      payableHours += payable;
+      productiveHours += productive;
+      laborCost += cost;
+      rowCount += laborRows;
+      if (!byLine[line]) byLine[line] = { line: line, payableHours: 0, productiveHours: 0, laborCost: 0 };
+      byLine[line].payableHours += payable;
+      byLine[line].productiveHours += productive;
+      byLine[line].laborCost += cost;
+    });
+
+    return {
+      payableHours: payableHours,
+      productiveHours: productiveHours,
+      laborCost: laborCost,
+      rows: rowCount,
+      byLineTop: Object.keys(byLine).map(function(key) { return byLine[key]; }).sort(function(a, b) { return b.laborCost - a.laborCost; }).slice(0, 5)
+    };
+  }
+
+  return {
+    totalRows: totalRows,
+    latestDate: latestLaborDate,
+    entriesOnLatestDate: latestLaborDate ? (laborByDate[latestLaborDate] || 0) : 0,
+    summarySource: "ops_daily_line_metrics_mv",
+    range: laborRange,
+  };
+}
+
+async function loadSupabaseAiContext(options) {
+  var summaryStart = toText(options && options.summaryStart);
+  var summaryEnd = toText(options && options.summaryEnd);
+  var includeProductionDetail = !!(options && options.includeProductionDetail);
+  var detailStart = toText(options && options.detailStart);
+  var detailEnd = toText(options && options.detailEnd);
   var supabase = getSupabaseAdmin();
 
-  var snapshotQ = await supabase
-    .from("cache_snapshot")
-    .select("synced_at,updated_by,row_counts,metrics,payload")
-    .eq("site_id", CACHE_SITE_ID)
-    .order("synced_at", { ascending: false })
-    .limit(1);
-  if (snapshotQ.error) throw snapshotQ.error;
-  var snapshot = Array.isArray(snapshotQ.data) && snapshotQ.data.length ? snapshotQ.data[0] : null;
+  var detailPromise = (includeProductionDetail && detailStart && detailEnd)
+    ? fetchAllRowsByDateWindow(supabase, {
+      table: "production_events",
+      columns: "produced_date_et,shift_label,line,job_id,work_order_code,item_code,units_produced",
+      dateColumn: "produced_date_et",
+      startDate: detailStart,
+      endDate: detailEnd,
+      maxRows: 25000
+    })
+    : Promise.resolve({ error: null, data: [] });
+
+  var responses = await Promise.all([
+    supabase
+      .from("cache_snapshots")
+      .select("synced_at,updated_by,row_counts,payload")
+      .eq("site_id", CACHE_SITE_ID)
+      .maybeSingle(),
+    fetchAllRowsByDateWindow(supabase, {
+      table: "ops_daily_line_metrics_mv",
+      columns: "date_et,shift_label,line_name,production_rows,produced_units,labor_rows,payable_hours,productive_hours,labor_cost",
+      dateColumn: "date_et",
+      startDate: summaryStart,
+      endDate: summaryEnd,
+      maxRows: 50000
+    }),
+    supabase
+      .from("ops_sku_targets")
+      .select("item_code,revenue_per_case,active_from,active_to,updated_at")
+      .eq("site_id", CACHE_SITE_ID)
+      .order("updated_at", { ascending: false })
+      .limit(5000),
+    detailPromise
+  ]);
+
+  var snapshotQ = responses[0];
+  var metricQ = responses[1];
+  var pricingQ = responses[2];
+  var detailQ = responses[3];
+
+  if (snapshotQ.error && !isMissingSupabaseRelationError("cache_snapshots", snapshotQ.error)) throw snapshotQ.error;
+  if (metricQ.error && !isMissingSupabaseRelationError("ops_daily_line_metrics_mv", metricQ.error)) throw metricQ.error;
+  if (pricingQ.error && !isMissingSupabaseRelationError("ops_sku_targets", pricingQ.error)) throw pricingQ.error;
+  if (detailQ.error && !isMissingSupabaseRelationError("production_events", detailQ.error)) throw detailQ.error;
+
+  var snapshot = !snapshotQ.error && snapshotQ.data ? snapshotQ.data : null;
   var snapshotPayload = snapshot && snapshot.payload ? snapshot.payload : null;
-
-  var prodQ = await supabase
-    .from("production_events")
-    .select("produced_date_et,units_produced,shift_label,line_name,item_code,work_order_code")
-    .eq("site_id", CACHE_SITE_ID)
-    .order("produced_date_et", { ascending: false })
-    .limit(5000);
-  var productionRows = [];
-  if (!prodQ.error && Array.isArray(prodQ.data)) productionRows = prodQ.data;
-
-  var laborQ = await supabase
-    .from("labor_events")
-    .select("worked_date_et,payable_hours,productive_hours,hourly_rate,line_name,job_id,work_order_code,item_code")
-    .eq("site_id", CACHE_SITE_ID)
-    .order("worked_date_et", { ascending: false })
-    .limit(8000);
-  var laborRows = [];
-  if (!laborQ.error && Array.isArray(laborQ.data)) laborRows = laborQ.data;
-
-  var pricingQ = await supabase
-    .from("ops_sku_targets")
-    .select("item_code,revenue_per_case,active_from,active_to,updated_at")
-    .eq("site_id", CACHE_SITE_ID)
-    .order("updated_at", { ascending: false })
-    .limit(5000);
-  var pricingRows = [];
-  if (!pricingQ.error && Array.isArray(pricingQ.data)) pricingRows = pricingQ.data;
+  var snapshotRowCounts = snapshot && snapshot.row_counts ? snapshot.row_counts : {};
+  var metricRows = !metricQ.error && Array.isArray(metricQ.data) ? metricQ.data : [];
+  var pricingRows = !pricingQ.error && Array.isArray(pricingQ.data) ? pricingQ.data : [];
 
   var itemMasterRows = snapshotPayload && Array.isArray(snapshotPayload.itemMaster) ? snapshotPayload.itemMaster : [];
   var itemMasterBySku = {};
@@ -489,154 +811,31 @@ async function loadSupabaseAiContext() {
     return { value: 0, source: "missing" };
   }
 
-  var byDay = {};
-  var lineTotals = {};
-  var skuTotals = {};
-  productionRows.forEach(function(r) {
-    var date = toText(r.produced_date_et);
-    var units = toNum(r.units_produced);
-    if (!date || !(units > 0)) return;
-    byDay[date] = (byDay[date] || 0) + units;
-    var line = toText(r.line_name || "Unassigned");
-    lineTotals[line] = (lineTotals[line] || 0) + units;
-    var sku = toText(r.item_code || "Unknown");
-    skuTotals[sku] = (skuTotals[sku] || 0) + units;
-  });
-  var dayPairs = Object.keys(byDay).sort().map(function(d) { return { date: d, units: byDay[d] }; });
-  var latestProdDate = dayPairs.length ? dayPairs[dayPairs.length - 1].date : "";
-  var latestProdUnits = latestProdDate ? byDay[latestProdDate] : 0;
-  var last7 = dayPairs.slice(-7);
-  var lineTop = Object.keys(lineTotals)
-    .map(function(line) { return { line: line, units: lineTotals[line] }; })
-    .sort(function(a, b) { return b.units - a.units; })
-    .slice(0, 5);
-  var skuTop = Object.keys(skuTotals)
-    .map(function(sku) { return { sku: sku, units: skuTotals[sku] }; })
-    .sort(function(a, b) { return b.units - a.units; })
-    .slice(0, 8);
-
-  function rangeTotals(start, end) {
-    if (!start || !end) return { totalCases: 0, totalRevenue: 0, revenueCoveredUnits: 0, byLineTop: [], bySkuTop: [], byShift: [], missingRevenueSkus: [], productionDays: 0, rows: 0 };
-    var rangeRows = productionRows.filter(function(r) {
-      var d = toText(r.produced_date_et);
-      return d && d >= start && d <= end;
-    });
-    var totalCases = 0;
-    var lineMap = {};
-    var skuMap = {};
-    var shiftMap = {};
-    var dayMap = {};
-    var totalRevenue = 0;
-    var revenueCoveredUnits = 0;
-    var missingRevenueSkus = {};
-    rangeRows.forEach(function(r) {
-      var u = toNum(r.units_produced);
-      if (!(u > 0)) return;
-      totalCases += u;
-      var dateKey = toText(r.produced_date_et);
-      var ln = toText(r.line_name || "Unassigned");
-      var sk = toText(r.item_code || "Unknown");
-      var sh = toText(r.shift_label || "Unassigned");
-      var rev = resolveRevenuePerCase(sk, dateKey);
-      var revenue = toNum(rev.value) * u;
-      if (!lineMap[ln]) lineMap[ln] = { line: ln, units: 0, revenue: 0 };
-      if (!skuMap[sk]) skuMap[sk] = { sku: sk, units: 0, revenue: 0 };
-      lineMap[ln].units += u;
-      lineMap[ln].revenue += revenue;
-      skuMap[sk].units += u;
-      skuMap[sk].revenue += revenue;
-      shiftMap[sh] = (shiftMap[sh] || 0) + u;
-      if (dateKey) dayMap[dateKey] = true;
-      if (revenue > 0) {
-        totalRevenue += revenue;
-        revenueCoveredUnits += u;
-      } else {
-        missingRevenueSkus[sk] = (missingRevenueSkus[sk] || 0) + u;
-      }
-    });
-    var byLineTop = Object.keys(lineMap).map(function(k) { return lineMap[k]; }).sort(function(a, b) { return b.units - a.units; }).slice(0, 5);
-    var bySkuTop = Object.keys(skuMap).map(function(k) { return skuMap[k]; }).sort(function(a, b) { return b.units - a.units; }).slice(0, 8);
-    var byShift = Object.keys(shiftMap).map(function(k) { return { shift: k, units: shiftMap[k] }; }).sort(function(a, b) { return b.units - a.units; });
-    var missingList = Object.keys(missingRevenueSkus)
-      .map(function(k) { return { sku: k, units: missingRevenueSkus[k] }; })
-      .sort(function(a, b) { return b.units - a.units; })
-      .slice(0, 10);
-    return {
-      totalCases: totalCases,
-      totalRevenue: totalRevenue,
-      revenueCoveredUnits: revenueCoveredUnits,
-      byLineTop: byLineTop,
-      bySkuTop: bySkuTop,
-      byShift: byShift,
-      missingRevenueSkus: missingList,
-      productionDays: Object.keys(dayMap).length,
-      rows: rangeRows.length
-    };
+  var productionDetailRows = [];
+  var productionDetailSource = "";
+  if (includeProductionDetail && detailStart && detailEnd) {
+    var productionDataState = snapshotDatasetState(snapshotPayload, snapshotRowCounts, "productionData");
+    if (productionDataState.complete && productionDataState.rows.length) {
+      productionDetailRows = buildProductionDetailRowsFromSnapshot(snapshotPayload, detailStart, detailEnd, snapshot && snapshot.synced_at);
+      productionDetailSource = "cache snapshot productionData";
+    } else if (!detailQ.error && Array.isArray(detailQ.data) && detailQ.data.length) {
+      productionDetailRows = detailQ.data;
+      productionDetailSource = "production_events";
+    }
   }
 
-  var latestLaborDate = "";
-  var laborByDate = {};
-  laborRows.forEach(function(r) {
-    var d = toText(r.worked_date_et);
-    if (!d) return;
-    laborByDate[d] = (laborByDate[d] || 0) + 1;
-    if (!latestLaborDate || d > latestLaborDate) latestLaborDate = d;
-  });
-
-  function laborRange(start, end) {
-    if (!start || !end) return { payableHours: 0, productiveHours: 0, laborCost: 0, rows: 0, byLineTop: [] };
-    var rangeRows = laborRows.filter(function(r) {
-      var d = toText(r.worked_date_et);
-      return d && d >= start && d <= end;
-    });
-    var payableHours = 0;
-    var productiveHours = 0;
-    var laborCost = 0;
-    var byLine = {};
-    rangeRows.forEach(function(r) {
-      var payable = toNum(r.payable_hours);
-      var productive = toNum(r.productive_hours);
-      var rate = toNum(r.hourly_rate);
-      var line = toText(r.line_name || "Unassigned");
-      payableHours += payable;
-      productiveHours += productive;
-      laborCost += payable * rate;
-      if (!byLine[line]) byLine[line] = { line: line, payableHours: 0, productiveHours: 0, laborCost: 0 };
-      byLine[line].payableHours += payable;
-      byLine[line].productiveHours += productive;
-      byLine[line].laborCost += payable * rate;
-    });
-    return {
-      payableHours: payableHours,
-      productiveHours: productiveHours,
-      laborCost: laborCost,
-      rows: rangeRows.length,
-      byLineTop: Object.keys(byLine).map(function(k) { return byLine[k]; }).sort(function(a, b) { return b.laborCost - a.laborCost; }).slice(0, 5)
-    };
-  }
+  var production = buildProductionSummary(metricRows, productionDetailRows, resolveRevenuePerCase, productionDetailSource);
+  var labor = buildLaborSummary(metricRows);
 
   return {
     siteId: CACHE_SITE_ID,
     snapshotSyncedAt: snapshot && snapshot.synced_at ? snapshot.synced_at : null,
     snapshotUpdatedBy: snapshot && snapshot.updated_by ? snapshot.updated_by : "",
-    snapshotRowCounts: snapshot && snapshot.row_counts ? snapshot.row_counts : {},
-    snapshotMetrics: snapshot && snapshot.metrics ? snapshot.metrics : {},
+    snapshotRowCounts: snapshotRowCounts,
+    snapshotMetrics: snapshotPayload && snapshotPayload.meta && typeof snapshotPayload.meta === "object" ? snapshotPayload.meta : {},
     snapshotPayload: snapshotPayload,
-    production: {
-      totalRows: productionRows.length,
-      latestDate: latestProdDate,
-      latestDateUnits: latestProdUnits,
-      byDayLast7: last7,
-      topLines: lineTop,
-      topSkus: skuTop,
-      range: rangeTotals,
-    },
-    labor: {
-      totalRows: laborRows.length,
-      latestDate: latestLaborDate,
-      entriesOnLatestDate: latestLaborDate ? (laborByDate[latestLaborDate] || 0) : 0,
-      range: laborRange,
-    },
+    production: production,
+    labor: labor,
     revenue: {
       pricingRows: pricingRows.length,
       itemMasterFallbackSkus: Object.keys(itemMasterBySku).length,
@@ -663,9 +862,17 @@ export default async function handler(req, res) {
     var metrics = body.metrics && typeof body.metrics === "object" ? body.metrics : {};
     var history = Array.isArray(body.history) ? body.history.slice(-8) : [];
     if (!prompt) return res.status(400).json({ error: "Prompt is required" });
+    var anchorDateEt = toText(metrics.todayEt) || ymdInEtFromDate(new Date());
+    var defaultOpsPeriod = resolvePeriodRange(detectPeriodLabel(prompt) || "today", anchorDateEt);
     var supabaseContext = null;
     try {
-      supabaseContext = await loadSupabaseAiContext();
+      supabaseContext = await loadSupabaseAiContext({
+        summaryStart: shiftIsoDate(anchorDateEt, -120),
+        summaryEnd: anchorDateEt,
+        includeProductionDetail: needsProductionDetailPrompt(prompt),
+        detailStart: defaultOpsPeriod.start,
+        detailEnd: defaultOpsPeriod.end,
+      });
     } catch (_) {
       supabaseContext = null;
     }
@@ -695,8 +902,6 @@ export default async function handler(req, res) {
       });
     }
 
-    var anchorDateEt = toText(metrics.todayEt) || ymdInEtFromDate(new Date());
-    var defaultOpsPeriod = resolvePeriodRange(detectPeriodLabel(prompt) || "today", anchorDateEt);
     var defaultProdAgg = (supabaseContext && supabaseContext.production && typeof supabaseContext.production.range === "function")
       ? supabaseContext.production.range(defaultOpsPeriod.start, defaultOpsPeriod.end)
       : null;
@@ -717,7 +922,7 @@ export default async function handler(req, res) {
           ", Shift 2: " + s2.toLocaleString() + "." +
           (supabaseContext && supabaseContext.production && supabaseContext.production.latestDate
             ? " Latest production date: " + supabaseContext.production.latestDate + " (" + toNum(supabaseContext.production.latestDateUnits).toLocaleString() + " cases)." +
-              sourceNote("production_events", supabaseContext.production.latestDate)
+              sourceNote(supabaseContext.production.summarySource || "ops_daily_line_metrics_mv", supabaseContext.production.latestDate)
             : ""),
         model: "deterministic",
       });
@@ -758,7 +963,7 @@ export default async function handler(req, res) {
           "Cases produced yesterday (" + (yesterdayEt || "ET") + "): " + yCases.toLocaleString() +
           ". Shift 1: " + yS1.toLocaleString() +
           ", Shift 2: " + yS2.toLocaleString() + "." +
-          sourceNote("production_events", yesterdayEt),
+          sourceNote((supabaseContext && supabaseContext.production && supabaseContext.production.summarySource) || "ops_daily_line_metrics_mv", yesterdayEt),
         model: "deterministic",
       });
     }
@@ -785,7 +990,7 @@ export default async function handler(req, res) {
           answer:
             "Average daily production for " + periodForOps.label + " (" + periodForOps.start + " to " + periodForOps.end + "): " +
             avgDaily.toLocaleString() + " cases/day across " + days + " production day" + (days === 1 ? "" : "s") + "." +
-            sourceNote("production_events", periodForOps.end),
+            sourceNote(supabaseContext.production.summarySource || "ops_daily_line_metrics_mv", periodForOps.end),
           model: "deterministic",
         });
       }
@@ -798,11 +1003,18 @@ export default async function handler(req, res) {
           answer:
             "Top line for " + periodForOps.label + " (" + periodForOps.start + " to " + periodForOps.end + "): " +
             String(topLine.line || "--") + " with " + toNum(topLine.units).toLocaleString() + " cases." +
-            sourceNote("production_events", periodForOps.end),
+            sourceNote(supabaseContext.production.summarySource || "ops_daily_line_metrics_mv", periodForOps.end),
           model: "deterministic",
         });
       }
       if (isTopSkuQuestion(prompt)) {
+        if (!opsAgg.hasSkuDetail) {
+          return res.status(200).json({
+            answer:
+              "Detailed SKU-level production data is unavailable for " + periodForOps.label + " (" + periodForOps.start + " to " + periodForOps.end + ").",
+            model: "deterministic",
+          });
+        }
         var skuList = (opsAgg.bySkuTop || []).slice(0, 5).map(function(x, idx) {
           return (idx + 1) + ". " + String(x.sku || "--") + " - " + toNum(x.units).toLocaleString() + " cases";
         });
@@ -810,7 +1022,7 @@ export default async function handler(req, res) {
           answer:
             "Top SKU mix for " + periodForOps.label + " (" + periodForOps.start + " to " + periodForOps.end + "):\n" +
             (skuList.length ? skuList.join("\n") : "No SKU totals found.") +
-            sourceNote("production_events", periodForOps.end),
+            sourceNote(supabaseContext.production.detailSource || "production_events", periodForOps.end),
           model: "deterministic",
         });
       }
@@ -824,12 +1036,19 @@ export default async function handler(req, res) {
             "Shift split for " + periodForOps.label + " (" + periodForOps.start + " to " + periodForOps.end + "): " +
             (shiftList.length ? shiftList.join(" | ") : "No shift totals found.") +
             (topShift ? ". Highest output: " + String(topShift.shift || "--") + "." : "") +
-            sourceNote("production_events", periodForOps.end),
+            sourceNote(supabaseContext.production.summarySource || "ops_daily_line_metrics_mv", periodForOps.end),
           model: "deterministic",
         });
       }
     }
     if (isRevenueQuestion(prompt) && defaultProdAgg) {
+      if (!defaultProdAgg.hasSkuDetail) {
+        return res.status(200).json({
+          answer:
+            "Detailed SKU-level production data is unavailable for " + defaultOpsPeriod.label + " (" + defaultOpsPeriod.start + " to " + defaultOpsPeriod.end + "), so revenue cannot be calculated yet.",
+          model: "deterministic",
+        });
+      }
       var revenueTotal = toNum(defaultProdAgg.totalRevenue);
       var revenueCases = toNum(defaultProdAgg.totalCases);
       var coveredUnits = toNum(defaultProdAgg.revenueCoveredUnits);
@@ -844,17 +1063,24 @@ export default async function handler(req, res) {
           Math.round(revenueTotal).toLocaleString() + " across " + revenueCases.toLocaleString() + " cases. " +
           "Coverage: " + coveragePct + "% of produced units." +
           (missingCount ? " Missing revenue on " + missingCount + " SKU" + (missingCount === 1 ? "" : "s") + (topMissing ? ": " + topMissing + "." : ".") : "") +
-          sourceNote("production_events + ops_sku_targets + item master cost", defaultOpsPeriod.end),
+          sourceNote(((supabaseContext && supabaseContext.production && supabaseContext.production.detailSource) || "production_events") + " + ops_sku_targets + item master cost", defaultOpsPeriod.end),
         model: "deterministic",
       });
     }
     if (isMissingRevenueQuestion(prompt) && defaultProdAgg) {
+      if (!defaultProdAgg.hasSkuDetail) {
+        return res.status(200).json({
+          answer:
+            "Detailed SKU-level production data is unavailable for " + defaultOpsPeriod.label + " (" + defaultOpsPeriod.start + " to " + defaultOpsPeriod.end + "), so pricing coverage cannot be verified yet.",
+          model: "deterministic",
+        });
+      }
       var missingSkuRows = Array.isArray(defaultProdAgg.missingRevenueSkus) ? defaultProdAgg.missingRevenueSkus : [];
       if (!missingSkuRows.length) {
         return res.status(200).json({
           answer:
             "All produced SKUs for " + defaultOpsPeriod.label + " (" + defaultOpsPeriod.start + " to " + defaultOpsPeriod.end + ") have revenue coverage." +
-            sourceNote("production_events + ops_sku_targets + item master cost", defaultOpsPeriod.end),
+            sourceNote(((supabaseContext && supabaseContext.production && supabaseContext.production.detailSource) || "production_events") + " + ops_sku_targets + item master cost", defaultOpsPeriod.end),
           model: "deterministic",
         });
       }
@@ -865,7 +1091,7 @@ export default async function handler(req, res) {
         answer:
           "SKUs missing revenue coverage for " + defaultOpsPeriod.label + " (" + defaultOpsPeriod.start + " to " + defaultOpsPeriod.end + "):\n" +
           missingSkuText +
-          sourceNote("production_events + ops_sku_targets + item master cost", defaultOpsPeriod.end),
+          sourceNote(((supabaseContext && supabaseContext.production && supabaseContext.production.detailSource) || "production_events") + " + ops_sku_targets + item master cost", defaultOpsPeriod.end),
         model: "deterministic",
       });
     }
@@ -884,7 +1110,7 @@ export default async function handler(req, res) {
           "Productivity: " + casesPerPayable.toLocaleString() + " cases/payable hr, " +
           casesPerProductive.toLocaleString() + " cases/productive hr. " +
           "Labor cost per case: $" + laborCostPerCase.toFixed(2) + "." +
-          sourceNote("labor_events + production_events", defaultOpsPeriod.end),
+          sourceNote(((supabaseContext && supabaseContext.labor && supabaseContext.labor.summarySource) || "ops_daily_line_metrics_mv") + " + " + (((supabaseContext && supabaseContext.production && supabaseContext.production.summarySource) || "ops_daily_line_metrics_mv")), defaultOpsPeriod.end),
         model: "deterministic",
       });
     }

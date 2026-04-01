@@ -26,6 +26,8 @@ Track SQL setup order and what each script provisions.
    - Covering production index + operations performance materialized views + refresh function
 11. `/Users/aj/Documents/New project/docs/supabase-query-performance.sql`
    - Query diagnostics extensions + latest artifact lookup index
+12. `/Users/aj/Documents/New project/docs/supabase-ai-trends-performance.sql`
+   - AI/trends follow-up indexes + refresh function `ANALYZE` pass
 
 ## Required Environment Variables
 - `SUPABASE_URL`
@@ -34,7 +36,7 @@ Track SQL setup order and what each script provisions.
 
 ## Verification Queries
 - Snapshot exists:
-  - `select site_id, synced_at from cache_snapshot order by synced_at desc limit 5;`
+  - `select site_id, synced_at from cache_snapshots order by synced_at desc limit 5;`
 - Production events loaded:
   - `select count(*) from production_events;`
 - Labor events loaded:
