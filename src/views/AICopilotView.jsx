@@ -1,4 +1,13 @@
 import { useMemo, useState } from "react";
+import {
+  ArrowRight,
+  BriefcaseBusiness,
+  ClipboardList,
+  Layers3,
+  Radar,
+  Sparkles,
+  TrendingUp,
+} from "lucide-react";
 import { Card } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -7,6 +16,15 @@ import { useTheme } from "../theme";
 function safeNum(v) {
   var n = Number(v || 0);
   return Number.isFinite(n) ? n : 0;
+}
+
+function formatWhole(value) {
+  return Math.round(safeNum(value)).toLocaleString();
+}
+
+function formatSignedPct(value) {
+  var n = Math.round(safeNum(value));
+  return (n >= 0 ? "+" : "") + n + "%";
 }
 
 function toIsoDateET(d) {
@@ -22,6 +40,20 @@ function toIsoDateET(d) {
     if (p.type !== "literal") parts[p.type] = p.value;
   });
   return parts.year && parts.month && parts.day ? (parts.year + "-" + parts.month + "-" + parts.day) : "";
+}
+
+function formatMetaTimestamp(value) {
+  var raw = String(value || "").trim();
+  if (!raw) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  var parsed = new Date(raw);
+  if (isNaN(parsed)) return raw;
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(parsed);
 }
 
 function severityFromUnits(units) {
@@ -96,19 +128,19 @@ function parseAiBrief(text) {
 
 function sectionTone(title) {
   var raw = String(title || "").toLowerCase();
-  if (raw.includes("snapshot")) {
+  if (raw.includes("snapshot") || raw.includes("performance") || raw.includes("output")) {
     return {
       panel: "border-[rgba(var(--accent-rgb),0.22)] bg-[rgba(var(--accent-rgb),0.06)]",
       badge: "bg-[rgba(var(--accent-rgb),0.14)] text-[rgb(var(--accent))]"
     };
   }
-  if (raw.includes("risk")) {
+  if (raw.includes("risk") || raw.includes("watch")) {
     return {
       panel: "border-[rgba(var(--warning-rgb),0.24)] bg-[rgba(var(--warning-rgb),0.08)]",
       badge: "bg-[rgba(var(--warning-rgb),0.14)] text-[rgb(var(--warning))]"
     };
   }
-  if (raw.includes("action")) {
+  if (raw.includes("action") || raw.includes("moves") || raw.includes("guidance")) {
     return {
       panel: "border-[rgba(var(--success-rgb),0.24)] bg-[rgba(var(--success-rgb),0.08)]",
       badge: "bg-[rgba(var(--success-rgb),0.14)] text-[rgb(var(--success))]"
@@ -120,19 +152,67 @@ function sectionTone(title) {
   };
 }
 
+function postureFromFacts(facts, metrics) {
+  var staleFeeds = (metrics && Array.isArray(metrics.dataHealth) ? metrics.dataHealth : []).filter(function(feed) {
+    var status = String(feed && feed.status || "").toLowerCase();
+    return status && status !== "fresh";
+  }).length;
+  if (facts.highRiskCount >= 2 || facts.evoconUnplannedMin >= 150 || safeNum(facts.woBlocked) > safeNum(facts.woReady) || staleFeeds >= 2) {
+    return {
+      label: "Intervene",
+      detail: "High-risk exposure is large enough that the floor plan needs active intervention.",
+      variant: "danger"
+    };
+  }
+  if (facts.highRiskCount >= 1 || facts.atRiskUnits >= 10000 || facts.evoconUnplannedMin >= 60 || staleFeeds >= 1) {
+    return {
+      label: "Watch",
+      detail: "The plan is workable, but the day has enough pressure that it should be managed tightly.",
+      variant: "warning"
+    };
+  }
+  return {
+    label: "Stable",
+    detail: "Signals look contained enough to run the plan with normal supervision.",
+    variant: "success"
+  };
+}
+
+function recommendationForOwner(recommendations, token) {
+  var lower = String(token || "").toLowerCase();
+  return (recommendations || []).find(function(row) {
+    return String(row && row.owner || "").toLowerCase().indexOf(lower) !== -1;
+  }) || null;
+}
+
+function targetViewForRecommendation(row, fallbackView) {
+  var view = String(row && row.targetView || "").toLowerCase();
+  if (view === "criticalitems") return "supplyrisk";
+  if (view === "workorders" || view === "operations" || view === "supplyrisk") return view;
+  return fallbackView || "aicopilot";
+}
+
 export default function AICopilotView(props) {
   var summary = props.summary || { total: 0, ready: 0, blocked: 0 };
   var criticalItems = Array.isArray(props.criticalItems) ? props.criticalItems : [];
   var dispatchQueue = Array.isArray(props.dispatchQueue) ? props.dispatchQueue : [];
+  var recommendations = Array.isArray(props.recommendations) ? props.recommendations : [];
   var productionSegments = props.productionSegments || { shiftRows: [], jobRows: [] };
   var evoconData = Array.isArray(props.evoconData) ? props.evoconData : [];
   var workOrders = Array.isArray(props.workOrders) ? props.workOrders : [];
+  var metrics = props.metrics && typeof props.metrics === "object" ? props.metrics : {};
   var onNavigate = typeof props.onNavigate === "function" ? props.onNavigate : function() {};
   const { mono } = useTheme();
 
+  const [selectedMode, setSelectedMode] = useState("standup");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState("");
-  const [aiBrief, setAiBrief] = useState("");
+  const [aiResult, setAiResult] = useState({
+    answer: "",
+    mode: "",
+    meta: null,
+    followUps: [],
+  });
 
   var todayEt = toIsoDateET(new Date());
 
@@ -228,13 +308,17 @@ export default function AICopilotView(props) {
     };
   }, [productionSegments, todayEt, summary, criticalItems, dispatchQueue, evoconData, workOrders]);
 
+  var posture = useMemo(function() {
+    return postureFromFacts(facts, metrics);
+  }, [facts, metrics]);
+
   var cards = useMemo(function() {
     var list = [];
     list.push({
       id: "today-output",
       title: "Today Output Snapshot",
       severity: facts.producedToday > 0 ? "success" : "warning",
-      why: "Produced " + Math.round(facts.producedToday).toLocaleString() + " cases so far (S1 " + Math.round(facts.producedS1).toLocaleString() + " / S2 " + Math.round(facts.producedS2).toLocaleString() + ").",
+      why: "Produced " + formatWhole(facts.producedToday) + " cases so far (S1 " + formatWhole(facts.producedS1) + " / S2 " + formatWhole(facts.producedS2) + ").",
       action: "Review line-level output and shift mix on Operations.",
       confidence: "High",
       view: "operations"
@@ -243,7 +327,7 @@ export default function AICopilotView(props) {
       id: "supply-risk",
       title: "Supply Risk Concentration",
       severity: severityFromUnits(facts.atRiskUnits),
-      why: facts.riskSkuCount.toLocaleString() + " at-risk SKUs and " + Math.round(facts.atRiskUnits).toLocaleString() + " units exposed.",
+      why: formatWhole(facts.riskSkuCount) + " at-risk SKUs and " + formatWhole(facts.atRiskUnits) + " units exposed.",
       action: "Prioritize high-risk shortages and inbound scheduling gaps.",
       confidence: "High",
       view: "supplyrisk"
@@ -253,8 +337,8 @@ export default function AICopilotView(props) {
         id: "top-risk",
         title: "Highest Impact Material",
         severity: "danger",
-        why: String(facts.topRisk.sku || "--") + " has " + Math.round(safeNum(facts.topRisk.totalShort || facts.topRisk.unitsAtRisk || 0)).toLocaleString() + " units short.",
-        action: String(facts.topRisk.recommendation || "Expedite / resequence based on due date."),
+        why: String(facts.topRisk.sku || "--") + " has " + formatWhole(safeNum(facts.topRisk.totalShort || facts.topRisk.unitsAtRisk || 0)) + " units short.",
+        action: String(facts.topRisk.recommendation || facts.topRisk.recommendedAction || "Expedite / resequence based on due date."),
         confidence: "Medium",
         view: "supplyrisk"
       });
@@ -275,8 +359,8 @@ export default function AICopilotView(props) {
         id: "batching",
         title: "Batching Opportunity",
         severity: facts.topBatch.count >= 4 ? "warning" : "info",
-        why: facts.batchGroupCount + " same-item batch groups are open. Top group: " + facts.topBatch.sku + " with " + facts.topBatch.count + " WOs and " + Math.round(facts.topBatch.remainingUnits).toLocaleString() + " remaining cases.",
-        action: "Use Work Orders batch filter to reduce changeovers on the top repeated items first.",
+        why: facts.batchGroupCount + " same-item batch groups are open. Top group: " + facts.topBatch.sku + " with " + facts.topBatch.count + " WOs and " + formatWhole(facts.topBatch.remainingUnits) + " remaining cases.",
+        action: "Use Work Orders batch filters to reduce changeovers on the top repeated items first.",
         confidence: "High",
         view: "workorders"
       });
@@ -285,83 +369,316 @@ export default function AICopilotView(props) {
       id: "ops-loss",
       title: "Evocon Loss Watch",
       severity: facts.evoconUnplannedMin > 120 ? "warning" : "info",
-      why: "Today unplanned stops: " + facts.evoconUnplannedMin.toLocaleString() + " min; speed loss: " + facts.evoconSlowMin.toLocaleString() + " min.",
-      action: "Use Evocon Loss Intelligence to target top stop-loss line first.",
+      why: "Today unplanned stops: " + formatWhole(facts.evoconUnplannedMin) + " min; speed loss: " + formatWhole(facts.evoconSlowMin) + " min.",
+      action: "Use Operations to target the top stop-loss line first.",
       confidence: facts.evoconTodayRows ? "Medium" : "Low",
       view: "operations"
     });
     return list;
   }, [facts]);
 
-  var aiBriefSections = useMemo(function() {
-    return parseAiBrief(aiBrief);
-  }, [aiBrief]);
+  var ownerMoves = useMemo(function() {
+    var plannerRec = recommendationForOwner(recommendations, "planner");
+    var supplyRec = recommendationForOwner(recommendations, "supply");
+    var opsRec = recommendationForOwner(recommendations, "supervisor") || recommendationForOwner(recommendations, "ops");
+    var staleFeeds = (metrics.dataHealth || []).filter(function(feed) {
+      return String(feed && feed.status || "").toLowerCase() && String(feed && feed.status || "").toLowerCase() !== "fresh";
+    });
 
-  async function generateBrief() {
+    return [
+      {
+        owner: "Planner",
+        title: plannerRec ? plannerRec.action : (facts.topRunNext[0] ? facts.topRunNext[0].action || "Run Next" : "Review Queue"),
+        detail: plannerRec
+          ? plannerRec.why
+          : (facts.topRunNext[0] ? ("Lead with WO " + (facts.topRunNext[0].woNum || "--") + " and keep the same-family queue flowing.") : "Use the ranked dispatch queue to lock the next production sequence."),
+        view: targetViewForRecommendation(plannerRec, "workorders"),
+        badge: "Today"
+      },
+      {
+        owner: "Supply Chain",
+        title: supplyRec ? supplyRec.action : (facts.topRisk && (facts.topRisk.recommendation || facts.topRisk.recommendedAction) ? (facts.topRisk.recommendation || facts.topRisk.recommendedAction) : "Protect Coverage"),
+        detail: supplyRec
+          ? supplyRec.why
+          : (facts.topRisk ? ((facts.topRisk.sku || "--") + " is the sharpest current shortage signal.") : "Validate the highest-risk materials before the next due-date window closes."),
+        view: targetViewForRecommendation(supplyRec, "supplyrisk"),
+        badge: facts.highRiskCount > 0 ? "Risk" : "Watch"
+      },
+      {
+        owner: "Floor Lead",
+        title: opsRec ? opsRec.action : "Recover Throughput",
+        detail: opsRec
+          ? opsRec.why
+          : ("Today shows " + formatWhole(facts.evoconUnplannedMin) + " min unplanned stops and " + formatWhole(facts.evoconSlowMin) + " min slow production."),
+        view: targetViewForRecommendation(opsRec, "operations"),
+        badge: facts.evoconUnplannedMin > 60 ? "Loss" : "Flow"
+      },
+      {
+        owner: "Ops Analyst",
+        title: staleFeeds.length ? "Refresh Feeds" : "Validate Narrative",
+        detail: staleFeeds.length
+          ? ("Refresh " + staleFeeds.slice(0, 3).map(function(feed) { return String(feed && feed.label || "source"); }).join(", ") + " before using the next narrative externally.")
+          : "Core feeds look healthy enough to support standups and escalation notes.",
+        view: staleFeeds.length ? "operations" : "aicopilot",
+        badge: staleFeeds.length ? "Data" : "Ready"
+      }
+    ];
+  }, [recommendations, facts, metrics.dataHealth]);
+
+  var aiBriefSections = useMemo(function() {
+    return parseAiBrief(aiResult.answer);
+  }, [aiResult.answer]);
+
+  var playbooks = useMemo(function() {
+    return [
+      {
+        id: "standup",
+        label: "Standup Brief",
+        description: "Floor-ready snapshot, risks, and owner actions.",
+        kicker: "Shift pulse",
+        icon: ClipboardList,
+        prompt: "Generate a concise operations copilot brief for daily standup. Use sections: 1) Today snapshot 2) Top risks 3) Actions by role 4) Confidence / source. Keep it under 220 words and include numbers from context."
+      },
+      {
+        id: "run_next",
+        label: "Run Next",
+        description: "Rank the best next work orders and explain sequencing.",
+        kicker: "Dispatch",
+        icon: Sparkles,
+        prompt: "Which work orders should we run next and why? Use sections: 1) Run next 2) Why these jobs 3) Sequencing guidance 4) Confidence / source."
+      },
+      {
+        id: "risk_radar",
+        label: "Risk Radar",
+        description: "Expose what can derail the plan today and what to do first.",
+        kicker: "Shortage watch",
+        icon: Radar,
+        prompt: "Which risks can derail today's plan? Focus on shortages, due-date exposure, and concrete owner actions."
+      },
+      {
+        id: "batch_plan",
+        label: "Batch Plan",
+        description: "Find same-item families that can reduce changeovers.",
+        kicker: "Changeovers",
+        icon: Layers3,
+        prompt: "Where are the best batching opportunities right now? Group by same-item families, recommend sequence order, and call out any watchouts."
+      },
+      {
+        id: "throughput_watch",
+        label: "Throughput Watch",
+        description: "Turn output pace and loss signals into a recovery plan.",
+        kicker: "Recovery",
+        icon: TrendingUp,
+        prompt: "Create a throughput watch. Use sections: 1) Output pace 2) Loss watch 3) Recovery moves 4) Confidence / source."
+      },
+      {
+        id: "executive_brief",
+        label: "Executive Brief",
+        description: "A tighter leadership recap with performance, risk, and management moves.",
+        kicker: "Leadership",
+        icon: BriefcaseBusiness,
+        prompt: "Create a concise executive brief for plant leadership. Use sections: 1) Performance 2) Operating risk 3) Management moves 4) Confidence / source. Keep it under 180 words."
+      }
+    ];
+  }, []);
+
+  var selectedPlaybook = playbooks.find(function(playbook) {
+    return playbook.id === selectedMode;
+  }) || playbooks[0];
+
+  async function runCopilot(mode, promptOverride) {
+    var playbook = playbooks.find(function(item) { return item.id === mode; }) || selectedPlaybook;
+    if (!playbook) return;
+    setSelectedMode(playbook.id);
     setAiLoading(true);
     setAiError("");
     try {
       var contextLines = [
         "Date: " + facts.todayEt,
         "Work orders: " + facts.woTotal + " total, " + facts.woReady + " ready, " + facts.woBlocked + " blocked",
-        "Today produced: " + Math.round(facts.producedToday),
-        "Supply risk: " + facts.riskSkuCount + " SKUs, " + Math.round(facts.atRiskUnits) + " units at risk",
+        "Today produced: " + formatWhole(facts.producedToday) + " cases",
+        "Supply risk: " + facts.riskSkuCount + " SKUs, " + formatWhole(facts.atRiskUnits) + " units at risk",
         "Batching: " + facts.batchGroupCount + " item groups, " + facts.batchWorkOrderCount + " work orders, top batch " + (facts.topBatch ? facts.topBatch.sku + " x" + facts.topBatch.count : "none"),
         "Evocon today: " + facts.evoconUnplannedMin + " unplanned min, " + facts.evoconSlowMin + " speed loss min",
-        "Top run next count: " + facts.topRunNext.length
+        "Top run-next count: " + facts.topRunNext.length,
+        "Posture: " + posture.label
       ];
+      var mergedMetrics = Object.assign({}, metrics, {
+        todayEt: facts.todayEt,
+        productionTodayCases: facts.producedToday,
+        productionTodayShift1Cases: facts.producedS1,
+        productionTodayShift2Cases: facts.producedS2,
+        workOrdersTotal: facts.woTotal,
+        workOrdersReady: facts.woReady,
+        workOrdersBlocked: facts.woBlocked,
+        supplyRiskItems: facts.riskSkuCount,
+        atRiskUnits: facts.atRiskUnits,
+        highRiskCount: facts.highRiskCount,
+        evoconUnplannedMin: facts.evoconUnplannedMin,
+        evoconSlowMin: facts.evoconSlowMin,
+      });
       var r = await fetch("/api/ai/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({
-          prompt: "Generate a concise operations copilot brief for daily standup. Use sections: 1) Today snapshot 2) Top 3 risks 3) Top 3 actions by role. Keep it under 180 words and include numbers from context.",
+          prompt: promptOverride || playbook.prompt,
+          copilotMode: playbook.id,
           activeView: "aicopilot",
           contextLines: contextLines,
-          metrics: facts,
+          metrics: mergedMetrics,
           history: []
         })
       });
       var body = await r.json().catch(function() { return {}; });
       if (!r.ok) throw new Error(body && (body.error || body.details) ? (body.error || body.details) : "AI request failed");
-      setAiBrief(String(body && body.answer || "").trim() || "No AI brief returned.");
+      setAiResult({
+        answer: String(body && body.answer || "").trim() || "No AI brief returned.",
+        mode: playbook.id,
+        meta: body && body.meta ? body.meta : null,
+        followUps: Array.isArray(body && body.followUps) ? body.followUps : [],
+      });
     } catch (e) {
       setAiError(e && e.message ? e.message : "Could not generate AI brief");
-      setAiBrief("");
+      setAiResult({ answer: "", mode: playbook.id, meta: null, followUps: [] });
     } finally {
       setAiLoading(false);
     }
   }
 
   return (
-    <div className="space-y-3">
-      <Card className="px-4 py-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
+    <div className="space-y-4">
+      <Card className="overflow-hidden border-[rgba(var(--accent-rgb),0.18)] bg-[linear-gradient(135deg,rgba(var(--accent-rgb),0.14),rgba(255,255,255,0.96)_60%)] px-4 py-4">
+        <div className="grid gap-4 xl:grid-cols-[1.4fr,1fr]">
           <div>
-            <div className="text-sm font-semibold">AI Copilot</div>
-            <div className="text-xs text-[rgb(var(--muted))]">Deterministic standup signals with AI narrative grounded in current Operations, Work Orders, and Supply Risk data.</div>
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <Badge variant="info">AI Copilot Command Center</Badge>
+              <Badge variant={posture.variant}>{posture.label}</Badge>
+              <Badge variant="success">Live</Badge>
+            </div>
+            <div className="max-w-3xl text-xl font-semibold tracking-tight text-[rgb(var(--foreground))]">
+              Reframe the day from signals into decisions, then turn those decisions into owner-specific moves.
+            </div>
+            <div className="mt-2 max-w-2xl text-sm leading-6 text-[rgb(var(--muted))]">
+              The copilot now blends PackPulse metrics, work-order sequencing, shortage pressure, throughput loss, and data health into focused playbooks. Use it as a standup engine, a sequencing coach, or a fast escalation writer.
+            </div>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="default" onClick={function() { runCopilot(selectedPlaybook.id); }} disabled={aiLoading}>
+                {aiLoading ? "Running..." : "Run " + selectedPlaybook.label}
+              </Button>
+              <Button size="sm" variant="outline" onClick={function() { onNavigate("workorders"); }}>
+                Open Work Orders
+              </Button>
+              <div className="text-xs text-[rgb(var(--muted))]">{posture.detail}</div>
+            </div>
           </div>
-          <div className="flex items-center gap-1.5">
-            <Badge variant="success">Live</Badge>
-            <Button variant="outline" size="sm" onClick={generateBrief} disabled={aiLoading}>
-              {aiLoading ? "Generating..." : "Generate AI Brief"}
-            </Button>
+
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-2">
+            <div className="rounded-2xl border border-white/70 bg-white/80 px-3 py-3 shadow-sm">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[rgb(var(--muted))]">Output Today</div>
+              <div className="mt-2 text-2xl font-semibold text-[rgb(var(--foreground))]">{formatWhole(facts.producedToday)}</div>
+              <div className="mt-1 text-xs text-[rgb(var(--muted))]">Cases so far | S1 {formatWhole(facts.producedS1)} / S2 {formatWhole(facts.producedS2)}</div>
+            </div>
+            <div className="rounded-2xl border border-white/70 bg-white/80 px-3 py-3 shadow-sm">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[rgb(var(--muted))]">Supply Exposure</div>
+              <div className="mt-2 text-2xl font-semibold text-[rgb(var(--foreground))]">{formatWhole(facts.atRiskUnits)}</div>
+              <div className="mt-1 text-xs text-[rgb(var(--muted))]">{facts.highRiskCount} high-risk items live right now</div>
+            </div>
+            <div className="rounded-2xl border border-white/70 bg-white/80 px-3 py-3 shadow-sm">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[rgb(var(--muted))]">Run-Next Depth</div>
+              <div className="mt-2 text-2xl font-semibold text-[rgb(var(--foreground))]">{facts.topRunNext.length}</div>
+              <div className="mt-1 text-xs text-[rgb(var(--muted))]">{facts.topRunNext[0] ? ("Lead WO " + (facts.topRunNext[0].woNum || "--")) : "No ranked lead yet"}</div>
+            </div>
+            <div className="rounded-2xl border border-white/70 bg-white/80 px-3 py-3 shadow-sm">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[rgb(var(--muted))]">Changeover Wins</div>
+              <div className="mt-2 text-2xl font-semibold text-[rgb(var(--foreground))]">{facts.batchGroupCount}</div>
+              <div className="mt-1 text-xs text-[rgb(var(--muted))]">{facts.topBatch ? (facts.topBatch.sku + " x" + facts.topBatch.count) : "No repeat families open"}</div>
+            </div>
           </div>
         </div>
       </Card>
 
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {ownerMoves.map(function(move) {
+          return (
+            <Card key={move.owner} className="px-4 py-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div className="text-sm font-semibold">{move.owner}</div>
+                <Badge variant="secondary">{move.badge}</Badge>
+              </div>
+              <div className="mb-1 text-sm font-medium text-[rgb(var(--foreground))]">{move.title}</div>
+              <div className="mb-3 text-xs leading-6 text-[rgb(var(--muted))]">{move.detail}</div>
+              <Button size="sm" variant="outline" onClick={function() { onNavigate(move.view); }}>
+                Open {move.view === "workorders" ? "Work Orders" : move.view === "supplyrisk" ? "Supply Risk" : move.view === "operations" ? "Operations" : "Copilot"}
+              </Button>
+            </Card>
+          );
+        })}
+      </div>
+
+      <Card className="px-4 py-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <div className="text-sm font-semibold">Copilot Playbooks</div>
+            <div className="mt-1 text-xs text-[rgb(var(--muted))]">Pick a mode to generate a different kind of grounded guidance from the same operating context.</div>
+          </div>
+          <Button size="sm" variant="outline" onClick={function() { runCopilot(selectedPlaybook.id); }} disabled={aiLoading}>
+            {aiLoading ? "Running..." : "Generate " + selectedPlaybook.label}
+          </Button>
+        </div>
+        <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
+          {playbooks.map(function(playbook) {
+            var Icon = playbook.icon;
+            var isActive = playbook.id === selectedMode;
+            return (
+              <button
+                key={playbook.id}
+                type="button"
+                onClick={function() { setSelectedMode(playbook.id); }}
+                className={
+                  "group rounded-2xl border px-4 py-4 text-left transition " +
+                  (isActive
+                    ? "border-[rgb(var(--accent))] bg-[rgba(var(--accent-rgb),0.08)] shadow-sm"
+                    : "border-[rgb(var(--border))] bg-white hover:border-[rgba(var(--accent-rgb),0.32)] hover:bg-[rgb(var(--surface))]")
+                }
+              >
+                <div className="mb-3 flex items-start justify-between gap-3">
+                  <div className={"inline-flex h-10 w-10 items-center justify-center rounded-2xl " + (isActive ? "bg-[rgba(var(--accent-rgb),0.12)] text-[rgb(var(--accent))]" : "bg-[rgb(var(--surface))] text-[rgb(var(--muted))]")}>
+                    <Icon className="h-5 w-5" aria-hidden="true" />
+                  </div>
+                  <Badge variant={isActive ? "info" : "secondary"}>{playbook.kicker}</Badge>
+                </div>
+                <div className="text-sm font-semibold text-[rgb(var(--foreground))]">{playbook.label}</div>
+                <div className="mt-1 text-xs leading-6 text-[rgb(var(--muted))]">{playbook.description}</div>
+                <div className="mt-4 flex items-center gap-1 text-xs font-medium text-[rgb(var(--accent))]">
+                  Selected {isActive ? <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" /> : null}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </Card>
+
       {aiError ? <Card className="border-[rgb(var(--danger-line))] bg-[rgb(var(--danger-soft))] px-3 py-2 text-sm text-[rgb(var(--danger))]">{aiError}</Card> : null}
-      {aiBrief ? (
+
+      {aiResult.answer ? (
         <Card className="overflow-hidden border-[rgba(var(--accent-rgb),0.16)] bg-[linear-gradient(180deg,rgba(var(--accent-rgb),0.05),rgba(255,255,255,0))] px-4 py-4">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
             <div>
-              <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[rgb(var(--muted))]">AI Brief</div>
-              <div className="mt-1 text-sm text-[rgb(var(--muted))]">Standup-ready summary grouped into snapshot, risks, and actions.</div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[rgb(var(--muted))]">
+                {aiResult.meta && aiResult.meta.modeLabel ? aiResult.meta.modeLabel : "Copilot Output"}
+              </div>
+              <div className="mt-1 text-sm text-[rgb(var(--muted))]">
+                {aiResult.meta && aiResult.meta.sourceLabel ? aiResult.meta.sourceLabel : "Grounded response from current PackPulse context."}
+              </div>
             </div>
-            <div className="rounded-full border border-[rgba(var(--accent-rgb),0.18)] bg-[rgba(var(--accent-rgb),0.08)] px-2.5 py-1 text-[11px] font-semibold text-[rgb(var(--accent))]">
-              Structured Output
+            <div className="flex flex-wrap items-center gap-1.5">
+              {aiResult.meta && aiResult.meta.deterministic ? <Badge variant="success">Deterministic</Badge> : <Badge variant="info">AI + Grounding</Badge>}
+              {aiResult.meta && aiResult.meta.dataTimestamp ? <Badge variant="secondary">{formatMetaTimestamp(aiResult.meta.dataTimestamp)}</Badge> : null}
+              <Badge variant="secondary">{aiResult.meta && aiResult.meta.modeLabel ? aiResult.meta.modeLabel : selectedPlaybook.label}</Badge>
             </div>
           </div>
+
           {aiBriefSections.length ? (
             <div className="grid gap-3 xl:grid-cols-3">
               {aiBriefSections.map(function(section, sectionIdx) {
@@ -403,11 +720,45 @@ export default function AICopilotView(props) {
             </div>
           ) : (
             <div className="whitespace-pre-wrap rounded-xl border border-[rgb(var(--border))] bg-white/80 px-4 py-3 text-sm leading-relaxed">
-              {aiBrief}
+              {aiResult.answer}
             </div>
           )}
+
+          {aiResult.followUps.length ? (
+            <div className="mt-4">
+              <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[rgb(var(--muted))]">Ask Next</div>
+              <div className="flex flex-wrap gap-1.5">
+                {aiResult.followUps.map(function(prompt) {
+                  return (
+                    <button
+                      key={prompt}
+                      type="button"
+                      onClick={function() { runCopilot(selectedPlaybook.id, prompt); }}
+                      className="rounded-full border border-[rgb(var(--border))] bg-white px-3 py-1.5 text-xs text-[rgb(var(--foreground))] transition hover:border-[rgb(var(--accent))] hover:text-[rgb(var(--accent))]"
+                    >
+                      {prompt}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
         </Card>
-      ) : null}
+      ) : (
+        <Card className="px-4 py-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold">No Copilot Output Yet</div>
+              <div className="mt-1 max-w-2xl text-sm leading-6 text-[rgb(var(--muted))]">
+                Start with <strong>{selectedPlaybook.label}</strong> if you want the fastest way to turn today’s signals into a usable plan. The result will come back grouped into sections with follow-up prompts you can keep drilling into.
+              </div>
+            </div>
+            <Button size="sm" variant="outline" onClick={function() { runCopilot(selectedPlaybook.id); }} disabled={aiLoading}>
+              {aiLoading ? "Running..." : "Generate First Output"}
+            </Button>
+          </div>
+        </Card>
+      )}
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {cards.map(function(card) {
@@ -429,8 +780,11 @@ export default function AICopilotView(props) {
 
       {facts.topRunNext.length ? (
         <Card className="px-4 py-3">
-          <div className="mb-2 flex items-center justify-between">
-            <div className="text-sm font-semibold">Top Run-Next Candidates</div>
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div className="text-sm font-semibold">Top Run-Next Candidates</div>
+              <div className="mt-1 text-xs text-[rgb(var(--muted))]">These come from the dispatch engine, then the copilot can reframe them into sequence guidance or standup language.</div>
+            </div>
             <Button size="sm" variant="outline" onClick={function() { onNavigate("workorders"); }}>Open Queue</Button>
           </div>
           <div className="space-y-1.5">
@@ -440,8 +794,9 @@ export default function AICopilotView(props) {
                   <Badge variant={idx < 2 ? "success" : "secondary"}>#{idx + 1}</Badge>
                   <span className="font-semibold">{r.woNum || "--"}</span>
                   <span className="text-[rgb(var(--muted))]">{r.action || "Run Next"}</span>
-                  <span className="text-[rgb(var(--muted))]">Impact {Math.round(safeNum(r.impactUnits)).toLocaleString()} units</span>
-                  <span className="text-[rgb(var(--muted))]">Score {Math.round(safeNum(r.priorityScore))}</span>
+                  <span className="text-[rgb(var(--muted))]">Impact {formatWhole(r.impactUnits)} units</span>
+                  <span className="text-[rgb(var(--muted))]">Score {formatWhole(r.priorityScore)}</span>
+                  {r.why ? <span className="text-[rgb(var(--muted))]">{r.why}</span> : null}
                 </div>
               );
             })}

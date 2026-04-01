@@ -892,6 +892,15 @@ export default function ProductionReadiness() {
     d.setDate(d.getDate() + n);
     return d.toISOString().slice(0, 10);
   };
+  var yesterdayEt = shiftDaysIso(todayEt, -1);
+  var productionYesterdayRows = (productionSegmentsForUI.shiftRows || []).filter(function(r) { return (r && r.date) === yesterdayEt; });
+  var productionYesterdayTotal = productionYesterdayRows.reduce(function(sum, r) { return sum + (Number(r && r.unitsProduced || 0) || 0); }, 0);
+  var productionYesterdayS1 = productionYesterdayRows
+    .filter(function(r) { return String(r && r.shift || "").toLowerCase().indexOf("shift 1") !== -1; })
+    .reduce(function(sum, r) { return sum + (Number(r && r.unitsProduced || 0) || 0); }, 0);
+  var productionYesterdayS2 = productionYesterdayRows
+    .filter(function(r) { return String(r && r.shift || "").toLowerCase().indexOf("shift 2") !== -1; })
+    .reduce(function(sum, r) { return sum + (Number(r && r.unitsProduced || 0) || 0); }, 0);
   var lastWeekStartEt = shiftDaysIso(weekStartEt, -7);
   var lastWeekEndEt = shiftDaysIso(weekStartEt, -1);
   var rowsInRange = function(startIso, endIso) {
@@ -908,29 +917,153 @@ export default function ProductionReadiness() {
       .filter(function(r) { return String(r && r.shift || "").toLowerCase().indexOf(token) !== -1; })
       .reduce(function(sum, r) { return sum + (Number(r && r.unitsProduced || 0) || 0); }, 0);
   };
+  var normalizeSkuKey = function(value) {
+    return String(value || "").trim().replace(/\.0+$/, "").toLowerCase();
+  };
+  var topRunNext = (dispatchQueue || [])
+    .filter(function(row) { return String(row && row.targetView || "") === "workorders"; })
+    .slice(0, 5)
+    .map(function(row) {
+      return {
+        woNum: row && row.woNum ? row.woNum : "",
+        action: row && row.action ? row.action : "",
+        why: row && row.why ? row.why : "",
+        dueDate: row && row.dueDate ? String(row.dueDate).slice(0, 10) : "",
+        impactUnits: toNumSafe(row && row.impactUnits),
+        priorityScore: toNumSafe(row && row.priorityScore),
+        confidence: row && row.confidence ? row.confidence : "",
+        skuKey: row && row.skuKey ? row.skuKey : "",
+      };
+    });
+  var topSupplyRisks = criticalItemsForUI.slice(0, 5).map(function(item) {
+    return {
+      sku: item && item.sku ? item.sku : "",
+      desc: item && item.desc ? item.desc : "",
+      riskLevel: item && item.riskLevel ? item.riskLevel : "",
+      shortQty: toNumSafe(item && (item.totalShort != null ? item.totalShort : item.shortQty)),
+      unitsAtRisk: toNumSafe(item && item.unitsAtRisk),
+      dueDate: item && item.earliestDueDate ? item.earliestDueDate : "",
+      recommendation: item && (item.recommendedAction || item.recommendation) ? (item.recommendedAction || item.recommendation) : "",
+      status: item && item.status ? item.status : "",
+    };
+  });
+  var batchGroups = {};
+  (analysisForUI.results || []).forEach(function(wo) {
+    var skuRaw = String((wo && (wo.productSkuRaw || wo.productSku)) || "").trim();
+    var skuKey = normalizeSkuKey(skuRaw);
+    if (!skuKey || isClosedStatus(wo && wo.status)) return;
+    var unitsRemaining = toNumSafe(wo && wo.unitsRemaining);
+    if (!(unitsRemaining > 0)) {
+      var qty = toNumSafe(wo && wo.qtyToProduce);
+      var produced = toNumSafe(wo && wo.unitsProduced);
+      unitsRemaining = Math.max(0, qty - produced);
+    }
+    if (!(unitsRemaining > 0)) return;
+    if (!batchGroups[skuKey]) {
+      batchGroups[skuKey] = {
+        sku: skuRaw || "--",
+        count: 0,
+        remainingUnits: 0,
+        dueStart: "",
+        dueEnd: "",
+      };
+    }
+    batchGroups[skuKey].count += 1;
+    batchGroups[skuKey].remainingUnits += unitsRemaining;
+    var due = String(wo && wo.dueDate || "").slice(0, 10);
+    if (due && (!batchGroups[skuKey].dueStart || due < batchGroups[skuKey].dueStart)) batchGroups[skuKey].dueStart = due;
+    if (due && (!batchGroups[skuKey].dueEnd || due > batchGroups[skuKey].dueEnd)) batchGroups[skuKey].dueEnd = due;
+  });
+  var topBatchGroups = Object.keys(batchGroups)
+    .map(function(key) { return batchGroups[key]; })
+    .filter(function(group) { return group.count > 1; })
+    .sort(function(a, b) {
+      if (b.count !== a.count) return b.count - a.count;
+      return b.remainingUnits - a.remainingUnits;
+    })
+    .slice(0, 5);
+  var topRecommendations = (recommendationsForUI || []).slice(0, 6).map(function(row) {
+    return {
+      owner: row && row.owner ? row.owner : "",
+      action: row && row.action ? row.action : "",
+      why: row && row.why ? row.why : "",
+      priority: row && row.priority ? row.priority : "",
+      priorityScore: toNumSafe(row && row.priorityScore),
+      impactUnits: toNumSafe(row && row.impactUnits),
+      targetView: row && row.targetView ? row.targetView : "",
+      source: row && row.source ? row.source : "",
+    };
+  });
+  var evoconTodayRows = (ds.evoconData || []).filter(function(row) {
+    return String(row && row.date || "") === todayEt;
+  });
+  var evoconUnplannedMin = evoconTodayRows.reduce(function(sum, row) {
+    return sum + Math.round(toNumSafe(row && row.unplannedstops) / 60);
+  }, 0);
+  var evoconSlowMin = evoconTodayRows.reduce(function(sum, row) {
+    return sum + Math.round(toNumSafe(row && row.slowProduction) / 60);
+  }, 0);
+  var thisWeekCases = sumUnits(thisWeekRows);
+  var lastWeekCases = sumUnits(lastWeekRows);
+  var weekDeltaCases = thisWeekCases - lastWeekCases;
+  var weekDeltaPct = lastWeekCases > 0 ? Math.round((weekDeltaCases / lastWeekCases) * 100) : 0;
+  var atRiskUnits = (criticalItemsForUI || []).reduce(function(sum, item) {
+    return sum + Math.max(
+      toNumSafe(item && (item.totalShort != null ? item.totalShort : item.shortQty)),
+      toNumSafe(item && item.unitsAtRisk)
+    );
+  }, 0);
+  var highRiskCount = (criticalItemsForUI || []).filter(function(item) {
+    return String(item && item.riskLevel || "").toLowerCase() === "high";
+  }).length;
+  var dataHealth = (dataSourceStatus || []).map(function(s) {
+    var freshness = s && s.forceFresh ? "fresh" : staleLevel(s && s.ts, s && s.cad);
+    return {
+      key: s && s.k ? s.k : "",
+      label: s && s.l ? s.l : "Source",
+      status: freshness,
+      timestamp: s && s.ts ? s.ts : "",
+      forceFresh: !!(s && s.forceFresh),
+    };
+  });
   var askAiMetrics = {
     todayEt: todayEt,
+    yesterdayEt: yesterdayEt,
     workOrdersTotal: summaryForUI.total,
     workOrdersReady: summaryForUI.ready,
     workOrdersBlocked: summaryForUI.blocked,
     supplyRiskItems: criticalItemsForUI.length,
+    highRiskCount: highRiskCount,
+    atRiskUnits: atRiskUnits,
     freshData: freshCount,
     freshDataTotal: dataSourceStatus.length,
     productionTodayCases: productionTodayTotal,
     productionTodayShift1Cases: productionTodayS1,
     productionTodayShift2Cases: productionTodayS2,
+    productionYesterdayCases: productionYesterdayTotal,
+    productionYesterdayShift1Cases: productionYesterdayS1,
+    productionYesterdayShift2Cases: productionYesterdayS2,
     productionLatestDate: productionLatestDate,
     productionLatestCases: productionLatestTotal,
     thisWeekStartEt: weekStartEt,
     thisWeekEndEt: todayEt,
-    thisWeekCases: sumUnits(thisWeekRows),
+    thisWeekCases: thisWeekCases,
     thisWeekShift1Cases: sumShift(thisWeekRows, "shift 1"),
     thisWeekShift2Cases: sumShift(thisWeekRows, "shift 2"),
     lastWeekStartEt: lastWeekStartEt,
     lastWeekEndEt: lastWeekEndEt,
-    lastWeekCases: sumUnits(lastWeekRows),
+    lastWeekCases: lastWeekCases,
     lastWeekShift1Cases: sumShift(lastWeekRows, "shift 1"),
     lastWeekShift2Cases: sumShift(lastWeekRows, "shift 2"),
+    weekDeltaCases: weekDeltaCases,
+    weekDeltaPct: weekDeltaPct,
+    evoconUnplannedMin: evoconUnplannedMin,
+    evoconSlowMin: evoconSlowMin,
+    topRunNext: topRunNext,
+    topSupplyRisks: topSupplyRisks,
+    topBatchGroups: topBatchGroups,
+    topRecommendations: topRecommendations,
+    dataHealth: dataHealth,
   };
   var marchMonth = (todayEt || "").slice(0, 4) + "-03";
   var marchWOs = (analysisForUI.results || []).filter(function(w) {
@@ -983,11 +1116,15 @@ export default function ProductionReadiness() {
   askAiMetrics.marchBusinessDaysRemaining = businessDaysRemainingInMarch;
   askAiMetrics.marchDailyTargetFullMonth = businessDaysInMarch ? Math.ceil(marchRemainingUnits / businessDaysInMarch) : 0;
   askAiMetrics.marchDailyTargetRemaining = businessDaysRemainingInMarch ? Math.ceil(marchRemainingUnits / businessDaysRemainingInMarch) : 0;
+  var leadRunNext = topRunNext[0] || null;
+  var leadRisk = topSupplyRisks[0] || null;
   var askAiContextLines = [
     "Active view: " + (activeView || "workorders"),
     "Work Orders: " + summaryForUI.total + " | Ready: " + summaryForUI.ready + " | Blocked: " + summaryForUI.blocked,
-    "Supply risk items: " + criticalItemsForUI.length,
-    "Fresh data: " + freshCount + "/" + dataSourceStatus.length + " | Produced today: " + productionTodayTotal,
+    "Supply risk items: " + criticalItemsForUI.length + " | High risk: " + highRiskCount + " | Units at risk: " + Math.round(atRiskUnits).toLocaleString(),
+    "Fresh data: " + freshCount + "/" + dataSourceStatus.length + " | Produced today: " + productionTodayTotal + " | WoW: " + (weekDeltaPct >= 0 ? "+" : "") + weekDeltaPct + "%",
+    "Top run next: " + (leadRunNext ? (leadRunNext.woNum + " • " + leadRunNext.action + " • " + Math.round(leadRunNext.impactUnits).toLocaleString() + " units") : "No ranked run-next candidate"),
+    "Top risk: " + (leadRisk ? (leadRisk.sku + " • " + Math.round(Math.max(toNumSafe(leadRisk.shortQty), toNumSafe(leadRisk.unitsAtRisk))).toLocaleString() + " units • " + (leadRisk.recommendation || "Review")) : "No active shortage"),
     "March due remaining: " + marchRemainingUnits + " over " + businessDaysRemainingInMarch + " business days",
   ];
   var syncProgress = (() => {
@@ -1439,7 +1576,7 @@ export default function ProductionReadiness() {
         />
 
         <Suspense fallback={<Card className="mt-3 p-4 text-sm text-[rgb(var(--muted))]">Loading view...</Card>}>
-          {activeView === "aicopilot" && <AICopilotView summary={summaryForUI} criticalItems={criticalItemsForUI} dispatchQueue={dispatchQueue || []} productionSegments={productionSegmentsForUI} evoconData={ds.evoconData || []} workOrders={analysisForUI.results || []} onNavigate={setActiveView} />}
+          {activeView === "aicopilot" && <AICopilotView summary={summaryForUI} criticalItems={criticalItemsForUI} dispatchQueue={dispatchQueue || []} recommendations={recommendationsForUI} productionSegments={productionSegmentsForUI} evoconData={ds.evoconData || []} workOrders={analysisForUI.results || []} metrics={askAiMetrics} onNavigate={setActiveView} />}
           {activeView === "operations" && <OperationsView productionSegments={productionSegmentsForUI} productionDataRaw={ds.productionData || []} laborDataRaw={ds.laborData || []} evoconData={ds.evoconData || []} evoconTimestamp={ds.evoconTimestamp || evoconLastSyncAt} itemMaster={ds.itemMaster || []} initialFilters={operationsPermalinkState} onPermalinkChange={handleOperationsPermalinkChange} serverSyncVersion={operationsServerSyncVersion} onRefreshProduction={triggerProductionRefresh} refreshingProduction={visibleNulogySyncBusy} />}
           {activeView === "invoicing" && <InvoicingView productionData={ds.productionData || []} workOrders={ds.workOrders || []} itemMaster={ds.itemMaster || []} productionTimestamp={ds.productionTimestamp} initialFilters={invoicingPermalinkState} onPermalinkChange={handleInvoicingPermalinkChange} />}
           {activeView === "forecast" && <ForecastView workOrders={ds.workOrders || []} itemMaster={ds.itemMaster || []} productionData={ds.productionData || []} laborData={ds.laborData || []} initialFilters={forecastPermalinkState} onPermalinkChange={handleForecastPermalinkChange} />}

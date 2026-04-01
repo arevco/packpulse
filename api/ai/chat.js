@@ -318,6 +318,520 @@ function sourceNote(label, detail) {
   return " Source: " + (cleanLabel || cleanDetail) + ".";
 }
 
+function formatWholeNumber(value) {
+  return Math.round(toNum(value)).toLocaleString();
+}
+
+function formatSignedPercent(value) {
+  var n = Math.round(toNum(value));
+  return (n >= 0 ? "+" : "") + n + "%";
+}
+
+function takeTop(list, limit) {
+  return Array.isArray(list) ? list.slice(0, limit || 5) : [];
+}
+
+function isRunNextQuestion(prompt) {
+  var q = toText(prompt).toLowerCase();
+  if (!q) return false;
+  return (
+    q.includes("run next") ||
+    q.includes("what should we run") ||
+    q.includes("prioritize work orders") ||
+    q.includes("which work orders should we run")
+  );
+}
+
+function isStandupQuestion(prompt) {
+  var q = toText(prompt).toLowerCase();
+  if (!q) return false;
+  return (
+    q.includes("standup brief") ||
+    q.includes("stand-up brief") ||
+    q.includes("daily standup") ||
+    (q.includes("standup") && q.includes("brief"))
+  );
+}
+
+function isWhatChangedQuestion(prompt) {
+  var q = toText(prompt).toLowerCase();
+  if (!q) return false;
+  return (
+    q.includes("what changed") ||
+    q.includes("what is different") ||
+    q.includes("what's different") ||
+    q.includes("changed since last week")
+  );
+}
+
+function isDataHealthQuestion(prompt) {
+  var q = toText(prompt).toLowerCase();
+  if (!q) return false;
+  return (
+    q.includes("data health") ||
+    q.includes("data freshness") ||
+    q.includes("fresh data") ||
+    q.includes("stale data") ||
+    q.includes("which feeds are stale")
+  );
+}
+
+function isRiskRadarQuestion(prompt) {
+  var q = toText(prompt).toLowerCase();
+  if (!q) return false;
+  return (
+    q.includes("risk radar") ||
+    q.includes("top risks") ||
+    q.includes("most urgent risks") ||
+    q.includes("what can derail")
+  );
+}
+
+function isThroughputWatchQuestion(prompt) {
+  var q = toText(prompt).toLowerCase();
+  if (!q) return false;
+  return (
+    q.includes("throughput watch") ||
+    q.includes("recovery plan") ||
+    q.includes("recover throughput") ||
+    q.includes("slow production") ||
+    q.includes("unplanned stops")
+  );
+}
+
+function isExecutiveBriefQuestion(prompt) {
+  var q = toText(prompt).toLowerCase();
+  if (!q) return false;
+  return (
+    q.includes("executive brief") ||
+    q.includes("exec brief") ||
+    q.includes("board update") ||
+    q.includes("leadership recap")
+  );
+}
+
+function buildModeLabel(mode) {
+  var key = toText(mode).toLowerCase();
+  if (key === "standup") return "Standup Brief";
+  if (key === "run_next") return "Run Next";
+  if (key === "risk_radar") return "Risk Radar";
+  if (key === "batch_plan") return "Batch Plan";
+  if (key === "throughput_watch") return "Throughput Watch";
+  if (key === "executive_brief") return "Executive Brief";
+  if (key === "what_changed") return "Change Summary";
+  if (key === "data_health") return "Data Health";
+  return "Copilot";
+}
+
+function inferCopilotMode(prompt, explicitMode) {
+  var mode = toText(explicitMode).toLowerCase();
+  if (mode) return mode;
+  if (isStandupQuestion(prompt)) return "standup";
+  if (isRunNextQuestion(prompt)) return "run_next";
+  if (isRiskRadarQuestion(prompt)) return "risk_radar";
+  if (isBatchOpportunityQuestion(prompt)) return "batch_plan";
+  if (isThroughputWatchQuestion(prompt)) return "throughput_watch";
+  if (isExecutiveBriefQuestion(prompt)) return "executive_brief";
+  if (isWhatChangedQuestion(prompt)) return "what_changed";
+  if (isDataHealthQuestion(prompt)) return "data_health";
+  return "";
+}
+
+function followUpsForMode(mode, activeView) {
+  var key = toText(mode).toLowerCase();
+  if (key === "standup") {
+    return [
+      "What should we run next and why?",
+      "Which shortages are most urgent today?",
+      "What changed vs last week?"
+    ];
+  }
+  if (key === "run_next") {
+    return [
+      "Where are the best batching opportunities?",
+      "Which shortages could block the top runs?",
+      "Write a standup brief from this queue."
+    ];
+  }
+  if (key === "risk_radar") {
+    return [
+      "What should supply chain do first?",
+      "Which SKUs are missing revenue coverage?",
+      "Summarize top blockers in one paragraph."
+    ];
+  }
+  if (key === "batch_plan") {
+    return [
+      "What should we run next and why?",
+      "Build a shift handoff note from this plan.",
+      "Which shortages could break the batches?"
+    ];
+  }
+  if (key === "throughput_watch") {
+    return [
+      "Summarize today vs yesterday output.",
+      "Write a standup brief with output, risk, and actions.",
+      "What changed vs last week?"
+    ];
+  }
+  if (key === "executive_brief") {
+    return [
+      "Which moves matter most for the floor today?",
+      "Where are the best batching opportunities?",
+      "What should supply chain do first?"
+    ];
+  }
+  if (key === "what_changed") {
+    return [
+      "Write a standup brief from the changes.",
+      "What should we run next and why?",
+      "Which risks can derail the plan today?"
+    ];
+  }
+  if (key === "data_health") {
+    return [
+      "Which metrics are safe to trust right now?",
+      "Write a standup brief from the freshest data only.",
+      "What data should we refresh first?"
+    ];
+  }
+  if (activeView === "operations") {
+    return [
+      "Summarize today vs yesterday output.",
+      "How much revenue did we produce today?",
+      "What is labor cost per case this week?"
+    ];
+  }
+  if (activeView === "supplyrisk") {
+    return [
+      "Which shortages are most urgent today?",
+      "What is missing vs unscheduled?",
+      "What should supply chain do first?"
+    ];
+  }
+  if (activeView === "workorders") {
+    return [
+      "What should we run next and why?",
+      "Where are the best batching opportunities?",
+      "Summarize top blockers in one paragraph."
+    ];
+  }
+  return [
+    "Summarize this dashboard in 5 bullets.",
+    "What are top 3 actions for today?",
+    "What changed since last review?"
+  ];
+}
+
+function buildResponseMeta(options) {
+  return {
+    mode: toText(options && options.mode),
+    modeLabel: buildModeLabel(options && options.mode),
+    sourceLabel: toText(options && options.sourceLabel),
+    dataTimestamp: toText(options && options.dataTimestamp),
+    grounded: options && options.grounded !== false,
+    deterministic: !!(options && options.deterministic),
+  };
+}
+
+function sendAnswer(res, answer, options) {
+  return res.status(200).json({
+    answer: toText(answer) || "No AI response was returned.",
+    model: toText(options && options.model) || "deterministic",
+    meta: buildResponseMeta(options),
+    followUps: Array.isArray(options && options.followUps) ? options.followUps.slice(0, 4) : [],
+  });
+}
+
+function findRecommendationForOwner(metrics, ownerToken) {
+  var token = toText(ownerToken).toLowerCase();
+  return takeTop(metrics && metrics.topRecommendations, 8).find(function(row) {
+    return toText(row && row.owner).toLowerCase().indexOf(token) !== -1;
+  }) || null;
+}
+
+function buildRunNextAnswer(metrics, dataTimestamp) {
+  var topRunNext = takeTop(metrics && metrics.topRunNext, 5);
+  if (!topRunNext.length) {
+    return "No ranked run-next candidates are available in the current dispatch queue.";
+  }
+  var lines = topRunNext.map(function(row, idx) {
+    var due = toText(row && row.dueDate);
+    var why = toText(row && row.why);
+    return (idx + 1) + ". WO " + toText(row && row.woNum) +
+      " - " + (toText(row && row.action) || "Run Next") +
+      " | " + formatWholeNumber(row && row.impactUnits) + " units" +
+      " | score " + formatWholeNumber(row && row.priorityScore) +
+      (due ? " | due " + due : "") +
+      (why ? " | " + why : "");
+  });
+  return (
+    "Top run-next queue from the current dispatch ranking:\n" +
+    lines.join("\n") +
+    sourceNote("dispatch queue + work orders", dataTimestamp)
+  );
+}
+
+function buildRiskRadarAnswer(metrics, dataTimestamp) {
+  var watchlist = takeTop(metrics && metrics.topSupplyRisks, 4);
+  var atRiskUnits = formatWholeNumber(metrics && metrics.atRiskUnits);
+  var riskItems = formatWholeNumber(metrics && metrics.supplyRiskItems);
+  var highRisk = formatWholeNumber(metrics && metrics.highRiskCount);
+  var riskLines = watchlist.length
+    ? watchlist.map(function(item, idx) {
+      var exposure = Math.max(toNum(item && item.shortQty), toNum(item && item.unitsAtRisk));
+      var due = toText(item && item.dueDate);
+      return (idx + 1) + ". " + toText(item && item.sku) +
+        " - " + formatWholeNumber(exposure) + " units at risk" +
+        (due ? " | due " + due : "") +
+        " | " + (toText(item && item.recommendation) || "Review coverage");
+    }).join("\n")
+    : "1. No active supply risks are surfaced in the current watchlist.";
+  return [
+    "**1) Exposure**",
+    "- " + riskItems + " supply risk items are active, with " + highRisk + " high-risk and " + atRiskUnits + " units exposed.",
+    "",
+    "**2) Priority Watchlist**",
+    riskLines,
+    "",
+    "**3) Actions**",
+    "- Supply Chain: " + (toText(findRecommendationForOwner(metrics, "supply") && findRecommendationForOwner(metrics, "supply").action) || "Expedite the highest uncovered shortages first.") ,
+    "- Planner: Resequence around the highest-risk shortages before they hit due-date windows.",
+    "- Ops Analyst: Refresh inbound and dock feeds if the watchlist feels stale.",
+    "",
+    "**4) Confidence / Source**",
+    "- Grounded in current PackPulse risk watchlists and recommendation signals." + sourceNote("critical items + inbound coverage", dataTimestamp)
+  ].join("\n");
+}
+
+function buildBatchPlanAnswer(metrics, dataTimestamp) {
+  var groups = takeTop(metrics && metrics.topBatchGroups, 5);
+  if (!groups.length) {
+    return "No same-item batching opportunities are open right now." + sourceNote("current work orders", dataTimestamp);
+  }
+  var lines = groups.map(function(group, idx) {
+    var dueWindow = toText(group && group.dueStart) && toText(group && group.dueEnd)
+      ? " | due " + toText(group && group.dueStart) + " to " + toText(group && group.dueEnd)
+      : "";
+    return (idx + 1) + ". " + toText(group && group.sku) +
+      " - " + formatWholeNumber(group && group.count) + " WOs" +
+      " | " + formatWholeNumber(group && group.remainingUnits) + " remaining cases" +
+      dueWindow;
+  });
+  return [
+    "**1) Best Changeover Wins**",
+    lines.join("\n"),
+    "",
+    "**2) Sequencing Guidance**",
+    "- Start with the largest repeated SKU families to capture the fastest changeover savings.",
+    "- Pull the earliest-due work order to the front inside each family, then run same-SKU jobs back-to-back.",
+    "- Check the top batch against the run-next queue before locking the sequence.",
+    "",
+    "**3) Confidence / Source**",
+    "- Built from current open work orders and remaining-unit balances." + sourceNote("work orders", dataTimestamp)
+  ].join("\n");
+}
+
+function buildThroughputWatchAnswer(metrics, dataTimestamp) {
+  var todayCases = formatWholeNumber(metrics && metrics.productionTodayCases);
+  var yesterdayCases = formatWholeNumber(metrics && metrics.productionYesterdayCases);
+  var thisWeekCases = formatWholeNumber(metrics && metrics.thisWeekCases);
+  var lastWeekCases = formatWholeNumber(metrics && metrics.lastWeekCases);
+  var evoconUnplanned = formatWholeNumber(metrics && metrics.evoconUnplannedMin);
+  var evoconSlow = formatWholeNumber(metrics && metrics.evoconSlowMin);
+  return [
+    "**1) Output Pace**",
+    "- Today: " + todayCases + " cases versus " + yesterdayCases + " yesterday.",
+    "- This week-to-date: " + thisWeekCases + " cases versus " + lastWeekCases + " last week (" + formatSignedPercent(metrics && metrics.weekDeltaPct) + ").",
+    "",
+    "**2) Loss Watch**",
+    "- Unplanned stops today: " + evoconUnplanned + " min.",
+    "- Slow production today: " + evoconSlow + " min.",
+    "",
+    "**3) Recovery Moves**",
+    "- Floor Lead: attack the biggest stop-loss line first, then verify if speed loss is staffing, changeover, or mechanical.",
+    "- Planner: protect the top run-next jobs from avoidable resequencing.",
+    "- Analyst: validate the freshest production and Evocon sync before escalating trends.",
+    "",
+    "**4) Confidence / Source**",
+    "- Grounded in current production and Evocon summaries." + sourceNote("production segments + Evocon", dataTimestamp)
+  ].join("\n");
+}
+
+function buildWhatChangedAnswer(metrics, dataTimestamp) {
+  var deltaCases = formatWholeNumber(metrics && metrics.weekDeltaCases);
+  var topRun = takeTop(metrics && metrics.topRunNext, 1)[0] || null;
+  var topRisk = takeTop(metrics && metrics.topSupplyRisks, 1)[0] || null;
+  return [
+    "**1) Output Delta**",
+    "- This week-to-date is " + formatSignedPercent(metrics && metrics.weekDeltaPct) + " versus last week (" + deltaCases + " cases).",
+    "- Today sits at " + formatWholeNumber(metrics && metrics.productionTodayCases) + " cases so far.",
+    "",
+    "**2) What Is Driving It**",
+    "- Risk watch: " + formatWholeNumber(metrics && metrics.highRiskCount) + " high-risk items and " + formatWholeNumber(metrics && metrics.atRiskUnits) + " units exposed.",
+    "- Throughput watch: " + formatWholeNumber(metrics && metrics.evoconUnplannedMin) + " unplanned-stop minutes and " + formatWholeNumber(metrics && metrics.evoconSlowMin) + " slow-production minutes today.",
+    "",
+    "**3) Immediate Focus**",
+    "- Run-next lead: " + (topRun ? ("WO " + toText(topRun.woNum) + " - " + (toText(topRun.action) || "Run Next")) : "No lead candidate is ranked right now.") ,
+    "- Biggest current risk: " + (topRisk ? (toText(topRisk.sku) + " - " + (toText(topRisk.recommendation) || "Review coverage")) : "No active shortage is highlighted right now.") ,
+    "",
+    "**4) Confidence / Source**",
+    "- Built from current PackPulse work-order, risk, and operations signals." + sourceNote("PackPulse metrics", dataTimestamp)
+  ].join("\n");
+}
+
+function buildStandupAnswer(metrics, dataTimestamp) {
+  var topRun = takeTop(metrics && metrics.topRunNext, 1)[0] || null;
+  var topRisk = takeTop(metrics && metrics.topSupplyRisks, 1)[0] || null;
+  var plannerRec = findRecommendationForOwner(metrics, "planner");
+  var supplyRec = findRecommendationForOwner(metrics, "supply");
+  var analystRec = findRecommendationForOwner(metrics, "analyst");
+  var staleFeeds = takeTop((metrics && metrics.dataHealth || []).filter(function(row) {
+    return toText(row && row.status) && toText(row && row.status) !== "fresh";
+  }), 3);
+  return [
+    "**1) Today Snapshot**",
+    "- Output today: " + formatWholeNumber(metrics && metrics.productionTodayCases) + " cases (Shift 1 " + formatWholeNumber(metrics && metrics.productionTodayShift1Cases) + ", Shift 2 " + formatWholeNumber(metrics && metrics.productionTodayShift2Cases) + ").",
+    "- Work orders: " + formatWholeNumber(metrics && metrics.workOrdersTotal) + " total, " + formatWholeNumber(metrics && metrics.workOrdersReady) + " ready, " + formatWholeNumber(metrics && metrics.workOrdersBlocked) + " blocked.",
+    "- Week-to-date: " + formatWholeNumber(metrics && metrics.thisWeekCases) + " cases (" + formatSignedPercent(metrics && metrics.weekDeltaPct) + " vs last week).",
+    "",
+    "**2) Top Risks**",
+    "- Supply exposure: " + formatWholeNumber(metrics && metrics.supplyRiskItems) + " active risk items, " + formatWholeNumber(metrics && metrics.highRiskCount) + " high-risk, " + formatWholeNumber(metrics && metrics.atRiskUnits) + " units at risk.",
+    "- Highest current risk: " + (topRisk ? (toText(topRisk.sku) + " - " + formatWholeNumber(Math.max(toNum(topRisk.shortQty), toNum(topRisk.unitsAtRisk))) + " units - " + (toText(topRisk.recommendation) || "Review coverage")) : "No shortage leader is surfaced in the current watchlist.") ,
+    "- Throughput watch: " + formatWholeNumber(metrics && metrics.evoconUnplannedMin) + " unplanned-stop minutes and " + formatWholeNumber(metrics && metrics.evoconSlowMin) + " slow-production minutes today.",
+    "",
+    "**3) Actions By Role**",
+    "- Planner: " + (plannerRec ? (toText(plannerRec.action) + " - " + toText(plannerRec.why)) : (topRun ? ("Sequence WO " + toText(topRun.woNum) + " first and protect the rest of the ranked queue.") : "Review the top ranked run-next candidates.")) ,
+    "- Supply Chain: " + (supplyRec ? (toText(supplyRec.action) + " - " + toText(supplyRec.why)) : (topRisk ? ((toText(topRisk.recommendation) || "Expedite") + " for " + toText(topRisk.sku) + ".") : "Confirm coverage on the top at-risk materials.")) ,
+    "- Floor Lead: Attack the top loss line first, then keep the lead run-next family moving without avoidable changeovers.",
+    "- Ops Analyst: " + (analystRec ? (toText(analystRec.action) + " - " + toText(analystRec.why)) : (staleFeeds.length ? ("Refresh " + staleFeeds.map(function(row) { return toText(row && row.label); }).join(", ") + ".") : "Data feeds look healthy enough to trust for the next standup.")) ,
+    "",
+    "**4) Confidence / Source**",
+    "- Grounded in current PackPulse metrics, dispatch ranking, risk watchlists, and data-health signals." + sourceNote("PackPulse metrics", dataTimestamp)
+  ].join("\n");
+}
+
+function buildExecutiveBriefAnswer(metrics, dataTimestamp) {
+  var topRun = takeTop(metrics && metrics.topRunNext, 1)[0] || null;
+  var topRisk = takeTop(metrics && metrics.topSupplyRisks, 1)[0] || null;
+  return [
+    "**1) Performance**",
+    "- Today is at " + formatWholeNumber(metrics && metrics.productionTodayCases) + " cases; week-to-date is " + formatWholeNumber(metrics && metrics.thisWeekCases) + " (" + formatSignedPercent(metrics && metrics.weekDeltaPct) + " vs last week).",
+    "",
+    "**2) Operating Risk**",
+    "- " + formatWholeNumber(metrics && metrics.highRiskCount) + " high-risk items are active with " + formatWholeNumber(metrics && metrics.atRiskUnits) + " units exposed.",
+    "- Throughput loss today: " + formatWholeNumber(metrics && metrics.evoconUnplannedMin) + " unplanned-stop minutes, " + formatWholeNumber(metrics && metrics.evoconSlowMin) + " slow-production minutes.",
+    "",
+    "**3) Management Moves**",
+    "- Run priority: " + (topRun ? ("WO " + toText(topRun.woNum) + " - " + (toText(topRun.action) || "Run Next")) : "Review the current dispatch queue.") ,
+    "- Risk action: " + (topRisk ? ((toText(topRisk.recommendation) || "Escalate") + " for " + toText(topRisk.sku)) : "No single shortage dominates the watchlist.") ,
+    "",
+    "**4) Confidence / Source**",
+    "- Built from current PackPulse production, work-order, and risk context." + sourceNote("PackPulse metrics", dataTimestamp)
+  ].join("\n");
+}
+
+function buildDataHealthAnswer(metrics, dataTimestamp) {
+  var feeds = takeTop(metrics && metrics.dataHealth, 8);
+  if (!feeds.length) {
+    return "Data-health status is unavailable from the current client context.";
+  }
+  var lines = feeds.map(function(feed, idx) {
+    return (idx + 1) + ". " + toText(feed && feed.label) + " - " + toText(feed && feed.status) + (toText(feed && feed.timestamp) ? " (" + toText(feed && feed.timestamp) + ")" : "");
+  });
+  return [
+    "**1) Feed Freshness**",
+    lines.join("\n"),
+    "",
+    "**2) Trust Guidance**",
+    "- Fresh feeds are safe for operational decisions right now.",
+    "- Anything marked stale or old should be refreshed before using it for escalation or executive reporting.",
+    "",
+    "**3) Confidence / Source**",
+    "- Built from PackPulse data-source freshness indicators." + sourceNote("client data health", dataTimestamp)
+  ].join("\n");
+}
+
+function buildDeterministicCopilotAnswer(mode, metrics, dataTimestamp) {
+  var key = toText(mode).toLowerCase();
+  if (key === "run_next") return buildRunNextAnswer(metrics, dataTimestamp);
+  if (key === "standup") return buildStandupAnswer(metrics, dataTimestamp);
+  if (key === "risk_radar") return buildRiskRadarAnswer(metrics, dataTimestamp);
+  if (key === "batch_plan") return buildBatchPlanAnswer(metrics, dataTimestamp);
+  if (key === "throughput_watch") return buildThroughputWatchAnswer(metrics, dataTimestamp);
+  if (key === "executive_brief") return buildExecutiveBriefAnswer(metrics, dataTimestamp);
+  if (key === "what_changed") return buildWhatChangedAnswer(metrics, dataTimestamp);
+  if (key === "data_health") return buildDataHealthAnswer(metrics, dataTimestamp);
+  return "";
+}
+
+function buildCopilotModeInstruction(mode) {
+  var key = toText(mode).toLowerCase();
+  if (key === "standup") {
+    return "Format the reply with bold headings exactly: **1) Today Snapshot**, **2) Top Risks**, **3) Actions By Role**, **4) Confidence / Source**. Keep it standup-ready and grounded in numbers.";
+  }
+  if (key === "run_next") {
+    return "Format with bold headings exactly: **1) Run Next**, **2) Why These Jobs**, **3) Sequencing Guidance**, **4) Confidence / Source**. Lead with the concrete queue.";
+  }
+  if (key === "risk_radar") {
+    return "Format with bold headings exactly: **1) Exposure**, **2) Priority Watchlist**, **3) Actions**, **4) Confidence / Source**. Focus on what can derail the plan today.";
+  }
+  if (key === "batch_plan") {
+    return "Format with bold headings exactly: **1) Best Changeover Wins**, **2) Sequencing Guidance**, **3) Watchouts**, **4) Confidence / Source**. Recommend batching only when the data supports it.";
+  }
+  if (key === "throughput_watch") {
+    return "Format with bold headings exactly: **1) Output Pace**, **2) Loss Watch**, **3) Recovery Moves**, **4) Confidence / Source**. Tie the plan to throughput loss and near-term actions.";
+  }
+  if (key === "executive_brief") {
+    return "Format with bold headings exactly: **1) Performance**, **2) Operating Risk**, **3) Management Moves**, **4) Confidence / Source**. Keep it concise and leadership-ready.";
+  }
+  if (key === "what_changed") {
+    return "Format with bold headings exactly: **1) Output Delta**, **2) What Is Driving It**, **3) Immediate Focus**, **4) Confidence / Source**. Emphasize change versus the prior comparison window.";
+  }
+  if (key === "data_health") {
+    return "Format with bold headings exactly: **1) Feed Freshness**, **2) Trust Guidance**, **3) Confidence / Source**. State clearly what is safe versus unsafe to trust.";
+  }
+  return "Use bold section headings when helpful. Ground every claim in the provided PackPulse context, mention data gaps explicitly, and close with what to do next.";
+}
+
+function buildCopilotFactPack(metrics, activeView, contextLines, supabaseContext) {
+  return {
+    activeView: toText(activeView),
+    todayEt: toText(metrics && metrics.todayEt),
+    output: {
+      todayCases: toNum(metrics && metrics.productionTodayCases),
+      yesterdayCases: toNum(metrics && metrics.productionYesterdayCases),
+      thisWeekCases: toNum(metrics && metrics.thisWeekCases),
+      lastWeekCases: toNum(metrics && metrics.lastWeekCases),
+      weekDeltaPct: toNum(metrics && metrics.weekDeltaPct),
+      latestDate: toText(metrics && metrics.productionLatestDate),
+    },
+    workOrders: {
+      total: toNum(metrics && metrics.workOrdersTotal),
+      ready: toNum(metrics && metrics.workOrdersReady),
+      blocked: toNum(metrics && metrics.workOrdersBlocked),
+      topRunNext: takeTop(metrics && metrics.topRunNext, 4),
+      topBatchGroups: takeTop(metrics && metrics.topBatchGroups, 4),
+    },
+    risk: {
+      items: toNum(metrics && metrics.supplyRiskItems),
+      highRisk: toNum(metrics && metrics.highRiskCount),
+      atRiskUnits: toNum(metrics && metrics.atRiskUnits),
+      topSupplyRisks: takeTop(metrics && metrics.topSupplyRisks, 4),
+    },
+    throughput: {
+      evoconUnplannedMin: toNum(metrics && metrics.evoconUnplannedMin),
+      evoconSlowMin: toNum(metrics && metrics.evoconSlowMin),
+    },
+    recommendations: takeTop(metrics && metrics.topRecommendations, 6),
+    dataHealth: takeTop(metrics && metrics.dataHealth, 8),
+    contextLines: Array.isArray(contextLines) ? contextLines.slice(0, 8) : [],
+    snapshotSyncedAt: toText(supabaseContext && supabaseContext.snapshotSyncedAt),
+    snapshotUpdatedBy: toText(supabaseContext && supabaseContext.snapshotUpdatedBy),
+    pricingRows: toNum(supabaseContext && supabaseContext.revenue && supabaseContext.revenue.pricingRows),
+  };
+}
+
 function firstField(row, keys) {
   if (!row || typeof row !== "object") return "";
   for (var i = 0; i < keys.length; i++) {
@@ -861,6 +1375,8 @@ export default async function handler(req, res) {
     var contextLines = Array.isArray(body.contextLines) ? body.contextLines.map(toText).filter(Boolean).slice(0, 8) : [];
     var metrics = body.metrics && typeof body.metrics === "object" ? body.metrics : {};
     var history = Array.isArray(body.history) ? body.history.slice(-8) : [];
+    var explicitCopilotMode = toText(body.copilotMode).toLowerCase();
+    var copilotMode = inferCopilotMode(prompt, explicitCopilotMode);
     if (!prompt) return res.status(400).json({ error: "Prompt is required" });
     var anchorDateEt = toText(metrics.todayEt) || ymdInEtFromDate(new Date());
     var defaultOpsPeriod = resolvePeriodRange(detectPeriodLabel(prompt) || "today", anchorDateEt);
@@ -876,19 +1392,32 @@ export default async function handler(req, res) {
     } catch (_) {
       supabaseContext = null;
     }
+    var responseDataTimestamp =
+      toText(supabaseContext && supabaseContext.snapshotSyncedAt) ||
+      toText(metrics.productionLatestDate) ||
+      toText(metrics.todayEt);
+    var deterministicCopilotAnswer = buildDeterministicCopilotAnswer(copilotMode, metrics, responseDataTimestamp);
     var lookupSku = extractComponentLookupSku(prompt);
     if (lookupSku) {
       var result = componentsForSkuFromPayload(supabaseContext && supabaseContext.snapshotPayload, lookupSku);
       if (!result.hasBomData) {
-        return res.status(200).json({
-          answer: "BOM data is not available in shared snapshot yet. Run Nulogy sync with BOM included, then ask again.",
+        return sendAnswer(res, "BOM data is not available in shared snapshot yet. Run Nulogy sync with BOM included, then ask again.", {
           model: "deterministic",
+          mode: copilotMode || "chat",
+          sourceLabel: "shared snapshot BOM",
+          dataTimestamp: responseDataTimestamp,
+          deterministic: true,
+          followUps: followUpsForMode(copilotMode, activeView),
         });
       }
       if (!result.items.length) {
-        return res.status(200).json({
-          answer: "No BOM components found for " + lookupSku + " in current snapshot.",
+        return sendAnswer(res, "No BOM components found for " + lookupSku + " in current snapshot.", {
           model: "deterministic",
+          mode: copilotMode || "chat",
+          sourceLabel: "shared snapshot BOM",
+          dataTimestamp: responseDataTimestamp,
+          deterministic: true,
+          followUps: followUpsForMode(copilotMode, activeView),
         });
       }
       var lines = result.items.slice(0, 25).map(function(item, idx) {
@@ -896,9 +1425,13 @@ export default async function handler(req, res) {
         var qty = item.qtyPer != null && item.qtyPer !== "" ? " (qty/unit: " + item.qtyPer + ")" : "";
         return (idx + 1) + ". " + item.component + desc + qty;
       });
-      return res.status(200).json({
-        answer: "Components for " + lookupSku + ":\n" + lines.join("\n"),
+      return sendAnswer(res, "Components for " + lookupSku + ":\n" + lines.join("\n"), {
         model: "deterministic",
+        mode: copilotMode || "chat",
+        sourceLabel: "shared snapshot BOM",
+        dataTimestamp: responseDataTimestamp,
+        deterministic: true,
+        followUps: followUpsForMode(copilotMode, activeView),
       });
     }
 
@@ -908,6 +1441,77 @@ export default async function handler(req, res) {
     var defaultLaborAgg = (supabaseContext && supabaseContext.labor && typeof supabaseContext.labor.range === "function")
       ? supabaseContext.labor.range(defaultOpsPeriod.start, defaultOpsPeriod.end)
       : null;
+
+    if (!explicitCopilotMode && isStandupQuestion(prompt) && deterministicCopilotAnswer) {
+      return sendAnswer(res, deterministicCopilotAnswer, {
+        model: "deterministic",
+        mode: copilotMode || "standup",
+        sourceLabel: "PackPulse metrics",
+        dataTimestamp: responseDataTimestamp,
+        deterministic: true,
+        followUps: followUpsForMode(copilotMode || "standup", activeView),
+      });
+    }
+    if (!explicitCopilotMode && isRunNextQuestion(prompt) && deterministicCopilotAnswer) {
+      return sendAnswer(res, deterministicCopilotAnswer, {
+        model: "deterministic",
+        mode: copilotMode || "run_next",
+        sourceLabel: "dispatch queue + work orders",
+        dataTimestamp: responseDataTimestamp,
+        deterministic: true,
+        followUps: followUpsForMode(copilotMode || "run_next", activeView),
+      });
+    }
+    if (!explicitCopilotMode && isRiskRadarQuestion(prompt) && deterministicCopilotAnswer) {
+      return sendAnswer(res, deterministicCopilotAnswer, {
+        model: "deterministic",
+        mode: copilotMode || "risk_radar",
+        sourceLabel: "critical items + inbound coverage",
+        dataTimestamp: responseDataTimestamp,
+        deterministic: true,
+        followUps: followUpsForMode(copilotMode || "risk_radar", activeView),
+      });
+    }
+    if (!explicitCopilotMode && isWhatChangedQuestion(prompt) && deterministicCopilotAnswer) {
+      return sendAnswer(res, deterministicCopilotAnswer, {
+        model: "deterministic",
+        mode: copilotMode || "what_changed",
+        sourceLabel: "PackPulse metrics",
+        dataTimestamp: responseDataTimestamp,
+        deterministic: true,
+        followUps: followUpsForMode(copilotMode || "what_changed", activeView),
+      });
+    }
+    if (!explicitCopilotMode && isDataHealthQuestion(prompt) && deterministicCopilotAnswer) {
+      return sendAnswer(res, deterministicCopilotAnswer, {
+        model: "deterministic",
+        mode: copilotMode || "data_health",
+        sourceLabel: "client data health",
+        dataTimestamp: responseDataTimestamp,
+        deterministic: true,
+        followUps: followUpsForMode(copilotMode || "data_health", activeView),
+      });
+    }
+    if (!explicitCopilotMode && isThroughputWatchQuestion(prompt) && deterministicCopilotAnswer) {
+      return sendAnswer(res, deterministicCopilotAnswer, {
+        model: "deterministic",
+        mode: copilotMode || "throughput_watch",
+        sourceLabel: "production + Evocon",
+        dataTimestamp: responseDataTimestamp,
+        deterministic: true,
+        followUps: followUpsForMode(copilotMode || "throughput_watch", activeView),
+      });
+    }
+    if (!explicitCopilotMode && isExecutiveBriefQuestion(prompt) && deterministicCopilotAnswer) {
+      return sendAnswer(res, deterministicCopilotAnswer, {
+        model: "deterministic",
+        mode: copilotMode || "executive_brief",
+        sourceLabel: "PackPulse metrics",
+        dataTimestamp: responseDataTimestamp,
+        deterministic: true,
+        followUps: followUpsForMode(copilotMode || "executive_brief", activeView),
+      });
+    }
 
     // Deterministic answer for high-frequency operational ask.
     if (isTodayCasesQuestion(prompt)) {
@@ -1288,9 +1892,21 @@ export default async function handler(req, res) {
       delete supabaseContext.snapshotPayload;
     }
 
+    var copilotFactPack = buildCopilotFactPack(metrics, activeView, contextLines, supabaseContext);
+
     var apiKey = process.env.OPENAI_API_KEY || "";
     var model = process.env.OPENAI_MODEL || "gpt-4o-mini";
     if (!apiKey) {
+      if (deterministicCopilotAnswer) {
+        return sendAnswer(res, deterministicCopilotAnswer, {
+          model: "deterministic",
+          mode: copilotMode || "chat",
+          sourceLabel: "PackPulse metrics",
+          dataTimestamp: responseDataTimestamp,
+          deterministic: true,
+          followUps: followUpsForMode(copilotMode, activeView),
+        });
+      }
       return res.status(500).json({ error: "OPENAI_API_KEY is not configured" });
     }
 
@@ -1300,9 +1916,11 @@ export default async function handler(req, res) {
       "Prioritize: what happened, why it matters, and what to do next.",
       "Use provided numeric context directly; do not invent metrics.",
       "If the user asks for a number and it is present in context, answer with the exact value first.",
-      "For summary questions, include: total, trend, top SKU mix, top lines, and concrete actions.",
+      "For summary questions, include: total, trend, top line or SKU mix when available, and concrete actions.",
       "If data is missing or uncertain, say so clearly.",
-      "Never claim actions were completed unless explicitly provided in context."
+      "Never claim actions were completed unless explicitly provided in context.",
+      "Always distinguish between facts from context and recommendations inferred from those facts.",
+      buildCopilotModeInstruction(copilotMode)
     ].join(" ");
 
     var messages = [{ role: "system", content: system }];
@@ -1312,8 +1930,10 @@ export default async function handler(req, res) {
         "Context\n" +
         "- User: " + user.email + "\n" +
         "- Active view: " + activeView + "\n" +
+        (copilotMode ? "- Copilot mode: " + copilotMode + "\n" : "") +
         (contextLines.length ? "- Dashboard context:\n  - " + contextLines.join("\n  - ") + "\n" : "") +
         "- Metrics JSON: " + JSON.stringify(metrics) + "\n" +
+        "- Copilot fact pack JSON: " + JSON.stringify(copilotFactPack) + "\n" +
         "- Last week aggregate JSON: " + JSON.stringify(lastWeekAgg) + "\n" +
         "- This week aggregate JSON: " + JSON.stringify(thisWeekAgg) + "\n" +
         "- Supabase context JSON: " + JSON.stringify(supabaseContext || {})
@@ -1349,6 +1969,16 @@ export default async function handler(req, res) {
     }
     if (!openaiResp.ok) {
       var details = parsed && parsed.error && parsed.error.message ? parsed.error.message : raw || "OpenAI request failed";
+      if (deterministicCopilotAnswer) {
+        return sendAnswer(res, deterministicCopilotAnswer, {
+          model: "deterministic",
+          mode: copilotMode || "chat",
+          sourceLabel: "PackPulse metrics",
+          dataTimestamp: responseDataTimestamp,
+          deterministic: true,
+          followUps: followUpsForMode(copilotMode, activeView),
+        });
+      }
       return res.status(openaiResp.status).json({ error: "AI request failed", details: details });
     }
 
@@ -1360,9 +1990,17 @@ export default async function handler(req, res) {
       parsed.choices[0].message.content
         ? String(parsed.choices[0].message.content).trim()
         : "";
+    if (!answer && deterministicCopilotAnswer) answer = deterministicCopilotAnswer;
     if (!answer) answer = "No AI response was returned.";
 
-    return res.status(200).json({ answer: answer, model: model });
+    return sendAnswer(res, answer, {
+      model: model,
+      mode: copilotMode || "chat",
+      sourceLabel: "PackPulse metrics + Supabase context",
+      dataTimestamp: responseDataTimestamp,
+      deterministic: false,
+      followUps: followUpsForMode(copilotMode, activeView),
+    });
   } catch (err) {
     Sentry.captureException(err);
     return res.status(500).json({
