@@ -80,6 +80,10 @@ function normalizeGroupValue(value) {
   return normalizeSearchValue(value).replace(/\.0+$/, "").replace(/\s+/g, " ");
 }
 
+function normalizeLotCodeValue(value) {
+  return String(value || "").trim().replace(/\s+/g, " ").toUpperCase();
+}
+
 function normalizeLookupKey(value) {
   var raw = String(value || "").trim();
   if (!raw) return "";
@@ -601,6 +605,7 @@ function buildWorkOrderFallbacks(workOrders) {
       "Fixed Lot Code", "fixed_lot_code",
       "Fixed lot code"
     ]) || "").trim();
+    fixedLotCode = normalizeLotCodeValue(fixedLotCode);
     addIndexedValue(customerByWorkOrder, workOrderCode, customer);
     addIndexedValue(customerByWorkOrder, workOrderId, customer);
     addIndexedValue(unitByWorkOrder, workOrderCode, unitOfMeasure);
@@ -648,6 +653,7 @@ function buildProductionLotFallbacks(rows, workOrders) {
       "Lot Code", "Lot code", "lot_code",
       "Finished Good Lot Code", "finished_good_lot_code"
     ]) || "").trim();
+    lotCode = normalizeLotCodeValue(lotCode);
     if (!lotCode) return;
 
     var jobId = String(pickFieldLoose(row, [
@@ -704,6 +710,7 @@ function buildProductionLotFallbacks(rows, workOrders) {
       "Fixed Lot Code", "fixed_lot_code",
       "Fixed lot code"
     ]) || "").trim();
+    fixedLotCode = normalizeLotCodeValue(fixedLotCode);
     addIndexedValue(fixedLotByWorkOrder, workOrderCode, fixedLotCode);
     addIndexedValue(fixedLotByWorkOrder, workOrderId, fixedLotCode);
   });
@@ -824,6 +831,7 @@ function buildNormalizedProductionRow(row, index, fallbacks) {
     "Lot Code", "Lot code", "lot_code",
     "Finished Good Lot Code", "finished_good_lot_code"
   ]) || "").trim();
+  lotCode = normalizeLotCodeValue(lotCode);
   var line = String(pickFieldLoose(row, [
     "Line", "line",
     "line_name", "Line Name"
@@ -851,6 +859,7 @@ function buildNormalizedProductionRow(row, index, fallbacks) {
     jobId: jobId,
     line: line
   }, fallbacks);
+  fallbackLotCode = normalizeLotCodeValue(fallbackLotCode);
   var customerLabel = customer || "Unassigned customer";
   if (fallbackCustomer) customerLabel = fallbackCustomer;
   var skuLabel = sku || "Missing SKU";
