@@ -96,6 +96,118 @@ function compactInventoryRowsForApp(rows) {
   return Object.values(grouped);
 }
 
+var CLIENT_SHARED_SNAPSHOT_SOFT_LIMIT = 1_500_000;
+
+function compactRowsForSharedSnapshot(rows, opts) {
+  var maxRows = (opts && opts.maxRows) || 1200;
+  if (!Array.isArray(rows)) return [];
+  return rows.slice(0, maxRows).map(function(row) {
+    if (!row || typeof row !== "object") return row;
+    var copy = Object.assign({}, row);
+    if (Object.prototype.hasOwnProperty.call(copy, "raw")) delete copy.raw;
+    return copy;
+  });
+}
+
+function countRowsFromSnapshotPayload(payload) {
+  return {
+    inventory: Array.isArray(payload && payload.inventory) ? payload.inventory.length : 0,
+    workOrders: Array.isArray(payload && payload.workOrders) ? payload.workOrders.length : 0,
+    productionData: Array.isArray(payload && payload.productionData) ? payload.productionData.length : 0,
+    laborData: Array.isArray(payload && payload.laborData) ? payload.laborData.length : 0,
+    evoconData: Array.isArray(payload && payload.evoconData) ? payload.evoconData.length : 0,
+    itemMaster: Array.isArray(payload && payload.itemMaster) ? payload.itemMaster.length : 0,
+    boms: Array.isArray(payload && payload.boms) ? payload.boms.length : 0,
+    edrData: Array.isArray(payload && payload.edrData) ? payload.edrData.length : 0,
+    dockData: Array.isArray(payload && payload.dockData) ? payload.dockData.length : 0,
+  };
+}
+
+function uniqueStringValues(values) {
+  var seen = {};
+  var out = [];
+  (Array.isArray(values) ? values : []).forEach(function(value) {
+    var key = String(value || "").trim();
+    if (!key || seen[key]) return;
+    seen[key] = true;
+    out.push(key);
+  });
+  return out;
+}
+
+function measureJsonBytes(value) {
+  var text = "";
+  try {
+    text = JSON.stringify(value || {});
+  } catch (_err) {
+    return 0;
+  }
+  if (typeof TextEncoder !== "undefined") {
+    return new TextEncoder().encode(text).length;
+  }
+  return unescape(encodeURIComponent(text)).length;
+}
+
+function measureSnapshotRequestBytes(payload) {
+  return measureJsonBytes({ payload: payload });
+}
+
+function compactSharedSnapshotPayloadForApp(input) {
+  var payload = Object.assign({}, input || {});
+  payload.meta = Object.assign({}, (input && input.meta) || {});
+  payload.meta.clientRowCounts = countRowsFromSnapshotPayload(input || {});
+
+  var dropped = [];
+  var trimmed = [];
+  var bytes = measureSnapshotRequestBytes(payload);
+
+  function trimDataset(key, maxRows) {
+    if (bytes <= CLIENT_SHARED_SNAPSHOT_SOFT_LIMIT) return;
+    if (!Array.isArray(payload[key]) || payload[key].length <= maxRows) return;
+    payload[key] = compactRowsForSharedSnapshot(payload[key], { maxRows: maxRows });
+    trimmed.push(key);
+    bytes = measureSnapshotRequestBytes(payload);
+  }
+
+  function dropDataset(key) {
+    if (bytes <= CLIENT_SHARED_SNAPSHOT_SOFT_LIMIT) return;
+    if (!Array.isArray(payload[key]) || !payload[key].length) return;
+    payload[key] = [];
+    dropped.push(key);
+    bytes = measureSnapshotRequestBytes(payload);
+  }
+
+  trimDataset("evoconData", 900);
+  trimDataset("edrData", 1200);
+  trimDataset("dockData", 800);
+  trimDataset("boms", 2500);
+  trimDataset("itemMaster", 3000);
+
+  [
+    "evoconData",
+    "productionData",
+    "laborData",
+    "edrData",
+    "dockData",
+    "boms",
+    "itemMaster"
+  ].forEach(dropDataset);
+
+  trimDataset("workOrders", 3000);
+  trimDataset("inventory", 3000);
+  trimDataset("workOrders", 1500);
+  trimDataset("inventory", 1500);
+
+  payload.meta.clientDroppedDatasets = uniqueStringValues(dropped);
+  payload.meta.clientTrimmedDatasets = uniqueStringValues(trimmed);
+  return {
+    payload: payload,
+    bytes: bytes,
+    dropped: uniqueStringValues(dropped),
+    trimmed: uniqueStringValues(trimmed)
+  };
+}
+
 export function useDataSources() {
   const [inventory, setInventory] = useState(null);
   const [inventoryDetailData, setInventoryDetailData] = useState(null);
@@ -261,19 +373,23 @@ export function useDataSources() {
           if (sharedRes.ok) {
             var sharedBody = await sharedRes.json();
             if (sharedBody && sharedBody.snapshot && sharedBody.snapshot.payload) {
-              sharedRowCounts = sharedBody.snapshot.row_counts || {};
               sharedPayload = sharedBody.snapshot.payload || {};
               sharedMeta = sharedPayload.meta && typeof sharedPayload.meta === "object" ? sharedPayload.meta : {};
+              sharedRowCounts = sharedMeta.clientRowCounts && typeof sharedMeta.clientRowCounts === "object"
+                ? sharedMeta.clientRowCounts
+                : (sharedBody.snapshot.row_counts || {});
               var sharedProdRows = Array.isArray(sharedPayload.productionData) ? sharedPayload.productionData.length : 0;
               var sharedProdCount = Number(sharedRowCounts.productionData || 0);
               var sharedLaborRows = Array.isArray(sharedPayload.laborData) ? sharedPayload.laborData.length : 0;
               var sharedLaborCount = Number(sharedRowCounts.laborData || 0);
-              sharedDroppedDatasets = Array.isArray(sharedMeta.cacheDroppedDatasets)
-                ? sharedMeta.cacheDroppedDatasets
-                : [];
-              sharedProductionTruncated = sharedDroppedDatasets.indexOf("productionData") !== -1 || (sharedProdCount > 0 && sharedProdRows > 0 && sharedProdRows < sharedProdCount);
-              var sharedLaborTruncated = sharedDroppedDatasets.indexOf("laborData") !== -1 || (sharedLaborCount > 0 && sharedLaborRows > 0 && sharedLaborRows < sharedLaborCount);
-              sharedLoaded = hydrateFromPayloadObject(sharedBody.snapshot.payload, "shared");
+              sharedDroppedDatasets = uniqueStringValues(
+                []
+                  .concat(Array.isArray(sharedMeta.clientDroppedDatasets) ? sharedMeta.clientDroppedDatasets : [])
+                  .concat(Array.isArray(sharedMeta.cacheDroppedDatasets) ? sharedMeta.cacheDroppedDatasets : [])
+              );
+              sharedProductionTruncated = sharedDroppedDatasets.indexOf("productionData") !== -1 || (sharedProdCount > 0 && sharedProdRows < sharedProdCount);
+              var sharedLaborTruncated = sharedDroppedDatasets.indexOf("laborData") !== -1 || (sharedLaborCount > 0 && sharedLaborRows < sharedLaborCount);
+              sharedLoaded = hydrateFromPayloadObject(sharedPayload, "shared");
               setSharedSnapshotMeta({
                 source: "shared",
                 syncedAt: sharedBody.snapshot.synced_at ? new Date(sharedBody.snapshot.synced_at) : null,
@@ -471,6 +587,7 @@ export function useDataSources() {
       }
     };
     var timer = setTimeout(function() {
+      var compactedSnapshot = compactSharedSnapshotPayloadForApp(payload);
       setSharedSnapshotWrite(function(prev) {
         return {
           status: "writing",
@@ -488,7 +605,7 @@ export function useDataSources() {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ payload: payload })
+        body: JSON.stringify({ payload: compactedSnapshot.payload })
       }).then(function(resp) {
         return resp.text().then(function(rawText) {
           var body = null;
