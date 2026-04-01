@@ -569,6 +569,10 @@ export default function ForecastView(props) {
   var byWorkOrder = forecast && Array.isArray(forecast.byWorkOrder) ? forecast.byWorkOrder : [];
   var daily = forecast && Array.isArray(forecast.daily) ? forecast.daily : [];
   var flags = forecast && Array.isArray(forecast.flags) ? forecast.flags : [];
+  var dailyMonthLabel = useMemo(function() {
+    if (!/^\d{4}-\d{2}$/.test(String(monthKey || ""))) return String(monthKey || "the selected month");
+    return new Date(monthKey + "-01T00:00:00").toLocaleDateString(undefined, { year: "numeric", month: "long" });
+  }, [monthKey]);
   var topSku = useMemo(function() { return bySku.slice(0, 20); }, [bySku]);
   var microRows = useMemo(function() {
     return byWorkOrder.slice().sort(function(a, b) {
@@ -1247,13 +1251,18 @@ export default function ForecastView(props) {
       </TableShell>
 
       <div className="mb-2 mt-4 text-sm font-semibold text-[rgb(var(--foreground))]">Daily Forecast Targets</div>
+      <div className="mb-2 text-xs text-[rgb(var(--muted))]">
+        Daily targets are scoped to {dailyMonthLabel}. If a work order has no in-month schedule window, its forecast falls back to the nearest in-month date.
+      </div>
       <TableShell>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ background: C.raised }}>
                 <th style={{ textAlign: "left", padding: "8px 10px", fontSize: 12, color: C.dim }}>Day</th>
-                <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Cases</th>
+                <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Forecast Cases</th>
+                <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Actual Cases</th>
+                <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Case Var</th>
                 <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Revenue</th>
                 <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Actual Revenue</th>
                 <th style={{ textAlign: "right", padding: "8px 10px", fontSize: 12, color: C.dim }}>Revenue Var</th>
@@ -1262,14 +1271,17 @@ export default function ForecastView(props) {
               </tr>
             </thead>
             <tbody>
-              {!daily.length && <tr><td colSpan={7} style={{ padding: 16, textAlign: "center", color: C.dim }}>No daily targets available.</td></tr>}
+              {!daily.length && <tr><td colSpan={9} style={{ padding: 16, textAlign: "center", color: C.dim }}>No daily targets available.</td></tr>}
               {daily.slice(0, 31).map(function(d) {
                 var act = actualByDay[d.day_key] || { actual_cases: 0, actual_revenue: 0 };
+                var caseVar = safeNum(act.actual_cases) - safeNum(d.planned_cases);
                 var revVar = safeNum(act.actual_revenue) - safeNum(d.revenue);
                 return (
                   <tr key={d.day_key} style={{ borderBottom: "1px solid " + C.border }}>
                     <td style={{ padding: "8px 10px", fontSize: 13, color: C.bright }}>{d.day_key}</td>
                     <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{safeNum(d.planned_cases).toLocaleString(undefined, { maximumFractionDigits: 1 })}</td>
+                    <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{safeNum(act.actual_cases).toLocaleString(undefined, { maximumFractionDigits: 1 })}</td>
+                    <td style={{ padding: "8px 10px", fontSize: 13, color: caseVar >= 0 ? C.ok : C.bad, textAlign: "right" }}>{caseVar.toLocaleString(undefined, { maximumFractionDigits: 1 })}</td>
                     <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{fmtMoney(d.revenue)}</td>
                     <td style={{ padding: "8px 10px", fontSize: 13, color: C.text, textAlign: "right" }}>{fmtMoney(act.actual_revenue)}</td>
                     <td style={{ padding: "8px 10px", fontSize: 13, color: revVar >= 0 ? C.ok : C.bad, textAlign: "right" }}>{fmtMoney(revVar)}</td>

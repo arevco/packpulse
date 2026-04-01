@@ -90,6 +90,42 @@ function eachDayInclusive(startIso, endIso) {
   return out;
 }
 
+function monthBounds(monthKey) {
+  var s = String(monthKey || "").trim();
+  if (!/^\d{4}-\d{2}$/.test(s)) return { start: "", end: "" };
+  var year = Number(s.slice(0, 4));
+  var month = Number(s.slice(5, 7));
+  var start = s + "-01";
+  var endDate = new Date(Date.UTC(year, month, 0));
+  return {
+    start: start,
+    end: endDate.toISOString().slice(0, 10)
+  };
+}
+
+function clampIsoDayToMonth(isoDay, monthKey) {
+  var day = String(isoDay || "").trim();
+  if (!day) return "";
+  var bounds = monthBounds(monthKey);
+  if (!bounds.start || !bounds.end) return day;
+  if (day < bounds.start) return bounds.start;
+  if (day > bounds.end) return bounds.end;
+  return day;
+}
+
+function resolveDailyAllocationDays(monthKey, startIso, endIso, fallbackIso) {
+  var days = eachDayInclusive(startIso, endIso);
+  if (monthKey) days = days.filter(function(day) { return inMonth(day, monthKey); });
+  if (days.length) return days;
+
+  var fallback = fallbackIso;
+  if (monthKey) fallback = clampIsoDayToMonth(fallback, monthKey);
+  if (fallback) return [fallback];
+
+  var bounds = monthBounds(monthKey);
+  return bounds.start ? [bounds.start] : [];
+}
+
 function hasExplicitValue(value) {
   return value != null && String(value).trim() !== "";
 }
@@ -498,10 +534,9 @@ export function runLaborForecast(input) {
     };
     rows.push(row);
 
-    var startIso = isPriorOpenRollover ? "" : toIsoDay(pickValue(wo, ["Planned Start", "planned_start_at", "planned_start", "plannedStart"]));
-    var endIso = isPriorOpenRollover ? "" : toIsoDay(pickValue(wo, ["Planned End", "planned_end_at", "planned_end", "plannedEnd"]));
-    var dailyDays = eachDayInclusive(startIso, endIso);
-    if (!dailyDays.length) dailyDays = [dateIso || (monthKey ? (monthKey + "-01") : "")].filter(Boolean);
+    var startIso = toIsoDay(pickValue(wo, ["Planned Start", "planned_start_at", "planned_start", "plannedStart"]));
+    var endIso = toIsoDay(pickValue(wo, ["Planned End", "planned_end_at", "planned_end", "plannedEnd"]));
+    var dailyDays = resolveDailyAllocationDays(monthKey, startIso, endIso, dateIso || startIso || endIso);
     var perDayCases = plannedCases / Math.max(1, dailyDays.length);
     var perDayRevenue = revenue / Math.max(1, dailyDays.length);
     var perDayLabor = runLaborCost / Math.max(1, dailyDays.length);
