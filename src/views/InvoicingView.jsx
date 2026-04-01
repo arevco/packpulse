@@ -8,6 +8,7 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader } from "../components/ui/card";
 import { DatePicker } from "../components/ui/date-picker";
 import { Input } from "../components/ui/input";
+import SortHeaderButton from "../components/ui/sort-header-button";
 import TableShell from "../components/ui/table-shell";
 
 var MONTH_INDEX = {
@@ -26,6 +27,20 @@ var MONTH_INDEX = {
 };
 
 var REVENUE_CONFIG_STALE_MS = 15 * 60 * 1000;
+var DEFAULT_CANDIDATE_SORT_FIELD = "status";
+var DEFAULT_CANDIDATE_SORT_DIR = "asc";
+var CANDIDATE_SORT_LABELS = {
+  status: "Status",
+  customerSku: "Customer / SKU",
+  unitsProduced: "Units",
+  revenuePerUnitAvg: "Rev/Unit",
+  estimatedRevenue: "Estimated Revenue",
+  unitOfMeasure: "UOM",
+  workOrderReference: "Work Order",
+  purchaseOrderReference: "Purchase Order",
+  jobCount: "Jobs",
+  period: "Period"
+};
 var moneyFormatter = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
@@ -235,6 +250,133 @@ function revenueSourceMeta(source) {
   if (source === "item_master_cost_per_unit") return { label: "Item Master Fallback", variant: "info" };
   if (source === "mixed") return { label: "Mixed Sources", variant: "warning" };
   return { label: "Missing", variant: "danger" };
+}
+
+function createDefaultCandidateColumnFilters() {
+  return {
+    status: "all",
+    customerSku: "",
+    minUnits: "",
+    minRevenuePerUnit: "",
+    minEstimatedRevenue: "",
+    unitOfMeasure: "",
+    workOrder: "",
+    purchaseOrder: "",
+    minJobs: "",
+    period: ""
+  };
+}
+
+function defaultCandidateSortDirForField(field) {
+  if (field === "unitsProduced" || field === "revenuePerUnitAvg" || field === "estimatedRevenue" || field === "jobCount") return "desc";
+  if (field === "period") return "desc";
+  return "asc";
+}
+
+function statusSortRank(status) {
+  if (status === "review") return 0;
+  if (status === "ready") return 1;
+  return 2;
+}
+
+function compareTextValues(left, right) {
+  return String(left || "").localeCompare(String(right || ""), undefined, { sensitivity: "base", numeric: true });
+}
+
+function compareNumberValues(left, right) {
+  var a = safeNum(left);
+  var b = safeNum(right);
+  if (a < b) return -1;
+  if (a > b) return 1;
+  return 0;
+}
+
+function parseFilterThreshold(value) {
+  var raw = String(value || "").trim();
+  if (!raw) return null;
+  var cleaned = raw.replace(/[$,%\s,]/g, "");
+  if (!cleaned) return null;
+  var parsed = Number(cleaned);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function candidatePeriodSearchValue(candidate) {
+  return [
+    candidate && candidate.firstProducedDate,
+    candidate && candidate.lastProducedDate,
+    formatDateLabel(candidate && candidate.firstProducedDate),
+    formatDateLabel(candidate && candidate.lastProducedDate)
+  ].join(" ");
+}
+
+function candidateMatchesColumnFilters(candidate, filters) {
+  var applied = filters || createDefaultCandidateColumnFilters();
+  var statusFilter = String(applied.status || "all");
+  var customerSkuFilter = normalizeSearchValue(applied.customerSku);
+  var unitOfMeasureFilter = normalizeSearchValue(applied.unitOfMeasure);
+  var workOrderFilter = normalizeSearchValue(applied.workOrder);
+  var purchaseOrderFilter = normalizeSearchValue(applied.purchaseOrder);
+  var periodFilter = normalizeSearchValue(applied.period);
+  var minUnits = parseFilterThreshold(applied.minUnits);
+  var minRevenuePerUnit = parseFilterThreshold(applied.minRevenuePerUnit);
+  var minEstimatedRevenue = parseFilterThreshold(applied.minEstimatedRevenue);
+  var minJobs = parseFilterThreshold(applied.minJobs);
+
+  if (statusFilter !== "all" && candidate.status !== statusFilter) return false;
+  if (customerSkuFilter) {
+    var customerSkuValue = normalizeSearchValue((candidate.customer || "") + " " + (candidate.sku || "") + " " + (candidate.description || ""));
+    if (customerSkuValue.indexOf(customerSkuFilter) === -1) return false;
+  }
+  if (minUnits != null && safeNum(candidate.unitsProduced) < minUnits) return false;
+  if (minRevenuePerUnit != null && safeNum(candidate.revenuePerUnitAvg) < minRevenuePerUnit) return false;
+  if (minEstimatedRevenue != null && safeNum(candidate.estimatedRevenue) < minEstimatedRevenue) return false;
+  if (unitOfMeasureFilter && normalizeSearchValue(candidate.unitOfMeasure).indexOf(unitOfMeasureFilter) === -1) return false;
+  if (workOrderFilter && normalizeSearchValue(candidate.workOrderReference).indexOf(workOrderFilter) === -1) return false;
+  if (purchaseOrderFilter && normalizeSearchValue(candidate.purchaseOrderReference).indexOf(purchaseOrderFilter) === -1) return false;
+  if (minJobs != null && safeNum(candidate.jobCount) < minJobs) return false;
+  if (periodFilter && normalizeSearchValue(candidatePeriodSearchValue(candidate)).indexOf(periodFilter) === -1) return false;
+  return true;
+}
+
+function sortInvoiceCandidates(rows, sortField, sortDir) {
+  var dir = sortDir === "desc" ? -1 : 1;
+  return rows.slice().sort(function(left, right) {
+    var comparison = 0;
+
+    if (sortField === "customerSku") {
+      comparison = compareTextValues(left.customer, right.customer);
+      if (!comparison) comparison = compareTextValues(left.sku, right.sku);
+    } else if (sortField === "unitsProduced") {
+      comparison = compareNumberValues(left.unitsProduced, right.unitsProduced);
+    } else if (sortField === "revenuePerUnitAvg") {
+      comparison = compareNumberValues(left.revenuePerUnitAvg, right.revenuePerUnitAvg);
+    } else if (sortField === "estimatedRevenue") {
+      comparison = compareNumberValues(left.estimatedRevenue, right.estimatedRevenue);
+    } else if (sortField === "unitOfMeasure") {
+      comparison = compareTextValues(left.unitOfMeasure, right.unitOfMeasure);
+    } else if (sortField === "workOrderReference") {
+      comparison = compareTextValues(left.workOrderReference, right.workOrderReference);
+    } else if (sortField === "purchaseOrderReference") {
+      comparison = compareTextValues(left.purchaseOrderReference, right.purchaseOrderReference);
+    } else if (sortField === "jobCount") {
+      comparison = compareNumberValues(left.jobCount, right.jobCount);
+    } else if (sortField === "period") {
+      comparison = compareTextValues(left.firstProducedDate, right.firstProducedDate);
+      if (!comparison) comparison = compareTextValues(left.lastProducedDate, right.lastProducedDate);
+    } else {
+      comparison = compareNumberValues(statusSortRank(left.status), statusSortRank(right.status));
+    }
+
+    if (comparison) return comparison * dir;
+    if (right.unitsProduced !== left.unitsProduced) return right.unitsProduced - left.unitsProduced;
+    comparison = compareTextValues(left.customer, right.customer);
+    if (comparison) return comparison;
+    comparison = compareTextValues(left.sku, right.sku);
+    if (comparison) return comparison;
+    comparison = compareTextValues(left.workOrderReference, right.workOrderReference);
+    if (comparison) return comparison;
+    return compareTextValues(left.purchaseOrderReference, right.purchaseOrderReference);
+  });
 }
 
 async function fetchJsonWithCredentials(url) {
@@ -535,8 +677,13 @@ export default function InvoicingView(props) {
   var [customerFilter, setCustomerFilter] = useState(String(initialFilters.customer || "all"));
   var [statusFilter, setStatusFilter] = useState(String(initialFilters.status || "all"));
   var [searchTerm, setSearchTerm] = useState(String(initialFilters.q || ""));
+  var [candidateSortField, setCandidateSortField] = useState(DEFAULT_CANDIDATE_SORT_FIELD);
+  var [candidateSortDir, setCandidateSortDir] = useState(DEFAULT_CANDIDATE_SORT_DIR);
+  var [candidateColumnFilters, setCandidateColumnFilters] = useState(createDefaultCandidateColumnFilters);
+  var [showCandidateColumnFilters, setShowCandidateColumnFilters] = useState(false);
 
   var deferredSearchTerm = useDeferredValue(searchTerm);
+  var deferredCandidateColumnFilters = useDeferredValue(candidateColumnFilters);
 
   useEffect(function() {
     if (!onPermalinkChange) return;
@@ -755,12 +902,20 @@ export default function InvoicingView(props) {
     });
   }, [filteredRows]);
 
-  var visibleInvoiceCandidates = useMemo(function() {
+  var statusScopedInvoiceCandidates = useMemo(function() {
     return invoiceCandidates.filter(function(candidate) {
       if (statusFilter === "all") return true;
       return candidate.status === statusFilter;
     });
   }, [invoiceCandidates, statusFilter]);
+
+  var visibleInvoiceCandidates = useMemo(function() {
+    var filteredCandidates = statusScopedInvoiceCandidates.slice();
+    filteredCandidates = filteredCandidates.filter(function(candidate) {
+      return candidateMatchesColumnFilters(candidate, deferredCandidateColumnFilters);
+    });
+    return sortInvoiceCandidates(filteredCandidates, candidateSortField, candidateSortDir);
+  }, [statusScopedInvoiceCandidates, deferredCandidateColumnFilters, candidateSortField, candidateSortDir]);
 
   var visibleCandidateKeySet = useMemo(function() {
     var out = {};
@@ -770,9 +925,17 @@ export default function InvoicingView(props) {
     return out;
   }, [visibleInvoiceCandidates]);
 
+  var statusScopedCandidateKeySet = useMemo(function() {
+    var out = {};
+    statusScopedInvoiceCandidates.forEach(function(candidate) {
+      out[candidate.key] = true;
+    });
+    return out;
+  }, [statusScopedInvoiceCandidates]);
+
   var customerRollups = useMemo(function() {
     var grouped = {};
-    visibleInvoiceCandidates.forEach(function(candidate) {
+    statusScopedInvoiceCandidates.forEach(function(candidate) {
       if (!grouped[candidate.customer]) {
         grouped[candidate.customer] = {
           customer: candidate.customer,
@@ -802,7 +965,7 @@ export default function InvoicingView(props) {
       if (right.reviewLines !== left.reviewLines) return right.reviewLines - left.reviewLines;
       return right.unitsProduced - left.unitsProduced;
     });
-  }, [visibleInvoiceCandidates]);
+  }, [statusScopedInvoiceCandidates]);
 
   var detailRows = useMemo(function() {
     var rows = filteredRows.filter(function(row) {
@@ -819,6 +982,12 @@ export default function InvoicingView(props) {
     return rows;
   }, [filteredRows, visibleCandidateKeySet]);
 
+  var statusScopedRows = useMemo(function() {
+    return filteredRows.filter(function(row) {
+      return !!statusScopedCandidateKeySet[row.candidateKey];
+    });
+  }, [filteredRows, statusScopedCandidateKeySet]);
+
   var summary = useMemo(function() {
     var customers = {};
     var uniqueJobs = {};
@@ -827,7 +996,7 @@ export default function InvoicingView(props) {
     var estimatedRevenue = 0;
     var pricedUnits = 0;
     var fallbackUnits = 0;
-    visibleInvoiceCandidates.forEach(function(candidate) {
+    statusScopedInvoiceCandidates.forEach(function(candidate) {
       customers[candidate.customer] = true;
       if (candidate.status === "review") reviewCount += 1;
       else readyCount += 1;
@@ -835,14 +1004,14 @@ export default function InvoicingView(props) {
       pricedUnits += candidate.pricedUnits;
       if (candidate.revenueSource === "item_master_cost_per_unit" || candidate.revenueSource === "mixed") fallbackUnits += candidate.itemMasterFallbackUnits || 0;
     });
-    detailRows.forEach(function(row) {
+    statusScopedRows.forEach(function(row) {
       if (row.jobId) uniqueJobs[row.jobId] = true;
     });
-    var totalUnits = visibleInvoiceCandidates.reduce(function(sum, candidate) { return sum + candidate.unitsProduced; }, 0);
+    var totalUnits = statusScopedInvoiceCandidates.reduce(function(sum, candidate) { return sum + candidate.unitsProduced; }, 0);
     return {
       unitsProduced: totalUnits,
       customers: Object.keys(customers).length,
-      invoiceLines: visibleInvoiceCandidates.length,
+      invoiceLines: statusScopedInvoiceCandidates.length,
       readyLines: readyCount,
       reviewLines: reviewCount,
       jobs: Object.keys(uniqueJobs).length,
@@ -851,7 +1020,7 @@ export default function InvoicingView(props) {
       revenueCoveragePct: totalUnits > 0 ? Math.round((pricedUnits / totalUnits) * 100) : 0,
       fallbackUnits: fallbackUnits
     };
-  }, [visibleInvoiceCandidates, detailRows]);
+  }, [statusScopedInvoiceCandidates, statusScopedRows]);
 
   var customerPeriodRows = useMemo(function() {
     return revenueReadyRows.filter(function(row) {
@@ -898,7 +1067,65 @@ export default function InvoicingView(props) {
     setCustomerFilter("all");
     setStatusFilter("all");
     setSearchTerm("");
+    setShowCandidateColumnFilters(false);
+    setCandidateSortField(DEFAULT_CANDIDATE_SORT_FIELD);
+    setCandidateSortDir(DEFAULT_CANDIDATE_SORT_DIR);
+    setCandidateColumnFilters(createDefaultCandidateColumnFilters());
   }
+
+  function handleCandidateSort(field) {
+    if (candidateSortField === field) {
+      setCandidateSortDir(function(previous) {
+        return previous === "asc" ? "desc" : "asc";
+      });
+      return;
+    }
+    setCandidateSortField(field);
+    setCandidateSortDir(defaultCandidateSortDirForField(field));
+  }
+
+  function updateCandidateColumnFilter(field, value) {
+    setCandidateColumnFilters(function(previous) {
+      return Object.assign({}, previous, { [field]: value });
+    });
+  }
+
+  function clearCandidateTableControls() {
+    setCandidateSortField(DEFAULT_CANDIDATE_SORT_FIELD);
+    setCandidateSortDir(DEFAULT_CANDIDATE_SORT_DIR);
+    setCandidateColumnFilters(createDefaultCandidateColumnFilters());
+  }
+
+  var hasActiveCandidateColumnFilters = useMemo(function() {
+    var defaults = createDefaultCandidateColumnFilters();
+    return Object.keys(defaults).some(function(key) {
+      return String(candidateColumnFilters[key] || "") !== String(defaults[key] || "");
+    });
+  }, [candidateColumnFilters]);
+
+  var hasActiveCandidateTableControls = useMemo(function() {
+    return hasActiveCandidateColumnFilters || candidateSortField !== DEFAULT_CANDIDATE_SORT_FIELD || candidateSortDir !== DEFAULT_CANDIDATE_SORT_DIR;
+  }, [hasActiveCandidateColumnFilters, candidateSortField, candidateSortDir]);
+
+  var showCandidateFilterRow = showCandidateColumnFilters || hasActiveCandidateColumnFilters;
+
+  var candidateControlChips = useMemo(function() {
+    var chips = [];
+    if (candidateSortField !== DEFAULT_CANDIDATE_SORT_FIELD || candidateSortDir !== DEFAULT_CANDIDATE_SORT_DIR) {
+      chips.push("Sort: " + (CANDIDATE_SORT_LABELS[candidateSortField] || candidateSortField) + " " + (candidateSortDir === "asc" ? "↑" : "↓"));
+    }
+    if (candidateColumnFilters.status && candidateColumnFilters.status !== "all") chips.push("Status: " + candidateColumnFilters.status);
+    if (candidateColumnFilters.customerSku) chips.push("Customer/SKU: " + candidateColumnFilters.customerSku);
+    if (candidateColumnFilters.minUnits) chips.push("Units ≥ " + candidateColumnFilters.minUnits);
+    if (candidateColumnFilters.minRevenuePerUnit) chips.push("Rev/Unit ≥ " + candidateColumnFilters.minRevenuePerUnit);
+    if (candidateColumnFilters.minEstimatedRevenue) chips.push("Revenue ≥ " + candidateColumnFilters.minEstimatedRevenue);
+    if (candidateColumnFilters.unitOfMeasure) chips.push("UOM: " + candidateColumnFilters.unitOfMeasure);
+    if (candidateColumnFilters.workOrder) chips.push("WO: " + candidateColumnFilters.workOrder);
+    if (candidateColumnFilters.purchaseOrder) chips.push("PO: " + candidateColumnFilters.purchaseOrder);
+    if (candidateColumnFilters.minJobs) chips.push("Jobs ≥ " + candidateColumnFilters.minJobs);
+    if (candidateColumnFilters.period) chips.push("Period: " + candidateColumnFilters.period);
+    return chips;
+  }, [candidateColumnFilters, candidateSortField, candidateSortDir]);
 
   function exportSummaryCsv() {
     var header = [
@@ -993,8 +1220,45 @@ export default function InvoicingView(props) {
   if (!normalizedRows.length) {
     return (
       <Card className="mt-3">
-        <CardContent className="px-4 py-5 text-sm text-[rgb(var(--muted))]">
-          No production data is available yet. Run the Nulogy sync and include the Production report to build invoice candidates.
+        <CardHeader className="border-b border-[rgb(var(--border))] pb-4">
+          <div className="text-lg font-semibold text-[rgb(var(--foreground))]">Invoicing Workflow</div>
+          <div className="mt-1 max-w-3xl text-sm text-[rgb(var(--muted))]">
+            Review customer SKU output for a billing period, assign each line to a work order and purchase order, and export accounting-ready invoice detail.
+          </div>
+        </CardHeader>
+        <CardContent className="px-4 py-4">
+          <div className="rounded-xl border border-dashed border-[rgb(var(--border))] bg-[color-mix(in_oklab,rgb(var(--surface))_70%,white)] p-4">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <div className="text-base font-semibold text-[rgb(var(--foreground))]">No production rows are loaded for invoicing yet</div>
+                <div className="mt-2 max-w-2xl text-sm text-[rgb(var(--muted))]">
+                  Run the Nulogy sync and include the Production report. Once production rows are available, this page will assemble customer, SKU, work order, and purchase order invoice lines automatically.
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={applyCurrentMonth} variant="outline" size="sm">Current Month</Button>
+                <Button onClick={applyPreviousMonth} variant="outline" size="sm">Previous Month</Button>
+              </div>
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <div className="rounded-lg border border-[rgb(var(--border))] bg-white px-3 py-3">
+                <div className="text-xs font-medium uppercase tracking-[0.12em] text-[rgb(var(--muted))]">Billing Window</div>
+                <div className="mt-2 text-sm font-medium text-[rgb(var(--foreground))]">
+                  {formatDateLabel(startDate)} to {formatDateLabel(endDate)}
+                </div>
+              </div>
+              <div className="rounded-lg border border-[rgb(var(--border))] bg-white px-3 py-3">
+                <div className="text-xs font-medium uppercase tracking-[0.12em] text-[rgb(var(--muted))]">Production Sync</div>
+                <div className="mt-2 text-sm font-medium text-[rgb(var(--foreground))]">
+                  {props.productionTimestamp ? new Date(props.productionTimestamp).toLocaleString() : "Not synced yet"}
+                </div>
+              </div>
+              <div className="rounded-lg border border-[rgb(var(--border))] bg-white px-3 py-3">
+                <div className="text-xs font-medium uppercase tracking-[0.12em] text-[rgb(var(--muted))]">Needed For Invoice Lines</div>
+                <div className="mt-2 text-sm font-medium text-[rgb(var(--foreground))]">Production rows with SKU, WO, and PO references</div>
+              </div>
+            </div>
+          </div>
         </CardContent>
       </Card>
     );
@@ -1188,32 +1452,195 @@ export default function InvoicingView(props) {
 
         <Card>
           <CardHeader className="border-b border-[rgb(var(--border))] pb-3">
-            <div>
-              <div className="text-base font-semibold text-[rgb(var(--foreground))]">Invoice Candidates</div>
-              <div className="mt-1 text-sm text-[rgb(var(--muted))]">
-                {customerFilter === "all"
-                  ? "Grouped by customer, SKU, work order, and purchase order for the selected billing period."
-                  : ("Focused on " + customerFilter + ".")}
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <div className="text-base font-semibold text-[rgb(var(--foreground))]">Invoice Candidates</div>
+                <div className="mt-1 text-sm text-[rgb(var(--muted))]">
+                  {customerFilter === "all"
+                    ? "Grouped by customer, SKU, work order, and purchase order for the selected billing period."
+                    : ("Focused on " + customerFilter + ".")}
+                </div>
+                <div className="mt-2 text-xs text-[rgb(var(--muted))]">
+                  Page filters stay above. Table controls below only refine the invoice line grid and exports.
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="secondary">
+                  {visibleInvoiceCandidates.length === statusScopedInvoiceCandidates.length
+                    ? (visibleInvoiceCandidates.length.toLocaleString() + " line items")
+                    : ("Showing " + visibleInvoiceCandidates.length.toLocaleString() + " of " + statusScopedInvoiceCandidates.length.toLocaleString())}
+                </Badge>
+                <Button
+                  onClick={function() {
+                    setShowCandidateColumnFilters(function(previous) { return !previous; });
+                  }}
+                  variant={showCandidateFilterRow ? "secondary" : "outline"}
+                  size="sm"
+                  disabled={hasActiveCandidateColumnFilters}
+                >
+                  {hasActiveCandidateColumnFilters ? "Filters Applied" : (showCandidateFilterRow ? "Hide Column Filters" : "Show Column Filters")}
+                </Button>
+                <Button onClick={clearCandidateTableControls} variant="ghost" size="sm" disabled={!hasActiveCandidateTableControls}>
+                  Clear Table Controls
+                </Button>
               </div>
             </div>
+            {candidateControlChips.length ? (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {candidateControlChips.map(function(label) {
+                  return <Badge key={label} variant="secondary">{label}</Badge>;
+                })}
+              </div>
+            ) : null}
           </CardHeader>
           <CardContent className="px-0 py-0">
             <TableShell className="rounded-none border-x-0 border-b-0">
               <div className="overflow-auto">
                 <table className="min-w-full text-sm">
                   <thead className="bg-[rgb(var(--surface))] text-[rgb(var(--muted))]">
-                    <tr>
-                      <th className="px-4 py-3 text-left font-medium">Status</th>
-                      <th className="px-4 py-3 text-left font-medium">Customer / SKU</th>
-                      <th className="px-4 py-3 text-right font-medium">Units</th>
-                      <th className="px-4 py-3 text-right font-medium">Rev/Unit</th>
-                      <th className="px-4 py-3 text-right font-medium">Est Revenue</th>
-                      <th className="px-4 py-3 text-left font-medium">UOM</th>
-                      <th className="px-4 py-3 text-left font-medium">Work Order</th>
-                      <th className="px-4 py-3 text-left font-medium">Purchase Order</th>
-                      <th className="px-4 py-3 text-right font-medium">Jobs</th>
-                      <th className="px-4 py-3 text-left font-medium">Period</th>
+                    <tr className="border-b border-[rgb(var(--border))]">
+                      <th className="px-4 py-3 text-left font-medium">
+                        <SortHeaderButton onClick={function() { handleCandidateSort("status"); }} className="w-full">
+                          Status{candidateSortField === "status" ? (candidateSortDir === "asc" ? " ↑" : " ↓") : ""}
+                        </SortHeaderButton>
+                      </th>
+                      <th className="px-4 py-3 text-left font-medium">
+                        <SortHeaderButton onClick={function() { handleCandidateSort("customerSku"); }} className="w-full">
+                          Customer / SKU{candidateSortField === "customerSku" ? (candidateSortDir === "asc" ? " ↑" : " ↓") : ""}
+                        </SortHeaderButton>
+                      </th>
+                      <th className="px-4 py-3 text-right font-medium">
+                        <SortHeaderButton onClick={function() { handleCandidateSort("unitsProduced"); }} className="w-full text-right">
+                          Units{candidateSortField === "unitsProduced" ? (candidateSortDir === "asc" ? " ↑" : " ↓") : ""}
+                        </SortHeaderButton>
+                      </th>
+                      <th className="px-4 py-3 text-right font-medium">
+                        <SortHeaderButton onClick={function() { handleCandidateSort("revenuePerUnitAvg"); }} className="w-full text-right">
+                          Rev/Unit{candidateSortField === "revenuePerUnitAvg" ? (candidateSortDir === "asc" ? " ↑" : " ↓") : ""}
+                        </SortHeaderButton>
+                      </th>
+                      <th className="px-4 py-3 text-right font-medium">
+                        <SortHeaderButton onClick={function() { handleCandidateSort("estimatedRevenue"); }} className="w-full text-right">
+                          Est Revenue{candidateSortField === "estimatedRevenue" ? (candidateSortDir === "asc" ? " ↑" : " ↓") : ""}
+                        </SortHeaderButton>
+                      </th>
+                      <th className="px-4 py-3 text-left font-medium">
+                        <SortHeaderButton onClick={function() { handleCandidateSort("unitOfMeasure"); }} className="w-full">
+                          UOM{candidateSortField === "unitOfMeasure" ? (candidateSortDir === "asc" ? " ↑" : " ↓") : ""}
+                        </SortHeaderButton>
+                      </th>
+                      <th className="px-4 py-3 text-left font-medium">
+                        <SortHeaderButton onClick={function() { handleCandidateSort("workOrderReference"); }} className="w-full">
+                          Work Order{candidateSortField === "workOrderReference" ? (candidateSortDir === "asc" ? " ↑" : " ↓") : ""}
+                        </SortHeaderButton>
+                      </th>
+                      <th className="px-4 py-3 text-left font-medium">
+                        <SortHeaderButton onClick={function() { handleCandidateSort("purchaseOrderReference"); }} className="w-full">
+                          Purchase Order{candidateSortField === "purchaseOrderReference" ? (candidateSortDir === "asc" ? " ↑" : " ↓") : ""}
+                        </SortHeaderButton>
+                      </th>
+                      <th className="px-4 py-3 text-right font-medium">
+                        <SortHeaderButton onClick={function() { handleCandidateSort("jobCount"); }} className="w-full text-right">
+                          Jobs{candidateSortField === "jobCount" ? (candidateSortDir === "asc" ? " ↑" : " ↓") : ""}
+                        </SortHeaderButton>
+                      </th>
+                      <th className="px-4 py-3 text-left font-medium">
+                        <SortHeaderButton onClick={function() { handleCandidateSort("period"); }} className="w-full">
+                          Period{candidateSortField === "period" ? (candidateSortDir === "asc" ? " ↑" : " ↓") : ""}
+                        </SortHeaderButton>
+                      </th>
                     </tr>
+                    {showCandidateFilterRow ? (
+                      <tr className="border-b border-[rgb(var(--border))] bg-[color-mix(in_oklab,rgb(var(--surface))_72%,white)]">
+                        <th className="px-4 py-3">
+                          <select
+                            value={candidateColumnFilters.status}
+                            onChange={function(event) { updateCandidateColumnFilter("status", event.target.value); }}
+                            className="flex h-8 w-full rounded-md border border-[rgb(var(--border))] bg-white px-2 text-xs text-[rgb(var(--foreground))] shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--accent))] focus-visible:ring-offset-1"
+                          >
+                            <option value="all">Any</option>
+                            <option value="ready">Ready</option>
+                            <option value="review">Review</option>
+                          </select>
+                        </th>
+                        <th className="px-4 py-3">
+                          <Input
+                            value={candidateColumnFilters.customerSku}
+                            onChange={function(event) { updateCandidateColumnFilter("customerSku", event.target.value); }}
+                            placeholder="Filter..."
+                            className="h-8 min-w-[180px] px-2 text-xs"
+                          />
+                        </th>
+                        <th className="px-4 py-3">
+                          <Input
+                            value={candidateColumnFilters.minUnits}
+                            onChange={function(event) { updateCandidateColumnFilter("minUnits", event.target.value); }}
+                            placeholder="Min"
+                            inputMode="decimal"
+                            className="h-8 min-w-[88px] px-2 text-right text-xs"
+                          />
+                        </th>
+                        <th className="px-4 py-3">
+                          <Input
+                            value={candidateColumnFilters.minRevenuePerUnit}
+                            onChange={function(event) { updateCandidateColumnFilter("minRevenuePerUnit", event.target.value); }}
+                            placeholder="Min"
+                            inputMode="decimal"
+                            className="h-8 min-w-[88px] px-2 text-right text-xs"
+                          />
+                        </th>
+                        <th className="px-4 py-3">
+                          <Input
+                            value={candidateColumnFilters.minEstimatedRevenue}
+                            onChange={function(event) { updateCandidateColumnFilter("minEstimatedRevenue", event.target.value); }}
+                            placeholder="Min"
+                            inputMode="decimal"
+                            className="h-8 min-w-[96px] px-2 text-right text-xs"
+                          />
+                        </th>
+                        <th className="px-4 py-3">
+                          <Input
+                            value={candidateColumnFilters.unitOfMeasure}
+                            onChange={function(event) { updateCandidateColumnFilter("unitOfMeasure", event.target.value); }}
+                            placeholder="Filter..."
+                            className="h-8 min-w-[88px] px-2 text-xs"
+                          />
+                        </th>
+                        <th className="px-4 py-3">
+                          <Input
+                            value={candidateColumnFilters.workOrder}
+                            onChange={function(event) { updateCandidateColumnFilter("workOrder", event.target.value); }}
+                            placeholder="Filter..."
+                            className="h-8 min-w-[140px] px-2 text-xs"
+                          />
+                        </th>
+                        <th className="px-4 py-3">
+                          <Input
+                            value={candidateColumnFilters.purchaseOrder}
+                            onChange={function(event) { updateCandidateColumnFilter("purchaseOrder", event.target.value); }}
+                            placeholder="Filter..."
+                            className="h-8 min-w-[140px] px-2 text-xs"
+                          />
+                        </th>
+                        <th className="px-4 py-3">
+                          <Input
+                            value={candidateColumnFilters.minJobs}
+                            onChange={function(event) { updateCandidateColumnFilter("minJobs", event.target.value); }}
+                            placeholder="Min"
+                            inputMode="decimal"
+                            className="h-8 min-w-[72px] px-2 text-right text-xs"
+                          />
+                        </th>
+                        <th className="px-4 py-3">
+                          <Input
+                            value={candidateColumnFilters.period}
+                            onChange={function(event) { updateCandidateColumnFilter("period", event.target.value); }}
+                            placeholder="YYYY-MM-DD"
+                            className="h-8 min-w-[120px] px-2 text-xs"
+                          />
+                        </th>
+                      </tr>
+                    ) : null}
                   </thead>
                   <tbody>
                     {visibleInvoiceCandidates.length ? visibleInvoiceCandidates.map(function(candidate) {
@@ -1221,7 +1648,7 @@ export default function InvoicingView(props) {
                       return (
                         <tr
                           key={candidate.key}
-                          className="border-t border-[rgb(var(--border))] align-top hover:bg-[rgb(var(--surface))]"
+                          className="border-t border-[rgb(var(--border))] align-top hover:bg-[rgb(var(--surface))] odd:bg-[color-mix(in_oklab,rgb(var(--surface))_40%,white)]"
                         >
                           <td className="px-4 py-3">
                             <Badge variant={statusMeta.variant}>{statusMeta.label}</Badge>
@@ -1239,15 +1666,15 @@ export default function InvoicingView(props) {
                               <div className="mt-2 text-xs text-[rgb(var(--muted))]">{candidate.issueSummary}</div>
                             ) : null}
                           </td>
-                          <td className="px-4 py-3 text-right font-medium text-[rgb(var(--foreground))]">{formatUnits(candidate.unitsProduced)}</td>
-                          <td className="px-4 py-3 text-right font-medium text-[rgb(var(--foreground))]">
+                          <td className="px-4 py-3 text-right font-medium tabular-nums text-[rgb(var(--foreground))]">{formatUnits(candidate.unitsProduced)}</td>
+                          <td className="px-4 py-3 text-right font-medium tabular-nums text-[rgb(var(--foreground))]">
                             {candidate.pricedUnits > 0 ? formatMoney(candidate.revenuePerUnitAvg) : "--"}
                           </td>
-                          <td className="px-4 py-3 text-right font-medium text-[rgb(var(--foreground))]">{candidate.pricedUnits > 0 ? formatMoney(candidate.estimatedRevenue) : "--"}</td>
+                          <td className="px-4 py-3 text-right font-medium tabular-nums text-[rgb(var(--foreground))]">{candidate.pricedUnits > 0 ? formatMoney(candidate.estimatedRevenue) : "--"}</td>
                           <td className="px-4 py-3 text-[rgb(var(--muted))]">{candidate.unitOfMeasure}</td>
-                          <td className="px-4 py-3 text-[rgb(var(--foreground))]">{candidate.workOrderReference}</td>
-                          <td className="px-4 py-3 text-[rgb(var(--foreground))]">{candidate.purchaseOrderReference}</td>
-                          <td className="px-4 py-3 text-right text-[rgb(var(--muted))]">{candidate.jobCount.toLocaleString()}</td>
+                          <td className="px-4 py-3 font-mono text-xs text-[rgb(var(--foreground))]">{candidate.workOrderReference}</td>
+                          <td className="px-4 py-3 font-mono text-xs text-[rgb(var(--foreground))]">{candidate.purchaseOrderReference}</td>
+                          <td className="px-4 py-3 text-right tabular-nums text-[rgb(var(--muted))]">{candidate.jobCount.toLocaleString()}</td>
                           <td className="px-4 py-3 text-[rgb(var(--muted))]">
                             {formatDateLabel(candidate.firstProducedDate)} to {formatDateLabel(candidate.lastProducedDate)}
                           </td>
@@ -1256,7 +1683,9 @@ export default function InvoicingView(props) {
                     }) : (
                       <tr>
                         <td colSpan={10} className="px-4 py-6 text-center text-sm text-[rgb(var(--muted))]">
-                          No invoice candidates match the current filters.
+                          {statusScopedInvoiceCandidates.length
+                            ? "No invoice candidates match the current table controls."
+                            : "No invoice candidates match the current filters."}
                         </td>
                       </tr>
                     )}
