@@ -15,6 +15,7 @@ const PROXY_REPORT_TYPES = {
   project_status: "workorders",
   bom: "bom",
   item_master: "itemmaster",
+  receive_order: "receiveorders",
   production: "production",
   labor: "labor",
 };

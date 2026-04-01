@@ -128,6 +128,28 @@ export function buildProductionFilters(options) {
   ];
 }
 
+export function buildReceiveOrderFilters(options) {
+  var filters = [
+    {
+      column: "received",
+      operator: "=",
+      threshold: "No"
+    }
+  ];
+  var explicitStartDate = sanitizeIsoDate(options && options.startDate);
+  var explicitEndDate = sanitizeIsoDate(options && options.endDate);
+  if (explicitStartDate && explicitEndDate && explicitEndDate >= explicitStartDate) {
+    var explicitEndExclusive = shiftIsoDateKey(explicitEndDate, 1) || explicitEndDate;
+    filters.push({
+      column: "expected_delivery_at",
+      operator: "between",
+      from_threshold: formatNulogyBoundaryDateTime(explicitStartDate),
+      to_threshold: formatNulogyBoundaryDateTime(explicitEndExclusive)
+    });
+  }
+  return filters;
+}
+
 // Column codes verified against actual REV Copack Nulogy instance
 // CRITICAL: item_code is a FIXED FIELD on inventory_snapshot — always auto-included
 // Do NOT pass it in the columns array or the API will reject the request
@@ -234,6 +256,21 @@ const REPORT_CONFIGS = {
       ["finished_good_code", "subcomponent_code", "subcomponent_unit_quantity"]
     ]
   },
+  receiveorders: {
+    report: "receive_order",
+    requiredColumns: ["receive_order_code", "item_code", "expected_unit_quantity"],
+    columnSets: [
+      ["receive_order_code", "item_code", "item_description", "expected_unit_quantity", "unit_of_measure",
+       "expected_delivery_at", "reference", "vendor_name", "received", "status", "project_code", "ro_date_at"],
+      ["receive_order_code", "item_code", "expected_unit_quantity", "unit_of_measure",
+       "expected_delivery_at", "reference", "vendor_name", "received", "status", "ro_date_at"],
+      ["receive_order_code", "item_code", "expected_unit_quantity", "unit_of_measure",
+       "expected_delivery_at", "received", "status"],
+      ["receive_order_code", "item_code", "expected_unit_quantity", "expected_delivery_at"],
+      ["receive_order_code", "item_code", "expected_unit_quantity"]
+    ],
+    filters: buildReceiveOrderFilters
+  },
   production: {
     report: "production",
     requiredColumns: ["produced_at", "job_id", "units_produced"],
@@ -282,7 +319,7 @@ export async function createReportTask(options) {
   if (!config) {
     return {
       statusCode: 400,
-      body: { error: `Invalid report type: ${reportType}. Use: inventory, workorders, itemmaster, bom, production, or labor` }
+      body: { error: `Invalid report type: ${reportType}. Use: inventory, workorders, itemmaster, bom, receiveorders, production, or labor` }
     };
   }
 

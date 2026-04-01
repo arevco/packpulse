@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { safeNum, normalizeStr, autoMapColumns, INV_PAT, BOM_PAT, WO_PAT, PO_PAT } from "../utils";
 import { parseCsvText, readFileAsText, readWorkbook } from "../utils/fileParsers";
+import { normalizeInboundRows } from "../lib/inboundData";
 
 const STORAGE_KEYS = {
   inventory: "inv-data",
@@ -704,7 +705,7 @@ export function useDataSources() {
         d.forEach(function(r) { r.__edrTab = sn; });
         rows.push.apply(rows, d);
       });
-      return rows;
+      return normalizeInboundRows(rows, "legacy_edr_workbook");
     });
   }, []);
 
@@ -737,7 +738,7 @@ export function useDataSources() {
       if (type==="inv") {setInventory(d);setInvFileName(file.name);setInvTimestamp(ts);setInventoryDetailData([]);setInventoryDetailTimestamp(ts);}
       else if (type==="bom") {setBoms(d);setBomFileName(file.name);setBomTimestamp(ts);}
       else if (type==="wo") {setWorkOrders(d);setWoFileName(file.name);setWoTimestamp(ts);}
-      else if (type==="edr") {setEdrData(d);setEdrFileName(file.name);setEdrTimestamp(ts);}
+      else if (type==="edr") {setEdrData(normalizeInboundRows(d, file.name));setEdrFileName(file.name);setEdrTimestamp(ts);}
     }
   }, [parseXlsxFile, parseEdrWorkbook]);
 
@@ -813,7 +814,7 @@ export function useDataSources() {
     sharedSnapshotWrite,
     analyzing, setAnalyzing,
     invRefreshRef, bomRefreshRef, woRefreshRef, edrRefreshRef, dockRefreshRef,
-    parseXlsxFile, parseEdrWorkbook, handleRefreshFile,
+    parseXlsxFile, parseEdrWorkbook, handleRefreshFile, normalizeInboundRows,
     invHeaders, bomHeaders, woHeaders,
     allUploaded, requiredMappingsMet,
   };

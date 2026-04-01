@@ -14,11 +14,12 @@ const REPORT_TYPES = [
   { key: "workorders", label: "Work Orders", required: true },
   { key: "itemmaster", label: "Item Master", required: false },
   { key: "bom", label: "Bill of Materials", required: false },
+  { key: "receiveorders", label: "Receive Orders", required: false },
   { key: "production", label: "Production", required: false },
   { key: "labor", label: "Labor", required: false }
 ];
 const CORE_REPORT_TYPES = ["inventory", "workorders", "production"];
-const OPTIONAL_DEFERRED_TYPES = ["itemmaster", "bom", "labor"];
+const OPTIONAL_DEFERRED_TYPES = ["itemmaster", "bom", "receiveorders", "labor"];
 
 const POLL_INTERVAL = 4000; // 4 seconds between polls
 const MAX_POLLS = 60; // max ~4 minutes of polling
@@ -38,12 +39,13 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
     workorders: { status: IDLE, progress: "", error: null, rowCount: 0 },
     itemmaster: { status: IDLE, progress: "", error: null, rowCount: 0 },
     bom: { status: IDLE, progress: "", error: null, rowCount: 0 },
+    receiveorders: { status: IDLE, progress: "", error: null, rowCount: 0 },
     production: { status: IDLE, progress: "", error: null, rowCount: 0 },
     labor: { status: IDLE, progress: "", error: null, rowCount: 0 }
   });
   const [syncTypes, setSyncTypes] = useState(Array.isArray(defaultSyncTypes) && defaultSyncTypes.length
     ? defaultSyncTypes.slice()
-    : ["inventory", "workorders", "itemmaster", "bom", "production", "labor"]);
+    : ["inventory", "workorders", "itemmaster", "bom", "receiveorders", "production", "labor"]);
   const abortRef = useRef(false);
   const autoStartedRef = useRef(false);
 
@@ -366,7 +368,7 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
                 ? "Connected — pull live data from Nulogy"
                 : connectionStatus?.configured
                 ? "Credentials set but not connected"
-                : "Pull inventory, WOs, item master, BOMs, production, and labor from Nulogy"}
+                : "Pull inventory, WOs, item master, BOMs, receive orders, production, and labor from Nulogy"}
             </div>
           </div>
           <span aria-hidden="true" style={{

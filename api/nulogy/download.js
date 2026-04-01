@@ -205,6 +205,44 @@ const COLUMN_MAPS = {
     "release_date": "Release Date",
     "Release Date": "Release Date"
   },
+  receiveorders: {
+    "receive_order_code": "Receive Order Code",
+    "Receive Order code": "Receive Order Code",
+    "Receive Order Code": "Receive Order Code",
+    "receive_order_id": "Receive Order",
+    "Receive Order": "Receive Order",
+    "item_code": "Item Code",
+    "Item code": "Item Code",
+    "Item Code": "Item Code",
+    "item_description": "Item Description",
+    "Item description": "Item Description",
+    "Item Description": "Item Description",
+    "expected_unit_quantity": "Quantity",
+    "Expected unit quantity": "Quantity",
+    "actual_unit_quantity": "Actual Quantity",
+    "Actual unit quantity": "Actual Quantity",
+    "unit_of_measure": "Unit Of Measure",
+    "Unit of measure": "Unit Of Measure",
+    "Unit Of Measure": "Unit Of Measure",
+    "expected_delivery_at": "Expected delivery date",
+    "Expected delivery date": "Expected delivery date",
+    "expected_ship_at": "Expected ship date",
+    "Expected ship date": "Expected ship date",
+    "actual_ship_at": "Actual ship date",
+    "Actual ship date": "Actual ship date",
+    "reference": "Reference",
+    "Reference": "Reference",
+    "vendor_name": "Vendor Name",
+    "Vendor name": "Vendor Name",
+    "received": "Received",
+    "Received": "Received",
+    "status": "Status",
+    "Status": "Status",
+    "project_code": "Work Order Code",
+    "Project Code": "Work Order Code",
+    "ro_date_at": "RO Date",
+    "RO Date": "RO Date"
+  },
   production: {
     "produced_at": "Produced At",
     "Produced At": "Produced At",
@@ -459,7 +497,7 @@ export async function fetchAndTransformReport(downloadUrl, reportType, rawMode) 
     return {
       ok: false,
       statusCode: 400,
-      body: { error: "Missing or invalid type parameter. Use: inventory, workorders, itemmaster, bom, production, or labor" }
+      body: { error: "Missing or invalid type parameter. Use: inventory, workorders, itemmaster, bom, receiveorders, production, or labor" }
     };
   }
   try {
