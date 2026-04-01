@@ -1,4 +1,5 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTheme } from "../theme";
 import { useStyles } from "../hooks/useStyles";
 import { fmtDate, triggerDownload, normalizeStr, formatDescriptionForDisplay, detectPackType, safeNum } from "../utils";
@@ -67,6 +68,32 @@ function isWithinDueDateRange(value, start, end) {
   return true;
 }
 
+var WORK_ORDER_VIRTUAL_THRESHOLD = 80;
+var WORK_ORDER_VIRTUAL_MAX_HEIGHT = "min(72vh, 960px)";
+var WORK_ORDER_GRID_TEMPLATE = "92px 120px 72px 92px 220px 140px 120px 96px 96px 96px 100px 88px 88px 88px 88px 84px 88px 88px 88px";
+var WORK_ORDER_TABLE_MIN_WIDTH = "1944px";
+var WORK_ORDER_COLUMNS = [
+  { field: "woNum", label: "WO#" },
+  { field: "product", label: "Product" },
+  { field: "batchCount", label: "Batch", title: "Open work orders sharing the same item" },
+  { field: "skuType", label: "SKU Type" },
+  { field: "desc", label: "Product Description" },
+  { field: "customer", label: "Customer" },
+  { field: "status", label: "WO Status" },
+  { field: "dueDate", label: "Due" },
+  { field: "qty", label: "Order Qty" },
+  { field: "produced", label: "Produced" },
+  { field: "remaining", label: "Remaining" },
+  { field: "complete", label: "Complete" },
+  { field: "readiness", label: "Ready" },
+  { field: "maxRunnable", label: "Make", title: "Capacity if this work order runs in isolation" },
+  { field: "committedCanMake", label: "Net", title: "Capacity after shared-material commitments across active work orders" },
+  { field: "commitmentGap", label: "Gap", title: "Difference between isolated make and commitment-aware net capacity" },
+  { field: "estHours", label: "Est Hrs" },
+  { field: "dispatchRank", label: "Run Next", title: "Run Next rank from dispatch scoring" },
+  { field: "dispatchScore", label: "Score", title: "Run Next weighted score (higher = stronger candidate)" }
+];
+
 export default function WorkOrdersView({ analysis, woStatuses, woCustomers, recommendations, dispatchQueue, inboundCoverage, initialFilters, onPermalinkChange }) {
   const { C, sans, mono } = useTheme();
   const { thC, tdN, tdM, thDS, tdDN, tdDM, truncate } = useStyles();
@@ -87,6 +114,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
   const [sortField, setSortField] = useState(String(initial.sortField || "readiness"));
   const [sortDir, setSortDir] = useState(String(initial.sortDir || "desc"));
   const [expandedWOs, setExpandedWOs] = useState({});
+  const workOrdersScrollRef = useRef(null);
 
   var runStatusMeta = function(s) {
     if (s === "ready") return { label:"RDY", variant:"success" };
@@ -183,6 +211,18 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
 
   var handleSort = f => { if (sortField === f) setSortDir(d => d==="asc"?"desc":"asc"); else { setSortField(f); setSortDir("desc"); } };
   var woCommitKey = function(wo) { return [wo.woNum || "", wo.productSkuRaw || "", wo.dueDate || ""].join("|"); };
+  var getWorkOrderRowKey = function(wo, idx) {
+    var key = woCommitKey(wo);
+    return key || [wo && wo.woNum ? wo.woNum : "", idx].join("|");
+  };
+  var toggleExpandedWorkOrder = function(rowKey) {
+    setExpandedWOs(function(prev) {
+      var next = Object.assign({}, prev);
+      if (next[rowKey]) delete next[rowKey];
+      else next[rowKey] = true;
+      return next;
+    });
+  };
 
   var statusLooksClosed = function(status) {
     var s = normalizeStr(status || "");
@@ -584,6 +624,27 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     });
     return r;
   }, [pageScopeResults, sortField, sortDir, commitmentMap, runNextMetaMap, batchOpportunityMap]);
+  var enableVirtualRows = filteredResults.length >= WORK_ORDER_VIRTUAL_THRESHOLD;
+  var workOrderRowVirtualizer = useVirtualizer({
+    count: enableVirtualRows ? filteredResults.length : 0,
+    getScrollElement: function() {
+      return workOrdersScrollRef.current;
+    },
+    estimateSize: function(index) {
+      var row = filteredResults[index];
+      var rowKey = getWorkOrderRowKey(row, index);
+      return expandedWOs[rowKey] ? 360 : 52;
+    },
+    overscan: 8,
+    getItemKey: function(index) {
+      return getWorkOrderRowKey(filteredResults[index], index);
+    }
+  });
+
+  useEffect(function() {
+    if (!enableVirtualRows) return;
+    workOrderRowVirtualizer.measure();
+  }, [enableVirtualRows, expandedWOs, filteredResults.length, workOrderRowVirtualizer]);
 
   var commitmentSummary = useMemo(function() {
     if (!analysis) return null;
@@ -1046,186 +1107,246 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     );
   };
 
+  var renderSortLabel = function(column) {
+    var label = column.title ? <span title={column.title}>{column.label}</span> : column.label;
+    return (
+      <SortHeaderButton onClick={function() { handleSort(column.field); }} className="text-left">
+        {label}{sortField===column.field ? (sortDir==="asc" ? " \u2191" : " \u2193") : ""}
+      </SortHeaderButton>
+    );
+  };
+
   var SortTh = function(props) {
     return (
-      <th style={Object.assign({}, thC(sortField===props.field), props.style||{})}>
-        <SortHeaderButton onClick={() => handleSort(props.field)} className={props.alignRight ? "text-right" : "text-left"}>
-          {props.children}{sortField===props.field ? (sortDir==="asc" ? " \u2191" : " \u2193") : ""}
-        </SortHeaderButton>
+      <th style={Object.assign({}, thC(sortField===props.column.field), props.style||{})}>
+        {renderSortLabel(props.column)}
       </th>
     );
   };
 
-  var renderWORows = () => {
-    if (filteredResults.length === 0) return <tr><td colSpan={19} style={{ padding:36, textAlign:"center", color:C.dim, fontSize:14 }}>No work orders match filters.</td></tr>;
+  var renderWOExpandedDetails = function(wo, commitment, batchMeta, runMeta) {
+    var details = [];
+    if (runMeta) details.push(
+      <div key="dispatch" style={{ fontSize:13, color:C.dim, marginBottom:8 }}>
+        <span style={{ fontWeight:700, color:C.accent }}>Run Next #{runMeta.rank}</span>{" \u2022 "}
+        <span style={{ fontFamily:mono, color:C.bright }}>Score {runMeta.score}</span>{" \u2022 "}
+        <span style={{ color:C.bright }}>{runMeta.action || "Run Next"}</span>
+        {runMeta.why ? <span>{" \u2022 " + runMeta.why.replace(/^WO\s+\S+\s+\u2022\s*/i, "")}</span> : null}
+      </div>
+    );
+    if (batchMeta) details.push(
+      <div key="batch" style={{ fontSize:13, color:C.dim, marginBottom:8 }}>
+        <span style={{ fontWeight:700, color:C.accent }}>Batch opportunity x{batchMeta.batchCount}</span>
+        {" \u2022 "}Same item queued on <span style={{ color:C.bright }}>{batchMeta.woNums.join(", ")}</span>
+        {" \u2022 "}Remaining <span style={{ color:C.bright, fontFamily:mono }}>{fmtNum(batchMeta.totalRemainingUnits)}</span>
+        {" \u2022 "}Due window <span style={{ color:C.bright, fontFamily:mono }}>{fmtDate(batchMeta.dueStart)}</span> to <span style={{ color:C.bright, fontFamily:mono }}>{fmtDate(batchMeta.dueEnd)}</span>
+      </div>
+    );
+    if (wo.reference1) details.push(<div key="ref" style={{ fontSize:13, color:C.text, marginBottom:8 }}><span style={{ fontSize:12, fontWeight:600, color:C.dim, letterSpacing:0.1, marginRight:6 }}>Notes</span>{wo.reference1}</div>);
+    if (wo.plannedStart || wo.plannedEnd) details.push(
+      <div key="sched" style={{ fontSize:13, color:C.dim, marginBottom:8, display:"flex", gap:16, flexWrap:"wrap" }}>
+        <span>Start: <span style={{ color:C.bright, fontFamily:mono }}>{fmtDate(wo.plannedStart)}</span></span>
+        <span>End: <span style={{ color:C.bright, fontFamily:mono }}>{fmtDate(wo.plannedEnd)}</span></span>
+      </div>
+    );
+    if (wo.unitsPerHour > 0 || wo.standardPeople > 0) details.push(<div key="ops" style={{ fontSize:13, color:C.dim, marginBottom:8, display:"flex", gap:16 }}>
+      {wo.unitsPerHour > 0 && <span><span style={{ fontWeight:600, color:C.bright }}>{wo.unitsPerHour}</span> units/hr</span>}
+      {wo.standardPeople > 0 && <span><span style={{ fontWeight:600, color:C.bright }}>{wo.standardPeople}</span> crew</span>}
+      {wo.prodPct > 0 && <span><span style={{ fontWeight:600, color:wo.prodPct>=100?C.ok:C.accent }}>{wo.prodPct}%</span> complete</span>}
+    </div>);
+    if (wo.components.length > 0) details.push(
+      <div key="bom">
+        <div style={{ fontSize:12, fontWeight:600, color:C.accent, marginBottom:6, marginTop:4, letterSpacing:0.1 }}>BOM - {wo.components.length} components</div>
+        <table style={{ width:"100%", borderCollapse:"collapse" }}>
+          <thead><tr>
+            {["Component","Description","Qty/Unit","Needed","On Hand","Short","Fill %"].map(function(h) { return <th key={h} style={thDS}>{h}</th>; })}
+          </tr></thead>
+          <tbody>
+            {wo.components.slice().sort(function(a, b) {
+              return String(a.sku || "").localeCompare(String(b.sku || ""), undefined, { numeric:true, sensitivity:"base" });
+            }).map(function(comp, ci) {
+              var rows = [];
+              var compPressure = commitment.componentPressure ? commitment.componentPressure[normalizeStr(comp.sku || "")] : null;
+              var hasCompPressure = !!(compPressure && compPressure.usedByWOs > 1);
+              var isNetLimiter = !!(hasCompPressure && compPressure.turnMakeUnits === commitment.committedCanMake && commitment.commitmentGap > 0);
+              rows.push(
+                <tr key={"c"+ci} style={{ borderBottom:comp.hasSubs?"none":"1px solid "+C.border }}>
+                  <td style={Object.assign({}, tdDM, { color:C.bright })}>
+                    {comp.sku}
+                    {comp.hasSubs && <span style={{ fontSize:13, color:C.accent, marginLeft:3 }}>+alt</span>}
+                    {(sharedComponentUsage[normalizeStr(comp.sku || "")] || 0) > 1 && (
+                      <Badge title={"Shared component: used in " + sharedComponentUsage[normalizeStr(comp.sku || "")] + " active work orders"} variant="danger" className="ml-1.5 px-1.5 py-0 text-[10px]">
+                        Shared
+                      </Badge>
+                    )}
+                    {hasCompPressure && (
+                      <div style={{ marginTop:4, fontSize:11, color:C.dim }}>
+                        Shared by <span style={{ color:C.bright, fontWeight:700 }}>{compPressure.usedByWOs}</span> WOs
+                        {" \u2022 "}Allocated before this WO: <span style={{ color:C.bright, fontFamily:mono }}>{fmtQty(compPressure.consumedBefore)}</span>
+                        {" \u2022 "}Available now: <span style={{ color:C.bright, fontFamily:mono }}>{fmtQty(compPressure.availableAtTurn)}</span>
+                        {" \u2022 "}Supports up to <span style={{ color:C.bright, fontFamily:mono }}>{fmtQty(compPressure.turnMakeUnits)}</span> WO units
+                        {isNetLimiter && (
+                          <Badge variant="danger" className="ml-1.5 px-1.5 py-0 text-[10px]">Net limiter</Badge>
+                        )}
+                      </div>
+                    )}
+                  </td>
+                  <td style={Object.assign({}, tdDN, { color:C.dim }, truncate(150))}>{formatDescriptionForDisplay(comp.desc) || "--"}</td>
+                  <td style={tdDM}>{comp.qtyPer}</td>
+                  <td style={Object.assign({}, tdDM, { color:C.bright })}>{comp.needed.toLocaleString()}</td>
+                  <td style={Object.assign({}, tdDM, { fontWeight:600, color:comp.onHand>=comp.needed?C.ok:C.bad })}>{comp.onHand.toLocaleString()}</td>
+                  <td style={Object.assign({}, tdDM, { fontWeight:600, color:comp.short>0?C.bad:C.dim })}>{comp.short > 0 ? comp.short.toLocaleString() : "--"}</td>
+                  <td style={Object.assign({}, tdDM, { fontWeight:500, color:comp.fillRate>=100?C.ok:comp.fillRate>=70?C.warn:C.bad })}>{Math.round(Math.min(comp.fillRate, 100))+"%"}</td>
+                </tr>
+              );
+              if (comp.hasSubs && comp.optionDetails) {
+                rows.push(
+                  <tr key={"s"+ci}><td colSpan={7} style={{ padding:"0 8px 6px 20px", borderBottom:"1px solid "+C.border }}>
+                    <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+                      {comp.optionDetails.map(function(opt, oi) { return <span key={oi} style={{ fontSize:12, fontFamily:mono, color:C.dim }}>
+                        <span style={{ color:opt.isSub?C.accent:C.ok, fontWeight:600, marginRight:2 }}>{opt.isSub ? "ALT" : "PRI"}</span>{opt.sku} = {opt.onHand.toLocaleString()}
+                      </span>; })}
+                    </div>
+                  </td></tr>
+                );
+              }
+              return rows;
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+    return details;
+  };
+
+  var buildWorkOrderViewModel = function(wo, idx) {
+    var rowKey = getWorkOrderRowKey(wo, idx);
+    var isExpanded = !!expandedWOs[rowKey];
+    var commitment = commitmentMap[woCommitKey(wo)] || { committedCanMake:0, commitmentGap:0, sharedConstraint:false };
+    var batchMeta = batchOpportunityMap[woCommitKey(wo)] || null;
+    var runMeta = runNextMetaMap[String(wo.woNum || "")] || null;
+    var rs = runStatusMeta(wo.runStatus);
+    var skuType = detectPackType(wo.productDesc || wo.productSkuRaw || "", wo.productSkuRaw || wo.productSku || "");
+    return {
+      rowKey: rowKey,
+      isExpanded: isExpanded,
+      detailContent: isExpanded ? renderWOExpandedDetails(wo, commitment, batchMeta, runMeta) : null,
+      summaryCells: [
+        { key:"woNum", style:Object.assign({}, tdM, { fontWeight:600, color:C.bright }), content:wo.woNum },
+        { key:"product", style:tdM, content:wo.productSkuRaw },
+        { key:"batchCount", style:Object.assign({}, tdN, { whiteSpace:"nowrap" }), content:batchMeta ? (
+          <Badge
+            variant="info"
+            title={"Batch opportunity across " + batchMeta.batchCount + " open work orders for item " + (wo.productSkuRaw || wo.productSku || "--") + " \u2022 Remaining " + fmtNum(batchMeta.totalRemainingUnits) + " \u2022 WO order: " + batchMeta.woNums.join(", ")}
+          >
+            {"x" + batchMeta.batchCount}
+          </Badge>
+        ) : <span style={{ color:C.dim }}>--</span> },
+        { key:"skuType", style:Object.assign({}, tdN, { whiteSpace:"nowrap" }), content:<Badge variant="secondary">{skuType}</Badge> },
+        { key:"desc", style:Object.assign({}, tdN, { color:C.dim }, truncate(220)), content:formatDescriptionForDisplay(wo.productDesc) || "--" },
+        { key:"customer", style:Object.assign({}, tdN, { color:C.dim }, truncate(140)), content:wo.customer || "--" },
+        { key:"status", style:Object.assign({}, tdN, { whiteSpace:"nowrap" }), content:<><Badge title={wo.runStatus || ""} variant={rs.variant} className="mr-1 min-w-[34px] justify-center px-1.5 py-0.5 text-[11px] font-bold">{rs.label}</Badge><Badge title={wo.status || ""} variant="secondary" className="min-w-[34px] justify-center px-1.5 py-0.5 text-[11px] font-bold">{shortWoStatus(wo.status)}</Badge></> },
+        { key:"dueDate", style:Object.assign({}, tdM, { color:C.text }), content:fmtDate(wo.dueDate) },
+        { key:"qty", style:Object.assign({}, tdM, { color:C.bright }), content:wo.qtyToProduce.toLocaleString() },
+        { key:"produced", style:Object.assign({}, tdM, { color:wo.unitsProduced>0?C.ok:C.dim }), content:wo.unitsProduced>0?wo.unitsProduced.toLocaleString():"--" },
+        { key:"remaining", style:Object.assign({}, tdM, { color:C.bright }), content:wo.unitsRemaining.toLocaleString() },
+        { key:"complete", style:Object.assign({}, tdM, { fontWeight:600, color:wo.prodPct>=100?C.ok:wo.prodPct>=50?C.warn:wo.prodPct>0?C.accent:C.dim }), content:wo.prodPct > 0 ? wo.prodPct+"%" : "--" },
+        { key:"readiness", style:Object.assign({}, tdM, { fontWeight:600, color:wo.readiness>=100?C.ok:wo.readiness>=70?C.warn:C.bad }), content:wo.readiness < 0 ? <span style={{color:C.dim}}>--</span> : Math.round(wo.readiness)+"%" },
+        { key:"maxRunnable", style:Object.assign({}, tdM, { fontWeight:600, color:wo.runStatus==="ready"?C.ok:wo.runStatus==="nobom"?C.dim:wo.maxRunnable>0?C.warn:C.bad }), content:wo.runStatus==="nobom" ? "--" : wo.maxRunnable.toLocaleString() },
+        { key:"committedCanMake", style:Object.assign({}, tdM, { fontWeight:600, color:commitment.committedCanMake>0?C.accent:C.dim }), content:wo.runStatus==="nobom" ? "--" : commitment.committedCanMake.toLocaleString() },
+        { key:"commitmentGap", style:Object.assign({}, tdN, { whiteSpace:"nowrap" }), content:(commitment.commitmentGap > 0) ? (
+          <Badge title={"Shared material demand across active work orders. Order: earliest due date, then WO #. Make: " + wo.maxRunnable.toLocaleString() + " | Net: " + commitment.committedCanMake.toLocaleString() + " | Gap: " + commitment.commitmentGap.toLocaleString()} variant="danger">Shared</Badge>
+        ) : <span style={{ color:C.dim }}>--</span> },
+        { key:"estHours", style:Object.assign({}, tdM, { color:wo.estHours>0?C.bright:C.dim }), content:wo.estHours > 0 ? wo.estHours+"h" : "--" },
+        { key:"dispatchRank", style:Object.assign({}, tdN, { color:runMeta ? C.bright : C.dim, whiteSpace:"nowrap" }), content:runMeta ? <span title={(runMeta.action || "Run Next") + (runMeta.why ? " • " + runMeta.why : "")} style={{ color:C.accent, fontWeight:700 }}>#{runMeta.rank}</span> : "--" },
+        { key:"dispatchScore", style:Object.assign({}, tdM, { color:runMeta ? C.bright : C.dim, fontFamily:mono, fontWeight:runMeta ? 700 : 500 }), content:runMeta ? runMeta.score : "--" }
+      ]
+    };
+  };
+
+  var renderWOTableRows = function() {
+    if (filteredResults.length === 0) return <tr><td colSpan={WORK_ORDER_COLUMNS.length} style={{ padding:36, textAlign:"center", color:C.dim, fontSize:14 }}>No work orders match filters.</td></tr>;
     var out = [];
-    filteredResults.forEach((wo, idx) => {
-      var rowKey = wo.woNum + "|" + idx;
-      var isX = !!expandedWOs[rowKey];
-      var commitment = commitmentMap[woCommitKey(wo)] || { committedCanMake:0, commitmentGap:0, sharedConstraint:false };
-      var batchMeta = batchOpportunityMap[woCommitKey(wo)] || null;
-      var runMeta = runNextMetaMap[String(wo.woNum || "")] || null;
-      var rs = runStatusMeta(wo.runStatus);
-      var skuType = detectPackType(wo.productDesc || wo.productSkuRaw || "", wo.productSkuRaw || wo.productSku || "");
+    filteredResults.forEach(function(wo, idx) {
+      var rowModel = buildWorkOrderViewModel(wo, idx);
       out.push(
-        <tr key={"r"+idx} onClick={function() {
-          setExpandedWOs(function(prev) {
-            var next = Object.assign({}, prev);
-            if (next[rowKey]) delete next[rowKey];
-            else next[rowKey] = true;
-            return next;
-          });
-        }} style={{ cursor:"pointer", borderBottom:"1px solid "+C.border, background:isX?C.raised:"transparent" }}
-          onMouseEnter={e => { if (!isX) e.currentTarget.style.background = C.hover; }} onMouseLeave={e => { if (!isX) e.currentTarget.style.background = isX ? C.raised : "transparent"; }}>
-          <td style={Object.assign({}, tdM, { fontWeight:600, color:C.bright })}>{wo.woNum}</td>
-          <td style={tdM}>{wo.productSkuRaw}</td>
-          <td style={Object.assign({}, tdN, { whiteSpace:"nowrap" })}>
-            {batchMeta ? (
-              <Badge
-                variant="info"
-                title={"Batch opportunity across " + batchMeta.batchCount + " open work orders for item " + (wo.productSkuRaw || wo.productSku || "--") + " \u2022 Remaining " + fmtNum(batchMeta.totalRemainingUnits) + " \u2022 WO order: " + batchMeta.woNums.join(", ")}
-              >
-                {"x" + batchMeta.batchCount}
-              </Badge>
-            ) : (
-              <span style={{ color:C.dim }}>--</span>
-            )}
-          </td>
-          <td style={Object.assign({}, tdN, { whiteSpace:"nowrap" })}><Badge variant="secondary">{skuType}</Badge></td>
-          <td style={Object.assign({}, tdN, { color:C.dim }, truncate(220))}>{formatDescriptionForDisplay(wo.productDesc) || "--"}</td>
-          <td style={Object.assign({}, tdN, { color:C.dim }, truncate(140))}>{wo.customer || "--"}</td>
-          <td style={Object.assign({}, tdN, { whiteSpace:"nowrap" })}>
-            <Badge title={wo.runStatus || ""} variant={rs.variant} className="mr-1 min-w-[34px] justify-center px-1.5 py-0.5 text-[11px] font-bold">{rs.label}</Badge>
-            <Badge title={wo.status || ""} variant="secondary" className="min-w-[34px] justify-center px-1.5 py-0.5 text-[11px] font-bold">{shortWoStatus(wo.status)}</Badge>
-          </td>
-          <td style={Object.assign({}, tdM, { color:C.text })}>{fmtDate(wo.dueDate)}</td>
-          <td style={Object.assign({}, tdM, { color:C.bright })}>{wo.qtyToProduce.toLocaleString()}</td>
-          <td style={Object.assign({}, tdM, { color:wo.unitsProduced>0?C.ok:C.dim })}>{wo.unitsProduced>0?wo.unitsProduced.toLocaleString():"--"}</td>
-          <td style={Object.assign({}, tdM, { color:C.bright })}>{wo.unitsRemaining.toLocaleString()}</td>
-          <td style={Object.assign({}, tdM, { fontWeight:600, color:wo.prodPct>=100?C.ok:wo.prodPct>=50?C.warn:wo.prodPct>0?C.accent:C.dim })}>{wo.prodPct > 0 ? wo.prodPct+"%" : "--"}</td>
-          <td style={Object.assign({}, tdM, { fontWeight:600, color:wo.readiness>=100?C.ok:wo.readiness>=70?C.warn:C.bad })}>{wo.readiness < 0 ? <span style={{color:C.dim}}>--</span> : Math.round(wo.readiness)+"%"}</td>
-          <td style={Object.assign({}, tdM, { fontWeight:600, color:wo.runStatus==="ready"?C.ok:wo.runStatus==="nobom"?C.dim:wo.maxRunnable>0?C.warn:C.bad })}>{wo.runStatus==="nobom" ? "--" : wo.maxRunnable.toLocaleString()}</td>
-          <td style={Object.assign({}, tdM, { fontWeight:600, color:commitment.committedCanMake>0?C.accent:C.dim })}>
-            {wo.runStatus==="nobom" ? "--" : commitment.committedCanMake.toLocaleString()}
-          </td>
-          <td style={Object.assign({}, tdN, { whiteSpace:"nowrap" })}>
-            {(commitment.commitmentGap > 0) ? (
-              <Badge title={"Shared material demand across active work orders. Order: earliest due date, then WO #. Make: " + wo.maxRunnable.toLocaleString() + " | Net: " + commitment.committedCanMake.toLocaleString() + " | Gap: " + commitment.commitmentGap.toLocaleString()} variant="danger">Shared</Badge>
-            ) : (
-              <span style={{ color:C.dim }}>--</span>
-            )}
-          </td>
-          <td style={Object.assign({}, tdM, { color:wo.estHours>0?C.bright:C.dim })}>{wo.estHours > 0 ? wo.estHours+"h" : "--"}</td>
-          <td style={Object.assign({}, tdN, { color:runMeta ? C.bright : C.dim, whiteSpace:"nowrap" })}>
-            {runMeta ? (
-              <span title={(runMeta.action || "Run Next") + (runMeta.why ? " • " + runMeta.why : "")} style={{ color:C.accent, fontWeight:700 }}>#{runMeta.rank}</span>
-            ) : "--"}
-          </td>
-          <td style={Object.assign({}, tdM, { color:runMeta ? C.bright : C.dim, fontFamily:mono, fontWeight:runMeta ? 700 : 500 })}>
-            {runMeta ? runMeta.score : "--"}
-          </td>
+        <tr
+          key={"r"+rowModel.rowKey}
+          onClick={function() { toggleExpandedWorkOrder(rowModel.rowKey); }}
+          style={{ cursor:"pointer", borderBottom:"1px solid "+C.border, background:rowModel.isExpanded?C.raised:"transparent" }}
+          onMouseEnter={function(e) { if (!rowModel.isExpanded) e.currentTarget.style.background = C.hover; }}
+          onMouseLeave={function(e) { if (!rowModel.isExpanded) e.currentTarget.style.background = "transparent"; }}
+        >
+          {rowModel.summaryCells.map(function(cell) { return <td key={cell.key} style={cell.style}>{cell.content}</td>; })}
         </tr>
       );
-      if (isX) {
-        var details = [];
-        if (runMeta) details.push(
-          <div key="dispatch" style={{ fontSize:13, color:C.dim, marginBottom:8 }}>
-            <span style={{ fontWeight:700, color:C.accent }}>Run Next #{runMeta.rank}</span>{" \u2022 "}
-            <span style={{ fontFamily:mono, color:C.bright }}>Score {runMeta.score}</span>{" \u2022 "}
-            <span style={{ color:C.bright }}>{runMeta.action || "Run Next"}</span>
-            {runMeta.why ? <span>{" \u2022 " + runMeta.why.replace(/^WO\s+\S+\s+\u2022\s*/i, "")}</span> : null}
-          </div>
-        );
-        if (batchMeta) details.push(
-          <div key="batch" style={{ fontSize:13, color:C.dim, marginBottom:8 }}>
-            <span style={{ fontWeight:700, color:C.accent }}>Batch opportunity x{batchMeta.batchCount}</span>
-            {" \u2022 "}Same item queued on <span style={{ color:C.bright }}>{batchMeta.woNums.join(", ")}</span>
-            {" \u2022 "}Remaining <span style={{ color:C.bright, fontFamily:mono }}>{fmtNum(batchMeta.totalRemainingUnits)}</span>
-            {" \u2022 "}Due window <span style={{ color:C.bright, fontFamily:mono }}>{fmtDate(batchMeta.dueStart)}</span> to <span style={{ color:C.bright, fontFamily:mono }}>{fmtDate(batchMeta.dueEnd)}</span>
-          </div>
-        );
-        if (wo.reference1) details.push(<div key="ref" style={{ fontSize:13, color:C.text, marginBottom:8 }}><span style={{ fontSize:12, fontWeight:600, color:C.dim, letterSpacing:0.1, marginRight:6 }}>Notes</span>{wo.reference1}</div>);
-        if (wo.plannedStart || wo.plannedEnd) details.push(
-          <div key="sched" style={{ fontSize:13, color:C.dim, marginBottom:8, display:"flex", gap:16, flexWrap:"wrap" }}>
-            <span>Start: <span style={{ color:C.bright, fontFamily:mono }}>{fmtDate(wo.plannedStart)}</span></span>
-            <span>End: <span style={{ color:C.bright, fontFamily:mono }}>{fmtDate(wo.plannedEnd)}</span></span>
-          </div>
-        );
-        if (wo.unitsPerHour > 0 || wo.standardPeople > 0) details.push(<div key="ops" style={{ fontSize:13, color:C.dim, marginBottom:8, display:"flex", gap:16 }}>
-          {wo.unitsPerHour > 0 && <span><span style={{ fontWeight:600, color:C.bright }}>{wo.unitsPerHour}</span> units/hr</span>}
-          {wo.standardPeople > 0 && <span><span style={{ fontWeight:600, color:C.bright }}>{wo.standardPeople}</span> crew</span>}
-          {wo.prodPct > 0 && <span><span style={{ fontWeight:600, color:wo.prodPct>=100?C.ok:C.accent }}>{wo.prodPct}%</span> complete</span>}
-        </div>);
-        if (wo.components.length > 0) details.push(
-          <div key="bom">
-            <div style={{ fontSize:12, fontWeight:600, color:C.accent, marginBottom:6, marginTop:4, letterSpacing:0.1 }}>BOM - {wo.components.length} components</div>
-            <table style={{ width:"100%", borderCollapse:"collapse" }}>
-              <thead><tr>
-                {["Component","Description","Qty/Unit","Needed","On Hand","Short","Fill %"].map(h => <th key={h} style={thDS}>{h}</th>)}
-              </tr></thead>
-              <tbody>
-                {wo.components.slice().sort(function(a, b) {
-                  return String(a.sku || "").localeCompare(String(b.sku || ""), undefined, { numeric:true, sensitivity:"base" });
-                }).map((comp, ci) => {
-                  var rows = [];
-                  var compPressure = commitment.componentPressure ? commitment.componentPressure[normalizeStr(comp.sku || "")] : null;
-                  var hasCompPressure = !!(compPressure && compPressure.usedByWOs > 1);
-                  var isNetLimiter = !!(hasCompPressure && compPressure.turnMakeUnits === commitment.committedCanMake && commitment.commitmentGap > 0);
-                  rows.push(
-                    <tr key={"c"+ci} style={{ borderBottom:comp.hasSubs?"none":"1px solid "+C.border }}>
-                      <td style={Object.assign({}, tdDM, { color:C.bright })}>
-                        {comp.sku}
-                        {comp.hasSubs && <span style={{ fontSize:13, color:C.accent, marginLeft:3 }}>+alt</span>}
-                        {(sharedComponentUsage[normalizeStr(comp.sku || "")] || 0) > 1 && (
-                          <Badge title={"Shared component: used in " + sharedComponentUsage[normalizeStr(comp.sku || "")] + " active work orders"} variant="danger" className="ml-1.5 px-1.5 py-0 text-[10px]">
-                            Shared
-                          </Badge>
-                        )}
-                        {hasCompPressure && (
-                          <div style={{ marginTop:4, fontSize:11, color:C.dim }}>
-                            Shared by <span style={{ color:C.bright, fontWeight:700 }}>{compPressure.usedByWOs}</span> WOs
-                            {" \u2022 "}Allocated before this WO: <span style={{ color:C.bright, fontFamily:mono }}>{fmtQty(compPressure.consumedBefore)}</span>
-                            {" \u2022 "}Available now: <span style={{ color:C.bright, fontFamily:mono }}>{fmtQty(compPressure.availableAtTurn)}</span>
-                            {" \u2022 "}Supports up to <span style={{ color:C.bright, fontFamily:mono }}>{fmtQty(compPressure.turnMakeUnits)}</span> WO units
-                            {isNetLimiter && (
-                              <Badge variant="danger" className="ml-1.5 px-1.5 py-0 text-[10px]">Net limiter</Badge>
-                            )}
-                          </div>
-                        )}
-                      </td>
-                      <td style={Object.assign({}, tdDN, { color:C.dim }, truncate(150))}>{formatDescriptionForDisplay(comp.desc) || "--"}</td>
-                      <td style={tdDM}>{comp.qtyPer}</td>
-                      <td style={Object.assign({}, tdDM, { color:C.bright })}>{comp.needed.toLocaleString()}</td>
-                      <td style={Object.assign({}, tdDM, { fontWeight:600, color:comp.onHand>=comp.needed?C.ok:C.bad })}>{comp.onHand.toLocaleString()}</td>
-                      <td style={Object.assign({}, tdDM, { fontWeight:600, color:comp.short>0?C.bad:C.dim })}>{comp.short > 0 ? comp.short.toLocaleString() : "--"}</td>
-                      <td style={Object.assign({}, tdDM, { fontWeight:500, color:comp.fillRate>=100?C.ok:comp.fillRate>=70?C.warn:C.bad })}>{Math.round(Math.min(comp.fillRate, 100))+"%"}</td>
-                    </tr>
-                  );
-                  if (comp.hasSubs && comp.optionDetails) {
-                    rows.push(
-                      <tr key={"s"+ci}><td colSpan={7} style={{ padding:"0 8px 6px 20px", borderBottom:"1px solid "+C.border }}>
-                        <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
-                          {comp.optionDetails.map((opt, oi) => <span key={oi} style={{ fontSize:12, fontFamily:mono, color:C.dim }}>
-                            <span style={{ color:opt.isSub?C.accent:C.ok, fontWeight:600, marginRight:2 }}>{opt.isSub ? "ALT" : "PRI"}</span>{opt.sku} = {opt.onHand.toLocaleString()}
-                          </span>)}
-                        </div>
-                      </td></tr>
-                    );
-                  }
-                  return rows;
-                })}
-              </tbody>
-            </table>
-          </div>
-        );
+      if (rowModel.isExpanded) {
         out.push(
-          <tr key={"d"+idx}><td colSpan={19} style={{ padding:"0 12px 14px 36px", background:C.raised }}>
-            {details}
+          <tr key={"d"+rowModel.rowKey}><td colSpan={WORK_ORDER_COLUMNS.length} style={{ padding:"0 12px 14px 36px", background:C.raised }}>
+            {rowModel.detailContent}
           </td></tr>
         );
       }
     });
     return out;
+  };
+
+  var renderVirtualWorkOrders = function() {
+    return (
+      <div style={{ overflowX:"auto" }}>
+        <div style={{ minWidth:WORK_ORDER_TABLE_MIN_WIDTH }}>
+          <div role="table" aria-label="Work Orders detail">
+            <div role="rowgroup">
+              <div role="row" style={{ display:"grid", gridTemplateColumns:WORK_ORDER_GRID_TEMPLATE, background:C.raised, borderBottom:"1px solid "+C.border }}>
+                {WORK_ORDER_COLUMNS.map(function(column) {
+                  return (
+                    <div key={column.field} role="columnheader" style={Object.assign({}, thC(sortField===column.field), { minWidth:0, display:"flex", alignItems:"center" })}>
+                      {renderSortLabel(column)}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <div ref={workOrdersScrollRef} style={{ maxHeight:WORK_ORDER_VIRTUAL_MAX_HEIGHT, overflowY:"auto", position:"relative" }}>
+              <div style={{ height:workOrderRowVirtualizer.getTotalSize(), position:"relative" }}>
+                {workOrderRowVirtualizer.getVirtualItems().map(function(virtualRow) {
+                  var rowModel = buildWorkOrderViewModel(filteredResults[virtualRow.index], virtualRow.index);
+                  return (
+                    <div
+                      key={virtualRow.key}
+                      ref={workOrderRowVirtualizer.measureElement}
+                      data-index={virtualRow.index}
+                      style={{ position:"absolute", top:0, left:0, width:"100%", transform:"translateY(" + virtualRow.start + "px)" }}
+                    >
+                      <div
+                        role="row"
+                        onClick={function() { toggleExpandedWorkOrder(rowModel.rowKey); }}
+                        style={{ cursor:"pointer", display:"grid", gridTemplateColumns:WORK_ORDER_GRID_TEMPLATE, background:rowModel.isExpanded?C.raised:"transparent", borderBottom:"1px solid "+C.border }}
+                        onMouseEnter={function(e) { if (!rowModel.isExpanded) e.currentTarget.style.background = C.hover; }}
+                        onMouseLeave={function(e) { if (!rowModel.isExpanded) e.currentTarget.style.background = "transparent"; }}
+                      >
+                        {rowModel.summaryCells.map(function(cell) {
+                          return (
+                            <div key={cell.key} role="cell" style={Object.assign({}, cell.style, { minWidth:0, display:"flex", alignItems:"center" })}>
+                              {cell.content}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {rowModel.isExpanded ? (
+                        <div style={{ padding:"0 12px 14px 36px", background:C.raised, borderBottom:"1px solid "+C.border }}>
+                          {rowModel.detailContent}
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   var handleOverviewCustomerSelect = function(customerName) {
@@ -1393,32 +1514,20 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       </div>
     )}
     <TableShell>
-      <div style={{ overflowX:"auto" }}>
-        <table style={{ width:"100%", borderCollapse:"collapse" }}>
-          <thead><tr style={{ background:C.raised }}>
-            <SortTh field="woNum">WO#</SortTh>
-            <SortTh field="product">Product</SortTh>
-            <SortTh field="batchCount"><span title="Open work orders sharing the same item">Batch</span></SortTh>
-            <SortTh field="skuType">SKU Type</SortTh>
-            <SortTh field="desc">Product Description</SortTh>
-            <SortTh field="customer">Customer</SortTh>
-            <SortTh field="status">WO Status</SortTh>
-            <SortTh field="dueDate">Due</SortTh>
-            <SortTh field="qty">Order Qty</SortTh>
-            <SortTh field="produced">Produced</SortTh>
-            <SortTh field="remaining">Remaining</SortTh>
-            <SortTh field="complete">Complete</SortTh>
-            <SortTh field="readiness">Ready</SortTh>
-            <SortTh field="maxRunnable"><span title="Capacity if this work order runs in isolation">Make</span></SortTh>
-            <SortTh field="committedCanMake"><span title="Capacity after shared-material commitments across active work orders">Net</span></SortTh>
-            <SortTh field="commitmentGap"><span title="Difference between isolated make and commitment-aware net capacity">Gap</span></SortTh>
-            <SortTh field="estHours">Est Hrs</SortTh>
-            <SortTh field="dispatchRank"><span title="Run Next rank from dispatch scoring">Run Next</span></SortTh>
-            <SortTh field="dispatchScore"><span title="Run Next weighted score (higher = stronger candidate)">Score</span></SortTh>
-          </tr></thead>
-          <tbody>{renderWORows()}</tbody>
-        </table>
-      </div>
+      {enableVirtualRows ? (
+        renderVirtualWorkOrders()
+      ) : (
+        <div style={{ overflowX:"auto" }}>
+          <table style={{ width:"100%", borderCollapse:"collapse" }}>
+            <thead><tr style={{ background:C.raised }}>
+              {WORK_ORDER_COLUMNS.map(function(column) {
+                return <SortTh key={column.field} column={column} />;
+              })}
+            </tr></thead>
+            <tbody>{renderWOTableRows()}</tbody>
+          </table>
+        </div>
+      )}
     </TableShell>
     </div>
   </div>);
