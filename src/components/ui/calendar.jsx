@@ -8,22 +8,19 @@ import { buttonVariants } from "./button";
 function Calendar({ className, classNames, showOutsideDays = true, ...props }) {
   return (
     <DayPicker
+      navLayout="around"
       showOutsideDays={showOutsideDays}
       className={cn("w-fit p-3", className)}
       classNames={{
         months: "flex flex-col sm:flex-row gap-3",
-        month: "space-y-3",
-        month_caption: "relative flex h-8 items-center justify-center px-8 pt-1",
+        month: "relative space-y-3",
+        month_caption: "flex h-9 items-center justify-center px-10",
         caption_label: "text-sm font-medium",
-        nav: "absolute inset-x-0 top-1 flex items-center justify-between",
-        button_previous: cn(
-          buttonVariants({ variant: "outline" }),
-          "h-7 w-7 bg-[rgb(var(--surface))] p-0 opacity-80 hover:opacity-100"
-        ),
-        button_next: cn(
-          buttonVariants({ variant: "outline" }),
-          "h-7 w-7 bg-[rgb(var(--surface))] p-0 opacity-80 hover:opacity-100"
-        ),
+        nav: "flex items-center gap-1",
+        button_previous:
+          "absolute left-0 top-0 inline-flex h-8 w-8 items-center justify-center rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-0 text-[rgb(var(--muted))] opacity-80 transition-colors hover:text-[rgb(var(--foreground))] hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--accent))] focus-visible:ring-offset-1 disabled:pointer-events-none disabled:opacity-50",
+        button_next:
+          "absolute right-0 top-0 inline-flex h-8 w-8 items-center justify-center rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-0 text-[rgb(var(--muted))] opacity-80 transition-colors hover:text-[rgb(var(--foreground))] hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--accent))] focus-visible:ring-offset-1 disabled:pointer-events-none disabled:opacity-50",
         month_grid: "w-full border-collapse",
         weekdays: "flex",
         weekday: "w-9 text-center text-[0.8rem] font-medium text-[rgb(var(--muted))]",
@@ -45,8 +42,9 @@ function Calendar({ className, classNames, showOutsideDays = true, ...props }) {
       }}
       components={{
         Chevron: function Chevron(props) {
-          if (props.orientation === "left") return <ChevronLeft className="h-4 w-4" />;
-          return <ChevronRight className="h-4 w-4" />;
+          var chevronClassName = cn("h-4 w-4 shrink-0", props.className);
+          if (props.orientation === "left") return <ChevronLeft className={chevronClassName} />;
+          return <ChevronRight className={chevronClassName} />;
         },
       }}
       {...props}
