@@ -86,13 +86,14 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
     if (type === "inventory") {
       updateReportState(type, { status: DOWNLOADING, progress: "Pulling compact inventory snapshot...", error: null });
       try {
-        const richRes = await fetch("/api/nulogy/inventory-rich?mode=compact");
+        const richRes = await fetch("/api/nulogy/inventory-rich?mode=compact&includeDetail=1");
         const richBody = await richRes.json();
         if (!richRes.ok) throw new Error((richBody && (richBody.error || richBody.details)) || `HTTP ${richRes.status}`);
 
         console.log("[Nulogy] inventory-rich diagnostics:", richBody && richBody.diagnostics ? richBody.diagnostics : {});
         const compactRowCount = Number(richBody && richBody.rowCount) || 0;
         const sourceRowCount = Number(richBody && richBody.diagnostics && richBody.diagnostics.sourceRowCount) || compactRowCount;
+        const detailData = Array.isArray(richBody && richBody.detailData) ? richBody.detailData : [];
         updateReportState(type, {
           status: DONE,
           progress: sourceRowCount !== compactRowCount
@@ -100,7 +101,12 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
             : `${compactRowCount.toLocaleString()} inventory records`,
           rowCount: sourceRowCount
         });
-        return { type, data: Array.isArray(richBody && richBody.data) ? richBody.data : [], rowCount: sourceRowCount };
+        return {
+          type,
+          data: Array.isArray(richBody && richBody.data) ? richBody.data : [],
+          detailData,
+          rowCount: sourceRowCount
+        };
       } catch (richErr) {
         console.warn("[Nulogy] inventory-rich failed, falling back to standard inventory report:", richErr);
         updateReportState(type, { status: CREATING, progress: "Falling back to standard inventory report...", error: null });

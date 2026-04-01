@@ -794,6 +794,11 @@ function parseUnknownInventoryPayload(text, contentType) {
   };
 }
 
+function isTruthyQueryValue(value) {
+  const raw = String(value == null ? "" : value).trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes";
+}
+
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
@@ -810,12 +815,13 @@ export default async function handler(req, res) {
 
   const auth = Buffer.from(user + ":" + pass).toString("base64");
   const mode = String((req.query && req.query.mode) || "detail").toLowerCase() === "compact" ? "compact" : "detail";
+  const includeDetail = isTruthyQueryValue(req.query && req.query.includeDetail);
 
   try {
     try {
       const reportData = await fetchReportInventoryData();
       const outputRows = mode === "compact" ? compactInventoryRows(reportData.data) : reportData.data;
-      return res.status(200).json({
+      const body = {
         data: outputRows,
         rowCount: outputRows.length,
         columns: outputRows.length ? Object.keys(outputRows[0]) : [],
@@ -842,7 +848,12 @@ export default async function handler(req, res) {
           itemLocatorFormat: "csv",
           itemLocatorError: ""
         }
-      });
+      };
+      if (includeDetail && mode === "compact") {
+        body.detailData = reportData.data;
+        body.detailRowCount = reportData.data.length;
+      }
+      return res.status(200).json(body);
     } catch (reportErr) {
       Sentry.captureException(reportErr);
     }
@@ -868,7 +879,7 @@ export default async function handler(req, res) {
     const mergedRows = mergeInventoryRows(inventorySeed.rows, itemLocatorRows);
     const outputRows = mode === "compact" ? compactInventoryRows(mergedRows) : mergedRows;
 
-    return res.status(200).json({
+    const body = {
       data: outputRows,
       rowCount: outputRows.length,
       columns: outputRows.length ? Object.keys(outputRows[0]) : [],
@@ -895,7 +906,12 @@ export default async function handler(req, res) {
         itemLocatorFormat: itemLocatorFormat,
         itemLocatorError: itemLocatorError
       }
-    });
+    };
+    if (includeDetail && mode === "compact") {
+      body.detailData = mergedRows;
+      body.detailRowCount = mergedRows.length;
+    }
+    return res.status(200).json(body);
   } catch (err) {
     Sentry.captureException(err);
     return res.status(500).json({

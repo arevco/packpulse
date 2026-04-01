@@ -4,6 +4,7 @@ import { parseCsvText, readFileAsText, readWorkbook } from "../utils/fileParsers
 
 const STORAGE_KEYS = {
   inventory: "inv-data",
+  inventoryDetail: "inv-detail-data",
   workOrders: "wo-data",
   itemMaster: "itemmaster-data",
   boms: "bom-data",
@@ -97,6 +98,7 @@ function compactInventoryRowsForApp(rows) {
 
 export function useDataSources() {
   const [inventory, setInventory] = useState(null);
+  const [inventoryDetailData, setInventoryDetailData] = useState(null);
   const [itemMaster, setItemMaster] = useState(null);
   const [boms, setBoms] = useState(null);
   const [workOrders, setWorkOrders] = useState(null);
@@ -111,6 +113,7 @@ export function useDataSources() {
   const [laborFileName, setLaborFileName] = useState("");
   const [evoconFileName, setEvoconFileName] = useState("");
   const [invTimestamp, setInvTimestamp] = useState(null);
+  const [inventoryDetailTimestamp, setInventoryDetailTimestamp] = useState(null);
   const [itemMasterTimestamp, setItemMasterTimestamp] = useState(null);
   const [bomTimestamp, setBomTimestamp] = useState(null);
   const [woTimestamp, setWoTimestamp] = useState(null);
@@ -289,6 +292,7 @@ export function useDataSources() {
 
         var keys = [
           STORAGE_KEYS.inventory,
+          STORAGE_KEYS.inventoryDetail,
           STORAGE_KEYS.workOrders,
           STORAGE_KEYS.production,
           STORAGE_KEYS.labor,
@@ -347,6 +351,8 @@ export function useDataSources() {
           });
         }
 
+        hydrateDataSet(map[STORAGE_KEYS.inventoryDetail], setInventoryDetailData, function() {}, setInventoryDetailTimestamp, "Nulogy Inventory Detail (cached)");
+
         // Shared snapshots may intentionally compact production data for payload size.
         // If local storage still has a fuller production export, prefer that for client-side
         // fallbacks and the next server snapshot repair.
@@ -377,6 +383,10 @@ export function useDataSources() {
   useEffect(() => {
     persistDataSet(STORAGE_KEYS.inventory, inventory, invFileName, invTimestamp);
   }, [inventory, invFileName, invTimestamp, persistDataSet]);
+
+  useEffect(() => {
+    persistDataSet(STORAGE_KEYS.inventoryDetail, inventoryDetailData, "Nulogy Inventory Detail", inventoryDetailTimestamp);
+  }, [inventoryDetailData, inventoryDetailTimestamp, persistDataSet]);
 
   useEffect(() => {
     persistDataSet(STORAGE_KEYS.workOrders, workOrders, woFileName, woTimestamp);
@@ -584,7 +594,7 @@ export function useDataSources() {
           setDockTimestamp(ts);
         } else {
           var d = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval:"" });
-          if (type==="inv") {setInventory(d);setInvFileName(file.name);setInvTimestamp(ts);}
+          if (type==="inv") {setInventory(d);setInvFileName(file.name);setInvTimestamp(ts);setInventoryDetailData([]);setInventoryDetailTimestamp(ts);}
           else if (type==="bom") {setBoms(d);setBomFileName(file.name);setBomTimestamp(ts);}
           else if (type==="wo") {setWorkOrders(d);setWoFileName(file.name);setWoTimestamp(ts);}
         }
@@ -592,7 +602,7 @@ export function useDataSources() {
     } else {
       var text = await readFileAsText(file);
       var d = await parseCsvText(text);
-      if (type==="inv") {setInventory(d);setInvFileName(file.name);setInvTimestamp(ts);}
+      if (type==="inv") {setInventory(d);setInvFileName(file.name);setInvTimestamp(ts);setInventoryDetailData([]);setInventoryDetailTimestamp(ts);}
       else if (type==="bom") {setBoms(d);setBomFileName(file.name);setBomTimestamp(ts);}
       else if (type==="wo") {setWorkOrders(d);setWoFileName(file.name);setWoTimestamp(ts);}
       else if (type==="edr") {setEdrData(d);setEdrFileName(file.name);setEdrTimestamp(ts);}
@@ -629,6 +639,7 @@ export function useDataSources() {
 
   return {
     inventory, setInventory,
+    inventoryDetailData, setInventoryDetailData,
     itemMaster, setItemMaster,
     boms, setBoms,
     workOrders, setWorkOrders,
@@ -643,6 +654,7 @@ export function useDataSources() {
     laborFileName, setLaborFileName,
     evoconFileName, setEvoconFileName,
     invTimestamp, setInvTimestamp,
+    inventoryDetailTimestamp, setInventoryDetailTimestamp,
     itemMasterTimestamp, setItemMasterTimestamp,
     bomTimestamp, setBomTimestamp,
     woTimestamp, setWoTimestamp,

@@ -655,6 +655,8 @@ export default function ProductionReadiness() {
       ds.setInventory(getRows(results.inventory));
       ds.setInvFileName("Nulogy Sync");
       ds.setInvTimestamp(ts);
+      ds.setInventoryDetailData(Array.isArray(results.inventory.detailData) ? results.inventory.detailData : []);
+      ds.setInventoryDetailTimestamp(ts);
     }
     if (results.workorders) {
       ds.setWorkOrders(getRows(results.workorders));
@@ -1056,7 +1058,7 @@ export default function ProductionReadiness() {
         )}
         {(!showAutoBootstrap || showDataSetup) && (<>
         <div className="mb-5 grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-2">
-          <FileUploader label="Inventory" uploaded={!!ds.inventory} fileName={ds.invFileName} onData={(d,n) => {ds.setInventory(d);ds.setInvFileName(n);ds.setInvTimestamp(new Date());}} subtitle="Daily stock levels (.csv)" />
+              <FileUploader label="Inventory" uploaded={!!ds.inventory} fileName={ds.invFileName} onData={(d,n) => { var ts = new Date(); ds.setInventory(d); ds.setInvFileName(n); ds.setInvTimestamp(ts); ds.setInventoryDetailData([]); ds.setInventoryDetailTimestamp(ts); }} subtitle="Daily stock levels (.csv)" />
           <FileUploader label="Work Orders" uploaded={!!ds.workOrders} fileName={ds.woFileName} onData={(d,n) => {ds.setWorkOrders(d);ds.setWoFileName(n);ds.setWoTimestamp(new Date());}} subtitle="Open work orders (.csv)" />
         </div>
         <div className="mb-2">
@@ -1316,6 +1318,8 @@ export default function ProductionReadiness() {
           {activeView === "inventory" && (
             <InventoryView
               inventory={ds.inventory || []}
+              inventoryDetailRows={ds.inventoryDetailData || []}
+              inventoryDetailTimestamp={ds.inventoryDetailTimestamp}
               itemMaster={ds.itemMaster || []}
               invMapping={ds.invMapping || {}}
               inventoryTimestamp={ds.invTimestamp}

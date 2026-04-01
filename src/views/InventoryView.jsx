@@ -184,8 +184,17 @@ function inventoryRowsNeedDetailFetch(rows, fileName) {
   return detailRows < Math.max(10, Math.round(rows.length * 0.15));
 }
 
-export default function InventoryView({ inventory, itemMaster, invMapping, inventoryTimestamp, inventoryFileName }) {
+export default function InventoryView({
+  inventory,
+  inventoryDetailRows,
+  inventoryDetailTimestamp,
+  itemMaster,
+  invMapping,
+  inventoryTimestamp,
+  inventoryFileName
+}) {
   var fallbackRows = Array.isArray(inventory) ? inventory : [];
+  var cachedDetailRows = Array.isArray(inventoryDetailRows) ? inventoryDetailRows : [];
   var itemMasterRows = Array.isArray(itemMaster) ? itemMaster : [];
   var mapping = invMapping || {};
   var detailCacheKey = String(
@@ -193,6 +202,12 @@ export default function InventoryView({ inventory, itemMaster, invMapping, inven
       ? inventoryTimestamp.toISOString()
       : (inventoryTimestamp || inventoryFileName || "")
   );
+  var detailPropKey = String(
+    inventoryDetailTimestamp && inventoryDetailTimestamp.toISOString
+      ? inventoryDetailTimestamp.toISOString()
+      : (inventoryDetailTimestamp || "")
+  );
+  var hasMatchingPropDetail = !!detailPropKey && detailPropKey === detailCacheKey && cachedDetailRows.length > 0;
   var theme = useTheme();
   var C = theme.C;
   var mono = theme.mono;
@@ -215,11 +230,13 @@ export default function InventoryView({ inventory, itemMaster, invMapping, inven
   var [page, setPage] = useState(1);
   var [pageSize, setPageSize] = useState(100);
   var [detailRows, setDetailRows] = useState(function() {
+    if (hasMatchingPropDetail) return cachedDetailRows;
     return inventoryDetailCache.key === detailCacheKey && Array.isArray(inventoryDetailCache.rows)
       ? inventoryDetailCache.rows
       : null;
   });
   var [detailStatus, setDetailStatus] = useState(function() {
+    if (hasMatchingPropDetail) return "ready";
     return inventoryDetailCache.key === detailCacheKey && Array.isArray(inventoryDetailCache.rows) ? "ready" : "idle";
   });
   var [detailError, setDetailError] = useState("");
@@ -229,6 +246,14 @@ export default function InventoryView({ inventory, itemMaster, invMapping, inven
   }, [fallbackRows, inventoryFileName]);
 
   useEffect(function() {
+    if (hasMatchingPropDetail) {
+      inventoryDetailCache.key = detailCacheKey;
+      inventoryDetailCache.rows = cachedDetailRows;
+      setDetailRows(cachedDetailRows);
+      setDetailStatus("ready");
+      setDetailError("");
+      return;
+    }
     if (inventoryDetailCache.key === detailCacheKey && Array.isArray(inventoryDetailCache.rows)) {
       setDetailRows(inventoryDetailCache.rows);
       setDetailStatus("ready");
@@ -238,10 +263,11 @@ export default function InventoryView({ inventory, itemMaster, invMapping, inven
     setDetailRows(null);
     setDetailStatus("idle");
     setDetailError("");
-  }, [detailCacheKey]);
+  }, [cachedDetailRows, detailCacheKey, hasMatchingPropDetail]);
 
   useEffect(function() {
     if (!shouldLoadDetail) return;
+    if (hasMatchingPropDetail) return;
     if (inventoryDetailCache.key === detailCacheKey && Array.isArray(inventoryDetailCache.rows)) return;
     var cancelled = false;
     setDetailStatus("loading");
@@ -271,7 +297,7 @@ export default function InventoryView({ inventory, itemMaster, invMapping, inven
     return function() {
       cancelled = true;
     };
-  }, [detailCacheKey, shouldLoadDetail]);
+  }, [detailCacheKey, hasMatchingPropDetail, shouldLoadDetail]);
 
   var rows = Array.isArray(detailRows) && detailRows.length ? detailRows : fallbackRows;
   var usingDetailRows = Array.isArray(detailRows) && detailRows.length > 0;
