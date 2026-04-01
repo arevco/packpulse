@@ -469,6 +469,7 @@ function buildNormalizedProductionRow(row, index, fallbacks) {
   var customerLabel = customer || "Unassigned customer";
   if (fallbackCustomer) customerLabel = fallbackCustomer;
   var skuLabel = sku || "Missing SKU";
+  var workOrderReference = workOrderCode || workOrderId;
   var rowIssues = [];
   if (!fallbackCustomer) rowIssues.push("Missing customer");
   if (!sku) rowIssues.push("Missing SKU");
@@ -490,7 +491,10 @@ function buildNormalizedProductionRow(row, index, fallbacks) {
     unitsProduced: unitsProduced,
     workOrderCode: workOrderCode,
     workOrderId: workOrderId,
+    workOrderReference: workOrderReference,
+    workOrderKey: normalizeGroupValue(workOrderReference || "missing work order"),
     purchaseOrderNumber: purchaseOrderNumber,
+    purchaseOrderKey: normalizeGroupValue(purchaseOrderNumber || "missing purchase order"),
     jobId: jobId,
     line: line || "--",
     unitOfMeasure: fallbackUnitOfMeasure,
@@ -575,7 +579,12 @@ export default function InvoicingView(props) {
       .map(function(row, index) {
         var normalized = buildNormalizedProductionRow(row, index, fieldFallbacks);
         normalized.searchHaystack = buildSearchHaystack(normalized);
-        normalized.candidateKey = normalized.customerKey + "|" + normalized.skuKey;
+        normalized.candidateKey = [
+          normalized.customerKey,
+          normalized.skuKey,
+          normalized.workOrderKey,
+          normalized.purchaseOrderKey
+        ].join("|");
         return normalized;
       })
       .filter(function(row) {
@@ -659,7 +668,7 @@ export default function InvoicingView(props) {
       if (row.description && row.description !== "--" && (group.description === "--" || row.description.length > group.description.length)) {
         group.description = row.description;
       }
-      if (row.workOrderCode || row.workOrderId) group.workOrders.add(row.workOrderCode || row.workOrderId);
+      if (row.workOrderReference) group.workOrders.add(row.workOrderReference);
       else group.missingWorkOrderRows += 1;
       if (row.purchaseOrderNumber) group.purchaseOrders.add(row.purchaseOrderNumber);
       else group.missingPurchaseOrderRows += 1;
@@ -690,9 +699,11 @@ export default function InvoicingView(props) {
       if (!group.unitMeasures.size) blockingIssues.push("Missing unit of measure");
       if (group.unitMeasures.size > 1) blockingIssues.push("Multiple unit measures in one invoice line");
       if (!group.workOrders.size) blockingIssues.push("No work order reference in the selected period");
+      if (group.workOrders.size > 1) blockingIssues.push("Multiple work orders in one invoice line");
+      if (!group.purchaseOrders.size) blockingIssues.push("No purchase order attached");
+      if (group.purchaseOrders.size > 1) blockingIssues.push("Multiple purchase orders in one invoice line");
 
-      if (!group.purchaseOrders.size) advisoryIssues.push("No purchase order attached");
-      else if (group.missingPurchaseOrderRows > 0) advisoryIssues.push(group.missingPurchaseOrderRows + " " + pluralize(group.missingPurchaseOrderRows, "row") + " missing PO");
+      if (group.missingPurchaseOrderRows > 0 && group.purchaseOrders.size > 0) advisoryIssues.push(group.missingPurchaseOrderRows + " " + pluralize(group.missingPurchaseOrderRows, "row") + " missing PO");
       if (group.missingWorkOrderRows > 0 && group.workOrders.size > 0) advisoryIssues.push(group.missingWorkOrderRows + " " + pluralize(group.missingWorkOrderRows, "row") + " missing work order");
       if (group.lines.size > 1) advisoryIssues.push(group.lines.size + " production lines");
       if (group.missingRevenueUnits > 0) advisoryIssues.push(formatUnits(group.missingRevenueUnits) + " units missing revenue");
@@ -714,6 +725,8 @@ export default function InvoicingView(props) {
         detailRows: group.detailRows,
         firstProducedDate: group.firstProducedDate,
         lastProducedDate: group.lastProducedDate,
+        workOrderReference: group.workOrders.size === 1 ? setToArray(group.workOrders)[0] : (group.workOrders.size ? "Mixed" : "--"),
+        purchaseOrderReference: group.purchaseOrders.size === 1 ? setToArray(group.purchaseOrders)[0] : (group.purchaseOrders.size ? "Mixed" : "--"),
         workOrderCount: group.workOrders.size,
         purchaseOrderCount: group.purchaseOrders.size,
         jobCount: group.jobs.size,
@@ -736,7 +749,9 @@ export default function InvoicingView(props) {
       if (left.status !== right.status) return left.status === "review" ? -1 : 1;
       if (right.unitsProduced !== left.unitsProduced) return right.unitsProduced - left.unitsProduced;
       if (left.customer !== right.customer) return left.customer.localeCompare(right.customer);
-      return left.sku.localeCompare(right.sku);
+      if (left.sku !== right.sku) return left.sku.localeCompare(right.sku);
+      if (left.workOrderReference !== right.workOrderReference) return left.workOrderReference.localeCompare(right.workOrderReference);
+      return left.purchaseOrderReference.localeCompare(right.purchaseOrderReference);
     });
   }, [filteredRows]);
 
@@ -898,8 +913,8 @@ export default function InvoicingView(props) {
       "estimated_revenue",
       "revenue_source",
       "unit_of_measure",
-      "work_order_count",
-      "purchase_order_count",
+      "work_order",
+      "purchase_order",
       "job_count",
       "line_count",
       "first_produced_date",
@@ -919,8 +934,8 @@ export default function InvoicingView(props) {
         candidate.estimatedRevenue.toFixed(2),
         candidate.revenueSource,
         candidate.unitOfMeasure,
-        candidate.workOrderCount,
-        candidate.purchaseOrderCount,
+        candidate.workOrderReference,
+        candidate.purchaseOrderReference,
         candidate.jobCount,
         candidate.lineCount,
         candidate.firstProducedDate,
@@ -1104,7 +1119,7 @@ export default function InvoicingView(props) {
         {[
           metricCard("Units Produced", formatUnits(summary.unitsProduced), "Finished-good output in the selected billing window.", "default"),
           metricCard("Customers", summary.customers.toLocaleString(), "Distinct customers represented in visible invoice lines.", "default"),
-          metricCard("Invoice Lines", summary.invoiceLines.toLocaleString(), "Customer and SKU rollups ready for accounting review.", "success"),
+          metricCard("Invoice Lines", summary.invoiceLines.toLocaleString(), "Customer, SKU, WO, and PO line items ready for accounting review.", "success"),
           metricCard("Estimated Revenue", formatMoney(summary.estimatedRevenue), summary.revenueCoveragePct >= 100 ? "All visible units have revenue coverage." : "Based on priced units only; uncovered units remain excluded.", summary.revenueCoveragePct >= 100 ? "success" : "warning"),
           metricCard("Revenue Coverage", summary.revenueCoveragePct + "%", summary.pricedUnits ? (formatUnits(summary.pricedUnits) + " priced units in the current result set.") : "No priced units found for the current result set.", summary.revenueCoveragePct >= 100 ? "success" : "warning"),
           metricCard("Needs Review", summary.reviewLines.toLocaleString(), summary.reviewLines ? "Lines missing traceability or billing fields." : "No blockers in the current result set.", summary.reviewLines ? "warning" : "success"),
@@ -1177,7 +1192,7 @@ export default function InvoicingView(props) {
               <div className="text-base font-semibold text-[rgb(var(--foreground))]">Invoice Candidates</div>
               <div className="mt-1 text-sm text-[rgb(var(--muted))]">
                 {customerFilter === "all"
-                  ? "Grouped by customer and SKU for the selected billing period."
+                  ? "Grouped by customer, SKU, work order, and purchase order for the selected billing period."
                   : ("Focused on " + customerFilter + ".")}
               </div>
             </div>
@@ -1194,8 +1209,8 @@ export default function InvoicingView(props) {
                       <th className="px-4 py-3 text-right font-medium">Rev/Unit</th>
                       <th className="px-4 py-3 text-right font-medium">Est Revenue</th>
                       <th className="px-4 py-3 text-left font-medium">UOM</th>
-                      <th className="px-4 py-3 text-right font-medium">WOs</th>
-                      <th className="px-4 py-3 text-right font-medium">POs</th>
+                      <th className="px-4 py-3 text-left font-medium">Work Order</th>
+                      <th className="px-4 py-3 text-left font-medium">Purchase Order</th>
                       <th className="px-4 py-3 text-right font-medium">Jobs</th>
                       <th className="px-4 py-3 text-left font-medium">Period</th>
                     </tr>
@@ -1230,8 +1245,8 @@ export default function InvoicingView(props) {
                           </td>
                           <td className="px-4 py-3 text-right font-medium text-[rgb(var(--foreground))]">{candidate.pricedUnits > 0 ? formatMoney(candidate.estimatedRevenue) : "--"}</td>
                           <td className="px-4 py-3 text-[rgb(var(--muted))]">{candidate.unitOfMeasure}</td>
-                          <td className="px-4 py-3 text-right text-[rgb(var(--muted))]">{candidate.workOrderCount.toLocaleString()}</td>
-                          <td className="px-4 py-3 text-right text-[rgb(var(--muted))]">{candidate.purchaseOrderCount.toLocaleString()}</td>
+                          <td className="px-4 py-3 text-[rgb(var(--foreground))]">{candidate.workOrderReference}</td>
+                          <td className="px-4 py-3 text-[rgb(var(--foreground))]">{candidate.purchaseOrderReference}</td>
                           <td className="px-4 py-3 text-right text-[rgb(var(--muted))]">{candidate.jobCount.toLocaleString()}</td>
                           <td className="px-4 py-3 text-[rgb(var(--muted))]">
                             {formatDateLabel(candidate.firstProducedDate)} to {formatDateLabel(candidate.lastProducedDate)}
