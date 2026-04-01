@@ -38,6 +38,12 @@ function normalizeGroupValue(value) {
   return normalizeSearchValue(value).replace(/\.0+$/, "").replace(/\s+/g, " ");
 }
 
+function normalizeLookupKey(value) {
+  var raw = String(value || "").trim();
+  if (!raw) return "";
+  return raw.replace(/\.0+$/, "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+
 function pickFieldLoose(row, keys) {
   if (!row || typeof row !== "object") return "";
   var rowKeys = Object.keys(row);
@@ -223,9 +229,93 @@ function buildSearchHaystack(row) {
   ].join(" ").toLowerCase();
 }
 
-function buildNormalizedProductionRow(row, index) {
+function createCountIndex() {
+  return {};
+}
+
+function addIndexedValue(index, key, value) {
+  var normalizedKey = normalizeLookupKey(key);
+  var normalizedValue = String(value || "").trim();
+  if (!normalizedKey || !normalizedValue) return;
+  if (!index[normalizedKey]) index[normalizedKey] = {};
+  index[normalizedKey][normalizedValue] = (index[normalizedKey][normalizedValue] || 0) + 1;
+}
+
+function pickIndexedValue(index, key, allowAmbiguous) {
+  var bucket = index[normalizeLookupKey(key)] || null;
+  if (!bucket) return "";
+  var values = Object.keys(bucket);
+  if (!values.length) return "";
+  values.sort(function(left, right) {
+    if (bucket[right] !== bucket[left]) return bucket[right] - bucket[left];
+    return left.localeCompare(right);
+  });
+  if (!allowAmbiguous && values.length > 1 && bucket[values[0]] === bucket[values[1]]) return "";
+  return values[0] || "";
+}
+
+function buildWorkOrderFallbacks(workOrders) {
+  var customerByWorkOrder = createCountIndex();
+  var customerBySku = createCountIndex();
+  var unitByWorkOrder = createCountIndex();
+  var unitBySku = createCountIndex();
+
+  (Array.isArray(workOrders) ? workOrders : []).forEach(function(row) {
+    var workOrderCode = String(pickFieldLoose(row, [
+      "Work Order Code", "work_order_code",
+      "project_code", "Project Code"
+    ]) || "").trim();
+    var workOrderId = String(pickFieldLoose(row, [
+      "Work Order ID", "work_order_id",
+      "Work Order", "work_order"
+    ]) || "").trim();
+    var sku = String(pickFieldLoose(row, [
+      "Item Code", "item_code",
+      "SKU", "sku"
+    ]) || "").trim();
+    var customer = String(pickFieldLoose(row, [
+      "Customer Name", "customer_name",
+      "Customer", "customer"
+    ]) || "").trim();
+    var unitOfMeasure = String(pickFieldLoose(row, [
+      "Unit of Measure", "unit_of_measure",
+      "Unit Of Measure", "uom"
+    ]) || "").trim();
+    addIndexedValue(customerByWorkOrder, workOrderCode, customer);
+    addIndexedValue(customerByWorkOrder, workOrderId, customer);
+    addIndexedValue(unitByWorkOrder, workOrderCode, unitOfMeasure);
+    addIndexedValue(unitByWorkOrder, workOrderId, unitOfMeasure);
+    addIndexedValue(customerBySku, sku, customer);
+    addIndexedValue(unitBySku, sku, unitOfMeasure);
+  });
+
+  return {
+    customerByWorkOrder: customerByWorkOrder,
+    customerBySku: customerBySku,
+    unitByWorkOrder: unitByWorkOrder,
+    unitBySku: unitBySku
+  };
+}
+
+function buildItemMasterCustomerIndex(itemMaster) {
+  var customerBySku = createCountIndex();
+  (Array.isArray(itemMaster) ? itemMaster : []).forEach(function(row) {
+    var sku = String(pickFieldLoose(row, [
+      "Item Code", "item_code",
+      "Code", "code"
+    ]) || "").trim();
+    var customer = String(pickFieldLoose(row, [
+      "Customer Name", "customer_name",
+      "Customer", "customer"
+    ]) || "").trim();
+    addIndexedValue(customerBySku, sku, customer);
+  });
+  return customerBySku;
+}
+
+function buildNormalizedProductionRow(row, index, fallbacks) {
   var customer = String(pickFieldLoose(row, [
-    "Customer name", "customer_name",
+    "Customer Name", "Customer name", "customer_name",
     "Customer", "customer",
     "item_customer_name", "item_customer",
     "project_customer"
@@ -252,7 +342,7 @@ function buildNormalizedProductionRow(row, index) {
     "Produced Units"
   ]));
   var workOrderCode = String(pickFieldLoose(row, [
-    "Work Order code", "work_order_code",
+    "Work Order Code", "Work Order code", "work_order_code",
     "project_code", "Project Code"
   ]) || "").trim();
   var workOrderId = String(pickFieldLoose(row, [
@@ -260,7 +350,7 @@ function buildNormalizedProductionRow(row, index) {
     "Work Order ID", "work_order_id"
   ]) || "").trim();
   var purchaseOrderNumber = String(pickFieldLoose(row, [
-    "Purchase Order number", "purchase_order_number",
+    "Purchase Order Number", "Purchase Order number", "purchase_order_number",
     "PO Number", "po_number"
   ]) || "").trim();
   var jobId = String(pickFieldLoose(row, [
@@ -272,21 +362,29 @@ function buildNormalizedProductionRow(row, index) {
     "line_name", "Line Name"
   ]) || "").trim();
   var unitOfMeasure = String(pickFieldLoose(row, [
-    "Unit of measure", "unit_of_measure",
-    "Unit of Measure", "uom"
+    "Unit of Measure", "Unit of measure", "unit_of_measure",
+    "Unit Of Measure", "uom"
   ]) || "").trim();
   var reference1 = String(pickFieldLoose(row, [
     "Reference 1", "reference_1",
-    "Work Order reference 1", "work_order_reference_1"
+    "Work Order Reference 1", "Work Order reference 1", "work_order_reference_1"
   ]) || "").trim();
+  var fallbackCustomer = customer ||
+    pickIndexedValue(fallbacks && fallbacks.customerByWorkOrder, workOrderCode || workOrderId, true) ||
+    pickIndexedValue(fallbacks && fallbacks.itemMasterCustomerBySku, sku, false) ||
+    pickIndexedValue(fallbacks && fallbacks.customerBySku, sku, false);
+  var fallbackUnitOfMeasure = unitOfMeasure ||
+    pickIndexedValue(fallbacks && fallbacks.unitByWorkOrder, workOrderCode || workOrderId, true) ||
+    pickIndexedValue(fallbacks && fallbacks.unitBySku, sku, false);
   var customerLabel = customer || "Unassigned customer";
+  if (fallbackCustomer) customerLabel = fallbackCustomer;
   var skuLabel = sku || "Missing SKU";
   var rowIssues = [];
-  if (!customer) rowIssues.push("Missing customer");
+  if (!fallbackCustomer) rowIssues.push("Missing customer");
   if (!sku) rowIssues.push("Missing SKU");
   if (!producedDate) rowIssues.push("Missing produced date");
   if (!(unitsProduced > 0)) rowIssues.push("No produced quantity");
-  if (!unitOfMeasure) rowIssues.push("Missing unit of measure");
+  if (!fallbackUnitOfMeasure) rowIssues.push("Missing unit of measure");
   if (!workOrderCode && !workOrderId) rowIssues.push("Missing work order");
   return {
     raw: row,
@@ -304,7 +402,7 @@ function buildNormalizedProductionRow(row, index) {
     purchaseOrderNumber: purchaseOrderNumber,
     jobId: jobId,
     line: line || "--",
-    unitOfMeasure: unitOfMeasure,
+    unitOfMeasure: fallbackUnitOfMeasure,
     reference1: reference1,
     rowIssues: rowIssues,
     searchHaystack: "",
@@ -331,6 +429,8 @@ function metricCard(label, value, helper, tone) {
 
 export default function InvoicingView(props) {
   var productionData = Array.isArray(props.productionData) ? props.productionData : [];
+  var workOrders = Array.isArray(props.workOrders) ? props.workOrders : [];
+  var itemMaster = Array.isArray(props.itemMaster) ? props.itemMaster : [];
   var initialFilters = props.initialFilters || {};
   var onPermalinkChange = typeof props.onPermalinkChange === "function" ? props.onPermalinkChange : null;
   var defaults = defaultInvoicingRange();
@@ -355,10 +455,21 @@ export default function InvoicingView(props) {
     });
   }, [onPermalinkChange, startDate, endDate, customerFilter, statusFilter, searchTerm]);
 
+  var fieldFallbacks = useMemo(function() {
+    var workOrderFallbacks = buildWorkOrderFallbacks(workOrders);
+    return {
+      customerByWorkOrder: workOrderFallbacks.customerByWorkOrder,
+      customerBySku: workOrderFallbacks.customerBySku,
+      unitByWorkOrder: workOrderFallbacks.unitByWorkOrder,
+      unitBySku: workOrderFallbacks.unitBySku,
+      itemMasterCustomerBySku: buildItemMasterCustomerIndex(itemMaster)
+    };
+  }, [workOrders, itemMaster]);
+
   var normalizedRows = useMemo(function() {
     return productionData
       .map(function(row, index) {
-        var normalized = buildNormalizedProductionRow(row, index);
+        var normalized = buildNormalizedProductionRow(row, index, fieldFallbacks);
         normalized.searchHaystack = buildSearchHaystack(normalized);
         normalized.candidateKey = normalized.customerKey + "|" + normalized.skuKey;
         return normalized;
@@ -366,7 +477,7 @@ export default function InvoicingView(props) {
       .filter(function(row) {
         return row.unitsProduced > 0;
       });
-  }, [productionData]);
+  }, [productionData, fieldFallbacks]);
 
   var availableDateRange = useMemo(function() {
     return normalizedRows.reduce(function(acc, row) {

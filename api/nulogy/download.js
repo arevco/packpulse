@@ -222,12 +222,22 @@ const COLUMN_MAPS = {
     "Item Code": "Item Code",
     "item_description": "Description",
     "Item Description": "Description",
+    "customer_name": "Customer Name",
+    "Customer name": "Customer Name",
+    "Customer Name": "Customer Name",
+    "project_customer": "Customer Name",
+    "Project Customer": "Customer Name",
     "units_produced": "Units Produced",
     "Units Produced": "Units Produced",
     "project_status": "Work Order Status",
     "Project Status": "Work Order Status",
     "purchase_order_number": "Purchase Order Number",
-    "Purchase Order Number": "Purchase Order Number"
+    "Purchase Order Number": "Purchase Order Number",
+    "unit_of_measure": "Unit of Measure",
+    "Unit of measure": "Unit of Measure",
+    "Unit Of Measure": "Unit of Measure",
+    "production_unit_of_measure": "Unit of Measure",
+    "Production Unit Of Measure": "Unit of Measure"
   },
   labor: {
     "Availability": "Availability",
