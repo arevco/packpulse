@@ -62,6 +62,37 @@ function toIsoDate(value) {
   return d.toISOString().slice(0, 10);
 }
 
+function isReceiveOrderInboundRow(row) {
+  var source = firstValueLoose(row, ["__inboundSource", "Inbound Source", "Source"]);
+  if (normalizeStr(source).includes("receiveorders")) return true;
+  var keys = Object.keys(row || {});
+  for (var i = 0; i < keys.length; i++) {
+    var nk = normalizeStr(keys[i]);
+    if (nk.includes("receiveorder")) return true;
+  }
+  return false;
+}
+
+function pickInboundDateValue(row, primaryKey) {
+  if (row && primaryKey && row[primaryKey] != null && row[primaryKey] !== "") return row[primaryKey];
+  return firstValueLoose(row, [
+    "Delivery Date",
+    "Expected delivery date",
+    "Receive Order Item expected delivery date",
+    "RO Date",
+    "Expected ship date",
+    "Actual ship date",
+    "Req Dely"
+  ]);
+}
+
+function parseInboundDateValue(row, primaryKey) {
+  var raw = pickInboundDateValue(row, primaryKey);
+  if (!raw) return null;
+  var d = raw instanceof Date ? raw : new Date(raw);
+  return isNaN(d) ? null : d;
+}
+
 function isWorkOrderClosed(wo) {
   var st = normalizeStr(wo && wo.status ? wo.status : "");
   var closedTokens = ["closed", "complete", "completed", "done", "cancelled", "canceled", "archived"];
@@ -1141,11 +1172,11 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       return edrCols.find(function(c) { return cands.some(function(p) { return normalizeStr(c).includes(p); }); });
     };
     var colMat = pickEdrMaterialColumn(edrCols) || findEdrCol(["material"]) || findEdrCol(["sku", "itemcode"]);
-    var colDate = findEdrCol(["deliverydate", "delivery"]) || findEdrCol(["reqdely"]);
+    var colDate = findEdrCol(["deliverydate", "delivery"]) || findEdrCol(["reqdely"]) || findEdrCol(["rodate", "expectedship", "actualship", "shipdate"]);
     var colPO = findEdrCol(["purchasingdocument", "purchasedoc", "ponumber", "po"]);
     var colQtyOpen = findEdrCol(["stilltobedelivered", "openqty", "stillto"]);
     var colQtyOrd = findEdrCol(["orderquantity", "orderqty"]);
-    if (!colMat || !colDate) return null;
+    if (!colMat) return null;
 
     var dockScheduledByPO = {};
     var dockStatusesByPO = {};
@@ -1176,12 +1207,17 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       var skuRaw = (row[colMat] || "").toString().trim();
       var skuKeys = buildSkuMatchKeys(skuRaw);
       if (!skuKeys.length) return;
-      var rawDate = row[colDate];
-      var dateObj = rawDate instanceof Date ? rawDate : new Date(rawDate);
-      if (isNaN(dateObj)) return;
-      var dateOnly = new Date(dateObj);
-      dateOnly.setHours(0, 0, 0, 0);
-      if (dateOnly < windowStart || dateOnly > windowEnd) return;
+      var inboundDate = parseInboundDateValue(row, colDate);
+      var hasUsableDate = !!inboundDate;
+      var undatedReceiveOrder = !hasUsableDate && isReceiveOrderInboundRow(row);
+      var dateOnly = null;
+      if (hasUsableDate) {
+        dateOnly = new Date(inboundDate);
+        dateOnly.setHours(0, 0, 0, 0);
+        if (dateOnly < windowStart || dateOnly > windowEnd) return;
+      } else if (!undatedReceiveOrder) {
+        return;
+      }
       var po = colPO ? (row[colPO] || "").toString().trim() : "";
       var poKey = normalizePoKey(po);
       var qtyOpen = colQtyOpen ? safeNum(row[colQtyOpen]) : 0;
@@ -1196,7 +1232,8 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
           po: po,
           poKey: poKey,
           dateObj: dateOnly,
-          date: dateOnly.toISOString().slice(0, 10),
+          date: dateOnly ? dateOnly.toISOString().slice(0, 10) : "",
+          hasDate: !!dateOnly,
           isScheduled: !!(poKey && dockScheduledByPO[poKey]),
         });
       });
@@ -1210,7 +1247,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       if (inboundRows.length > 1) {
         var seenInbound = {};
         inboundRows = inboundRows.filter(function(r) {
-          var key = [r.poKey || r.po || "", r.date || "", r.qty || 0].join("|");
+          var key = [r.poKey || r.po || "", r.date || "undated", r.qty || 0].join("|");
           if (seenInbound[key]) return false;
           seenInbound[key] = true;
           return true;
@@ -1225,11 +1262,13 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       var coveragePct = shortQty > 0 ? Math.min(100, Math.round(inboundQty / shortQty * 100)) : 100;
       var scheduledCoveragePct = shortQty > 0 ? Math.min(100, Math.round(scheduledQty / shortQty * 100)) : 100;
 
-      var earliestInboundDate = inboundRows.length
-        ? inboundRows.slice().sort(function(a, b) { return a.dateObj - b.dateObj; })[0].date
+      var datedInboundRows = inboundRows.filter(function(r) { return !!r.dateObj; });
+      var datedScheduledRows = scheduledRows.filter(function(r) { return !!r.dateObj; });
+      var earliestInboundDate = datedInboundRows.length
+        ? datedInboundRows.slice().sort(function(a, b) { return a.dateObj - b.dateObj; })[0].date
         : "";
-      var earliestScheduledDate = scheduledRows.length
-        ? scheduledRows.slice().sort(function(a, b) { return a.dateObj - b.dateObj; })[0].date
+      var earliestScheduledDate = datedScheduledRows.length
+        ? datedScheduledRows.slice().sort(function(a, b) { return a.dateObj - b.dateObj; })[0].date
         : "";
 
       var earliestDue = "";
