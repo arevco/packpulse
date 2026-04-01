@@ -490,8 +490,23 @@ export function useDataSources() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ payload: payload })
       }).then(function(resp) {
-        if (!resp.ok) return null;
-        return resp.json();
+        return resp.text().then(function(rawText) {
+          var body = null;
+          if (rawText) {
+            try {
+              body = JSON.parse(rawText);
+            } catch (_parseError) {
+              body = null;
+            }
+          }
+          if (!resp.ok) {
+            var detail = body && (body.error || body.details || body.message)
+              ? [body.error || body.message, body.details].filter(Boolean).join(": ")
+              : (rawText ? rawText.slice(0, 220) : ("HTTP " + resp.status));
+            throw new Error("Shared snapshot write failed (" + resp.status + "): " + detail);
+          }
+          return body;
+        });
       }).then(function(body) {
         if (!body || !body.snapshot) {
           setSharedSnapshotWrite(function(prev) {
@@ -525,14 +540,14 @@ export function useDataSources() {
           productionCorrectionStart: String(body.productionCorrectionStart || ""),
           laborCorrectionStart: String(body.laborCorrectionStart || "")
         });
-      }).catch(function() {
+      }).catch(function(err) {
         // Local cache still works; shared cache sync is best effort.
         setSharedSnapshotWrite(function(prev) {
           return {
             status: "error",
             attemptedAt: prev.attemptedAt || new Date(),
             succeededAt: prev.succeededAt,
-            error: "Shared snapshot write failed.",
+            error: err && err.message ? err.message : "Shared snapshot write failed.",
             snapshotVersion: prev.snapshotVersion || "",
             productionWriteMode: prev.productionWriteMode || "",
             laborWriteMode: prev.laborWriteMode || "",
