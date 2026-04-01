@@ -200,11 +200,11 @@ const REPORT_CONFIGS = {
     requiredColumns: ["produced_at", "job_id", "units_produced"],
     columnSets: [
       ["produced_at", "actual_job_start_at", "actual_job_end_at", "job_id", "project_code", "item_code", "item_description",
-       "line", "units_produced", "project_status", "purchase_order_number"],
-      ["produced_at", "actual_job_start_at", "actual_job_end_at", "job_id", "project_code", "item_code", "units_produced", "line"],
+       "lot_code", "line", "units_produced", "project_status", "purchase_order_number"],
+      ["produced_at", "actual_job_start_at", "actual_job_end_at", "job_id", "project_code", "item_code", "lot_code", "units_produced", "line"],
       ["produced_at", "job_id", "project_code", "item_code", "item_description",
-       "line", "units_produced", "project_status", "purchase_order_number"],
-      ["produced_at", "job_id", "project_code", "item_code", "units_produced", "line"],
+       "lot_code", "line", "units_produced", "project_status", "purchase_order_number"],
+      ["produced_at", "job_id", "project_code", "item_code", "lot_code", "units_produced", "line"],
       ["produced_at", "job_id", "units_produced"]
     ],
     filters: buildProductionFilters

@@ -51,6 +51,7 @@ function buildInvoicingRow(row) {
     "Customer Name": pickFieldLoose(raw, ["Customer Name", "Customer name", "customer_name"]),
     "Item Code": pickFieldLoose(raw, ["Item Code", "item_code"]) || row && row.item_code || "",
     "Description": pickFieldLoose(raw, ["Description", "Item Description", "item_description", "description"]),
+    "Lot Code": pickFieldLoose(raw, ["Lot Code", "Lot code", "lot_code"]),
     "Produced At": producedAt,
     produced_date_et: row && row.produced_date_et || "",
     produced_at_utc: row && row.produced_at_utc || "",

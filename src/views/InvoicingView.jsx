@@ -36,6 +36,7 @@ var CANDIDATE_SORT_LABELS = {
   revenuePerUnitAvg: "Rev/Unit",
   estimatedRevenue: "Estimated Revenue",
   unitOfMeasure: "UOM",
+  lotCode: "Lot Code",
   workOrderReference: "Work Order",
   purchaseOrderReference: "Purchase Order",
   jobCount: "Jobs",
@@ -260,6 +261,7 @@ function createDefaultCandidateColumnFilters() {
     minRevenuePerUnit: "",
     minEstimatedRevenue: "",
     unitOfMeasure: "",
+    lotCode: "",
     workOrder: "",
     purchaseOrder: "",
     minJobs: "",
@@ -314,6 +316,7 @@ function candidateMatchesColumnFilters(candidate, filters) {
   var statusFilter = String(applied.status || "all");
   var customerSkuFilter = normalizeSearchValue(applied.customerSku);
   var unitOfMeasureFilter = normalizeSearchValue(applied.unitOfMeasure);
+  var lotCodeFilter = normalizeSearchValue(applied.lotCode);
   var workOrderFilter = normalizeSearchValue(applied.workOrder);
   var purchaseOrderFilter = normalizeSearchValue(applied.purchaseOrder);
   var periodFilter = normalizeSearchValue(applied.period);
@@ -331,6 +334,7 @@ function candidateMatchesColumnFilters(candidate, filters) {
   if (minRevenuePerUnit != null && safeNum(candidate.revenuePerUnitAvg) < minRevenuePerUnit) return false;
   if (minEstimatedRevenue != null && safeNum(candidate.estimatedRevenue) < minEstimatedRevenue) return false;
   if (unitOfMeasureFilter && normalizeSearchValue(candidate.unitOfMeasure).indexOf(unitOfMeasureFilter) === -1) return false;
+  if (lotCodeFilter && normalizeSearchValue(candidate.lotCode).indexOf(lotCodeFilter) === -1) return false;
   if (workOrderFilter && normalizeSearchValue(candidate.workOrderReference).indexOf(workOrderFilter) === -1) return false;
   if (purchaseOrderFilter && normalizeSearchValue(candidate.purchaseOrderReference).indexOf(purchaseOrderFilter) === -1) return false;
   if (minJobs != null && safeNum(candidate.jobCount) < minJobs) return false;
@@ -354,6 +358,8 @@ function sortInvoiceCandidates(rows, sortField, sortDir) {
       comparison = compareNumberValues(left.estimatedRevenue, right.estimatedRevenue);
     } else if (sortField === "unitOfMeasure") {
       comparison = compareTextValues(left.unitOfMeasure, right.unitOfMeasure);
+    } else if (sortField === "lotCode") {
+      comparison = compareTextValues(left.lotCode, right.lotCode);
     } else if (sortField === "workOrderReference") {
       comparison = compareTextValues(left.workOrderReference, right.workOrderReference);
     } else if (sortField === "purchaseOrderReference") {
@@ -372,6 +378,8 @@ function sortInvoiceCandidates(rows, sortField, sortDir) {
     comparison = compareTextValues(left.customer, right.customer);
     if (comparison) return comparison;
     comparison = compareTextValues(left.sku, right.sku);
+    if (comparison) return comparison;
+    comparison = compareTextValues(left.lotCode, right.lotCode);
     if (comparison) return comparison;
     comparison = compareTextValues(left.workOrderReference, right.workOrderReference);
     if (comparison) return comparison;
@@ -474,6 +482,7 @@ function buildSearchHaystack(row) {
     row.customer,
     row.sku,
     row.description,
+    row.lotCode,
     row.workOrderCode,
     row.workOrderId,
     row.purchaseOrderNumber,
@@ -612,6 +621,10 @@ function buildNormalizedProductionRow(row, index, fallbacks) {
     "Job", "job_id",
     "Job ID"
   ]) || "").trim();
+  var lotCode = String(pickFieldLoose(row, [
+    "Lot Code", "Lot code", "lot_code",
+    "Finished Good Lot Code", "finished_good_lot_code"
+  ]) || "").trim();
   var line = String(pickFieldLoose(row, [
     "Line", "line",
     "line_name", "Line Name"
@@ -641,6 +654,7 @@ function buildNormalizedProductionRow(row, index, fallbacks) {
   if (!producedDate) rowIssues.push("Missing produced date");
   if (!(unitsProduced > 0)) rowIssues.push("No produced quantity");
   if (!fallbackUnitOfMeasure) rowIssues.push("Missing unit of measure");
+  if (!lotCode) rowIssues.push("Missing finished good lot code");
   if (!workOrderCode && !workOrderId) rowIssues.push("Missing work order");
   return {
     raw: row,
@@ -658,6 +672,8 @@ function buildNormalizedProductionRow(row, index, fallbacks) {
     workOrderId: workOrderId,
     workOrderReference: workOrderReference,
     workOrderKey: normalizeGroupValue(workOrderReference || "missing work order"),
+    lotCode: lotCode || "--",
+    lotCodeKey: normalizeGroupValue(lotCode || "missing finished good lot code"),
     purchaseOrderNumber: purchaseOrderNumber,
     purchaseOrderKey: normalizeGroupValue(purchaseOrderNumber || "missing purchase order"),
     jobId: jobId,
@@ -769,6 +785,7 @@ export default function InvoicingView(props) {
         normalized.candidateKey = [
           normalized.customerKey,
           normalized.skuKey,
+          normalized.lotCodeKey,
           normalized.workOrderKey,
           normalized.purchaseOrderKey
         ].join("|");
@@ -836,12 +853,14 @@ export default function InvoicingView(props) {
           detailRows: 0,
           firstProducedDate: "",
           lastProducedDate: "",
+          lotCodes: new Set(),
           workOrders: new Set(),
           purchaseOrders: new Set(),
           jobs: new Set(),
           lines: new Set(),
           unitMeasures: new Set(),
           missingProducedDateRows: 0,
+          missingLotCodeRows: 0,
           missingWorkOrderRows: 0,
           missingPurchaseOrderRows: 0,
           missingUnitOfMeasureRows: 0,
@@ -862,6 +881,8 @@ export default function InvoicingView(props) {
       if (row.description && row.description !== "--" && (group.description === "--" || row.description.length > group.description.length)) {
         group.description = row.description;
       }
+      if (row.lotCode && row.lotCode !== "--") group.lotCodes.add(row.lotCode);
+      else group.missingLotCodeRows += 1;
       if (row.workOrderReference) group.workOrders.add(row.workOrderReference);
       else group.missingWorkOrderRows += 1;
       if (row.purchaseOrderNumber) group.purchaseOrders.add(row.purchaseOrderNumber);
@@ -890,6 +911,8 @@ export default function InvoicingView(props) {
       if (group.missingCustomerRows > 0) blockingIssues.push("Missing customer on " + group.missingCustomerRows + " " + pluralize(group.missingCustomerRows, "row"));
       if (group.missingSkuRows > 0) blockingIssues.push("Missing SKU on " + group.missingSkuRows + " " + pluralize(group.missingSkuRows, "row"));
       if (group.missingProducedDateRows > 0) blockingIssues.push("Missing produced date on " + group.missingProducedDateRows + " " + pluralize(group.missingProducedDateRows, "row"));
+      if (!group.lotCodes.size) blockingIssues.push("Missing finished good lot code");
+      if (group.lotCodes.size > 1) blockingIssues.push("Multiple finished good lot codes in one invoice line");
       if (!group.unitMeasures.size) blockingIssues.push("Missing unit of measure");
       if (group.unitMeasures.size > 1) blockingIssues.push("Multiple unit measures in one invoice line");
       if (!group.workOrders.size) blockingIssues.push("No work order reference in the selected period");
@@ -919,6 +942,7 @@ export default function InvoicingView(props) {
         detailRows: group.detailRows,
         firstProducedDate: group.firstProducedDate,
         lastProducedDate: group.lastProducedDate,
+        lotCode: group.lotCodes.size === 1 ? setToArray(group.lotCodes)[0] : (group.lotCodes.size ? "Mixed" : "--"),
         workOrderReference: group.workOrders.size === 1 ? setToArray(group.workOrders)[0] : (group.workOrders.size ? "Mixed" : "--"),
         purchaseOrderReference: group.purchaseOrders.size === 1 ? setToArray(group.purchaseOrders)[0] : (group.purchaseOrders.size ? "Mixed" : "--"),
         workOrderCount: group.workOrders.size,
@@ -944,6 +968,7 @@ export default function InvoicingView(props) {
       if (right.unitsProduced !== left.unitsProduced) return right.unitsProduced - left.unitsProduced;
       if (left.customer !== right.customer) return left.customer.localeCompare(right.customer);
       if (left.sku !== right.sku) return left.sku.localeCompare(right.sku);
+      if (left.lotCode !== right.lotCode) return left.lotCode.localeCompare(right.lotCode);
       if (left.workOrderReference !== right.workOrderReference) return left.workOrderReference.localeCompare(right.workOrderReference);
       return left.purchaseOrderReference.localeCompare(right.purchaseOrderReference);
     });
@@ -1024,6 +1049,7 @@ export default function InvoicingView(props) {
       if (left.producedDate !== right.producedDate) return String(right.producedDate || "").localeCompare(String(left.producedDate || ""));
       if (left.customer !== right.customer) return left.customer.localeCompare(right.customer);
       if (left.sku !== right.sku) return left.sku.localeCompare(right.sku);
+      if (left.lotCode !== right.lotCode) return left.lotCode.localeCompare(right.lotCode);
       return right.unitsProduced - left.unitsProduced;
     });
     return rows;
@@ -1167,6 +1193,7 @@ export default function InvoicingView(props) {
     if (candidateColumnFilters.minRevenuePerUnit) chips.push("Rev/Unit ≥ " + candidateColumnFilters.minRevenuePerUnit);
     if (candidateColumnFilters.minEstimatedRevenue) chips.push("Revenue ≥ " + candidateColumnFilters.minEstimatedRevenue);
     if (candidateColumnFilters.unitOfMeasure) chips.push("UOM: " + candidateColumnFilters.unitOfMeasure);
+    if (candidateColumnFilters.lotCode) chips.push("Lot: " + candidateColumnFilters.lotCode);
     if (candidateColumnFilters.workOrder) chips.push("WO: " + candidateColumnFilters.workOrder);
     if (candidateColumnFilters.purchaseOrder) chips.push("PO: " + candidateColumnFilters.purchaseOrder);
     if (candidateColumnFilters.minJobs) chips.push("Jobs ≥ " + candidateColumnFilters.minJobs);
@@ -1187,6 +1214,7 @@ export default function InvoicingView(props) {
       "estimated_revenue",
       "revenue_source",
       "unit_of_measure",
+      "finished_good_lot_code",
       "work_order",
       "purchase_order",
       "job_count",
@@ -1208,6 +1236,7 @@ export default function InvoicingView(props) {
         candidate.estimatedRevenue.toFixed(2),
         candidate.revenueSource,
         candidate.unitOfMeasure,
+        candidate.lotCode,
         candidate.workOrderReference,
         candidate.purchaseOrderReference,
         candidate.jobCount,
@@ -1232,6 +1261,7 @@ export default function InvoicingView(props) {
       "estimated_revenue",
       "revenue_source",
       "unit_of_measure",
+      "lot_code",
       "job_id",
       "work_order_code",
       "work_order_id",
@@ -1251,6 +1281,7 @@ export default function InvoicingView(props) {
         row.estimatedRevenue.toFixed(2),
         row.revenueSource,
         row.unitOfMeasure,
+        row.lotCode,
         row.jobId,
         row.workOrderCode,
         row.workOrderId,
@@ -1382,7 +1413,7 @@ export default function InvoicingView(props) {
               </div>
               <div className="rounded-lg border border-[rgb(var(--border))] bg-white px-3 py-3">
                 <div className="text-xs font-medium uppercase tracking-[0.12em] text-[rgb(var(--muted))]">Needed For Invoice Lines</div>
-                <div className="mt-2 text-sm font-medium text-[rgb(var(--foreground))]">Production rows with SKU, WO, and PO references</div>
+                <div className="mt-2 text-sm font-medium text-[rgb(var(--foreground))]">Production rows with SKU, lot code, WO, and PO references</div>
               </div>
             </div>
           </div>
@@ -1488,7 +1519,7 @@ export default function InvoicingView(props) {
                   onChange={function(event) {
                     setSearchTerm(event.target.value);
                   }}
-                  placeholder="Customer, SKU, WO, PO, job..."
+                  placeholder="Customer, SKU, lot, WO, PO, job..."
                 />
               </div>
             </div>
@@ -1516,7 +1547,7 @@ export default function InvoicingView(props) {
         {[
           metricCard("Units Produced", formatUnits(summary.unitsProduced), "Finished-good output in the selected billing window.", "default"),
           metricCard("Customers", summary.customers.toLocaleString(), "Distinct customers represented in visible invoice lines.", "default"),
-          metricCard("Invoice Lines", summary.invoiceLines.toLocaleString(), "Customer, SKU, WO, and PO line items ready for accounting review.", "success"),
+          metricCard("Invoice Lines", summary.invoiceLines.toLocaleString(), "Customer, SKU, lot, WO, and PO line items ready for accounting review.", "success"),
           metricCard("Estimated Revenue", formatMoney(summary.estimatedRevenue), summary.revenueCoveragePct >= 100 ? "All visible units have revenue coverage." : "Based on priced units only; uncovered units remain excluded.", summary.revenueCoveragePct >= 100 ? "success" : "warning"),
           metricCard("Revenue Coverage", summary.revenueCoveragePct + "%", summary.pricedUnits ? (formatUnits(summary.pricedUnits) + " priced units in the current result set.") : "No priced units found for the current result set.", summary.revenueCoveragePct >= 100 ? "success" : "warning"),
           metricCard("Needs Review", summary.reviewLines.toLocaleString(), summary.reviewLines ? "Lines missing traceability or billing fields." : "No blockers in the current result set.", summary.reviewLines ? "warning" : "success"),
@@ -1590,7 +1621,7 @@ export default function InvoicingView(props) {
                 <div className="text-base font-semibold text-[rgb(var(--foreground))]">Invoice Candidates</div>
                 <div className="mt-1 text-sm text-[rgb(var(--muted))]">
                   {customerFilter === "all"
-                    ? "Grouped by customer, SKU, work order, and purchase order for the selected billing period."
+                    ? "Grouped by customer, SKU, finished-good lot, work order, and purchase order for the selected billing period."
                     : ("Focused on " + customerFilter + ".")}
                 </div>
                 <div className="mt-2 text-xs text-[rgb(var(--muted))]">
@@ -1660,6 +1691,11 @@ export default function InvoicingView(props) {
                       <th className="px-4 py-3 text-left font-medium">
                         <SortHeaderButton onClick={function() { handleCandidateSort("unitOfMeasure"); }} className="w-full">
                           UOM{candidateSortField === "unitOfMeasure" ? (candidateSortDir === "asc" ? " ↑" : " ↓") : ""}
+                        </SortHeaderButton>
+                      </th>
+                      <th className="px-4 py-3 text-left font-medium">
+                        <SortHeaderButton onClick={function() { handleCandidateSort("lotCode"); }} className="w-full">
+                          Lot Code{candidateSortField === "lotCode" ? (candidateSortDir === "asc" ? " ↑" : " ↓") : ""}
                         </SortHeaderButton>
                       </th>
                       <th className="px-4 py-3 text-left font-medium">
@@ -1741,6 +1777,14 @@ export default function InvoicingView(props) {
                         </th>
                         <th className="px-4 py-3">
                           <Input
+                            value={candidateColumnFilters.lotCode}
+                            onChange={function(event) { updateCandidateColumnFilter("lotCode", event.target.value); }}
+                            placeholder="Filter..."
+                            className="h-8 min-w-[140px] px-2 text-xs"
+                          />
+                        </th>
+                        <th className="px-4 py-3">
+                          <Input
                             value={candidateColumnFilters.workOrder}
                             onChange={function(event) { updateCandidateColumnFilter("workOrder", event.target.value); }}
                             placeholder="Filter..."
@@ -1805,6 +1849,7 @@ export default function InvoicingView(props) {
                           </td>
                           <td className="px-4 py-3 text-right font-medium tabular-nums text-[rgb(var(--foreground))]">{candidate.pricedUnits > 0 ? formatMoney(candidate.estimatedRevenue) : "--"}</td>
                           <td className="px-4 py-3 text-[rgb(var(--muted))]">{candidate.unitOfMeasure}</td>
+                          <td className="px-4 py-3 font-mono text-xs text-[rgb(var(--foreground))]">{candidate.lotCode}</td>
                           <td className="px-4 py-3 font-mono text-xs text-[rgb(var(--foreground))]">{candidate.workOrderReference}</td>
                           <td className="px-4 py-3 font-mono text-xs text-[rgb(var(--foreground))]">{candidate.purchaseOrderReference}</td>
                           <td className="px-4 py-3 text-right tabular-nums text-[rgb(var(--muted))]">{candidate.jobCount.toLocaleString()}</td>
@@ -1815,7 +1860,7 @@ export default function InvoicingView(props) {
                       );
                     }) : (
                       <tr>
-                        <td colSpan={10} className="px-4 py-6 text-center text-sm text-[rgb(var(--muted))]">
+                        <td colSpan={11} className="px-4 py-6 text-center text-sm text-[rgb(var(--muted))]">
                           {statusScopedInvoiceCandidates.length
                             ? "No invoice candidates match the current table controls."
                             : "No invoice candidates match the current filters."}
