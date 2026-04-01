@@ -1,4 +1,5 @@
-import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTheme } from "../theme";
 import { Card } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -41,20 +42,6 @@ function createEmptyLaborActuals(status, productionStatus) {
 }
 
 var EMPTY_BREAKDOWN = { rowsLite: [], bySku: [], byLine: [], latestByLine: [], latestDate: null, totalRows: 0, summaryOnly: false, querySource: "" };
-var operationsResponseCache = {
-  summary: Object.create(null),
-  breakdown: Object.create(null),
-  forecast: Object.create(null),
-  config: Object.create(null),
-  labor: Object.create(null)
-};
-var operationsInFlightCache = {
-  summary: Object.create(null),
-  breakdown: Object.create(null),
-  forecast: Object.create(null),
-  config: Object.create(null),
-  labor: Object.create(null)
-};
 var operationsInsightsPanelImportPromise = null;
 
 function importOperationsInsightsPanel() {
@@ -76,31 +63,6 @@ const OperationsInsightsPanel = lazy(function() {
     });
 });
 
-function readCachedOperationsData(kind, key) {
-  var bucket = operationsResponseCache[kind] || {};
-  return Object.prototype.hasOwnProperty.call(bucket, key) ? bucket[key] : null;
-}
-
-function loadCachedOperationsData(kind, key, loader) {
-  var cached = readCachedOperationsData(kind, key);
-  if (cached != null) return Promise.resolve(cached);
-  var inflight = operationsInFlightCache[kind] || {};
-  if (inflight[key]) return inflight[key];
-  var request = Promise.resolve()
-    .then(loader)
-    .then(function(result) {
-      operationsResponseCache[kind][key] = result;
-      delete operationsInFlightCache[kind][key];
-      return result;
-    })
-    .catch(function(error) {
-      delete operationsInFlightCache[kind][key];
-      throw error;
-    });
-  operationsInFlightCache[kind][key] = request;
-  return request;
-}
-
 async function fetchJsonWithCredentials(url) {
   var response = await fetch(url, { credentials: "include" });
   var body = {};
@@ -110,6 +72,48 @@ async function fetchJsonWithCredentials(url) {
     body = {};
   }
   return { response: response, body: body };
+}
+
+async function fetchOperationsSummary(fetchDays) {
+  var result = await fetchJsonWithCredentials("/api/ops/production-breakdown?days=" + fetchDays + "&summary=1");
+  if (!result.response.ok) {
+    throw new Error((result.body && result.body.error) || "Could not load production summary");
+  }
+  return normalizeBreakdownPayload(result.body);
+}
+
+async function fetchOperationsBreakdown(fetchDays) {
+  var result = await fetchJsonWithCredentials("/api/ops/production-breakdown?days=" + fetchDays);
+  if (!result.response.ok) {
+    throw new Error((result.body && result.body.error) || "Could not load production breakdown");
+  }
+  return normalizeBreakdownPayload(result.body);
+}
+
+async function fetchOperationsForecastPlans(monthKeys) {
+  var result = await fetchJsonWithCredentials("/api/ops/forecast-plan?monthKeys=" + encodeURIComponent(monthKeys.join(",")));
+  return normalizeForecastPlansPayload(result.response.ok ? result.body : {});
+}
+
+async function fetchOperationsConfig() {
+  var result = await fetchJsonWithCredentials("/api/ops/config");
+  return normalizeConfigPayload(result.response.ok ? result.body : {});
+}
+
+async function fetchOperationsLaborSummary(start, end) {
+  var result = await fetchJsonWithCredentials("/api/ops/labor-actuals?start=" + encodeURIComponent(start) + "&end=" + encodeURIComponent(end) + "&summary=1");
+  if (!result.response.ok) {
+    throw new Error((result.body && result.body.error) || "Could not load labor summary");
+  }
+  return normalizeLaborActualsPayload(true, result.body);
+}
+
+async function fetchOperationsLaborDetail(start, end) {
+  var result = await fetchJsonWithCredentials("/api/ops/labor-actuals?start=" + encodeURIComponent(start) + "&end=" + encodeURIComponent(end));
+  if (!result.response.ok) {
+    throw new Error((result.body && result.body.error) || "Could not load labor actuals");
+  }
+  return normalizeLaborActualsPayload(true, result.body);
 }
 
 function normalizeBreakdownPayload(body) {
@@ -1026,23 +1030,15 @@ function preferHigherShiftSeries(primaryRows, fallbackRows) {
 
 export default function OperationsView({ productionSegments, productionDataRaw, laborDataRaw, evoconData, evoconTimestamp, itemMaster, initialFilters, onPermalinkChange, serverSyncVersion, onRefreshProduction, refreshingProduction }) {
   const { C, mono } = useTheme();
+  const queryClient = useQueryClient();
   var initial = initialFilters || {};
   var initialPreset = String(initial.preset || "last_14");
   const [windowPreset, setWindowPreset] = useState(initialPreset);
   const initialRange = presetRange("last_14");
   const [rangeStart, setRangeStart] = useState(String(initial.start || initialRange.start));
   const [rangeEnd, setRangeEnd] = useState(String(initial.end || initialRange.end));
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState("");
-  const [trends, setTrends] = useState(null);
-  const [breakdown, setBreakdown] = useState(EMPTY_BREAKDOWN);
-  const [forecastPlans, setForecastPlans] = useState({});
-  const [opsSkuTargets, setOpsSkuTargets] = useState([]);
-  const [itemMasterCostBySku, setItemMasterCostBySku] = useState({});
-  const [laborActuals, setLaborActuals] = useState(function() { return createEmptyLaborActuals("idle", "ok"); });
-  const [deferredLoading, setDeferredLoading] = useState({ detail: false, forecast: false, config: false, labor: false });
   const [showInsightsPanelsReady, setShowInsightsPanelsReady] = useState(false);
-  const loadRequestRef = useRef(0);
+  const [deferredFetchReady, setDeferredFetchReady] = useState(false);
   const [skuMixMode, setSkuMixMode] = useState("type");
   const [showProductionLines, setShowProductionLines] = useState(false);
   const [showLossPriorities, setShowLossPriorities] = useState(false);
@@ -1066,30 +1062,12 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     return toIsoDateET(new Date());
   }, []);
 
-  var defaultDailyPerfEnd = useMemo(function() {
-    var dates = (trends && Array.isArray(trends.byDay) ? trends.byDay : [])
-      .map(function(row) { return String(row && row.date || ""); })
-      .filter(Boolean)
-      .sort();
-    return dates.length ? dates[dates.length - 1] : todayEt;
-  }, [trends, todayEt]);
-
-  var dailyPerfRange = useMemo(function() {
-    var start = dailyPerfStart || shiftDays(defaultDailyPerfEnd, -29);
-    var end = dailyPerfEnd || defaultDailyPerfEnd;
-    if (end < start) {
-      var tmp = start;
-      start = end;
-      end = tmp;
-    }
-    return { start: start, end: end };
-  }, [dailyPerfStart, dailyPerfEnd, defaultDailyPerfEnd]);
-
   var dailyPerfFetchDays = useMemo(function() {
-    var fetchStart = dailyPerfRange.start || shiftDays(todayEt, -29);
-    if (!fetchStart || fetchStart > todayEt) return 30;
-    return Math.max(30, daysInclusive(fetchStart, todayEt));
-  }, [dailyPerfRange.start, todayEt]);
+    var fetchEnd = dailyPerfEnd || todayEt;
+    var fetchStart = dailyPerfStart || shiftDays(fetchEnd, -29);
+    if (!fetchStart || !fetchEnd || fetchStart > fetchEnd) return 30;
+    return Math.max(30, daysInclusive(fetchStart, fetchEnd));
+  }, [dailyPerfStart, dailyPerfEnd, todayEt]);
 
   useEffect(function() {
     if (!onPermalinkChange) return;
@@ -1125,6 +1103,50 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     return Math.max(30, daysInclusive(earliestNeeded, today));
   }, [todayEt]);
 
+  var operationsFetchDays = useMemo(function() {
+    return Math.max(range.fetchDays, dailyPerfFetchDays, commandBoardFetchDays);
+  }, [range.fetchDays, dailyPerfFetchDays, commandBoardFetchDays]);
+
+  var laborFetchEnd = todayEt;
+  var laborFetchStart = useMemo(function() {
+    return shiftDays(laborFetchEnd, -(operationsFetchDays - 1));
+  }, [laborFetchEnd, operationsFetchDays]);
+
+  var forecastMonthsKey = forecastPlanMonths.join(",");
+  var summaryQueryKey = useMemo(function() {
+    return ["operations", "summary", safeNum(serverSyncVersion), operationsFetchDays];
+  }, [serverSyncVersion, operationsFetchDays]);
+  var breakdownQueryKey = useMemo(function() {
+    return ["operations", "breakdown", safeNum(serverSyncVersion), operationsFetchDays];
+  }, [serverSyncVersion, operationsFetchDays]);
+  var forecastQueryKey = useMemo(function() {
+    return ["operations", "forecast", safeNum(serverSyncVersion), forecastMonthsKey];
+  }, [serverSyncVersion, forecastMonthsKey]);
+  var configQueryKey = useMemo(function() {
+    return ["operations", "config", safeNum(serverSyncVersion)];
+  }, [serverSyncVersion]);
+  var laborSummaryQueryKey = useMemo(function() {
+    return ["operations", "labor-summary", safeNum(serverSyncVersion), laborFetchStart, laborFetchEnd];
+  }, [serverSyncVersion, laborFetchStart, laborFetchEnd]);
+  var laborDetailQueryKey = useMemo(function() {
+    return ["operations", "labor-detail", safeNum(serverSyncVersion), laborFetchStart, laborFetchEnd];
+  }, [serverSyncVersion, laborFetchStart, laborFetchEnd]);
+  var deferredQueryKey = useMemo(function() {
+    return [
+      safeNum(serverSyncVersion),
+      operationsFetchDays,
+      forecastMonthsKey,
+      laborFetchStart,
+      laborFetchEnd
+    ].join("|");
+  }, [serverSyncVersion, operationsFetchDays, forecastMonthsKey, laborFetchStart, laborFetchEnd]);
+  var hasCachedBreakdown = !!queryClient.getQueryData(breakdownQueryKey);
+
+  useEffect(function() {
+    setDeferredFetchReady(hasCachedBreakdown);
+    if (!hasCachedBreakdown) setShowInsightsPanelsReady(false);
+  }, [deferredQueryKey, hasCachedBreakdown]);
+
   var setCustomStart = function(v) {
     if (!v) return;
     setWindowPreset("custom");
@@ -1143,193 +1165,111 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       return start > v ? v : start;
     });
   };
-
-  var loadAll = async function() {
-    var requestId = loadRequestRef.current + 1;
-    loadRequestRef.current = requestId;
-    setErr("");
-    try {
-      var fetchDays = Math.max(range.fetchDays, dailyPerfFetchDays, commandBoardFetchDays);
-      var laborFetchEnd = toIsoDateET(new Date());
-      var laborFetchStart = shiftDays(laborFetchEnd, -(fetchDays - 1));
-      var forecastKey = "v" + safeNum(serverSyncVersion) + "|" + forecastPlanMonths.join(",");
-      var configKey = "v" + safeNum(serverSyncVersion);
-      var laborSummaryKey = "v" + safeNum(serverSyncVersion) + "|" + laborFetchStart + "|" + laborFetchEnd + "|summary";
-      var laborDetailKey = "v" + safeNum(serverSyncVersion) + "|" + laborFetchStart + "|" + laborFetchEnd + "|detail";
-      var summaryKey = "v" + safeNum(serverSyncVersion) + "|" + fetchDays + "|summary";
-      var breakdownKey = "v" + safeNum(serverSyncVersion) + "|" + fetchDays + "|detail";
-
-      var cachedSummary = readCachedOperationsData("summary", summaryKey);
-      var cachedBreakdown = readCachedOperationsData("breakdown", breakdownKey);
-      var cachedForecast = readCachedOperationsData("forecast", forecastKey);
-      var cachedConfig = readCachedOperationsData("config", configKey);
-      var cachedLaborSummary = readCachedOperationsData("labor", laborSummaryKey);
-      var cachedLaborDetail = readCachedOperationsData("labor", laborDetailKey);
-      var cachedLabor = cachedLaborDetail || (cachedLaborSummary ? withLaborActualsStatus(cachedLaborSummary, "loading") : null);
-
-      if (!cachedBreakdown) setShowInsightsPanelsReady(false);
-
-      setLoading(!(cachedSummary || cachedBreakdown));
-
-      if (cachedSummary || cachedBreakdown) {
-        var initialPayload = cachedSummary || cachedBreakdown;
-        setTrends(initialPayload.trends);
-        setBreakdown(cachedBreakdown ? cachedBreakdown.breakdown : initialPayload.breakdown);
-      }
-      if (cachedForecast) setForecastPlans(cachedForecast);
-      else if (!forecastPlanMonths.length) setForecastPlans({});
-      if (cachedConfig) {
-        setOpsSkuTargets(cachedConfig.skuTargets);
-        setItemMasterCostBySku(cachedConfig.itemMasterCostBySku);
-      }
-      if (cachedLaborDetail) {
-        setLaborActuals(cachedLaborDetail);
-      } else if (cachedLaborSummary) {
-        setLaborActuals(withLaborActualsStatus(cachedLaborSummary, "loading"));
-      } else {
-        setLaborActuals(createEmptyLaborActuals("loading", "loading"));
-      }
-      setDeferredLoading({
-        detail: !cachedBreakdown,
-        forecast: !cachedForecast && forecastPlanMonths.length > 0,
-        config: !cachedConfig,
-        labor: !cachedLaborDetail
-      });
-
-      var criticalPayload = cachedSummary || cachedBreakdown;
-      if (!criticalPayload) {
-        criticalPayload = await loadCachedOperationsData("summary", summaryKey, async function() {
-          var summaryResult = await fetchJsonWithCredentials("/api/ops/production-breakdown?days=" + fetchDays + "&summary=1");
-          if (!summaryResult.response.ok) {
-            throw new Error((summaryResult.body && summaryResult.body.error) || "Could not load production summary");
-          }
-          return normalizeBreakdownPayload(summaryResult.body);
-        });
-      }
-      if (requestId !== loadRequestRef.current) return;
-      setTrends(criticalPayload.trends);
-      setBreakdown(cachedBreakdown ? cachedBreakdown.breakdown : criticalPayload.breakdown);
-      setLoading(false);
-
-      var cancelDeferred = scheduleAfterPaint(function() {
-        if (requestId !== loadRequestRef.current) return;
-
-        if (!cachedBreakdown) {
-          loadCachedOperationsData("breakdown", breakdownKey, async function() {
-            var breakdownResult = await fetchJsonWithCredentials("/api/ops/production-breakdown?days=" + fetchDays);
-            if (!breakdownResult.response.ok) {
-              throw new Error((breakdownResult.body && breakdownResult.body.error) || "Could not load production breakdown");
-            }
-            return normalizeBreakdownPayload(breakdownResult.body);
-          })
-            .then(function(detailPayload) {
-              if (requestId !== loadRequestRef.current) return;
-              setTrends(detailPayload.trends);
-              setBreakdown(detailPayload.breakdown);
-            })
-            .catch(function() {})
-            .finally(function() {
-              if (requestId !== loadRequestRef.current) return;
-              setDeferredLoading(function(prev) { return Object.assign({}, prev, { detail: false }); });
-            });
-        }
-
-        if (!cachedForecast && forecastPlanMonths.length) {
-          loadCachedOperationsData("forecast", forecastKey, async function() {
-            var forecastResult = await fetchJsonWithCredentials("/api/ops/forecast-plan?monthKeys=" + encodeURIComponent(forecastPlanMonths.join(",")));
-            return normalizeForecastPlansPayload(forecastResult.response.ok ? forecastResult.body : {});
-          })
-            .then(function(nextForecastPlans) {
-              if (requestId !== loadRequestRef.current) return;
-              setForecastPlans(nextForecastPlans);
-            })
-            .catch(function() {})
-            .finally(function() {
-              if (requestId !== loadRequestRef.current) return;
-              setDeferredLoading(function(prev) { return Object.assign({}, prev, { forecast: false }); });
-            });
-        }
-
-        if (!cachedConfig) {
-          loadCachedOperationsData("config", configKey, async function() {
-            var configResult = await fetchJsonWithCredentials("/api/ops/config");
-            return normalizeConfigPayload(configResult.response.ok ? configResult.body : {});
-          })
-            .then(function(configPayload) {
-              if (requestId !== loadRequestRef.current) return;
-              setOpsSkuTargets(configPayload.skuTargets);
-              setItemMasterCostBySku(configPayload.itemMasterCostBySku);
-            })
-            .catch(function() {})
-            .finally(function() {
-              if (requestId !== loadRequestRef.current) return;
-              setDeferredLoading(function(prev) { return Object.assign({}, prev, { config: false }); });
-            });
-        }
-
-        var laborSummaryPromise = cachedLaborSummary ? Promise.resolve(cachedLaborSummary) : null;
-
-        if (!cachedLaborSummary) {
-          laborSummaryPromise = loadCachedOperationsData("labor", laborSummaryKey, async function() {
-            var laborSummaryResult = await fetchJsonWithCredentials("/api/ops/labor-actuals?start=" + encodeURIComponent(laborFetchStart) + "&end=" + encodeURIComponent(laborFetchEnd) + "&summary=1");
-            if (!laborSummaryResult.response.ok) {
-              throw new Error((laborSummaryResult.body && laborSummaryResult.body.error) || "Could not load labor summary");
-            }
-            return normalizeLaborActualsPayload(true, laborSummaryResult.body);
-          })
-            .then(function(nextLaborSummary) {
-              if (requestId !== loadRequestRef.current || cachedLaborDetail) return nextLaborSummary;
-              setLaborActuals(withLaborActualsStatus(nextLaborSummary, "loading"));
-              return nextLaborSummary;
-            })
-            .catch(function() {
-              return null;
-            });
-        }
-
-        if (!cachedLaborDetail) {
-          (laborSummaryPromise || Promise.resolve(null))
-            .catch(function() { return null; })
-            .then(function() {
-              return loadCachedOperationsData("labor", laborDetailKey, async function() {
-                var laborResult = await fetchJsonWithCredentials("/api/ops/labor-actuals?start=" + encodeURIComponent(laborFetchStart) + "&end=" + encodeURIComponent(laborFetchEnd));
-                if (!laborResult.response.ok) {
-                  throw new Error((laborResult.body && laborResult.body.error) || "Could not load labor actuals");
-                }
-                return normalizeLaborActualsPayload(true, laborResult.body);
-              });
-            })
-            .then(function(nextLaborActuals) {
-              if (requestId !== loadRequestRef.current) return;
-              setLaborActuals(nextLaborActuals);
-            })
-            .catch(function() {
-              if (requestId !== loadRequestRef.current) return;
-              setLaborActuals(function(prev) {
-                return hasLaborActualsSummaryData(prev)
-                  ? withLaborActualsStatus(prev, "error")
-                  : createEmptyLaborActuals("error", "error");
-              });
-            })
-            .finally(function() {
-              if (requestId !== loadRequestRef.current) return;
-              setDeferredLoading(function(prev) { return Object.assign({}, prev, { labor: false }); });
-            });
-        }
-      });
-      if (requestId !== loadRequestRef.current && typeof cancelDeferred === "function") cancelDeferred();
-    } catch (e) {
-      if (requestId !== loadRequestRef.current) return;
-      setErr(e && e.message ? e.message : "Failed loading Operations data");
-      setDeferredLoading({ detail: false, forecast: false, config: false, labor: false });
-    } finally {
-      if (requestId === loadRequestRef.current) setLoading(false);
-    }
-  };
+  var summaryQuery = useQuery({
+    queryKey: summaryQueryKey,
+    queryFn: function() {
+      return fetchOperationsSummary(operationsFetchDays);
+    },
+    staleTime: 60 * 1000
+  });
 
   useEffect(function() {
-    loadAll();
-  }, [windowPreset, rangeStart, rangeEnd, forecastPlanMonths.join(","), dailyPerfFetchDays, commandBoardFetchDays, serverSyncVersion]);
+    if (!summaryQuery.data) return;
+    if (deferredFetchReady) return;
+    return scheduleAfterPaint(function() {
+      setDeferredFetchReady(true);
+    });
+  }, [summaryQuery.data, deferredFetchReady, deferredQueryKey]);
+
+  var breakdownQuery = useQuery({
+    queryKey: breakdownQueryKey,
+    queryFn: function() {
+      return fetchOperationsBreakdown(operationsFetchDays);
+    },
+    enabled: deferredFetchReady,
+    staleTime: 60 * 1000
+  });
+  var forecastQuery = useQuery({
+    queryKey: forecastQueryKey,
+    queryFn: function() {
+      return fetchOperationsForecastPlans(forecastPlanMonths);
+    },
+    enabled: deferredFetchReady && forecastPlanMonths.length > 0,
+    staleTime: 5 * 60 * 1000
+  });
+  var configQuery = useQuery({
+    queryKey: configQueryKey,
+    queryFn: fetchOperationsConfig,
+    enabled: deferredFetchReady,
+    staleTime: 5 * 60 * 1000
+  });
+  var laborSummaryQuery = useQuery({
+    queryKey: laborSummaryQueryKey,
+    queryFn: function() {
+      return fetchOperationsLaborSummary(laborFetchStart, laborFetchEnd);
+    },
+    enabled: deferredFetchReady,
+    staleTime: 60 * 1000
+  });
+  var laborSummarySettled = !!queryClient.getQueryData(laborSummaryQueryKey)
+    || laborSummaryQuery.status === "success"
+    || laborSummaryQuery.status === "error";
+  var laborDetailQuery = useQuery({
+    queryKey: laborDetailQueryKey,
+    queryFn: function() {
+      return fetchOperationsLaborDetail(laborFetchStart, laborFetchEnd);
+    },
+    enabled: deferredFetchReady && laborSummarySettled,
+    staleTime: 60 * 1000
+  });
+
+  var serverPayload = breakdownQuery.data || summaryQuery.data || null;
+  var trends = serverPayload && serverPayload.trends ? serverPayload.trends : null;
+  var breakdown = breakdownQuery.data && breakdownQuery.data.breakdown
+    ? breakdownQuery.data.breakdown
+    : (serverPayload && serverPayload.breakdown ? serverPayload.breakdown : EMPTY_BREAKDOWN);
+  var forecastPlans = forecastPlanMonths.length ? (forecastQuery.data || {}) : {};
+  var configPayload = configQuery.data || {};
+  var opsSkuTargets = Array.isArray(configPayload.skuTargets) ? configPayload.skuTargets : [];
+  var itemMasterCostBySku = configPayload.itemMasterCostBySku && typeof configPayload.itemMasterCostBySku === "object"
+    ? configPayload.itemMasterCostBySku
+    : {};
+  var laborActuals = useMemo(function() {
+    if (laborDetailQuery.data) return laborDetailQuery.data;
+    if (laborSummaryQuery.data) {
+      return withLaborActualsStatus(laborSummaryQuery.data, laborDetailQuery.isError ? "error" : "loading");
+    }
+    if (laborDetailQuery.isError) return createEmptyLaborActuals("error", "error");
+    if (deferredFetchReady) return createEmptyLaborActuals("loading", "loading");
+    return createEmptyLaborActuals("idle", "ok");
+  }, [laborDetailQuery.data, laborDetailQuery.isError, laborSummaryQuery.data, deferredFetchReady]);
+  var loading = !serverPayload && summaryQuery.isPending;
+  var err = !serverPayload && summaryQuery.isError
+    ? (summaryQuery.error && summaryQuery.error.message ? summaryQuery.error.message : "Failed loading Operations data")
+    : "";
+  var deferredLoading = {
+    detail: !breakdownQuery.data && (!deferredFetchReady || breakdownQuery.isPending),
+    forecast: forecastPlanMonths.length > 0 && !forecastQuery.data && (!deferredFetchReady || forecastQuery.isPending),
+    config: !configQuery.data && (!deferredFetchReady || configQuery.isPending),
+    labor: !laborDetailQuery.data && (!deferredFetchReady || !laborSummarySettled || laborDetailQuery.isPending)
+  };
+  var defaultDailyPerfEnd = useMemo(function() {
+    var dates = (trends && Array.isArray(trends.byDay) ? trends.byDay : [])
+      .map(function(row) { return String(row && row.date || ""); })
+      .filter(Boolean)
+      .sort();
+    return dates.length ? dates[dates.length - 1] : todayEt;
+  }, [trends, todayEt]);
+  var dailyPerfRange = useMemo(function() {
+    var start = dailyPerfStart || shiftDays(defaultDailyPerfEnd, -29);
+    var end = dailyPerfEnd || defaultDailyPerfEnd;
+    if (end < start) {
+      var tmp = start;
+      start = end;
+      end = tmp;
+    }
+    return { start: start, end: end };
+  }, [dailyPerfStart, dailyPerfEnd, defaultDailyPerfEnd]);
 
   var localNulogySeries = useMemo(function() {
     var shiftRows = (productionSegments && Array.isArray(productionSegments.shiftRows)) ? productionSegments.shiftRows : [];
