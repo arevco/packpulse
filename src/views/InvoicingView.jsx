@@ -25,7 +25,6 @@ var MONTH_INDEX = {
   dec: 11
 };
 
-var DETAIL_ROW_LIMIT = 250;
 var REVENUE_CONFIG_STALE_MS = 15 * 60 * 1000;
 var moneyFormatter = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -532,7 +531,6 @@ export default function InvoicingView(props) {
   var [customerFilter, setCustomerFilter] = useState(String(initialFilters.customer || "all"));
   var [statusFilter, setStatusFilter] = useState(String(initialFilters.status || "all"));
   var [searchTerm, setSearchTerm] = useState(String(initialFilters.q || ""));
-  var [selectedCandidateKey, setSelectedCandidateKey] = useState("");
 
   var deferredSearchTerm = useDeferredValue(searchTerm);
 
@@ -757,11 +755,6 @@ export default function InvoicingView(props) {
     return out;
   }, [visibleInvoiceCandidates]);
 
-  useEffect(function() {
-    if (!selectedCandidateKey) return;
-    if (!visibleCandidateKeySet[selectedCandidateKey]) setSelectedCandidateKey("");
-  }, [selectedCandidateKey, visibleCandidateKeySet]);
-
   var customerRollups = useMemo(function() {
     var grouped = {};
     visibleInvoiceCandidates.forEach(function(candidate) {
@@ -799,7 +792,6 @@ export default function InvoicingView(props) {
   var detailRows = useMemo(function() {
     var rows = filteredRows.filter(function(row) {
       if (!visibleCandidateKeySet[row.candidateKey]) return false;
-      if (selectedCandidateKey && row.candidateKey !== selectedCandidateKey) return false;
       return true;
     }).slice();
 
@@ -810,12 +802,7 @@ export default function InvoicingView(props) {
       return right.unitsProduced - left.unitsProduced;
     });
     return rows;
-  }, [filteredRows, visibleCandidateKeySet, selectedCandidateKey]);
-
-  var detailRowsVisible = detailRows.slice(0, DETAIL_ROW_LIMIT);
-  var selectedCandidate = visibleInvoiceCandidates.find(function(candidate) {
-    return candidate.key === selectedCandidateKey;
-  }) || null;
+  }, [filteredRows, visibleCandidateKeySet]);
 
   var summary = useMemo(function() {
     var customers = {};
@@ -851,9 +838,17 @@ export default function InvoicingView(props) {
     };
   }, [visibleInvoiceCandidates, detailRows]);
 
+  var customerPeriodRows = useMemo(function() {
+    return revenueReadyRows.filter(function(row) {
+      if (startDate && (!row.producedDate || row.producedDate < startDate)) return false;
+      if (endDate && (!row.producedDate || row.producedDate > endDate)) return false;
+      return row.unitsProduced > 0 || !!row.jobId;
+    });
+  }, [revenueReadyRows, startDate, endDate]);
+
   var customerOptions = useMemo(function() {
     var totals = {};
-    normalizedRows.forEach(function(row) {
+    customerPeriodRows.forEach(function(row) {
       totals[row.customer] = (totals[row.customer] || 0) + row.unitsProduced;
     });
     return Object.keys(totals)
@@ -861,7 +856,13 @@ export default function InvoicingView(props) {
         if (totals[right] !== totals[left]) return totals[right] - totals[left];
         return left.localeCompare(right);
       });
-  }, [normalizedRows]);
+  }, [customerPeriodRows]);
+
+  useEffect(function() {
+    if (customerFilter === "all") return;
+    if (customerOptions.indexOf(customerFilter) !== -1) return;
+    setCustomerFilter("all");
+  }, [customerFilter, customerOptions]);
 
   function applyCurrentMonth() {
     var range = defaultInvoicingRange();
@@ -882,7 +883,6 @@ export default function InvoicingView(props) {
     setCustomerFilter("all");
     setStatusFilter("all");
     setSearchTerm("");
-    setSelectedCandidateKey("");
   }
 
   function exportSummaryCsv() {
@@ -971,8 +971,7 @@ export default function InvoicingView(props) {
         row.rowIssues.join(" | ")
       ].map(csvCell).join(",");
     });
-    var scope = selectedCandidate ? (normalizeLooseKey(selectedCandidate.customer) + "_" + normalizeLooseKey(selectedCandidate.sku)).slice(0, 60) : "filtered";
-    var filename = "invoice_detail_" + scope + "_" + (startDate || "all") + "_to_" + (endDate || "all") + ".csv";
+    var filename = "invoice_detail_filtered_" + (startDate || "all") + "_to_" + (endDate || "all") + ".csv";
     triggerDownload([header.join(",")].concat(body).join("\n"), filename, "text/csv;charset=utf-8;");
   }
 
@@ -1006,7 +1005,7 @@ export default function InvoicingView(props) {
             </Button>
             <Button onClick={exportDetailCsv} variant="outline" size="sm">
               <Download className="h-4 w-4" />
-              {selectedCandidate ? "Export Selected Detail" : "Export Detail"}
+              Export Detail
             </Button>
           </div>
         </CardHeader>
@@ -1045,7 +1044,6 @@ export default function InvoicingView(props) {
                   value={customerFilter}
                   onChange={function(event) {
                     setCustomerFilter(event.target.value);
-                    setSelectedCandidateKey("");
                   }}
                   className="flex h-9 w-full rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))] shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--accent))] focus-visible:ring-offset-1"
                 >
@@ -1063,7 +1061,6 @@ export default function InvoicingView(props) {
                   value={statusFilter}
                   onChange={function(event) {
                     setStatusFilter(event.target.value);
-                    setSelectedCandidateKey("");
                   }}
                   className="flex h-9 w-full rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))] shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--accent))] focus-visible:ring-offset-1"
                 >
@@ -1078,7 +1075,6 @@ export default function InvoicingView(props) {
                   value={searchTerm}
                   onChange={function(event) {
                     setSearchTerm(event.target.value);
-                    setSelectedCandidateKey("");
                   }}
                   placeholder="Customer, SKU, WO, PO, job..."
                 />
@@ -1146,7 +1142,6 @@ export default function InvoicingView(props) {
                           className={"cursor-pointer border-t border-[rgb(var(--border))] " + (active ? "bg-[color-mix(in_oklab,rgb(var(--accent))_7%,white)]" : "hover:bg-[rgb(var(--surface))]")}
                           onClick={function() {
                             setCustomerFilter(active ? "all" : row.customer);
-                            setSelectedCandidateKey("");
                           }}
                         >
                           <td className="px-4 py-3 font-medium text-[rgb(var(--foreground))]">
@@ -1178,18 +1173,13 @@ export default function InvoicingView(props) {
 
         <Card>
           <CardHeader className="border-b border-[rgb(var(--border))] pb-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <div className="text-base font-semibold text-[rgb(var(--foreground))]">Invoice Candidates</div>
-                <div className="mt-1 text-sm text-[rgb(var(--muted))]">
-                  {customerFilter === "all"
-                    ? "Grouped by customer and SKU for the selected billing period."
-                    : ("Focused on " + customerFilter + ".")}
-                </div>
+            <div>
+              <div className="text-base font-semibold text-[rgb(var(--foreground))]">Invoice Candidates</div>
+              <div className="mt-1 text-sm text-[rgb(var(--muted))]">
+                {customerFilter === "all"
+                  ? "Grouped by customer and SKU for the selected billing period."
+                  : ("Focused on " + customerFilter + ".")}
               </div>
-              {selectedCandidate ? (
-                <Button onClick={function() { setSelectedCandidateKey(""); }} variant="ghost" size="sm">Clear Selected Line</Button>
-              ) : null}
             </div>
           </CardHeader>
           <CardContent className="px-0 py-0">
@@ -1213,14 +1203,10 @@ export default function InvoicingView(props) {
                   <tbody>
                     {visibleInvoiceCandidates.length ? visibleInvoiceCandidates.map(function(candidate) {
                       var statusMeta = candidateStatusMeta(candidate.status);
-                      var active = selectedCandidateKey === candidate.key;
                       return (
                         <tr
                           key={candidate.key}
-                          className={"cursor-pointer border-t border-[rgb(var(--border))] align-top " + (active ? "bg-[color-mix(in_oklab,rgb(var(--accent))_7%,white)]" : "hover:bg-[rgb(var(--surface))]")}
-                          onClick={function() {
-                            setSelectedCandidateKey(active ? "" : candidate.key);
-                          }}
+                          className="border-t border-[rgb(var(--border))] align-top hover:bg-[rgb(var(--surface))]"
                         >
                           <td className="px-4 py-3">
                             <Badge variant={statusMeta.variant}>{statusMeta.label}</Badge>
@@ -1266,87 +1252,6 @@ export default function InvoicingView(props) {
           </CardContent>
         </Card>
       </div>
-
-      <Card>
-        <CardHeader className="border-b border-[rgb(var(--border))] pb-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <div className="text-base font-semibold text-[rgb(var(--foreground))]">Production Detail</div>
-              <div className="mt-1 text-sm text-[rgb(var(--muted))]">
-                {selectedCandidate
-                  ? ("Showing " + selectedCandidate.customer + " | " + selectedCandidate.sku + " across " + selectedCandidate.jobCount + " jobs.")
-                  : "Showing the underlying production rows for the current filter set."}
-              </div>
-            </div>
-            <div className="text-sm text-[rgb(var(--muted))]">
-              {detailRows.length > DETAIL_ROW_LIMIT
-                ? ("Showing " + DETAIL_ROW_LIMIT.toLocaleString() + " of " + detailRows.length.toLocaleString() + " rows. Export detail for the full set.")
-                : (detailRows.length.toLocaleString() + " rows")}
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="px-0 py-0">
-          <TableShell className="rounded-none border-x-0 border-b-0">
-            <div className="overflow-auto">
-              <table className="min-w-full text-sm">
-                <thead className="bg-[rgb(var(--surface))] text-[rgb(var(--muted))]">
-                  <tr>
-                    <th className="px-4 py-3 text-left font-medium">Produced</th>
-                    <th className="px-4 py-3 text-left font-medium">Customer / SKU</th>
-                    <th className="px-4 py-3 text-right font-medium">Units</th>
-                    <th className="px-4 py-3 text-right font-medium">Rev/Unit</th>
-                    <th className="px-4 py-3 text-right font-medium">Revenue</th>
-                    <th className="px-4 py-3 text-left font-medium">Source</th>
-                    <th className="px-4 py-3 text-left font-medium">Job</th>
-                    <th className="px-4 py-3 text-left font-medium">Work Order</th>
-                    <th className="px-4 py-3 text-left font-medium">PO</th>
-                    <th className="px-4 py-3 text-left font-medium">Line</th>
-                    <th className="px-4 py-3 text-left font-medium">Notes</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {detailRowsVisible.length ? detailRowsVisible.map(function(row) {
-                    return (
-                      <tr key={row.candidateKey + "::" + row.rowIndex} className="border-t border-[rgb(var(--border))] align-top">
-                        <td className="px-4 py-3 text-[rgb(var(--foreground))]">{formatDateLabel(row.producedDate)}</td>
-                        <td className="px-4 py-3">
-                          <div className="font-medium text-[rgb(var(--foreground))]">{row.customer} | {row.sku}</div>
-                          <div className="mt-1 text-xs text-[rgb(var(--muted))]">{row.description}</div>
-                        </td>
-                        <td className="px-4 py-3 text-right font-medium text-[rgb(var(--foreground))]">
-                          {formatUnits(row.unitsProduced)} {row.unitOfMeasure || ""}
-                        </td>
-                        <td className="px-4 py-3 text-right font-medium text-[rgb(var(--foreground))]">
-                          {row.revenuePerUnit > 0 ? formatMoney(row.revenuePerUnit) : "--"}
-                        </td>
-                        <td className="px-4 py-3 text-right font-medium text-[rgb(var(--foreground))]">
-                          {row.estimatedRevenue > 0 ? formatMoney(row.estimatedRevenue) : "--"}
-                        </td>
-                        <td className="px-4 py-3">
-                          <Badge variant={revenueSourceMeta(row.revenueSource).variant}>{revenueSourceMeta(row.revenueSource).label}</Badge>
-                        </td>
-                        <td className="px-4 py-3 text-[rgb(var(--muted))]">{row.jobId || "--"}</td>
-                        <td className="px-4 py-3 text-[rgb(var(--muted))]">{row.workOrderCode || row.workOrderId || "--"}</td>
-                        <td className="px-4 py-3 text-[rgb(var(--muted))]">{row.purchaseOrderNumber || "--"}</td>
-                        <td className="px-4 py-3 text-[rgb(var(--muted))]">{row.line || "--"}</td>
-                        <td className="px-4 py-3 text-xs text-[rgb(var(--muted))]">
-                          {row.rowIssues.length ? row.rowIssues.join(" | ") : (row.reference1 || "--")}
-                        </td>
-                      </tr>
-                    );
-                  }) : (
-                    <tr>
-                      <td colSpan={11} className="px-4 py-6 text-center text-sm text-[rgb(var(--muted))]">
-                        No production detail rows match the current filters.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </TableShell>
-        </CardContent>
-      </Card>
     </div>
   );
 }
