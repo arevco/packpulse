@@ -596,8 +596,10 @@ export default function ProductionReadiness() {
     var origin = options && (options.origin === "auto" || options.origin === "bootstrap") ? options.origin : "manual";
     setDockSyncOrigin(origin);
     setDockApiLoading(true);
-    setDockApiError("");
-    setDockApiInfo("");
+    if (origin !== "auto") {
+      setDockApiError("");
+      setDockApiInfo("");
+    }
     try {
       var resp = await fetch("/api/opendock/appointments");
       var body = await resp.json();
@@ -611,7 +613,7 @@ export default function ProductionReadiness() {
         ds.setDockFileName("OpenDock API");
         ds.setDockTimestamp(new Date());
       }
-      if (changed) {
+      if (changed && origin !== "auto") {
         setDockApiInfo((body && body.message) || ("Loaded " + rows.length + " appointments"));
       } else if (origin !== "auto") {
         setDockApiInfo("OpenDock already up to date");
@@ -1027,6 +1029,7 @@ export default function ProductionReadiness() {
   var visibleNulogySyncBusy = !!(hiddenSyncBusy && hiddenNulogySyncOrigin !== "auto");
   var backgroundNulogySyncBusy = !!(hiddenSyncBusy && hiddenNulogySyncOrigin === "auto");
   var visibleDockSyncBusy = !!(dockApiLoading && dockSyncOrigin !== "auto");
+  var visibleDockSyncInfo = !!(dockApiInfo && dockSyncOrigin !== "auto");
   var visibleDockSyncError = !!(dockApiError && dockSyncOrigin !== "auto");
   var visibleNulogySyncError = !!(nulogySyncState && nulogySyncState.errorCount > 0 && hiddenNulogySyncOrigin !== "auto");
   var showSharedSnapshotWritingBadge = sharedWrite.status === "writing" && showDataControlsPanel;
@@ -1162,8 +1165,8 @@ export default function ProductionReadiness() {
             </div>
             {dockApiLoading && <Badge variant="secondary">Loading OpenDock…</Badge>}
             {hiddenSyncBusy && <Badge variant="secondary">Loading Nulogy…</Badge>}
-            {dockApiInfo && <Badge variant="success">{dockApiInfo}</Badge>}
-            {dockApiError && <Badge variant="danger">OpenDock: {dockApiError}</Badge>}
+            {visibleDockSyncInfo && <Badge variant="success">{dockApiInfo}</Badge>}
+            {visibleDockSyncError && <Badge variant="danger">OpenDock: {dockApiError}</Badge>}
             {!dockApiLoading && !hiddenSyncBusy && (
             <Button onClick={() => { setDockApiInfo(""); setDockApiError(""); triggerFullNulogySync(); fetchOpenDockApi(); fetchEvoconApi(); }} variant="outline" size="sm">
                 Retry Sync
@@ -1200,8 +1203,8 @@ export default function ProductionReadiness() {
             {dockApiLoading ? "Loading OpenDock..." : "Fetch OpenDock from API"}
           </Button>
           <span className="text-xs text-[rgb(var(--muted))]">Uses secure Vercel server route (`/api/opendock/appointments`).</span>
-          {dockApiInfo && <span className="text-xs text-[rgb(var(--success))]">{dockApiInfo}</span>}
-          {dockApiError && <span className="text-xs text-[rgb(var(--danger))]">OpenDock API error: {dockApiError}</span>}
+          {visibleDockSyncInfo && <span className="text-xs text-[rgb(var(--success))]">{dockApiInfo}</span>}
+          {visibleDockSyncError && <span className="text-xs text-[rgb(var(--danger))]">OpenDock API error: {dockApiError}</span>}
         </div>
         </>)}
         {ds.allUploaded && !ds.analyzing && (
@@ -1241,8 +1244,8 @@ export default function ProductionReadiness() {
               </span>
             )}
             {dockApiLoading && <Badge variant="secondary">OpenDock</Badge>}
-            {dockApiInfo && syncVisualPct < 100 && <Badge variant="success">{dockApiInfo}</Badge>}
-            {dockApiError && <Badge variant="danger">OpenDock: {dockApiError}</Badge>}
+            {visibleDockSyncInfo && syncVisualPct < 100 && <Badge variant="success">{dockApiInfo}</Badge>}
+            {visibleDockSyncError && <Badge variant="danger">OpenDock: {dockApiError}</Badge>}
             {!dockApiLoading && !hiddenSyncBusy && setupNeedsBootstrap && (
               <Button variant="outline" size="sm" onClick={() => { setDockApiInfo(""); setDockApiError(""); triggerFullNulogySync(); fetchOpenDockApi(); fetchEvoconApi(); }}>
                 Retry
@@ -1403,8 +1406,8 @@ export default function ProductionReadiness() {
         )}
         {showDataControlsPanel && (!syncHealthy || showQuickControls) && (
           <>
-            {dockApiError && <div className="-mt-2 mb-1 text-xs text-[rgb(var(--danger))]">OpenDock API error: {dockApiError}</div>}
-            {dockApiInfo && <div className="-mt-0.5 mb-1 text-xs text-[rgb(var(--success))]">{dockApiInfo}</div>}
+            {visibleDockSyncError && <div className="-mt-2 mb-1 text-xs text-[rgb(var(--danger))]">OpenDock API error: {dockApiError}</div>}
+            {visibleDockSyncInfo && <div className="-mt-0.5 mb-1 text-xs text-[rgb(var(--success))]">{dockApiInfo}</div>}
             {evoconApiError && <div className="-mt-0.5 mb-1 text-xs text-[rgb(var(--danger))]">Evocon API error: {evoconApiError}</div>}
           </>
         )}
