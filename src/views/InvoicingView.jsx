@@ -404,6 +404,28 @@ async function fetchInvoicingRevenueConfig() {
   return normalizeRevenueConfigPayload(result.response.ok ? result.body : {});
 }
 
+function normalizeInvoicingProductionPayload(body) {
+  return {
+    rows: body && Array.isArray(body.rows) ? body.rows : [],
+    rowCount: Number(body && body.rowCount || 0),
+    querySource: String(body && body.querySource || ""),
+    latestSyncedAt: String(body && body.latestSyncedAt || ""),
+    availableDateRange: {
+      min: String(body && body.availableDateRange && body.availableDateRange.min || ""),
+      max: String(body && body.availableDateRange && body.availableDateRange.max || "")
+    }
+  };
+}
+
+async function fetchInvoicingProductionHistory(startDate, endDate) {
+  var url = "/api/ops/invoicing-production?start=" + encodeURIComponent(startDate) + "&end=" + encodeURIComponent(endDate);
+  var result = await fetchJsonWithCredentials(url);
+  if (!result.response.ok) {
+    throw new Error((result.body && (result.body.error || result.body.details)) || "Could not load invoicing production history");
+  }
+  return normalizeInvoicingProductionPayload(result.body);
+}
+
 function buildRevenueTargetsBySku(rows) {
   var map = {};
   (Array.isArray(rows) ? rows : []).forEach(function(row) {
@@ -562,6 +584,7 @@ function buildNormalizedProductionRow(row, index, fallbacks) {
     "Description", "description"
   ]) || "").trim();
   var producedRaw = pickFieldLoose(row, [
+    "Produced Date ET", "produced_date_et",
     "Produced date", "produced_date",
     "Produced At", "produced_at",
     "produced_at_utc",
@@ -665,7 +688,6 @@ function metricCard(label, value, helper, tone) {
 }
 
 export default function InvoicingView(props) {
-  var productionData = Array.isArray(props.productionData) ? props.productionData : [];
   var workOrders = Array.isArray(props.workOrders) ? props.workOrders : [];
   var itemMaster = Array.isArray(props.itemMaster) ? props.itemMaster : [];
   var initialFilters = props.initialFilters || {};
@@ -684,6 +706,7 @@ export default function InvoicingView(props) {
 
   var deferredSearchTerm = useDeferredValue(searchTerm);
   var deferredCandidateColumnFilters = useDeferredValue(candidateColumnFilters);
+  var hasValidDateRange = !!(startDate && endDate && endDate >= startDate);
 
   useEffect(function() {
     if (!onPermalinkChange) return;
@@ -709,6 +732,23 @@ export default function InvoicingView(props) {
   var itemMasterCostBySku = revenueConfig.itemMasterCostBySku && typeof revenueConfig.itemMasterCostBySku === "object"
     ? revenueConfig.itemMasterCostBySku
     : {};
+  var productionHistoryQuery = useQuery({
+    queryKey: ["invoicing", "production-history", startDate, endDate],
+    queryFn: function() {
+      return fetchInvoicingProductionHistory(startDate, endDate);
+    },
+    enabled: hasValidDateRange,
+    staleTime: 30 * 1000
+  });
+  var productionHistory = productionHistoryQuery.data || {
+    rows: [],
+    rowCount: 0,
+    querySource: "",
+    latestSyncedAt: "",
+    availableDateRange: { min: "", max: "" }
+  };
+  var productionRows = Array.isArray(productionHistory.rows) ? productionHistory.rows : [];
+  var productionSyncTimestamp = productionHistory.latestSyncedAt || (props.productionTimestamp ? new Date(props.productionTimestamp).toISOString() : "");
 
   var fieldFallbacks = useMemo(function() {
     var workOrderFallbacks = buildWorkOrderFallbacks(workOrders);
@@ -722,7 +762,7 @@ export default function InvoicingView(props) {
   }, [workOrders, itemMaster]);
 
   var normalizedRows = useMemo(function() {
-    return productionData
+    return productionRows
       .map(function(row, index) {
         var normalized = buildNormalizedProductionRow(row, index, fieldFallbacks);
         normalized.searchHaystack = buildSearchHaystack(normalized);
@@ -737,7 +777,7 @@ export default function InvoicingView(props) {
       .filter(function(row) {
         return row.unitsProduced > 0;
       });
-  }, [productionData, fieldFallbacks]);
+  }, [productionRows, fieldFallbacks]);
 
   var revenueReadyRows = useMemo(function() {
     return normalizedRows.map(function(row) {
@@ -752,6 +792,13 @@ export default function InvoicingView(props) {
   }, [normalizedRows, revenueTargetsBySku, itemMasterCostBySku]);
 
   var availableDateRange = useMemo(function() {
+    var queryRange = productionHistory.availableDateRange || { min: "", max: "" };
+    if (queryRange.min || queryRange.max) {
+      return {
+        min: String(queryRange.min || ""),
+        max: String(queryRange.max || "")
+      };
+    }
     return revenueReadyRows.reduce(function(acc, row) {
       if (!row.producedDate) return acc;
       return {
@@ -759,7 +806,7 @@ export default function InvoicingView(props) {
         max: updateMaxDate(acc.max, row.producedDate)
       };
     }, { min: "", max: "" });
-  }, [revenueReadyRows]);
+  }, [productionHistory.availableDateRange, revenueReadyRows]);
 
   var searchNeedle = normalizeSearchValue(deferredSearchTerm);
 
@@ -1217,7 +1264,81 @@ export default function InvoicingView(props) {
     triggerDownload([header.join(",")].concat(body).join("\n"), filename, "text/csv;charset=utf-8;");
   }
 
+  if (!hasValidDateRange) {
+    return (
+      <Card className="mt-3">
+        <CardHeader className="border-b border-[rgb(var(--border))] pb-4">
+          <div className="text-lg font-semibold text-[rgb(var(--foreground))]">Invoicing Workflow</div>
+          <div className="mt-1 max-w-3xl text-sm text-[rgb(var(--muted))]">
+            Review customer SKU output for a billing period, assign each line to a work order and purchase order, and export accounting-ready invoice detail.
+          </div>
+        </CardHeader>
+        <CardContent className="px-4 py-4">
+          <div className="rounded-xl border border-dashed border-[rgb(var(--border))] bg-[color-mix(in_oklab,rgb(var(--surface))_70%,white)] p-4">
+            <div className="text-base font-semibold text-[rgb(var(--foreground))]">Choose a valid billing window</div>
+            <div className="mt-2 max-w-2xl text-sm text-[rgb(var(--muted))]">
+              Start date and end date must both be set, and the end date cannot be earlier than the start date.
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (productionHistoryQuery.isLoading) {
+    return (
+      <Card className="mt-3">
+        <CardHeader className="border-b border-[rgb(var(--border))] pb-4">
+          <div className="text-lg font-semibold text-[rgb(var(--foreground))]">Invoicing Workflow</div>
+          <div className="mt-1 max-w-3xl text-sm text-[rgb(var(--muted))]">
+            Loading historical production rows for the selected billing window.
+          </div>
+        </CardHeader>
+        <CardContent className="px-4 py-4">
+          <div className="rounded-xl border border-dashed border-[rgb(var(--border))] bg-[color-mix(in_oklab,rgb(var(--surface))_70%,white)] p-4 text-sm text-[rgb(var(--muted))]">
+            Pulling invoicing history from stored `production_events` for {formatDateLabel(startDate)} to {formatDateLabel(endDate)}.
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (productionHistoryQuery.isError) {
+    return (
+      <Card className="mt-3">
+        <CardHeader className="border-b border-[rgb(var(--border))] pb-4">
+          <div className="text-lg font-semibold text-[rgb(var(--foreground))]">Invoicing Workflow</div>
+          <div className="mt-1 max-w-3xl text-sm text-[rgb(var(--muted))]">
+            Review customer SKU output for a billing period, assign each line to a work order and purchase order, and export accounting-ready invoice detail.
+          </div>
+        </CardHeader>
+        <CardContent className="px-4 py-4">
+          <div className="rounded-xl border border-[rgb(var(--danger))]/20 bg-[color-mix(in_oklab,rgb(var(--danger))_6%,white)] p-4">
+            <div className="text-base font-semibold text-[rgb(var(--foreground))]">Historical production data could not be loaded</div>
+            <div className="mt-2 max-w-2xl text-sm text-[rgb(var(--muted))]">
+              {productionHistoryQuery.error && productionHistoryQuery.error.message
+                ? productionHistoryQuery.error.message
+                : "The invoicing history request failed."}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
   if (!normalizedRows.length) {
+    var missingHistoryTable = productionHistory.querySource === "missing_production_events_table";
+    var hasAvailableHistory = !!(availableDateRange.min || availableDateRange.max);
+    var emptyStateTitle = missingHistoryTable
+      ? "Historical production storage is not available yet"
+      : hasAvailableHistory
+        ? "No production rows were found for this billing window"
+        : "No production history is stored for invoicing yet";
+    var emptyStateDescription = missingHistoryTable
+      ? "This environment does not have the `production_events` table available yet, so invoicing cannot load historical production rows."
+      : hasAvailableHistory
+        ? "The selected billing window falls outside the currently stored production history, or there were no positive-unit production rows in that period."
+        : "Run the Nulogy sync and include the Production report. Once rows are stored in historical production events, this page will assemble customer, SKU, work order, and purchase order invoice lines automatically.";
     return (
       <Card className="mt-3">
         <CardHeader className="border-b border-[rgb(var(--border))] pb-4">
@@ -1230,9 +1351,9 @@ export default function InvoicingView(props) {
           <div className="rounded-xl border border-dashed border-[rgb(var(--border))] bg-[color-mix(in_oklab,rgb(var(--surface))_70%,white)] p-4">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div>
-                <div className="text-base font-semibold text-[rgb(var(--foreground))]">No production rows are loaded for invoicing yet</div>
+                <div className="text-base font-semibold text-[rgb(var(--foreground))]">{emptyStateTitle}</div>
                 <div className="mt-2 max-w-2xl text-sm text-[rgb(var(--muted))]">
-                  Run the Nulogy sync and include the Production report. Once production rows are available, this page will assemble customer, SKU, work order, and purchase order invoice lines automatically.
+                  {emptyStateDescription}
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -1240,7 +1361,7 @@ export default function InvoicingView(props) {
                 <Button onClick={applyPreviousMonth} variant="outline" size="sm">Previous Month</Button>
               </div>
             </div>
-            <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
               <div className="rounded-lg border border-[rgb(var(--border))] bg-white px-3 py-3">
                 <div className="text-xs font-medium uppercase tracking-[0.12em] text-[rgb(var(--muted))]">Billing Window</div>
                 <div className="mt-2 text-sm font-medium text-[rgb(var(--foreground))]">
@@ -1250,7 +1371,13 @@ export default function InvoicingView(props) {
               <div className="rounded-lg border border-[rgb(var(--border))] bg-white px-3 py-3">
                 <div className="text-xs font-medium uppercase tracking-[0.12em] text-[rgb(var(--muted))]">Production Sync</div>
                 <div className="mt-2 text-sm font-medium text-[rgb(var(--foreground))]">
-                  {props.productionTimestamp ? new Date(props.productionTimestamp).toLocaleString() : "Not synced yet"}
+                  {productionSyncTimestamp ? new Date(productionSyncTimestamp).toLocaleString() : "Not synced yet"}
+                </div>
+              </div>
+              <div className="rounded-lg border border-[rgb(var(--border))] bg-white px-3 py-3">
+                <div className="text-xs font-medium uppercase tracking-[0.12em] text-[rgb(var(--muted))]">Available History</div>
+                <div className="mt-2 text-sm font-medium text-[rgb(var(--foreground))]">
+                  {hasAvailableHistory ? (formatDateLabel(availableDateRange.min) + " to " + formatDateLabel(availableDateRange.max)) : "No stored production history yet"}
                 </div>
               </div>
               <div className="rounded-lg border border-[rgb(var(--border))] bg-white px-3 py-3">
@@ -1302,8 +1429,14 @@ export default function InvoicingView(props) {
             ) : revenueConfigQuery.isLoading ? (
               <Badge variant="secondary">Loading revenue config</Badge>
             ) : null}
-            {props.productionTimestamp ? (
-              <Badge variant="secondary">Production synced {new Date(props.productionTimestamp).toLocaleString()}</Badge>
+            {productionHistoryQuery.isFetching ? (
+              <Badge variant="secondary">Refreshing production history</Badge>
+            ) : null}
+            {productionSyncTimestamp ? (
+              <Badge variant="secondary">
+                {productionHistory.querySource === "production_events" ? "History synced " : "Production synced "}
+                {new Date(productionSyncTimestamp).toLocaleString()}
+              </Badge>
             ) : null}
           </div>
 

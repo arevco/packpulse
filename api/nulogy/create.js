@@ -53,7 +53,7 @@ function buildProductionFilters(options) {
   var shiftsPerDay = Number(process.env.NULOGY_SHIFTS_PER_DAY || 2);
   var lookbackShifts = Number(process.env.NULOGY_PRODUCTION_LOOKBACK_SHIFTS || 60);
   var fixedFromEnv = String(process.env.NULOGY_PRODUCTION_FROM_DATE || "").trim();
-  var correctionDays = Number(process.env.PRODUCTION_EVENT_CORRECTION_DAYS || process.env.NULOGY_EVENT_CORRECTION_DAYS || 60);
+  var correctionDays = Number(process.env.PRODUCTION_EVENT_CORRECTION_DAYS || process.env.NULOGY_EVENT_CORRECTION_DAYS || 3);
   var explicitLookbackDays = Number(process.env.NULOGY_PRODUCTION_LOOKBACK_DAYS || 0);
   var recentProductionLookbackDays = Number(process.env.NULOGY_RECENT_PRODUCTION_LOOKBACK_DAYS || 3);
   var now = new Date();

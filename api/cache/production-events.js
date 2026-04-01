@@ -120,7 +120,7 @@ export default async function handler(req, res) {
       var writeResult = await writeProductionEventsSafely(supabase, {
         siteId: CACHE_SITE_ID,
         events: events,
-        correctionDays: Number(process.env.PRODUCTION_EVENT_CORRECTION_DAYS || process.env.NULOGY_EVENT_CORRECTION_DAYS || 60)
+        correctionDays: Number(process.env.PRODUCTION_EVENT_CORRECTION_DAYS || process.env.NULOGY_EVENT_CORRECTION_DAYS || 3)
       });
       var refreshResult = { status: "noop", details: null };
       if (writeResult.written > 0) {

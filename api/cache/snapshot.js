@@ -421,7 +421,7 @@ export default async function handler(req, res) {
           var productionWrite = await writeProductionEventsSafely(supabase, {
             siteId: CACHE_SITE_ID,
             events: productionEvents,
-            correctionDays: Number(process.env.PRODUCTION_EVENT_CORRECTION_DAYS || process.env.NULOGY_EVENT_CORRECTION_DAYS || 60)
+            correctionDays: Number(process.env.PRODUCTION_EVENT_CORRECTION_DAYS || process.env.NULOGY_EVENT_CORRECTION_DAYS || 3)
           });
           productionWriteMode = productionWrite.writeMode;
           productionCorrectionStart = productionWrite.correctionStart;
