@@ -42,6 +42,8 @@ function createEmptyLaborActuals(status, productionStatus) {
 }
 
 var EMPTY_BREAKDOWN = { rowsLite: [], bySku: [], byLine: [], latestByLine: [], latestDate: null, totalRows: 0, summaryOnly: false, querySource: "" };
+var OPERATIONS_PRIMARY_STALE_MS = 5 * 60 * 1000;
+var OPERATIONS_SUPPORTING_STALE_MS = 15 * 60 * 1000;
 var operationsInsightsPanelImportPromise = null;
 
 function importOperationsInsightsPanel() {
@@ -1170,7 +1172,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     queryFn: function() {
       return fetchOperationsSummary(operationsFetchDays);
     },
-    staleTime: 60 * 1000
+    staleTime: OPERATIONS_PRIMARY_STALE_MS
   });
 
   useEffect(function() {
@@ -1187,7 +1189,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       return fetchOperationsBreakdown(operationsFetchDays);
     },
     enabled: deferredFetchReady,
-    staleTime: 60 * 1000
+    staleTime: OPERATIONS_PRIMARY_STALE_MS
   });
   var forecastQuery = useQuery({
     queryKey: forecastQueryKey,
@@ -1195,13 +1197,13 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       return fetchOperationsForecastPlans(forecastPlanMonths);
     },
     enabled: deferredFetchReady && forecastPlanMonths.length > 0,
-    staleTime: 5 * 60 * 1000
+    staleTime: OPERATIONS_SUPPORTING_STALE_MS
   });
   var configQuery = useQuery({
     queryKey: configQueryKey,
     queryFn: fetchOperationsConfig,
     enabled: deferredFetchReady,
-    staleTime: 5 * 60 * 1000
+    staleTime: OPERATIONS_SUPPORTING_STALE_MS
   });
   var laborSummaryQuery = useQuery({
     queryKey: laborSummaryQueryKey,
@@ -1209,7 +1211,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       return fetchOperationsLaborSummary(laborFetchStart, laborFetchEnd);
     },
     enabled: deferredFetchReady,
-    staleTime: 60 * 1000
+    staleTime: OPERATIONS_PRIMARY_STALE_MS
   });
   var laborSummarySettled = !!queryClient.getQueryData(laborSummaryQueryKey)
     || laborSummaryQuery.status === "success"
@@ -1220,7 +1222,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       return fetchOperationsLaborDetail(laborFetchStart, laborFetchEnd);
     },
     enabled: deferredFetchReady && laborSummarySettled,
-    staleTime: 60 * 1000
+    staleTime: OPERATIONS_PRIMARY_STALE_MS
   });
 
   var serverPayload = breakdownQuery.data || summaryQuery.data || null;
