@@ -54,7 +54,7 @@ function pickFieldLoose(row, keys) {
   return "";
 }
 
-function buildProductionEvents(rows, siteId, syncedAt, updatedBy) {
+export function buildProductionEvents(rows, siteId, syncedAt, updatedBy) {
   var dedup = {};
   var hashOccurrences = {};
   (Array.isArray(rows) ? rows : []).forEach(function(row) {

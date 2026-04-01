@@ -46,6 +46,14 @@ export function selectEventsForWrite(events, options) {
   var dateField = String(options && options.dateField || "");
   var hasExistingRows = !!(options && options.hasExistingRows);
   var correctionDays = Math.max(1, Number(options && options.correctionDays || 60));
+  var forceFullBackfill = !!(options && options.forceFullBackfill);
+  if (forceFullBackfill) {
+    return {
+      mode: "explicit_backfill",
+      cutoffDate: null,
+      events: allEvents
+    };
+  }
   if (!hasExistingRows) {
     return {
       mode: "full_backfill",

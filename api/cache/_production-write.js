@@ -273,6 +273,7 @@ export async function writeProductionEventsSafely(supabase, options) {
   var siteId = String(options && options.siteId || "");
   var allEvents = Array.isArray(options && options.events) ? options.events : [];
   var correctionDays = Math.max(1, Number(options && options.correctionDays || 3));
+  var forceFullBackfill = !!(options && options.forceFullBackfill);
 
   var hasExistingRows = await withRetry(function() {
     return siteTableHasRows(supabase, "production_events", siteId);
@@ -280,7 +281,8 @@ export async function writeProductionEventsSafely(supabase, options) {
   var writePlan = selectEventsForWrite(allEvents, {
     dateField: "produced_date_et",
     hasExistingRows: hasExistingRows,
-    correctionDays: correctionDays
+    correctionDays: correctionDays,
+    forceFullBackfill: forceFullBackfill
   });
   var guardedPlan = await protectRecentSparseDates(supabase, siteId, writePlan.events);
   var writeResult = await replaceProductionEventsByDate(supabase, siteId, guardedPlan.events);

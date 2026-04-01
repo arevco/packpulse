@@ -218,6 +218,10 @@ const COLUMN_MAPS = {
     "Line": "Line",
     "project_code": "Work Order Code",
     "Project Code": "Work Order Code",
+    "project_id": "Work Order",
+    "Project ID": "Work Order",
+    "Work Order": "Work Order",
+    "Work Order ID": "Work Order",
     "item_code": "Item Code",
     "Item Code": "Item Code",
     "item_description": "Description",
@@ -236,6 +240,8 @@ const COLUMN_MAPS = {
     "Project Status": "Work Order Status",
     "purchase_order_number": "Purchase Order Number",
     "Purchase Order Number": "Purchase Order Number",
+    "reference_1": "Reference 1",
+    "Reference 1": "Reference 1",
     "unit_of_measure": "Unit of Measure",
     "Unit of measure": "Unit of Measure",
     "Unit Of Measure": "Unit of Measure",
@@ -335,7 +341,7 @@ const COLUMN_MAPS = {
   }
 };
 
-function parseCSV(text) {
+export function parseCSV(text) {
   const lines = text.split("\n");
   if (lines.length < 2) return [];
 
@@ -389,7 +395,7 @@ function parseCSVLine(line) {
   return result;
 }
 
-function transformColumns(rows, reportType) {
+export function transformColumns(rows, reportType) {
   const map = COLUMN_MAPS[reportType] || {};
   if (!rows.length) return rows;
   const normalizeKey = function(v) {
@@ -432,7 +438,7 @@ function normalizeLooseKey(value) {
   return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-function pickLooseValue(row, keys) {
+export function pickLooseValue(row, keys) {
   if (!row || typeof row !== "object") return "";
   var rowKeys = Object.keys(row);
   for (var i = 0; i < keys.length; i++) {
@@ -445,44 +451,30 @@ function pickLooseValue(row, keys) {
   return "";
 }
 
-export default async function handler(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-
-  if (req.method === "OPTIONS") return res.status(200).end();
-  if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
-
-  const downloadUrl = req.query.url;
-  const reportType = req.query.type;
-  const rawMode = String(req.query.raw || "") === "1";
-
+export async function fetchAndTransformReport(downloadUrl, reportType, rawMode) {
   if (!downloadUrl) {
-    return res.status(400).json({ error: "Missing url parameter" });
+    return { ok: false, statusCode: 400, body: { error: "Missing url parameter" } };
   }
   if (!reportType || !COLUMN_MAPS[reportType]) {
-    return res.status(400).json({ error: "Missing or invalid type parameter. Use: inventory, workorders, itemmaster, bom, production, or labor" });
+    return {
+      ok: false,
+      statusCode: 400,
+      body: { error: "Missing or invalid type parameter. Use: inventory, workorders, itemmaster, bom, production, or labor" }
+    };
   }
-
   try {
-    // Download CSV from S3 (no auth needed for the S3 URL)
     const response = await fetch(downloadUrl);
-
     if (!response.ok) {
-      return res.status(response.status).json({ error: `Failed to download report CSV (${response.status})` });
+      return {
+        ok: false,
+        statusCode: response.status,
+        body: { error: `Failed to download report CSV (${response.status})` }
+      };
     }
-
     const csvText = await response.text();
-
-    // Parse CSV
     const rows = parseCSV(csvText);
-
-    // Capture original headers before transformation
     const originalHeaders = rows.length > 0 ? Object.keys(rows[0]) : [];
-
-    // Transform column names for PackPulse compatibility unless raw mode requested.
     const transformed = rawMode ? rows : transformColumns(rows, reportType);
-
     const productionJobWindowDiagnostics = reportType === "production" && !rawMode && transformed.length
       ? {
           hasAnyActualJobStart: transformed.some(function(row) {
@@ -493,19 +485,40 @@ export default async function handler(req, res) {
           })
         }
       : null;
-
-    return res.status(200).json({
-      data: transformed,
-      rowCount: transformed.length,
-      reportType,
-      columns: transformed.length > 0 ? Object.keys(transformed[0]) : [],
-      originalHeaders: originalHeaders,
-      diagnostics: productionJobWindowDiagnostics
-    });
-
+    return {
+      ok: true,
+      statusCode: 200,
+      body: {
+        data: transformed,
+        rowCount: transformed.length,
+        reportType: reportType,
+        columns: transformed.length > 0 ? Object.keys(transformed[0]) : [],
+        originalHeaders: originalHeaders,
+        diagnostics: productionJobWindowDiagnostics
+      }
+    };
   } catch (err) {
     Sentry.captureException(err);
-    console.error("Nulogy download error:", err);
-    return res.status(500).json({ error: `Failed to download report: ${err.message}` });
+    return {
+      ok: false,
+      statusCode: 500,
+      body: { error: `Failed to download report: ${err.message}` }
+    };
   }
+}
+
+export default async function handler(req, res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+
+  const result = await fetchAndTransformReport(
+    req.query.url,
+    req.query.type,
+    String(req.query.raw || "") === "1"
+  );
+  return res.status(result.statusCode).json(result.body);
 }

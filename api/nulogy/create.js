@@ -6,7 +6,33 @@ import Sentry from "../_sentry.js";
 
 const NULOGY_URL = process.env.NULOGY_URL || "https://app.nulogy.net";
 
-function formatNulogyDateTime(date) {
+function sanitizeIsoDate(value) {
+  var text = String(value || "").trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : "";
+}
+
+function shiftIsoDateKey(dateKey, deltaDays) {
+  var base = sanitizeIsoDate(dateKey);
+  if (!base) return "";
+  var d = new Date(base + "T12:00:00Z");
+  if (isNaN(d)) return "";
+  d.setUTCDate(d.getUTCDate() + Number(deltaDays || 0));
+  return d.toISOString().slice(0, 10);
+}
+
+function formatNulogyBoundaryDateTime(dateKey) {
+  var base = sanitizeIsoDate(dateKey);
+  if (!base) return "";
+  var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  var parts = base.split("-");
+  var year = parts[0];
+  var monthIndex = Number(parts[1]) - 1;
+  var day = parts[2];
+  if (!(monthIndex >= 0 && monthIndex < months.length)) return "";
+  return year + "-" + months[monthIndex] + "-" + day + " 12:00 AM";
+}
+
+export function formatNulogyDateTime(date) {
   var d = date instanceof Date ? date : new Date(date);
   if (isNaN(d)) return "";
   var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -47,8 +73,21 @@ function missingRequiredColumns(config, columns) {
   });
 }
 
-function buildProductionFilters(options) {
+export function buildProductionFilters(options) {
   var syncProfile = String(options && options.syncProfile || "full");
+  var explicitStartDate = sanitizeIsoDate(options && options.startDate);
+  var explicitEndDate = sanitizeIsoDate(options && options.endDate);
+  if (explicitStartDate && explicitEndDate && explicitEndDate >= explicitStartDate) {
+    var explicitEndExclusive = shiftIsoDateKey(explicitEndDate, 1) || explicitEndDate;
+    return [
+      {
+        column: "produced_at",
+        operator: "between",
+        from_threshold: formatNulogyBoundaryDateTime(explicitStartDate),
+        to_threshold: formatNulogyBoundaryDateTime(explicitEndExclusive)
+      }
+    ];
+  }
   var shiftHours = Number(process.env.NULOGY_SHIFT_HOURS || 8);
   var shiftsPerDay = Number(process.env.NULOGY_SHIFTS_PER_DAY || 2);
   var lookbackShifts = Number(process.env.NULOGY_PRODUCTION_LOOKBACK_SHIFTS || 60);
@@ -200,11 +239,13 @@ const REPORT_CONFIGS = {
     requiredColumns: ["produced_at", "job_id", "units_produced"],
     columnSets: [
       ["produced_at", "actual_job_start_at", "actual_job_end_at", "job_id", "project_code", "item_code", "item_description",
-       "lot_code", "line", "units_produced", "project_status", "purchase_order_number"],
-      ["produced_at", "actual_job_start_at", "actual_job_end_at", "job_id", "project_code", "item_code", "lot_code", "units_produced", "line"],
+       "project_id", "customer_name", "lot_code", "line", "units_produced", "project_status", "purchase_order_number", "reference_1", "unit_of_measure"],
+      ["produced_at", "actual_job_start_at", "actual_job_end_at", "job_id", "project_code", "item_code",
+       "project_id", "customer_name", "lot_code", "units_produced", "line", "purchase_order_number", "reference_1", "unit_of_measure"],
       ["produced_at", "job_id", "project_code", "item_code", "item_description",
-       "lot_code", "line", "units_produced", "project_status", "purchase_order_number"],
-      ["produced_at", "job_id", "project_code", "item_code", "lot_code", "units_produced", "line"],
+       "project_id", "customer_name", "lot_code", "line", "units_produced", "project_status", "purchase_order_number", "reference_1", "unit_of_measure"],
+      ["produced_at", "job_id", "project_code", "item_code",
+       "project_id", "customer_name", "lot_code", "units_produced", "line", "purchase_order_number", "reference_1", "unit_of_measure"],
       ["produced_at", "job_id", "units_produced"]
     ],
     filters: buildProductionFilters
@@ -226,32 +267,37 @@ const REPORT_CONFIGS = {
   }
 };
 
-export default async function handler(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-
-  if (req.method === "OPTIONS") return res.status(200).end();
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
-
+export async function createReportTask(options) {
   const user = process.env.NULOGY_USER;
   const pass = process.env.NULOGY_PASS;
-  const siteUuid = process.env.NULOGY_SITE_UUID;
+  const siteUuid = String(options && options.siteUuid || process.env.NULOGY_SITE_UUID || "").trim();
 
   if (!user || !pass) {
-    return res.status(500).json({ error: "Nulogy credentials not configured." });
+    return { statusCode: 500, body: { error: "Nulogy credentials not configured." } };
   }
 
-  const { reportType } = req.body || {};
+  const reportType = String(options && options.reportType || "").trim();
   const config = REPORT_CONFIGS[reportType];
 
   if (!config) {
-    return res.status(400).json({ error: `Invalid report type: ${reportType}. Use: inventory, workorders, itemmaster, bom, production, or labor` });
+    return {
+      statusCode: 400,
+      body: { error: `Invalid report type: ${reportType}. Use: inventory, workorders, itemmaster, bom, production, or labor` }
+    };
   }
 
   const auth = Buffer.from(`${user}:${pass}`).toString("base64");
   const errors = [];
-  const filterOptions = { syncProfile: req.body && req.body.syncProfile ? req.body.syncProfile : "full" };
+  const filterOptions = Object.assign(
+    {
+      syncProfile: options && options.syncProfile ? options.syncProfile : "full"
+    },
+    options && options.filterOptions && typeof options.filterOptions === "object" ? options.filterOptions : {}
+  );
+  if (options && options.startDate && !filterOptions.startDate) filterOptions.startDate = options.startDate;
+  if (options && options.endDate && !filterOptions.endDate) filterOptions.endDate = options.endDate;
+  const hasOverrideFilters = !!(options && Object.prototype.hasOwnProperty.call(options, "filters"));
+  const overrideFilters = hasOverrideFilters ? options.filters : null;
 
   for (let attempt = 0; attempt < config.columnSets.length; attempt++) {
     const columns = config.columnSets[attempt];
@@ -261,7 +307,9 @@ export default async function handler(req, res) {
       columns: columns,
       locale: "en_US"
     };
-    if (config.filters) {
+    if (hasOverrideFilters) {
+      body.filters = overrideFilters;
+    } else if (config.filters) {
       body.filters = typeof config.filters === "function" ? config.filters(filterOptions) : config.filters;
     }
     if (siteUuid) body.site_uuid = siteUuid;
@@ -277,10 +325,10 @@ export default async function handler(req, res) {
       });
 
       if (response.status === 401) {
-        return res.status(401).json({ error: "Invalid Nulogy credentials." });
+        return { statusCode: 401, body: { error: "Invalid Nulogy credentials." } };
       }
       if (response.status === 403) {
-        return res.status(403).json({ error: "Nulogy credentials lack permissions." });
+        return { statusCode: 403, body: { error: "Nulogy credentials lack permissions." } };
       }
 
       if (response.ok || response.status === 201) {
@@ -298,15 +346,18 @@ export default async function handler(req, res) {
         const taskId = responseBody.task_id;
         const finalStatusUrl = statusUrl || responseBody.status_url || `${NULOGY_URL}/api/reports/report_runs/${taskId}`;
 
-        return res.status(201).json({
-          taskId,
-          statusUrl: finalStatusUrl,
-          reportType,
-          nulogyReport: config.report,
-          columnsUsed: columns,
-          attempt: attempt + 1,
-          totalColumns: columns.length
-        });
+        return {
+          statusCode: 201,
+          body: {
+            taskId,
+            statusUrl: finalStatusUrl,
+            reportType,
+            nulogyReport: config.report,
+            columnsUsed: columns,
+            attempt: attempt + 1,
+            totalColumns: columns.length
+          }
+        };
       }
 
       // 400 = bad request
@@ -335,7 +386,9 @@ export default async function handler(req, res) {
                 columns: prunedColumns,
                 locale: "en_US"
               };
-              if (config.filters) {
+              if (hasOverrideFilters) {
+                prunedBody.filters = overrideFilters;
+              } else if (config.filters) {
                 prunedBody.filters = typeof config.filters === "function" ? config.filters(filterOptions) : config.filters;
               }
               if (siteUuid) prunedBody.site_uuid = siteUuid;
@@ -355,16 +408,19 @@ export default async function handler(req, res) {
                 const taskId = prunedResponseBody.task_id;
                 const finalStatusUrl = statusUrl || prunedResponseBody.status_url || `${NULOGY_URL}/api/reports/report_runs/${taskId}`;
 
-                return res.status(201).json({
-                  taskId,
-                  statusUrl: finalStatusUrl,
-                  reportType,
-                  nulogyReport: config.report,
-                  columnsUsed: prunedColumns,
-                  attempt: attempt + 1,
-                  note: reportType === "labor" ? "auto-pruned unsupported labor columns" : "auto-pruned unsupported columns",
-                  totalColumns: prunedColumns.length
-                });
+                return {
+                  statusCode: 201,
+                  body: {
+                    taskId,
+                    statusUrl: finalStatusUrl,
+                    reportType,
+                    nulogyReport: config.report,
+                    columnsUsed: prunedColumns,
+                    attempt: attempt + 1,
+                    note: reportType === "labor" ? "auto-pruned unsupported labor columns" : "auto-pruned unsupported columns",
+                    totalColumns: prunedColumns.length
+                  }
+                };
               }
             }
           }
@@ -399,16 +455,19 @@ export default async function handler(req, res) {
             const taskId = retryBody.task_id;
             const finalStatusUrl = statusUrl || retryBody.status_url || `${NULOGY_URL}/api/reports/report_runs/${taskId}`;
 
-            return res.status(201).json({
-              taskId,
-              statusUrl: finalStatusUrl,
-              reportType,
-              nulogyReport: config.report,
-              columnsUsed: columns,
-              attempt: attempt + 1,
-              note: "filters removed",
-              totalColumns: columns.length
-            });
+            return {
+              statusCode: 201,
+              body: {
+                taskId,
+                statusUrl: finalStatusUrl,
+                reportType,
+                nulogyReport: config.report,
+                columnsUsed: columns,
+                attempt: attempt + 1,
+                note: "filters removed",
+                totalColumns: columns.length
+              }
+            };
           }
         }
 
@@ -426,13 +485,28 @@ export default async function handler(req, res) {
     }
   }
 
-  return res.status(400).json({
-    error: reportType === "production"
-      ? "Could not create a production report with the minimum required production columns."
-      : "Could not find valid column names for this Nulogy report.",
-    reportType,
-    nulogyReport: config.report,
-    totalAttempts: errors.length,
-    attempts: errors
-  });
+  return {
+    statusCode: 400,
+    body: {
+      error: reportType === "production"
+        ? "Could not create a production report with the minimum required production columns."
+        : "Could not find valid column names for this Nulogy report.",
+      reportType,
+      nulogyReport: config.report,
+      totalAttempts: errors.length,
+      attempts: errors
+    }
+  };
+}
+
+export default async function handler(req, res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+
+  const result = await createReportTask(req.body || {});
+  return res.status(result.statusCode).json(result.body);
 }

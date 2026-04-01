@@ -1,6 +1,7 @@
 import Sentry from "../_sentry.js";
 import { CACHE_SITE_ID, getAuthenticatedUser, getSupabaseAdmin, withCors } from "./_common.js";
 import { isMissingTableError } from "../_event-window.js";
+import { buildProductionCoverageAudit } from "./_production-coverage.js";
 
 function sanitizeIsoDate(value) {
   var text = String(value || "").trim();
@@ -151,6 +152,7 @@ export default async function handler(req, res) {
     ]);
     var availableDateRange = results[0];
     var rows = results[1];
+    var coverageAudit = buildProductionCoverageAudit(rows);
 
     return res.status(200).json({
       querySource: "production_events",
@@ -162,6 +164,7 @@ export default async function handler(req, res) {
         max: availableDateRange.max || ""
       },
       latestSyncedAt: availableDateRange.latestSyncedAt || "",
+      coverageAudit: coverageAudit,
       rows: rows.map(buildInvoicingRow)
     });
   } catch (err) {
@@ -173,6 +176,7 @@ export default async function handler(req, res) {
         rowCount: 0,
         availableDateRange: { min: "", max: "" },
         latestSyncedAt: "",
+        coverageAudit: buildProductionCoverageAudit([]),
         rows: []
       });
     }

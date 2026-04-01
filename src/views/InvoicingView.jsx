@@ -49,6 +49,25 @@ var moneyFormatter = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 2
 });
 
+function createDefaultCoverageAudit() {
+  return {
+    totalRows: 0,
+    rowsWithLotCode: 0,
+    rowsMissingLotCode: 0,
+    lotCoveragePct: 100,
+    rowsWithUnitOfMeasure: 0,
+    rowsMissingUnitOfMeasure: 0,
+    unitOfMeasureCoveragePct: 100,
+    rowsMissingBoth: 0,
+    rowsFullyCovered: 0,
+    fullyCoveredPct: 100,
+    topMissingDates: [],
+    topMissingWorkOrders: [],
+    topMissingSkus: [],
+    topMissingJobs: []
+  };
+}
+
 function normalizeLooseKey(value) {
   return String(value || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
 }
@@ -407,6 +426,38 @@ function normalizeRevenueConfigPayload(body) {
   };
 }
 
+function normalizeCoverageAuditPayload(body) {
+  var defaults = createDefaultCoverageAudit();
+  var source = body && typeof body === "object" ? body : {};
+  return {
+    totalRows: Number(source.totalRows || defaults.totalRows),
+    rowsWithLotCode: Number(source.rowsWithLotCode || defaults.rowsWithLotCode),
+    rowsMissingLotCode: Number(source.rowsMissingLotCode || defaults.rowsMissingLotCode),
+    lotCoveragePct: Number(source.lotCoveragePct == null ? defaults.lotCoveragePct : source.lotCoveragePct),
+    rowsWithUnitOfMeasure: Number(source.rowsWithUnitOfMeasure || defaults.rowsWithUnitOfMeasure),
+    rowsMissingUnitOfMeasure: Number(source.rowsMissingUnitOfMeasure || defaults.rowsMissingUnitOfMeasure),
+    unitOfMeasureCoveragePct: Number(source.unitOfMeasureCoveragePct == null ? defaults.unitOfMeasureCoveragePct : source.unitOfMeasureCoveragePct),
+    rowsMissingBoth: Number(source.rowsMissingBoth || defaults.rowsMissingBoth),
+    rowsFullyCovered: Number(source.rowsFullyCovered || defaults.rowsFullyCovered),
+    fullyCoveredPct: Number(source.fullyCoveredPct == null ? defaults.fullyCoveredPct : source.fullyCoveredPct),
+    topMissingDates: source && Array.isArray(source.topMissingDates) ? source.topMissingDates : defaults.topMissingDates,
+    topMissingWorkOrders: source && Array.isArray(source.topMissingWorkOrders) ? source.topMissingWorkOrders : defaults.topMissingWorkOrders,
+    topMissingSkus: source && Array.isArray(source.topMissingSkus) ? source.topMissingSkus : defaults.topMissingSkus,
+    topMissingJobs: source && Array.isArray(source.topMissingJobs) ? source.topMissingJobs : defaults.topMissingJobs
+  };
+}
+
+function formatCoverageHotspots(rows, kind) {
+  return (Array.isArray(rows) ? rows : [])
+    .slice(0, 3)
+    .map(function(row) {
+      var label = row && row.label ? row.label : "--";
+      if (kind === "date") label = formatDateLabel(label);
+      return label + " (" + Number(row && row.missingLotRows || 0).toLocaleString() + " lot, " + Number(row && row.missingUnitOfMeasureRows || 0).toLocaleString() + " UOM)";
+    })
+    .join("; ");
+}
+
 async function fetchInvoicingRevenueConfig() {
   var result = await fetchJsonWithCredentials("/api/ops/config");
   return normalizeRevenueConfigPayload(result.response.ok ? result.body : {});
@@ -418,6 +469,7 @@ function normalizeInvoicingProductionPayload(body) {
     rowCount: Number(body && body.rowCount || 0),
     querySource: String(body && body.querySource || ""),
     latestSyncedAt: String(body && body.latestSyncedAt || ""),
+    coverageAudit: normalizeCoverageAuditPayload(body && body.coverageAudit),
     availableDateRange: {
       min: String(body && body.availableDateRange && body.availableDateRange.min || ""),
       max: String(body && body.availableDateRange && body.availableDateRange.max || "")
@@ -917,9 +969,11 @@ export default function InvoicingView(props) {
     rowCount: 0,
     querySource: "",
     latestSyncedAt: "",
+    coverageAudit: createDefaultCoverageAudit(),
     availableDateRange: { min: "", max: "" }
   };
   var productionRows = Array.isArray(productionHistory.rows) ? productionHistory.rows : [];
+  var coverageAudit = productionHistory.coverageAudit || createDefaultCoverageAudit();
   var productionSyncTimestamp = productionHistory.latestSyncedAt || (props.productionTimestamp ? new Date(props.productionTimestamp).toISOString() : "");
 
   var fieldFallbacks = useMemo(function() {
@@ -1619,6 +1673,12 @@ export default function InvoicingView(props) {
             <Badge variant={summary.revenueCoveragePct >= 100 ? "success" : summary.revenueCoveragePct > 0 ? "warning" : "danger"}>
               Revenue coverage {summary.revenueCoveragePct}%
             </Badge>
+            <Badge variant={coverageAudit.lotCoveragePct >= 100 ? "success" : coverageAudit.lotCoveragePct > 0 ? "warning" : "danger"}>
+              Lot coverage {coverageAudit.lotCoveragePct}%
+            </Badge>
+            <Badge variant={coverageAudit.unitOfMeasureCoveragePct >= 100 ? "success" : coverageAudit.unitOfMeasureCoveragePct > 0 ? "warning" : "danger"}>
+              UOM coverage {coverageAudit.unitOfMeasureCoveragePct}%
+            </Badge>
             {revenueConfigQuery.isError ? (
               <Badge variant="danger">Revenue config unavailable</Badge>
             ) : revenueConfigQuery.isLoading ? (
@@ -1704,6 +1764,33 @@ export default function InvoicingView(props) {
               </div>
             </div>
           </div>
+
+          {coverageAudit.totalRows ? (
+            <div className={
+              "rounded-md border p-3 " +
+              ((coverageAudit.rowsMissingLotCode || coverageAudit.rowsMissingUnitOfMeasure)
+                ? "border-[rgb(var(--warning))]/25 bg-[color-mix(in_oklab,rgb(var(--warning))_7%,white)]"
+                : "border-[rgb(var(--success))]/20 bg-[color-mix(in_oklab,rgb(var(--success))_7%,white)]")
+            }>
+              <div className="text-xs font-medium uppercase tracking-[0.12em] text-[rgb(var(--muted))]">Production Events Audit</div>
+              <div className="mt-2 text-sm text-[rgb(var(--foreground))]">
+                Stored production history for this billing window is {coverageAudit.lotCoveragePct}% populated for lot code and {coverageAudit.unitOfMeasureCoveragePct}% populated for unit of measure.
+                {(coverageAudit.rowsMissingLotCode || coverageAudit.rowsMissingUnitOfMeasure)
+                  ? " " + coverageAudit.rowsMissingBoth.toLocaleString() + " row" + (coverageAudit.rowsMissingBoth === 1 ? "" : "s") + " are missing both fields."
+                  : " No lot or UOM gaps were detected in this window."}
+              </div>
+              {(coverageAudit.rowsMissingLotCode || coverageAudit.rowsMissingUnitOfMeasure) ? (
+                <div className="mt-2 space-y-1 text-xs text-[rgb(var(--muted))]">
+                  {coverageAudit.topMissingDates.length ? (
+                    <div>Top dates: {formatCoverageHotspots(coverageAudit.topMissingDates, "date")}</div>
+                  ) : null}
+                  {coverageAudit.topMissingWorkOrders.length ? (
+                    <div>Top work orders: {formatCoverageHotspots(coverageAudit.topMissingWorkOrders, "workOrder")}</div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 
