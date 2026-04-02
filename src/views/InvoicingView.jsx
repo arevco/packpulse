@@ -244,6 +244,28 @@ function lastMonthRange() {
   };
 }
 
+function sanitizeIsoDateKey(value) {
+  var raw = String(value || "").trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : "";
+}
+
+function resolveInitialBillingWindow(initialFilters, defaults) {
+  var fallbackStart = sanitizeIsoDateKey(defaults && defaults.start);
+  var fallbackEnd = sanitizeIsoDateKey(defaults && defaults.end);
+  var start = sanitizeIsoDateKey(initialFilters && initialFilters.start);
+  var end = sanitizeIsoDateKey(initialFilters && initialFilters.end);
+  if (start && end && end >= start) {
+    return {
+      start: start,
+      end: end
+    };
+  }
+  return {
+    start: fallbackStart,
+    end: fallbackEnd
+  };
+}
+
 function updateMinDate(current, next) {
   if (!next) return current || "";
   if (!current || next < current) return next;
@@ -1019,9 +1041,10 @@ export default function InvoicingView(props) {
   var initialFilters = props.initialFilters || {};
   var onPermalinkChange = typeof props.onPermalinkChange === "function" ? props.onPermalinkChange : null;
   var defaults = defaultInvoicingRange();
+  var initialBillingWindow = resolveInitialBillingWindow(initialFilters, defaults);
 
-  var [startDate, setStartDate] = useState(String(initialFilters.start || defaults.start || ""));
-  var [endDate, setEndDate] = useState(String(initialFilters.end || defaults.end || ""));
+  var [startDate, setStartDate] = useState(initialBillingWindow.start || "");
+  var [endDate, setEndDate] = useState(initialBillingWindow.end || "");
   var [customerFilter, setCustomerFilter] = useState(String(initialFilters.customer || "all"));
   var [statusFilter, setStatusFilter] = useState(String(initialFilters.status || "all"));
   var [searchTerm, setSearchTerm] = useState(String(initialFilters.q || ""));
@@ -1040,6 +1063,7 @@ export default function InvoicingView(props) {
 
   useEffect(function() {
     if (!onPermalinkChange) return;
+    if (!hasValidDateRange) return;
     onPermalinkChange({
       start: startDate || "",
       end: endDate || "",
@@ -1047,7 +1071,7 @@ export default function InvoicingView(props) {
       status: statusFilter || "all",
       q: searchTerm || ""
     });
-  }, [onPermalinkChange, startDate, endDate, customerFilter, statusFilter, searchTerm]);
+  }, [onPermalinkChange, hasValidDateRange, startDate, endDate, customerFilter, statusFilter, searchTerm]);
 
   var revenueConfigQuery = useQuery({
     queryKey: ["invoicing", "revenue-config"],
@@ -1839,6 +1863,17 @@ export default function InvoicingView(props) {
             <div className="text-base font-semibold text-[rgb(var(--foreground))]">Choose a valid billing window</div>
             <div className="mt-2 max-w-2xl text-sm text-[rgb(var(--muted))]">
               Start date and end date must both be set, and the end date cannot be earlier than the start date.
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Button onClick={applyCurrentMonth} size="sm">
+                Use Current Month
+              </Button>
+              <Button onClick={applyPreviousMonth} variant="outline" size="sm">
+                Use Previous Month
+              </Button>
+              <Button onClick={clearFilters} variant="ghost" size="sm">
+                Reset Filters
+              </Button>
             </div>
           </div>
         </CardContent>
