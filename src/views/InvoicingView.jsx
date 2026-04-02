@@ -138,6 +138,20 @@ function formatMoney(value) {
   return moneyFormatter.format(safeNum(value));
 }
 
+function formatDateTimeLabel(value) {
+  var raw = String(value || "").trim();
+  if (!raw) return "--";
+  var parsed = new Date(raw);
+  if (isNaN(parsed)) return raw;
+  return parsed.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  });
+}
+
 function csvCell(value) {
   var text = String(value == null ? "" : value);
   if (/[",\n]/.test(text)) return '"' + text.replace(/"/g, '""') + '"';
@@ -605,6 +619,83 @@ async function fetchQuickBooksPersistenceState(payload) {
   return normalizeQuickBooksPersistencePayload(result.body);
 }
 
+function normalizeQuickBooksConnectionPayload(body) {
+  var source = body && typeof body === "object" ? body : {};
+  var connection = source.connection && typeof source.connection === "object" ? source.connection : {};
+  var summary = connection.summary && typeof connection.summary === "object" ? connection.summary : {};
+  return {
+    configured: source.configured !== false,
+    connected: !!source.connected,
+    warnings: Array.isArray(source.warnings) ? source.warnings : [],
+    connection: {
+      status: String(connection.status || "disconnected"),
+      environment: String(connection.environment || "production"),
+      realmId: String(connection.realmId || ""),
+      companyName: String(connection.companyName || ""),
+      lastSyncedAt: String(connection.lastSyncedAt || ""),
+      lastSyncStatus: String(connection.lastSyncStatus || ""),
+      accessTokenExpiresAt: String(connection.accessTokenExpiresAt || ""),
+      refreshTokenExpiresAt: String(connection.refreshTokenExpiresAt || ""),
+      scopes: Array.isArray(connection.scopes) ? connection.scopes : [],
+      summary: {
+        customerCatalogCount: Number(summary.customerCatalogCount || 0),
+        itemCatalogCount: Number(summary.itemCatalogCount || 0),
+        termCatalogCount: Number(summary.termCatalogCount || 0),
+        customerMappingsCreated: Number(summary.customerMappingsCreated || 0),
+        customerMappingsUpdated: Number(summary.customerMappingsUpdated || 0),
+        customerMappingsUnresolved: Number(summary.customerMappingsUnresolved || 0),
+        itemMappingsCreated: Number(summary.itemMappingsCreated || 0),
+        itemMappingsUpdated: Number(summary.itemMappingsUpdated || 0),
+        itemMappingsUnresolved: Number(summary.itemMappingsUnresolved || 0),
+        termMappingsCreated: Number(summary.termMappingsCreated || 0),
+        termMappingsUpdated: Number(summary.termMappingsUpdated || 0),
+        termMappingsUnresolved: Number(summary.termMappingsUnresolved || 0),
+        preservedMappings: Number(summary.preservedMappings || 0),
+        unresolvedCustomers: Array.isArray(summary.unresolvedCustomers) ? summary.unresolvedCustomers : [],
+        unresolvedItems: Array.isArray(summary.unresolvedItems) ? summary.unresolvedItems : [],
+        unresolvedTerms: Array.isArray(summary.unresolvedTerms) ? summary.unresolvedTerms : []
+      }
+    }
+  };
+}
+
+async function fetchQuickBooksConnectionStatus() {
+  var result = await fetchJsonWithCredentials("/api/accounting/qbo/connection-status");
+  if (!result.response.ok) {
+    throw new Error((result.body && (result.body.error || result.body.details)) || "Could not load QuickBooks connection status");
+  }
+  return normalizeQuickBooksConnectionPayload(result.body);
+}
+
+async function syncQuickBooksMasterData() {
+  var result = await postJsonWithCredentials("/api/accounting/qbo/sync-master-data", {});
+  if (!result.response.ok) {
+    throw new Error((result.body && (result.body.error || result.body.details)) || "Could not sync QuickBooks master data");
+  }
+  return result.body && typeof result.body === "object" ? result.body : {};
+}
+
+function readQuickBooksNoticeFromLocation() {
+  if (typeof window === "undefined") return { tone: "", message: "" };
+  var params = new URLSearchParams(window.location.search || "");
+  var status = String(params.get("qbo_status") || "").trim().toLowerCase();
+  var message = String(params.get("qbo_message") || "").trim();
+  return !status && !message ? { tone: "", message: "" } : {
+    tone: status === "connected" ? "success" : "warning",
+    message: message || (status === "connected" ? "QuickBooks connected." : "QuickBooks update received.")
+  };
+}
+
+function clearQuickBooksNoticeFromLocation() {
+  if (typeof window === "undefined") return;
+  var params = new URLSearchParams(window.location.search || "");
+  if (!params.has("qbo_status") && !params.has("qbo_message")) return;
+  params.delete("qbo_status");
+  params.delete("qbo_message");
+  var nextUrl = window.location.pathname + (params.toString() ? ("?" + params.toString()) : "");
+  window.history.replaceState(null, "", nextUrl);
+}
+
 function buildRevenueTargetsBySku(rows) {
   var map = {};
   (Array.isArray(rows) ? rows : []).forEach(function(row) {
@@ -1056,6 +1147,10 @@ export default function InvoicingView(props) {
   var [invoicePreviewState, setInvoicePreviewState] = useState(function() {
     return { loading: false, error: "", data: null };
   });
+  var [quickBooksSyncState, setQuickBooksSyncState] = useState(function() {
+    return { loading: false, error: "", data: null };
+  });
+  var [quickBooksNotice, setQuickBooksNotice] = useState(readQuickBooksNoticeFromLocation);
 
   var deferredSearchTerm = useDeferredValue(searchTerm);
   var deferredCandidateColumnFilters = useDeferredValue(candidateColumnFilters);
@@ -1072,6 +1167,11 @@ export default function InvoicingView(props) {
       q: searchTerm || ""
     });
   }, [onPermalinkChange, hasValidDateRange, startDate, endDate, customerFilter, statusFilter, searchTerm]);
+
+  useEffect(function() {
+    if (!quickBooksNotice.message) return;
+    clearQuickBooksNoticeFromLocation();
+  }, [quickBooksNotice.message]);
 
   var revenueConfigQuery = useQuery({
     queryKey: ["invoicing", "revenue-config"],
@@ -1365,7 +1465,32 @@ export default function InvoicingView(props) {
     staleTime: 30 * 1000
   });
 
+  var quickBooksConnectionQuery = useQuery({
+    queryKey: ["invoicing", "quickbooks-connection-status"],
+    queryFn: fetchQuickBooksConnectionStatus,
+    staleTime: 30 * 1000
+  });
+
   var quickBooksPersistence = quickBooksPersistenceQuery.data || normalizeQuickBooksPersistencePayload({});
+  var quickBooksConnection = quickBooksConnectionQuery.data || normalizeQuickBooksConnectionPayload({});
+  var quickBooksConnectionSummary = quickBooksConnection.connection.summary || {
+    customerCatalogCount: 0,
+    itemCatalogCount: 0,
+    termCatalogCount: 0,
+    customerMappingsCreated: 0,
+    customerMappingsUpdated: 0,
+    customerMappingsUnresolved: 0,
+    itemMappingsCreated: 0,
+    itemMappingsUpdated: 0,
+    itemMappingsUnresolved: 0,
+    termMappingsCreated: 0,
+    termMappingsUpdated: 0,
+    termMappingsUnresolved: 0,
+    preservedMappings: 0,
+    unresolvedCustomers: [],
+    unresolvedItems: [],
+    unresolvedTerms: []
+  };
 
   var invoiceCandidates = useMemo(function() {
     return baseInvoiceCandidates.map(function(candidate) {
@@ -1652,6 +1777,32 @@ export default function InvoicingView(props) {
 
   function clearSelectedCandidates() {
     setSelectedCandidateKeys({});
+  }
+
+  function beginQuickBooksConnect() {
+    if (typeof window === "undefined") return;
+    var returnTo = window.location.pathname + (window.location.search || "");
+    window.location.assign("/api/accounting/qbo/connect?returnTo=" + encodeURIComponent(returnTo));
+  }
+
+  async function runQuickBooksMasterSync() {
+    setQuickBooksSyncState({ loading: true, error: "", data: null });
+    try {
+      var result = await syncQuickBooksMasterData();
+      setQuickBooksSyncState({ loading: false, error: "", data: result });
+      setQuickBooksNotice({
+        tone: "success",
+        message: "QuickBooks master data synced. Review any unresolved mappings below."
+      });
+      await quickBooksConnectionQuery.refetch();
+      await quickBooksPersistenceQuery.refetch();
+    } catch (error) {
+      setQuickBooksSyncState({
+        loading: false,
+        error: error && error.message ? error.message : "Could not sync QuickBooks master data.",
+        data: null
+      });
+    }
   }
 
   async function buildInvoicePreview() {
@@ -2213,6 +2364,99 @@ export default function InvoicingView(props) {
               </div>
             </div>
           ) : null}
+
+          {quickBooksConnectionQuery.error ? (
+            <div className="rounded-md border border-[rgb(var(--danger))]/20 bg-[color-mix(in_oklab,rgb(var(--danger))_6%,white)] p-4 text-sm text-[rgb(var(--foreground))]">
+              Could not load QuickBooks connection status. OAuth setup and master-data sync are unavailable right now.
+            </div>
+          ) : (
+            <div className="rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <div className="text-sm font-medium text-[rgb(var(--foreground))]">QuickBooks Connection</div>
+                  <div className="mt-1 text-xs text-[rgb(var(--muted))]">
+                    {quickBooksConnection.connected
+                      ? ((quickBooksConnection.connection.companyName || ("Realm " + (quickBooksConnection.connection.realmId || "--"))) + " connected in " + quickBooksConnection.connection.environment + ".")
+                      : "Connect QuickBooks, then sync customers, items, and terms so PackPulse can auto-fill invoice mappings."}
+                  </div>
+                  {quickBooksConnection.connected && quickBooksConnection.connection.lastSyncedAt ? (
+                    <div className="mt-2 text-xs text-[rgb(var(--muted))]">
+                      Last synced {formatDateTimeLabel(quickBooksConnection.connection.lastSyncedAt)}.
+                    </div>
+                  ) : null}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant={!quickBooksConnection.configured ? "warning" : quickBooksConnection.connected ? "success" : "secondary"}>
+                    {!quickBooksConnection.configured ? "Needs QBO Env" : quickBooksConnection.connected ? "Connected" : "Not Connected"}
+                  </Badge>
+                  {quickBooksConnection.connected && quickBooksConnection.connection.lastSyncStatus === "ok" ? (
+                    <Badge variant="info">Catalog synced</Badge>
+                  ) : null}
+                  <Button onClick={beginQuickBooksConnect} variant={quickBooksConnection.connected ? "outline" : "default"} size="sm" disabled={!quickBooksConnection.configured}>
+                    {quickBooksConnection.connected ? "Reconnect QuickBooks" : "Connect QuickBooks"}
+                  </Button>
+                  <Button onClick={runQuickBooksMasterSync} variant="outline" size="sm" disabled={!quickBooksConnection.connected || quickBooksSyncState.loading}>
+                    {quickBooksSyncState.loading ? "Syncing QBO Master Data..." : "Sync QBO Master Data"}
+                  </Button>
+                </div>
+              </div>
+
+              {!quickBooksConnectionQuery.error && Array.isArray(quickBooksConnection.warnings) && quickBooksConnection.warnings.length ? (
+                <div className="mt-3 rounded-md border border-[rgb(var(--warning))]/25 bg-[color-mix(in_oklab,rgb(var(--warning))_7%,white)] p-3">
+                  <div className="space-y-1 text-xs text-[rgb(var(--muted))]">
+                    {quickBooksConnection.warnings.map(function(warning, index) {
+                      return <div key={"qbo-connection-warning-" + index}>{warning}</div>;
+                    })}
+                  </div>
+                </div>
+              ) : null}
+
+              {quickBooksNotice.message ? (
+                <div className={
+                  "mt-3 rounded-md border p-3 text-sm " +
+                  (quickBooksNotice.tone === "success"
+                    ? "border-[rgb(var(--success))]/20 bg-[color-mix(in_oklab,rgb(var(--success))_8%,white)] text-[rgb(var(--foreground))]"
+                    : "border-[rgb(var(--warning))]/25 bg-[color-mix(in_oklab,rgb(var(--warning))_7%,white)] text-[rgb(var(--foreground))]")
+                }>
+                  {quickBooksNotice.message}
+                </div>
+              ) : null}
+
+              {quickBooksSyncState.error ? (
+                <div className="mt-3 rounded-md border border-[rgb(var(--danger))]/20 bg-[color-mix(in_oklab,rgb(var(--danger))_6%,white)] p-3 text-sm text-[rgb(var(--foreground))]">
+                  {quickBooksSyncState.error}
+                </div>
+              ) : null}
+
+              {quickBooksConnection.connected ? (
+                <div className="mt-3 grid gap-3 md:grid-cols-4">
+                  {[
+                    metricCard("QBO Customers", quickBooksConnectionSummary.customerCatalogCount.toLocaleString(), "Customer records stored from the latest QuickBooks sync.", "default"),
+                    metricCard("QBO Items", quickBooksConnectionSummary.itemCatalogCount.toLocaleString(), "Item records stored from the latest QuickBooks sync.", "default"),
+                    metricCard("Auto-Mapped", (quickBooksConnectionSummary.customerMappingsCreated + quickBooksConnectionSummary.customerMappingsUpdated + quickBooksConnectionSummary.itemMappingsCreated + quickBooksConnectionSummary.itemMappingsUpdated + quickBooksConnectionSummary.termMappingsCreated + quickBooksConnectionSummary.termMappingsUpdated).toLocaleString(), "Mappings created or refreshed from exact QuickBooks matches.", "success"),
+                    metricCard("Manual Review", (quickBooksConnectionSummary.customerMappingsUnresolved + quickBooksConnectionSummary.itemMappingsUnresolved + quickBooksConnectionSummary.termMappingsUnresolved).toLocaleString(), quickBooksConnectionSummary.preservedMappings ? (quickBooksConnectionSummary.preservedMappings.toLocaleString() + " existing mapping" + (quickBooksConnectionSummary.preservedMappings === 1 ? "" : "s") + " preserved.") : "Only edge cases should remain after sync.", (quickBooksConnectionSummary.customerMappingsUnresolved + quickBooksConnectionSummary.itemMappingsUnresolved + quickBooksConnectionSummary.termMappingsUnresolved) ? "warning" : "success")
+                  ]}
+                </div>
+              ) : null}
+
+              {quickBooksConnection.connected && (quickBooksConnectionSummary.unresolvedCustomers.length || quickBooksConnectionSummary.unresolvedItems.length || quickBooksConnectionSummary.unresolvedTerms.length) ? (
+                <div className="mt-3 rounded-md border border-[rgb(var(--warning))]/25 bg-[color-mix(in_oklab,rgb(var(--warning))_7%,white)] p-3">
+                  <div className="text-sm font-medium text-[rgb(var(--foreground))]">Manual Review Queue</div>
+                  <div className="mt-2 space-y-1 text-xs text-[rgb(var(--muted))]">
+                    {quickBooksConnectionSummary.unresolvedCustomers.length ? (
+                      <div>Customers: {quickBooksConnectionSummary.unresolvedCustomers.join("; ")}</div>
+                    ) : null}
+                    {quickBooksConnectionSummary.unresolvedItems.length ? (
+                      <div>Items: {quickBooksConnectionSummary.unresolvedItems.join("; ")}</div>
+                    ) : null}
+                    {quickBooksConnectionSummary.unresolvedTerms.length ? (
+                      <div>Terms: {quickBooksConnectionSummary.unresolvedTerms.join("; ")}</div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          )}
 
           {!selectedCandidateCount ? (
             <div className="rounded-md border border-dashed border-[rgb(var(--border))] bg-[color-mix(in_oklab,rgb(var(--surface))_70%,white)] p-4 text-sm text-[rgb(var(--muted))]">
