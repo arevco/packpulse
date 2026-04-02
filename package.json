@@ -12,6 +12,7 @@
     "build": "vite build",
     "build:analyze": "BUNDLE_ANALYZE=true vite build",
     "preview": "vite preview",
+    "forecast:eval": "node scripts/forecast/evaluate-daily-targets.mjs",
     "nulogy:docs": "node scripts/nulogy/extract-reports-api-docs.mjs",
     "nulogy:artifacts": "node scripts/nulogy/run-report-catalog.mjs",
     "nulogy:artifacts:upload": "node scripts/nulogy/upload-artifacts-to-supabase.mjs"

@@ -5,6 +5,7 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { MonthPicker } from "../components/ui/month-picker";
 import TableShell from "../components/ui/table-shell";
+import { buildProductionDrivenDailyTargets, monthRange, shiftIsoDay } from "../lib/dailyForecastTargets.js";
 import { detectPackType, safeNum } from "../utils";
 
 function fmtMoney(n) {
@@ -31,86 +32,6 @@ function hasExplicitValue(value) {
 
 function currentMonthKey() {
   return new Date().toISOString().slice(0, 7);
-}
-
-function monthRange(monthKey) {
-  var s = String(monthKey || "").trim();
-  if (!/^\d{4}-\d{2}$/.test(s)) return { start: "", end: "" };
-  var year = Number(s.slice(0, 4));
-  var month = Number(s.slice(5, 7));
-  var start = s + "-01";
-  var endDate = new Date(Date.UTC(year, month, 0));
-  var end = endDate.toISOString().slice(0, 10);
-  return { start: start, end: end };
-}
-
-function shiftIsoDay(dateIso, days) {
-  var s = String(dateIso || "").slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return "";
-  var d = new Date(s + "T00:00:00Z");
-  if (isNaN(d)) return "";
-  d.setUTCDate(d.getUTCDate() + Number(days || 0));
-  return d.toISOString().slice(0, 10);
-}
-
-function eachIsoDayBetween(startIso, endIso) {
-  var start = String(startIso || "").slice(0, 10);
-  var end = String(endIso || "").slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return [];
-  var s = new Date(start + "T00:00:00Z");
-  var e = new Date(end + "T00:00:00Z");
-  if (isNaN(s) || isNaN(e) || e < s) return [];
-  var out = [];
-  for (var d = new Date(s); d <= e; d.setUTCDate(d.getUTCDate() + 1)) {
-    out.push(d.toISOString().slice(0, 10));
-  }
-  return out;
-}
-
-function isBusinessDay(dateIso) {
-  var s = String(dateIso || "").slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
-  var d = new Date(s + "T00:00:00Z");
-  if (isNaN(d)) return false;
-  var dow = d.getUTCDay();
-  return dow !== 0 && dow !== 6;
-}
-
-function toEasternDateTimeParts(value) {
-  var d = value instanceof Date ? value : new Date(value);
-  if (isNaN(d)) return null;
-  var out = {};
-  new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false
-  }).formatToParts(d).forEach(function(part) {
-    if (part.type !== "literal") out[part.type] = part.value;
-  });
-  if (!out.year || !out.month || !out.day || !out.hour || !out.minute) return null;
-  return {
-    date: out.year + "-" + out.month + "-" + out.day,
-    hour: parseInt(out.hour, 10),
-    minute: parseInt(out.minute, 10)
-  };
-}
-
-var PRODUCTION_DAY_START_MINUTES = 7 * 60;
-var PRODUCTION_DAY_END_MINUTES = 23 * 60;
-
-function productionDayStatusET(value) {
-  var parts = toEasternDateTimeParts(value);
-  if (!parts) return null;
-  var totalMinutes = (safeNum(parts.hour) * 60) + safeNum(parts.minute);
-  return {
-    calendarDate: parts.date,
-    productionDate: totalMinutes < PRODUCTION_DAY_START_MINUTES ? shiftIsoDay(parts.date, -1) : parts.date,
-    inProgress: totalMinutes >= PRODUCTION_DAY_START_MINUTES && totalMinutes < PRODUCTION_DAY_END_MINUTES
-  };
 }
 
 function statusLooksClosed(status) {
@@ -231,152 +152,6 @@ async function fetchForecastProductionHistory(monthKey) {
   var result = await fetchJsonWithCredentials(url);
   if (!result.response.ok) throw new Error((result.body && result.body.error) || "Could not load production history");
   return result.body || {};
-}
-
-function buildProductionDrivenDailyTargets(options) {
-  var input = options || {};
-  var monthKey = String(input.monthKey || "").trim();
-  var summary = input.summary && typeof input.summary === "object" ? input.summary : {};
-  var actualByDay = input.actualByDay && typeof input.actualByDay === "object" ? input.actualByDay : {};
-  var historyByDay = Array.isArray(input.historyByDay) ? input.historyByDay : [];
-  var fallbackRows = Array.isArray(input.fallbackRows) ? input.fallbackRows : [];
-  var range = monthRange(monthKey);
-  var totalCases = safeNum(summary.total_cases);
-  var totalRevenue = safeNum(summary.total_revenue);
-  var totalLaborCost = safeNum(summary.total_labor_cost);
-  var totalHeadcountHours = safeNum(summary.total_headcount_hours);
-  var allDays = eachIsoDayBetween(range.start, range.end);
-  if (!allDays.length || !(totalCases > 0)) {
-    return {
-      rows: fallbackRows,
-      model: "forecast_schedule",
-      actualLockedThrough: "",
-      remainingForecastCases: 0,
-      trailingDailyVelocity: 0,
-      historyDaysUsed: 0
-    };
-  }
-  if (!historyByDay.length) {
-    return {
-      rows: fallbackRows,
-      model: "forecast_schedule",
-      actualLockedThrough: "",
-      remainingForecastCases: 0,
-      trailingDailyVelocity: 0,
-      historyDaysUsed: 0
-    };
-  }
-
-  var productionStatus = productionDayStatusET(new Date());
-  var currentProductionMonth = productionStatus && productionStatus.productionDate
-    ? String(productionStatus.productionDate).slice(0, 7)
-    : "";
-  var isCurrentProductionMonth = currentProductionMonth === monthKey;
-  var planningStart = range.start;
-  var actualLockedThrough = "";
-  if (isCurrentProductionMonth && productionStatus && productionStatus.productionDate) {
-    planningStart = productionStatus.inProgress
-      ? productionStatus.productionDate
-      : shiftIsoDay(productionStatus.productionDate, 1);
-    if (planningStart < range.start) planningStart = range.start;
-    if (planningStart > range.end) planningStart = shiftIsoDay(range.end, 1);
-    actualLockedThrough = shiftIsoDay(planningStart, -1);
-  }
-
-  var completedActualCases = 0;
-  if (isCurrentProductionMonth && actualLockedThrough) {
-    allDays.forEach(function(day) {
-      if (day > actualLockedThrough) return;
-      completedActualCases += safeNum(actualByDay[day] && actualByDay[day].actual_cases);
-    });
-  }
-  var remainingForecastCases = isCurrentProductionMonth
-    ? Math.max(0, totalCases - completedActualCases)
-    : totalCases;
-
-  var historyRows = historyByDay.slice().sort(function(a, b) {
-    return String(a.date || "").localeCompare(String(b.date || ""));
-  }).filter(function(row) {
-    var day = String(row && row.date || "");
-    if (!day || !range.start) return false;
-    if (!(safeNum(row && row.units) > 0)) return false;
-    return !planningStart || day < planningStart;
-  });
-  var recentRows = historyRows.slice(-28);
-  var trailingRows = historyRows.slice(-5);
-  var trailingDailyVelocity = trailingRows.length
-    ? Math.round(trailingRows.reduce(function(sum, row) { return sum + safeNum(row.units); }, 0) / trailingRows.length)
-    : 0;
-  var historyDaysUsed = recentRows.length;
-  var weekdayUnits = {};
-  recentRows.forEach(function(row) {
-    var day = String(row && row.date || "");
-    var d = new Date(day + "T00:00:00Z");
-    if (isNaN(d)) return;
-    var dow = d.getUTCDay();
-    if (!weekdayUnits[dow]) weekdayUnits[dow] = [];
-    weekdayUnits[dow].push(safeNum(row.units));
-  });
-  var overallAverage = recentRows.length
-    ? recentRows.reduce(function(sum, row) { return sum + safeNum(row.units); }, 0) / recentRows.length
-    : 0;
-  var hasSaturdayHistory = !!(weekdayUnits[6] && weekdayUnits[6].length);
-  var allocationDays = isCurrentProductionMonth
-    ? allDays.filter(function(day) { return day >= planningStart; })
-    : allDays.slice();
-  var rawWeightByDay = {};
-  var rawWeightTotal = 0;
-  allocationDays.forEach(function(day) {
-    var dow = new Date(day + "T00:00:00Z").getUTCDay();
-    var samples = weekdayUnits[dow] || [];
-    var weekdayAverage = samples.length
-      ? samples.reduce(function(sum, units) { return sum + safeNum(units); }, 0) / samples.length
-      : 0;
-    var rawWeight = weekdayAverage;
-    if (!(rawWeight > 0)) {
-      if (dow === 6 && hasSaturdayHistory) rawWeight = overallAverage * 0.2;
-      else if (dow === 0) rawWeight = 0;
-      else if (isBusinessDay(day)) rawWeight = overallAverage > 0 ? overallAverage : 1;
-    }
-    rawWeightByDay[day] = rawWeight;
-    rawWeightTotal += rawWeight;
-  });
-  if (!(rawWeightTotal > 0)) {
-    rawWeightTotal = 0;
-    allocationDays.forEach(function(day) {
-      var fallbackWeight = isBusinessDay(day) ? 1 : 0;
-      rawWeightByDay[day] = fallbackWeight;
-      rawWeightTotal += fallbackWeight;
-    });
-  }
-
-  var revenuePerCase = totalCases > 0 ? totalRevenue / totalCases : 0;
-  var laborPerCase = totalCases > 0 ? totalLaborCost / totalCases : 0;
-  var headcountHoursPerCase = totalCases > 0 ? totalHeadcountHours / totalCases : 0;
-  var rows = allDays.map(function(day) {
-    var plannedCases = 0;
-    if (isCurrentProductionMonth && actualLockedThrough && day <= actualLockedThrough) {
-      plannedCases = safeNum(actualByDay[day] && actualByDay[day].actual_cases);
-    } else if (rawWeightByDay[day] > 0 && remainingForecastCases > 0 && rawWeightTotal > 0) {
-      plannedCases = remainingForecastCases * (rawWeightByDay[day] / rawWeightTotal);
-    }
-    return {
-      day_key: day,
-      planned_cases: plannedCases,
-      revenue: plannedCases * revenuePerCase,
-      labor_cost: plannedCases * laborPerCase,
-      headcount_hours: plannedCases * headcountHoursPerCase
-    };
-  });
-
-  return {
-    rows: rows,
-    model: historyDaysUsed ? "production_history" : "forecast_schedule",
-    actualLockedThrough: actualLockedThrough,
-    remainingForecastCases: remainingForecastCases,
-    trailingDailyVelocity: trailingDailyVelocity,
-    historyDaysUsed: historyDaysUsed
-  };
 }
 
 export default function ForecastView(props) {
@@ -927,7 +702,7 @@ export default function ForecastView(props) {
       var lead = dailyTargetsModel.actualLockedThrough
         ? ("Locked actual output through " + dailyTargetsModel.actualLockedThrough + "; ")
         : "";
-      return lead + "remaining " + Math.round(safeNum(dailyTargetsModel.remainingForecastCases)).toLocaleString() + " cases are distributed using the recent production yield profile (" + Math.max(1, safeNum(dailyTargetsModel.historyDaysUsed)) + " recent production days, trailing pace " + Math.round(safeNum(dailyTargetsModel.trailingDailyVelocity)).toLocaleString() + "/day).";
+      return lead + "remaining " + Math.round(safeNum(dailyTargetsModel.remainingForecastCases)).toLocaleString() + " cases are spread across the remaining business days, then nudged with bounded weekday adjustments from recent production history (" + Math.max(1, safeNum(dailyTargetsModel.historyDaysUsed)) + " recent production days, trailing pace " + Math.round(safeNum(dailyTargetsModel.trailingDailyVelocity)).toLocaleString() + "/day).";
     }
     return "Daily targets are using the forecast schedule split because recent production history is unavailable.";
   }, [dailyTargetsModel]);
