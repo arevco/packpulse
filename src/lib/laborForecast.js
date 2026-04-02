@@ -90,6 +90,8 @@ function eachDayInclusive(startIso, endIso) {
   return out;
 }
 
+var DEFAULT_BACKLOG_SPREAD_BUSINESS_DAYS = 5;
+
 function monthBounds(monthKey) {
   var s = String(monthKey || "").trim();
   if (!/^\d{4}-\d{2}$/.test(s)) return { start: "", end: "" };
@@ -113,17 +115,65 @@ function clampIsoDayToMonth(isoDay, monthKey) {
   return day;
 }
 
-function resolveDailyAllocationDays(monthKey, startIso, endIso, fallbackIso) {
-  var days = eachDayInclusive(startIso, endIso);
-  if (monthKey) days = days.filter(function(day) { return inMonth(day, monthKey); });
-  if (days.length) return days;
+function isBusinessDay(isoDay) {
+  if (!isoDay) return false;
+  var d = new Date(isoDay + "T00:00:00Z");
+  if (isNaN(d)) return false;
+  var dow = d.getUTCDay();
+  return dow !== 0 && dow !== 6;
+}
 
-  var fallback = fallbackIso;
-  if (monthKey) fallback = clampIsoDayToMonth(fallback, monthKey);
-  if (fallback) return [fallback];
+function eachBusinessDayInclusive(startIso, endIso) {
+  return eachDayInclusive(startIso, endIso).filter(isBusinessDay);
+}
+
+function firstBusinessDaysOfMonth(monthKey, count) {
+  var bounds = monthBounds(monthKey);
+  if (!bounds.start || !bounds.end) return [];
+  return eachBusinessDayInclusive(bounds.start, bounds.end).slice(0, Math.max(1, safeNum(count) || 0));
+}
+
+function resolveDailyAllocationDays(options) {
+  var input = options || {};
+  var monthKey = String(input.monthKey || "").trim();
+  var startIso = String(input.startIso || "").trim();
+  var endIso = String(input.endIso || "").trim();
+  var dueIso = String(input.dueIso || "").trim();
+  var fallbackIso = String(input.fallbackIso || "").trim();
+  var isPriorOpenRollover = !!input.isPriorOpenRollover;
+
+  var scheduledDays = eachDayInclusive(startIso, endIso);
+  if (monthKey) scheduledDays = scheduledDays.filter(function(day) { return inMonth(day, monthKey); });
+  if (scheduledDays.length) return scheduledDays;
 
   var bounds = monthBounds(monthKey);
-  return bounds.start ? [bounds.start] : [];
+  if (!bounds.start || !bounds.end) {
+    return fallbackIso ? [fallbackIso] : [];
+  }
+
+  // Overdue rollover without an in-month schedule should create an early-month
+  // catch-up target instead of pinning all volume to a single day.
+  if (isPriorOpenRollover && dueIso && dueIso < bounds.start) {
+    var backlogDays = firstBusinessDaysOfMonth(monthKey, DEFAULT_BACKLOG_SPREAD_BUSINESS_DAYS);
+    if (backlogDays.length) return backlogDays;
+  }
+
+  var derivedStart = clampIsoDayToMonth(startIso, monthKey);
+  if (!derivedStart || derivedStart < bounds.start) derivedStart = bounds.start;
+  var derivedEnd = clampIsoDayToMonth(dueIso || endIso, monthKey) || bounds.end;
+  if (derivedStart > derivedEnd) derivedStart = bounds.start;
+
+  var businessDays = eachBusinessDayInclusive(derivedStart, derivedEnd);
+  if (businessDays.length) return businessDays;
+
+  var dueInMonth = clampIsoDayToMonth(dueIso, monthKey);
+  if (dueInMonth) return [dueInMonth];
+
+  var monthDays = firstBusinessDaysOfMonth(monthKey, DEFAULT_BACKLOG_SPREAD_BUSINESS_DAYS);
+  if (monthDays.length) return monthDays;
+
+  var fallback = clampIsoDayToMonth(fallbackIso, monthKey);
+  return fallback ? [fallback] : [bounds.start];
 }
 
 function hasExplicitValue(value) {
@@ -536,7 +586,14 @@ export function runLaborForecast(input) {
 
     var startIso = toIsoDay(pickValue(wo, ["Planned Start", "planned_start_at", "planned_start", "plannedStart"]));
     var endIso = toIsoDay(pickValue(wo, ["Planned End", "planned_end_at", "planned_end", "plannedEnd"]));
-    var dailyDays = resolveDailyAllocationDays(monthKey, startIso, endIso, dateIso || startIso || endIso);
+    var dailyDays = resolveDailyAllocationDays({
+      monthKey: monthKey,
+      startIso: startIso,
+      endIso: endIso,
+      dueIso: dateIso,
+      fallbackIso: dateIso || startIso || endIso,
+      isPriorOpenRollover: isPriorOpenRollover
+    });
     var perDayCases = plannedCases / Math.max(1, dailyDays.length);
     var perDayRevenue = revenue / Math.max(1, dailyDays.length);
     var perDayLabor = runLaborCost / Math.max(1, dailyDays.length);

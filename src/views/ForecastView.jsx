@@ -1252,7 +1252,7 @@ export default function ForecastView(props) {
 
       <div className="mb-2 mt-4 text-sm font-semibold text-[rgb(var(--foreground))]">Daily Forecast Targets</div>
       <div className="mb-2 text-xs text-[rgb(var(--muted))]">
-        Daily targets are scoped to {dailyMonthLabel}. If a work order has no in-month schedule window, its forecast falls back to the nearest in-month date.
+        Daily targets are scoped to {dailyMonthLabel}. Explicit planned windows stay on those dates; rows without a usable in-month schedule are spread across business days up to due date, with overdue rollover volume front-loaded into the first business week.
       </div>
       <TableShell>
         <div style={{ overflowX: "auto" }}>
