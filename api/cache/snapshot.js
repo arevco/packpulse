@@ -33,6 +33,73 @@ function clonePlain(obj) {
   return JSON.parse(JSON.stringify(obj || {}));
 }
 
+function describeError(error) {
+  return String(
+    (error && (error.message || error.details || error.hint || error.error_description || error.code)) ||
+    error ||
+    ""
+  ).trim();
+}
+
+function summarizeError(error, maxLen) {
+  var limit = Math.max(40, Number(maxLen || 220));
+  var message = describeError(error).replace(/\s+/g, " ").trim();
+  if (!message) return "unknown";
+  return message.length > limit ? message.slice(0, limit - 3) + "..." : message;
+}
+
+function isMissingOptionalTableError(table, error) {
+  var msg = describeError(error).toLowerCase();
+  var tableName = String(table || "").toLowerCase();
+  if (!tableName) return false;
+  return msg.includes(tableName) && (
+    msg.includes("schema cache") ||
+    msg.includes("could not find the table") ||
+    msg.includes("relation") ||
+    msg.includes("does not exist")
+  );
+}
+
+function isTransientUpstreamError(error) {
+  var msg = describeError(error).toLowerCase();
+  var status = Number(error && (error.status || error.statusCode || error.code));
+  if (Number.isFinite(status) && status >= 500) return true;
+  return (
+    msg.includes("<html") ||
+    msg.includes("cloudflare") ||
+    msg.includes("internal server error") ||
+    msg.includes("bad gateway") ||
+    msg.includes("service unavailable") ||
+    msg.includes("gateway timeout")
+  );
+}
+
+function wait(ms) {
+  return new Promise(function(resolve) {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function bestEffortInsert(operation) {
+  var attempts = 0;
+  var lastError = null;
+  while (attempts < 2) {
+    attempts += 1;
+    try {
+      var result = await operation();
+      if (!result || !result.error) {
+        return { ok: true, data: result && result.data ? result.data : null, attempts: attempts };
+      }
+      lastError = result.error;
+    } catch (error) {
+      lastError = error;
+    }
+    if (attempts >= 2 || !isTransientUpstreamError(lastError)) break;
+    await wait(150 * attempts);
+  }
+  return { ok: false, error: lastError, attempts: attempts };
+}
+
 function compactRows(rows, opts) {
   var maxRows = (opts && opts.maxRows) || 1200;
   if (!Array.isArray(rows)) return [];
@@ -311,21 +378,21 @@ function buildProductionEvents(payload, siteId, syncedAt, updatedBy) {
 }
 
 async function logSyncRun(supabase, row) {
-  try {
-    const run = await supabase.from("sync_runs").insert(row);
-    if (run.error) {
-      var msg = String(run.error.message || "").toLowerCase();
-      if (msg.includes("sync_runs") && msg.includes("schema cache")) {
-        return { ok: false, status: "missing_sync_runs_table" };
-      }
-      Sentry.captureException(run.error);
-      return { ok: false, status: "sync_runs_insert_failed" };
-    }
-    return { ok: true, status: "ok" };
-  } catch (e) {
-    Sentry.captureException(e);
-    return { ok: false, status: "sync_runs_insert_failed" };
+  var run = await bestEffortInsert(function() {
+    return supabase.from("sync_runs").insert(row);
+  });
+  if (run.ok) {
+    return { ok: true, status: "ok", attempts: run.attempts };
   }
+  if (isMissingOptionalTableError("sync_runs", run.error)) {
+    return { ok: false, status: "missing_sync_runs_table", attempts: run.attempts };
+  }
+  if (isTransientUpstreamError(run.error)) {
+    console.warn("[cache/snapshot] sync_runs insert unavailable after " + run.attempts + " attempts: " + summarizeError(run.error));
+    return { ok: false, status: "sync_runs_unavailable", attempts: run.attempts };
+  }
+  Sentry.captureException(run.error);
+  return { ok: false, status: "sync_runs_insert_failed", attempts: run.attempts };
 }
 
 export default async function handler(req, res) {
@@ -376,21 +443,25 @@ export default async function handler(req, res) {
         .select("site_id,row_counts,synced_at,updated_by")
         .single();
       if (up.error) throw up.error;
-      const hist = await supabase
-        .from("cache_snapshot_history")
-        .insert({
-          site_id: CACHE_SITE_ID,
-          row_counts: rowCounts,
-          derived_metrics: derivedMetrics,
-          captured_at: up.data && up.data.synced_at ? up.data.synced_at : syncedAt,
-          updated_by: user.email,
-        });
+      const hist = await bestEffortInsert(function() {
+        return supabase
+          .from("cache_snapshot_history")
+          .insert({
+            site_id: CACHE_SITE_ID,
+            row_counts: rowCounts,
+            derived_metrics: derivedMetrics,
+            captured_at: up.data && up.data.synced_at ? up.data.synced_at : syncedAt,
+            updated_by: user.email,
+          });
+      });
       let historyStatus = "ok";
-      if (hist.error) {
-        var msg = String(hist.error.message || "").toLowerCase();
-        if (msg.includes("cache_snapshot_history") && msg.includes("schema cache")) {
+      if (!hist.ok) {
+        if (isMissingOptionalTableError("cache_snapshot_history", hist.error)) {
           // Non-blocking: keep core snapshot cache live even if history table is not present yet.
           historyStatus = "missing_history_table";
+        } else if (isTransientUpstreamError(hist.error)) {
+          console.warn("[cache/snapshot] cache_snapshot_history insert unavailable after " + hist.attempts + " attempts: " + summarizeError(hist.error));
+          historyStatus = "history_upstream_unavailable";
         } else {
           Sentry.captureException(hist.error);
           historyStatus = "history_insert_failed";
