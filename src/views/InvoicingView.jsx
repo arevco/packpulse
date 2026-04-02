@@ -592,6 +592,14 @@ async function fetchQuickBooksInvoicePreview(payload) {
   return result.body && typeof result.body === "object" ? result.body : {};
 }
 
+async function createQuickBooksInvoices(payload) {
+  var result = await postJsonWithCredentials("/api/accounting/qbo/create-invoices", payload);
+  if (!result.response.ok) {
+    throw new Error((result.body && (result.body.error || result.body.details)) || "Could not create QuickBooks invoices");
+  }
+  return result.body && typeof result.body === "object" ? result.body : {};
+}
+
 function normalizeQuickBooksPersistencePayload(body) {
   var source = body && typeof body === "object" ? body : {};
   var summary = source.summary && typeof source.summary === "object" ? source.summary : {};
@@ -1145,6 +1153,9 @@ export default function InvoicingView(props) {
   var [showCandidateColumnFilters, setShowCandidateColumnFilters] = useState(false);
   var [selectedCandidateKeys, setSelectedCandidateKeys] = useState({});
   var [invoicePreviewState, setInvoicePreviewState] = useState(function() {
+    return { loading: false, error: "", data: null };
+  });
+  var [invoiceExportState, setInvoiceExportState] = useState(function() {
     return { loading: false, error: "", data: null };
   });
   var [quickBooksSyncState, setQuickBooksSyncState] = useState(function() {
@@ -1785,6 +1796,40 @@ export default function InvoicingView(props) {
     window.location.assign("/api/accounting/qbo/connect?returnTo=" + encodeURIComponent(returnTo));
   }
 
+  function buildSelectedQuickBooksPayload() {
+    return {
+      billingWindow: {
+        startDate: startDate || "",
+        endDate: endDate || ""
+      },
+      invoiceDate: endDate || startDate || "",
+      selectedCandidates: selectedInvoiceCandidates.map(function(candidate) {
+        return {
+          key: candidate.key,
+          candidateExportKey: candidate.exportAuditKey,
+          customer: candidate.customer,
+          sku: candidate.sku,
+          description: candidate.description,
+          unitsProduced: candidate.unitsProduced,
+          estimatedRevenue: candidate.estimatedRevenue,
+          revenuePerUnitAvg: candidate.revenuePerUnitAvg,
+          unitOfMeasure: candidate.unitOfMeasure,
+          lotCode: candidate.lotCode,
+          purchaseOrderReference: candidate.purchaseOrderReference,
+          workOrderReference: candidate.workOrderReference,
+          workOrderCount: candidate.workOrderCount,
+          jobCount: candidate.jobCount,
+          lineCount: candidate.lineCount,
+          detailRows: candidate.detailRows,
+          status: candidate.status,
+          firstProducedDate: candidate.firstProducedDate,
+          lastProducedDate: candidate.lastProducedDate,
+          issueSummary: candidate.issueSummary
+        };
+      })
+    };
+  }
+
   async function runQuickBooksMasterSync() {
     setQuickBooksSyncState({ loading: true, error: "", data: null });
     try {
@@ -1808,44 +1853,55 @@ export default function InvoicingView(props) {
   async function buildInvoicePreview() {
     if (!selectedInvoiceCandidates.length) return;
     setInvoicePreviewState({ loading: true, error: "", data: null });
+    setInvoiceExportState({ loading: false, error: "", data: null });
     try {
-      var payload = {
-        billingWindow: {
-          startDate: startDate || "",
-          endDate: endDate || ""
-        },
-        invoiceDate: endDate || startDate || "",
-        selectedCandidates: selectedInvoiceCandidates.map(function(candidate) {
-          return {
-            key: candidate.key,
-            candidateExportKey: candidate.exportAuditKey,
-            customer: candidate.customer,
-            sku: candidate.sku,
-            description: candidate.description,
-            unitsProduced: candidate.unitsProduced,
-            estimatedRevenue: candidate.estimatedRevenue,
-            revenuePerUnitAvg: candidate.revenuePerUnitAvg,
-            unitOfMeasure: candidate.unitOfMeasure,
-            lotCode: candidate.lotCode,
-            purchaseOrderReference: candidate.purchaseOrderReference,
-            workOrderReference: candidate.workOrderReference,
-            workOrderCount: candidate.workOrderCount,
-            jobCount: candidate.jobCount,
-            lineCount: candidate.lineCount,
-            detailRows: candidate.detailRows,
-            status: candidate.status,
-            firstProducedDate: candidate.firstProducedDate,
-            lastProducedDate: candidate.lastProducedDate,
-            issueSummary: candidate.issueSummary
-          };
-        })
-      };
+      var payload = buildSelectedQuickBooksPayload();
       var preview = await fetchQuickBooksInvoicePreview(payload);
       setInvoicePreviewState({ loading: false, error: "", data: preview });
     } catch (error) {
       setInvoicePreviewState({
         loading: false,
         error: error && error.message ? error.message : "Could not build QuickBooks preview.",
+        data: null
+      });
+    }
+  }
+
+  async function createInvoicesInQuickBooks() {
+    var draftCount = Number(invoicePreviewState.data && invoicePreviewState.data.groupCount || 0);
+    if (!draftCount || !selectedInvoiceCandidates.length) return;
+    if (typeof window !== "undefined") {
+      var confirmed = window.confirm(
+        "Create " + draftCount + " QuickBooks invoice" + (draftCount === 1 ? "" : "s") + " now? PackPulse will mark the exported candidates as already pushed after success."
+      );
+      if (!confirmed) return;
+    }
+
+    setInvoiceExportState({ loading: true, error: "", data: null });
+    try {
+      var result = await createQuickBooksInvoices(buildSelectedQuickBooksPayload());
+      setInvoiceExportState({ loading: false, error: "", data: result });
+      setQuickBooksNotice({
+        tone: Number(result.failedCount || 0) ? "warning" : "success",
+        message: Number(result.failedCount || 0)
+          ? ("Created " + Number(result.createdCount || 0).toLocaleString() + " QuickBooks invoice" + (Number(result.createdCount || 0) === 1 ? "" : "s") + ". " + Number(result.failedCount || 0).toLocaleString() + " invoice" + (Number(result.failedCount || 0) === 1 ? "" : "s") + " need follow-up.")
+          : ("Created " + Number(result.createdCount || 0).toLocaleString() + " QuickBooks invoice" + (Number(result.createdCount || 0) === 1 ? "" : "s") + ".")
+      });
+      if (Array.isArray(result.createdCandidateKeys) && result.createdCandidateKeys.length) {
+        setSelectedCandidateKeys(function(previous) {
+          var next = Object.assign({}, previous);
+          result.createdCandidateKeys.forEach(function(key) {
+            delete next[key];
+          });
+          return next;
+        });
+      }
+      await quickBooksPersistenceQuery.refetch();
+      await quickBooksConnectionQuery.refetch();
+    } catch (error) {
+      setInvoiceExportState({
+        loading: false,
+        error: error && error.message ? error.message : "Could not create QuickBooks invoices.",
         data: null
       });
     }
@@ -2305,12 +2361,12 @@ export default function InvoicingView(props) {
 
       <Card>
         <CardHeader className="flex flex-col gap-3 border-b border-[rgb(var(--border))] pb-3 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <div className="text-base font-semibold text-[rgb(var(--foreground))]">QuickBooks Preview</div>
-            <div className="mt-1 text-sm text-[rgb(var(--muted))]">
-              Select export-ready invoice candidates, then preview draft invoices grouped by customer and purchase order before we wire the live QuickBooks create call.
+            <div>
+              <div className="text-base font-semibold text-[rgb(var(--foreground))]">QuickBooks Preview</div>
+              <div className="mt-1 text-sm text-[rgb(var(--muted))]">
+              Select export-ready invoice candidates, preview draft invoices grouped by customer and purchase order, then create them in QuickBooks when the review looks right.
+              </div>
             </div>
-          </div>
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant={selectedCandidateCount ? "info" : "secondary"}>
               {selectedCandidateCount.toLocaleString()} selected
@@ -2344,6 +2400,14 @@ export default function InvoicingView(props) {
             </Button>
             <Button onClick={buildInvoicePreview} variant="default" size="sm" disabled={!selectedReadyCandidateCount || invoicePreviewState.loading}>
               {invoicePreviewState.loading ? "Building Preview..." : "Preview QuickBooks Draft"}
+            </Button>
+            <Button
+              onClick={createInvoicesInQuickBooks}
+              variant="outline"
+              size="sm"
+              disabled={!quickBooksConnection.connected || !(invoicePreviewState.data && Array.isArray(invoicePreviewState.data.invoiceGroups) && invoicePreviewState.data.invoiceGroups.length) || invoicePreviewState.loading || invoiceExportState.loading}
+            >
+              {invoiceExportState.loading ? "Creating In QuickBooks..." : "Create In QuickBooks"}
             </Button>
           </div>
         </CardHeader>
@@ -2481,6 +2545,12 @@ export default function InvoicingView(props) {
             </div>
           ) : null}
 
+          {invoiceExportState.error ? (
+            <div className="rounded-md border border-[rgb(var(--danger))]/20 bg-[color-mix(in_oklab,rgb(var(--danger))_6%,white)] p-4 text-sm text-[rgb(var(--foreground))]">
+              {invoiceExportState.error}
+            </div>
+          ) : null}
+
           {invoicePreviewState.data && Array.isArray(invoicePreviewState.data.validationIssues) && invoicePreviewState.data.validationIssues.length ? (
             <div className="rounded-md border border-[rgb(var(--warning))]/25 bg-[color-mix(in_oklab,rgb(var(--warning))_7%,white)] p-4">
               <div className="text-sm font-medium text-[rgb(var(--foreground))]">Validation Issues</div>
@@ -2489,6 +2559,58 @@ export default function InvoicingView(props) {
                   return <div key={String(issue && issue.key || "issue") + "-" + index}>{issue && issue.message ? issue.message : "Unknown preview issue."}</div>;
                 })}
               </div>
+            </div>
+          ) : null}
+
+          {invoiceExportState.data ? (
+            <div className="rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant={Number(invoiceExportState.data.failedCount || 0) ? "warning" : "success"}>
+                  {Number(invoiceExportState.data.createdCount || 0).toLocaleString()} created
+                </Badge>
+                {Number(invoiceExportState.data.failedCount || 0) ? (
+                  <Badge variant="warning">{Number(invoiceExportState.data.failedCount || 0).toLocaleString()} failed</Badge>
+                ) : null}
+                {Array.isArray(invoiceExportState.data.warnings) && invoiceExportState.data.warnings.length ? (
+                  <Badge variant="secondary">{invoiceExportState.data.warnings.length.toLocaleString()} warning{invoiceExportState.data.warnings.length === 1 ? "" : "s"}</Badge>
+                ) : null}
+              </div>
+              {Array.isArray(invoiceExportState.data.warnings) && invoiceExportState.data.warnings.length ? (
+                <div className="mt-3 space-y-1 text-xs text-[rgb(var(--muted))]">
+                  {invoiceExportState.data.warnings.map(function(warning, index) {
+                    return <div key={"qbo-export-warning-" + index}>{warning}</div>;
+                  })}
+                </div>
+              ) : null}
+              {Array.isArray(invoiceExportState.data.createdInvoices) && invoiceExportState.data.createdInvoices.length ? (
+                <div className="mt-3 rounded-md border border-[rgb(var(--success))]/20 bg-[color-mix(in_oklab,rgb(var(--success))_8%,white)] p-3">
+                  <div className="text-sm font-medium text-[rgb(var(--foreground))]">Created Invoices</div>
+                  <div className="mt-2 space-y-1 text-xs text-[rgb(var(--muted))]">
+                    {invoiceExportState.data.createdInvoices.map(function(group) {
+                      var docLabel = group.externalDocNumber ? ("Invoice " + group.externalDocNumber) : (group.externalInvoiceId ? ("QBO ID " + group.externalInvoiceId) : "Created");
+                      return (
+                        <div key={"created-invoice-" + group.key}>
+                          {group.customer} | PO {group.purchaseOrderNumber || "--"} | {docLabel}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+              {Array.isArray(invoiceExportState.data.failedInvoices) && invoiceExportState.data.failedInvoices.length ? (
+                <div className="mt-3 rounded-md border border-[rgb(var(--warning))]/25 bg-[color-mix(in_oklab,rgb(var(--warning))_7%,white)] p-3">
+                  <div className="text-sm font-medium text-[rgb(var(--foreground))]">Needs Follow-Up</div>
+                  <div className="mt-2 space-y-1 text-xs text-[rgb(var(--muted))]">
+                    {invoiceExportState.data.failedInvoices.map(function(group, index) {
+                      return (
+                        <div key={"failed-invoice-" + index}>
+                          {group.customer} | PO {group.purchaseOrderNumber || "--"} | {group.message}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
             </div>
           ) : null}
 

@@ -437,19 +437,22 @@ async function refreshConnectionIfNeeded(supabase, row, userEmail, forceRefresh)
   }
 }
 
-async function fetchQuickBooksJson(context, path, searchParams, allowRetry) {
+async function requestQuickBooksJson(context, method, path, searchParams, payload, allowRetry) {
   var url = new URL(getQuickBooksApiBaseUrl(context.environment) + path);
   var params = searchParams && typeof searchParams === "object" ? searchParams : {};
   Object.keys(params).forEach(function(key) {
     if (params[key] == null || params[key] === "") return;
     url.searchParams.set(key, String(params[key]));
   });
+  var headers = {
+    Accept: "application/json",
+    Authorization: "Bearer " + context.accessToken
+  };
+  if (payload != null) headers["Content-Type"] = "application/json";
   var response = await fetch(url.toString(), {
-    method: "GET",
-    headers: {
-      Accept: "application/json",
-      Authorization: "Bearer " + context.accessToken
-    }
+    method: sanitizeText(method, 12).toUpperCase() || "GET",
+    headers: headers,
+    body: payload == null ? undefined : JSON.stringify(payload)
   });
   var body = {};
   try {
@@ -457,17 +460,34 @@ async function fetchQuickBooksJson(context, path, searchParams, allowRetry) {
   } catch (_error) {
     body = {};
   }
+  var intuitTid = sanitizeText(
+    (response.headers && typeof response.headers.get === "function" && (response.headers.get("intuit_tid") || response.headers.get("intuit-tid"))) || "",
+    240
+  );
   if (response.status === 401 && allowRetry !== false) {
     var refreshed = await refreshConnectionIfNeeded(context.supabase, context, context.userEmail, true);
-    return fetchQuickBooksJson(Object.assign({}, context, refreshed), path, searchParams, false);
+    return requestQuickBooksJson(Object.assign({}, context, refreshed), method, path, searchParams, payload, false);
   }
   if (!response.ok) {
     var fault = body && body.Fault && Array.isArray(body.Fault.Error) && body.Fault.Error.length
       ? body.Fault.Error.map(function(entry) { return sanitizeText(entry && (entry.Detail || entry.Message), 180); }).filter(Boolean).join(" | ")
       : "";
-    throw new Error(fault || ("QuickBooks API request failed (" + response.status + ")"));
+    var error = new Error(fault || ("QuickBooks API request failed (" + response.status + ")"));
+    error.status = response.status;
+    error.intuitTid = intuitTid;
+    error.responseBody = body;
+    throw error;
   }
-  return body;
+  return {
+    body: body,
+    status: response.status,
+    intuitTid: intuitTid
+  };
+}
+
+async function fetchQuickBooksJson(context, path, searchParams, allowRetry) {
+  var result = await requestQuickBooksJson(context, "GET", path, searchParams, null, allowRetry);
+  return result.body;
 }
 
 async function queryQuickBooksEntities(context, entityType) {
@@ -501,6 +521,39 @@ async function fetchQuickBooksCompanyInfo(context) {
   } catch (_error) {
     return "";
   }
+}
+
+export async function getQuickBooksRequestContext(userEmail) {
+  var supabase = getSupabaseAdmin();
+  var record = await loadConnectionRecord(supabase);
+  if (!record.tableReady) throw new Error(record.warning);
+  if (!record.row) throw new Error("QuickBooks is not connected yet.");
+  var connection = await refreshConnectionIfNeeded(supabase, record.row, userEmail);
+  return Object.assign({}, connection, {
+    supabase: supabase,
+    userEmail: sanitizeText(userEmail, 240),
+    environment: connection.environment || getQuickBooksEnvironment(),
+    realmId: connection.realmId
+  });
+}
+
+export async function createQuickBooksInvoice(input) {
+  var payload = input && input.payload && typeof input.payload === "object" ? input.payload : {};
+  var context = input && input.context ? input.context : await getQuickBooksRequestContext(input && input.userEmail);
+  var result = await requestQuickBooksJson(
+    context,
+    "POST",
+    "/v3/company/" + encodeURIComponent(context.realmId) + "/invoice",
+    null,
+    payload
+  );
+  var invoice = result.body && result.body.Invoice && typeof result.body.Invoice === "object" ? result.body.Invoice : {};
+  return {
+    invoice: invoice,
+    body: result.body,
+    intuitTid: result.intuitTid,
+    context: context
+  };
 }
 
 function normalizeCatalogEntity(entityType, raw, realmId, syncedAt) {
