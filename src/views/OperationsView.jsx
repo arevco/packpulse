@@ -1811,8 +1811,8 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     };
   }, [effectiveTrends, effectiveBreakdown, forecastPlans, revenueTargetsBySku, itemMasterCostBySku]);
 
-  var monthEndBookedWorkOrderComparison = useMemo(function() {
-    var openBookedTotal = (Array.isArray(workOrders) ? workOrders : []).reduce(function(sum, wo) {
+  var openBookedWorkOrderTotal = useMemo(function() {
+    return (Array.isArray(workOrders) ? workOrders : []).reduce(function(sum, wo) {
       var status = normalizeStr(wo && wo.status || "");
       if (status !== "booked" || statusLooksClosed(status)) return sum;
       var qtyToProduce = safeNum(wo && wo.qtyToProduce);
@@ -1823,6 +1823,10 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       if (!(unitsRemaining > 0)) return sum;
       return sum + qtyToProduce;
     }, 0);
+  }, [workOrders]);
+
+  var monthEndBookedWorkOrderComparison = useMemo(function() {
+    var openBookedTotal = safeNum(openBookedWorkOrderTotal);
     if (!(openBookedTotal > 0)) return null;
     var projectedMonthEndYield = safeNum(metrics.monthlyRunRate);
     var delta = projectedMonthEndYield - openBookedTotal;
@@ -1835,33 +1839,28 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       displayLabel: "vs open booked WO total",
       compareLabel: "vs open booked WO total"
     };
-  }, [workOrders, metrics.monthlyRunRate]);
+  }, [openBookedWorkOrderTotal, metrics.monthlyRunRate]);
 
   var weeklyBookedWorkOrderComparison = useMemo(function() {
-    var openBookedTotal = (Array.isArray(workOrders) ? workOrders : []).reduce(function(sum, wo) {
-      var status = normalizeStr(wo && wo.status || "");
-      if (status !== "booked" || statusLooksClosed(status)) return sum;
-      var qtyToProduce = safeNum(wo && wo.qtyToProduce);
-      var unitsRemaining = safeNum(wo && wo.unitsRemaining);
-      if (!(unitsRemaining > 0)) {
-        unitsRemaining = Math.max(0, qtyToProduce - safeNum(wo && wo.unitsProduced));
-      }
-      if (!(unitsRemaining > 0)) return sum;
-      return sum + qtyToProduce;
-    }, 0);
-    if (!(openBookedTotal > 0)) return null;
+    var openBookedTotal = safeNum(openBookedWorkOrderTotal);
+    var remainingBusinessDays = safeNum(metrics.remainingBusinessDays);
+    if (!(openBookedTotal > 0) || !(remainingBusinessDays > 0)) return null;
+    var availableWeeks = remainingBusinessDays / 5;
+    if (!(availableWeeks > 0)) return null;
+    var requiredWeeklyPace = Math.round(openBookedTotal / availableWeeks);
     var projectedWeeklyRunRate = safeNum(metrics.weeklyRunRate);
-    var delta = projectedWeeklyRunRate - openBookedTotal;
+    var delta = projectedWeeklyRunRate - requiredWeeklyPace;
     return {
-      compareActual: openBookedTotal,
-      compareReferenceLabel: "Open booked WOs",
-      compareReferenceUnits: openBookedTotal,
+      compareActual: requiredWeeklyPace,
+      compareReferenceLabel: "Booked weekly pace",
+      compareReferenceUnits: requiredWeeklyPace,
       displayDelta: delta,
-      displayDeltaPct: Math.round((delta / openBookedTotal) * 100),
-      displayLabel: "vs open booked WO total",
-      compareLabel: "vs open booked WO total"
+      displayDeltaPct: Math.round((delta / requiredWeeklyPace) * 100),
+      displayLabel: "vs booked weekly pace",
+      compareLabel: "vs booked weekly pace",
+      availableWeeks: availableWeeks
     };
-  }, [workOrders, metrics.weeklyRunRate]);
+  }, [openBookedWorkOrderTotal, metrics.weeklyRunRate, metrics.remainingBusinessDays]);
 
   var shiftPlanVsActual = useMemo(function() {
     if (!showInsightsPanelsReady) return { rows: [], max: 1 };
@@ -2763,7 +2762,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
         value: safeNum(metrics.weeklyRunRate).toLocaleString(),
         note: "Trailing " + safeNum(metrics.trailingProductionDays).toLocaleString() + " production days",
         subnote: weeklyBookedWorkOrderComparison
-          ? referenceNote("Open booked WOs", { latestUnits: safeNum(weeklyBookedWorkOrderComparison.compareReferenceUnits) })
+          ? ("Booked weekly pace " + safeNum(weeklyBookedWorkOrderComparison.compareReferenceUnits).toLocaleString() + " · " + (Math.round(safeNum(weeklyBookedWorkOrderComparison.availableWeeks) * 10) / 10).toLocaleString() + " weeks left")
           : "",
         detail: weeklyBookedWorkOrderComparison
           ? compareText(weeklyBookedWorkOrderComparison)
