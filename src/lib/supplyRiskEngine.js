@@ -525,23 +525,10 @@ function buildInboundCoverage(criticalItems, inboundLines) {
 function buildLoadBoard(appointments, inboundLines, linkMap, todayIso, freshnessTimestamps) {
   var todayDate = new Date(todayIso + "T00:00:00");
   var loadsById = {};
+  var appointmentsById = {};
+  var matchedAppointmentIds = {};
   appointments.forEach(function(appointment) {
-    loadsById[appointment.id] = {
-      key: appointment.id,
-      scheduledDate: appointment.scheduledDate || "",
-      expectedDate: appointment.scheduledDate || "",
-      po: appointment.po || "",
-      confirmation: appointment.confirmation || "",
-      status: appointment.status || "",
-      matchState: "opendock-only",
-      isMatched: false,
-      materialLineCount: 0,
-      totalQty: 0,
-      linkedWOCount: 0,
-      unitsUnlocked: 0,
-      materials: [],
-      linkedWOKeys: {}
-    };
+    appointmentsById[appointment.id] = appointment;
   });
 
   var byMaterial = {};
@@ -553,6 +540,41 @@ function buildLoadBoard(appointments, inboundLines, linkMap, todayIso, freshness
     matchedByReference: 0,
     matchedByConfirmation: 0
   };
+
+  function createLoadSeed(loadKey, appointment, line) {
+    return {
+      key: loadKey,
+      scheduledDate: appointment && appointment.scheduledDate ? appointment.scheduledDate : "",
+      expectedDate: line && line.date ? line.date : (appointment && appointment.scheduledDate ? appointment.scheduledDate : ""),
+      po: line && line.po ? line.po : (appointment && appointment.po ? appointment.po : ""),
+      confirmation: appointment && appointment.confirmation ? appointment.confirmation : (line && line.confirmation ? line.confirmation : ""),
+      status: appointment && appointment.status ? appointment.status : (line ? "Awaiting OpenDock" : ""),
+      matchState: appointment ? "matched-fresh" : (line ? "receive-order-only" : "opendock-only"),
+      isMatched: !!appointment,
+      materialLineCount: 0,
+      totalQty: 0,
+      linkedWOCount: 0,
+      unitsUnlocked: 0,
+      materials: [],
+      linkedWOKeys: {}
+    };
+  }
+
+  function getLoadKey(line) {
+    if (line && line.matchedAppointmentId) return line.matchedAppointmentId;
+    if (line && line.poKey) return "receive-order:" + line.poKey;
+    if (line && Array.isArray(line.tokens)) {
+      var firstToken = line.tokens.find(function(token) {
+        return token && token.token;
+      });
+      if (firstToken && firstToken.token) return "receive-order-token:" + firstToken.token;
+    }
+    return line && line.id ? line.id : ("load-" + Object.keys(loadsById).length);
+  }
+
+  function boardDate(load) {
+    return String(load && (load.scheduledDate || load.expectedDate) || "");
+  }
 
   inboundLines.forEach(function(line) {
     var resolved = resolveMaterialLinks(linkMap, line.skuKeys);
@@ -568,13 +590,30 @@ function buildLoadBoard(appointments, inboundLines, linkMap, todayIso, freshness
       safeNum(line.qty),
       resolved.links.reduce(function(sum, link) { return sum + Math.max(0, safeNum(link.short)); }, 0)
     );
+    var appointment = line.matchedAppointmentId ? appointmentsById[line.matchedAppointmentId] : null;
+    var loadKey = getLoadKey(line);
+    if (!loadsById[loadKey]) {
+      loadsById[loadKey] = createLoadSeed(loadKey, appointment, line);
+    }
+    var load = loadsById[loadKey];
+
+    if (appointment) {
+      matchedAppointmentIds[appointment.id] = true;
+      load.isMatched = true;
+      load.matchState = "matched-fresh";
+      if (!load.scheduledDate && appointment.scheduledDate) load.scheduledDate = appointment.scheduledDate;
+      if (!load.confirmation && appointment.confirmation) load.confirmation = appointment.confirmation;
+      if ((!load.status || load.status === "Awaiting OpenDock") && appointment.status) load.status = appointment.status;
+    }
+    if (line.date && (!load.expectedDate || line.date < load.expectedDate)) load.expectedDate = line.date;
+    if (!load.po && line.po) load.po = line.po;
 
     var materialLine = {
       materialSku: line.sku || "Unknown",
       materialDesc: line.desc || "",
       qty: safeNum(line.qty),
       expectedDate: line.date || line.dockScheduledDate || "",
-      matchState: line.matchedAppointmentId ? "matched-fresh" : "receive-order-only",
+      matchState: appointment ? "matched-fresh" : "receive-order-only",
       linkedWOCount: resolved.links.length,
       unitsUnlocked: unitsUnlocked
     };
@@ -597,16 +636,11 @@ function buildLoadBoard(appointments, inboundLines, linkMap, todayIso, freshness
       confirmation: line.confirmation || "",
       dockStatus: line.dockStatus || "",
       dockApptDate: line.dockScheduledDate || "",
-      isMatched: !!line.matchedAppointmentId,
+      isMatched: !!appointment,
       linkedWOCount: resolved.links.length,
       isAtRisk: resolved.links.length > 0
     });
 
-    if (!line.matchedAppointmentId || !loadsById[line.matchedAppointmentId]) return;
-    var load = loadsById[line.matchedAppointmentId];
-    load.isMatched = true;
-    load.matchState = "matched-fresh";
-    if (line.date && (!load.expectedDate || line.date < load.expectedDate)) load.expectedDate = line.date;
     load.materialLineCount += 1;
     load.totalQty += safeNum(line.qty);
     resolved.links.forEach(function(link) {
@@ -614,6 +648,13 @@ function buildLoadBoard(appointments, inboundLines, linkMap, todayIso, freshness
     });
     load.unitsUnlocked += unitsUnlocked;
     load.materials.push(materialLine);
+  });
+
+  appointments.forEach(function(appointment) {
+    if (matchedAppointmentIds[appointment.id]) return;
+    if (!loadsById[appointment.id]) {
+      loadsById[appointment.id] = createLoadSeed(appointment.id, appointment, null);
+    }
   });
 
   var loads = Object.values(loadsById).map(function(load) {
@@ -633,7 +674,7 @@ function buildLoadBoard(appointments, inboundLines, linkMap, todayIso, freshness
       materials: load.materials
     };
   }).sort(function(a, b) {
-    return String(a.scheduledDate || "").localeCompare(String(b.scheduledDate || "")) ||
+    return String(boardDate(a) || "9999-12-31").localeCompare(String(boardDate(b) || "9999-12-31")) ||
       String(a.po || "").localeCompare(String(b.po || ""));
   });
 
@@ -645,8 +686,8 @@ function buildLoadBoard(appointments, inboundLines, linkMap, todayIso, freshness
   var lastInboundDate = allDeliveries.reduce(function(maxDate, delivery) {
     return delivery.date && (!maxDate || delivery.date > maxDate) ? delivery.date : maxDate;
   }, "");
-  var lastDockDate = loads.reduce(function(maxDate, load) {
-    return load.scheduledDate && (!maxDate || load.scheduledDate > maxDate) ? load.scheduledDate : maxDate;
+  var lastDockDate = appointments.reduce(function(maxDate, appointment) {
+    return appointment.scheduledDate && (!maxDate || appointment.scheduledDate > maxDate) ? appointment.scheduledDate : maxDate;
   }, "");
   var inboundSyncedAt = freshnessTimestamps && freshnessTimestamps.inboundSyncedAt ? new Date(freshnessTimestamps.inboundSyncedAt) : null;
   var dockSyncedAt = freshnessTimestamps && freshnessTimestamps.dockSyncedAt ? new Date(freshnessTimestamps.dockSyncedAt) : null;
@@ -711,17 +752,21 @@ function buildLoadBoard(appointments, inboundLines, linkMap, todayIso, freshness
     },
     deliveriesV2: {
       todayBoard: {
-        openDockAppointmentsToday: loads.filter(function(load) { return load.scheduledDate === todayIso; }).length,
+        openDockAppointmentsToday: appointments.filter(function(appointment) { return appointment.scheduledDate === todayIso; }).length,
         edrLoadsToday: allDeliveries.filter(function(delivery) { return delivery.date === todayIso; }).length,
-        matchedLoadsToday: loads.filter(function(load) { return load.scheduledDate === todayIso && load.isMatched; }).length,
-        unmatchedLoadsToday: loads.filter(function(load) { return load.scheduledDate === todayIso && !load.isMatched; }).length,
-        atRiskLoadsToday: loads.filter(function(load) { return load.scheduledDate === todayIso && (load.linkedWOCount || 0) > 0; }).length,
-        unitsPotentiallyUnlockedToday: Math.round(loads.filter(function(load) { return load.scheduledDate === todayIso; }).reduce(function(sum, load) { return sum + safeNum(load.unitsUnlocked); }, 0))
+        matchedLoadsToday: loads.filter(function(load) { return boardDate(load) === todayIso && load.isMatched; }).length,
+        unmatchedLoadsToday: loads.filter(function(load) { return boardDate(load) === todayIso && !load.isMatched; }).length,
+        atRiskLoadsToday: loads.filter(function(load) { return boardDate(load) === todayIso && (load.linkedWOCount || 0) > 0; }).length,
+        unitsPotentiallyUnlockedToday: Math.round(loads.filter(function(load) { return boardDate(load) === todayIso; }).reduce(function(sum, load) { return sum + safeNum(load.unitsUnlocked); }, 0))
       },
       summary: {
+        totalLoads: loads.length,
+        matchedLoads: loads.filter(function(load) { return load.isMatched; }).length,
+        receiveOrderOnly: loads.filter(function(load) { return load.matchState === "receive-order-only"; }).length,
+        openDockOnly: loads.filter(function(load) { return load.matchState === "opendock-only"; }).length,
         openDockScheduled: loads.length,
-        materialResolved: loads.filter(function(load) { return load.materialLineCount > 0; }).length,
-        materialUnknown: loads.filter(function(load) { return load.materialLineCount <= 0; }).length,
+        materialResolved: loads.filter(function(load) { return load.isMatched; }).length,
+        materialUnknown: loads.filter(function(load) { return load.matchState === "receive-order-only" || load.matchState === "opendock-only"; }).length,
         atRiskWOsWaiting: Object.keys(openWorkOrdersWaiting).length,
         unitsPotentiallyUnlocked: Math.round(loads.reduce(function(sum, load) { return sum + safeNum(load.unitsUnlocked); }, 0))
       },
@@ -747,14 +792,14 @@ function buildLoadBoard(appointments, inboundLines, linkMap, todayIso, freshness
       loads: loads,
       exceptions: {
         edrWithoutOpenDock: inboundLines.filter(function(line) { return !line.matchedAppointmentId; }).length,
-        openDockWithoutEdr: loads.filter(function(load) { return !load.isMatched; }).length,
+        openDockWithoutEdr: loads.filter(function(load) { return load.matchState === "opendock-only"; }).length,
         lateForDueWos: 0,
         cancelledAtRisk: loads.filter(function(load) { return (load.linkedWOCount || 0) > 0 && normalizeStr(load.status || "").includes("cancel"); }).length
       },
       reconciliation: {
         edrTodayTotal: allDeliveries.filter(function(delivery) { return delivery.date === todayIso; }).length,
-        matchedToday: loads.filter(function(load) { return load.scheduledDate === todayIso && load.isMatched; }).length,
-        unmatchedToday: loads.filter(function(load) { return load.scheduledDate === todayIso && !load.isMatched; }).length,
+        matchedToday: loads.filter(function(load) { return boardDate(load) === todayIso && load.isMatched; }).length,
+        unmatchedToday: loads.filter(function(load) { return boardDate(load) === todayIso && !load.isMatched; }).length,
         materialColumn: "Material",
         exactSkuMatched: matchDiagnostics.exactSkuMatched,
         leadingZeroMatched: matchDiagnostics.leadingZeroMatched,

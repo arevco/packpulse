@@ -1,6 +1,6 @@
 import Sentry from "../_sentry.js";
-import { parseCSV, transformColumns } from "./download.js";
-import { NULOGY_URL, getNulogyCredentials, buildAuthHeader } from "./_runner.js";
+import { parseCSV, transformColumns, fetchAndTransformReport } from "./download.js";
+import { NULOGY_URL, getNulogyCredentials, buildAuthHeader, executeReportRun } from "./_runner.js";
 
 const RECEIVE_ORDER_COLUMNS = [
   "actual_ship_at",
@@ -44,6 +44,19 @@ const DEFAULT_RECEIVE_ORDERS_COMPLETED_REPORT_ID = String(
 
 function normalizeKey(value) {
   return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function classifyReceivedValue(value) {
+  const normalized = normalizeKey(value);
+  if (normalized === "yes" || normalized === "true" || normalized === "1") return "yes";
+  if (normalized === "no" || normalized === "false" || normalized === "0") return "no";
+  return "";
+}
+
+function countOpenRows(rows) {
+  return (Array.isArray(rows) ? rows : []).reduce(function(sum, row) {
+    return classifyReceivedValue(row && row.Received) === "yes" ? sum : (sum + 1);
+  }, 0);
 }
 
 function buildDefaultReceiveOrdersPath() {
@@ -233,6 +246,86 @@ function parseReceiveOrdersPayload(payload) {
   };
 }
 
+async function fetchReceiveOrdersViaReportRun() {
+  const runResult = await executeReportRun({
+    report: "receive_order",
+    columns: [
+      "actual_ship_at",
+      "actual_unit_quantity",
+      "carrier_name",
+      "expected_delivery_at",
+      "expected_ship_at",
+      "expected_unit_quantity",
+      "internal_notes",
+      "item_alternate_code_1",
+      "item_alternate_code_2",
+      "item_category_name",
+      "item_class",
+      "item_code",
+      "item_customer",
+      "item_description",
+      "item_family_name",
+      "item_gtin",
+      "item_material_cost_per_unit",
+      "item_type_name",
+      "item_upc",
+      "number_of_receipts",
+      "project_code",
+      "purchase_price_per_unit",
+      "purchaser",
+      "receive_order_code",
+      "receive_order_customer",
+      "received",
+      "reference",
+      "ro_date_at",
+      "site_name",
+      "status",
+      "unit_of_measure",
+      "vendor_name",
+      "vendor_notes"
+    ],
+    locale: "en_US",
+    waitForCompletion: true,
+    pollIntervalMs: 2500,
+    maxPolls: 60
+  });
+
+  if (!runResult || !runResult.ok) {
+    const body = runResult && runResult.body ? runResult.body : {};
+    throw new Error(String(body.error || "Receive Orders report run failed."));
+  }
+
+  const body = runResult.body || {};
+  if (!body.downloadUrl) {
+    throw new Error("Receive Orders report run completed without a download URL.");
+  }
+
+  const downloadResult = await fetchAndTransformReport(body.downloadUrl, "receiveorders", false);
+  if (!downloadResult.ok) {
+    const downloadBody = downloadResult.body || {};
+    throw new Error(String(downloadBody.error || "Receive Orders CSV download failed."));
+  }
+
+  const downloadBody = downloadResult.body || {};
+  const openRowCount = countOpenRows(downloadBody.data);
+  return {
+    data: Array.isArray(downloadBody.data) ? downloadBody.data : [],
+    rowCount: Number(downloadBody.rowCount) || 0,
+    reportType: "receiveorders",
+    columns: Array.isArray(downloadBody.columns) ? downloadBody.columns : [],
+    originalHeaders: Array.isArray(downloadBody.originalHeaders) ? downloadBody.originalHeaders : [],
+    diagnostics: {
+      source: "report_run",
+      downloadUrl: body.downloadUrl,
+      statusUrl: body.statusUrl || "",
+      statusHistory: Array.isArray(body.statusHistory) ? body.statusHistory : [],
+      requestBody: body.requestBody || null,
+      rawRowCount: Number(downloadBody.rowCount) || 0,
+      openRowCount
+    }
+  };
+}
+
 export async function fetchReceiveOrdersDirect() {
   let credentials;
   try {
@@ -249,6 +342,19 @@ export async function fetchReceiveOrdersDirect() {
   const sourcePath = getReceiveOrdersPath();
 
   try {
+    try {
+      const reportRunBody = await fetchReceiveOrdersViaReportRun();
+      if (reportRunBody.rowCount > 0) {
+        return {
+          ok: true,
+          statusCode: 200,
+          body: reportRunBody
+        };
+      }
+    } catch (reportRunError) {
+      Sentry.captureException(reportRunError);
+    }
+
     const initialPayload = await fetchText(sourcePath, authHeader);
     let parsed = parseReceiveOrdersPayload(initialPayload);
     let payloadUsed = initialPayload;
@@ -261,6 +367,10 @@ export async function fetchReceiveOrdersDirect() {
     const rawRows = Array.isArray(parsed.rows) ? parsed.rows : [];
     const transformed = transformColumns(rawRows, "receiveorders");
     const originalHeaders = rawRows.length ? Object.keys(rawRows[0]) : (parsed.headers || []);
+    const openRowCount = countOpenRows(transformed);
+    if (!rawRows.length) {
+      throw new Error("Nulogy canned Receive Orders export returned no usable rows.");
+    }
 
     return {
       ok: true,
@@ -279,7 +389,8 @@ export async function fetchReceiveOrdersDirect() {
           contentType: payloadUsed.contentType,
           parsedFormat: parsed.format || "",
           csvUrl: parsed.csvUrl || "",
-          rawRowCount: rawRows.length
+          rawRowCount: rawRows.length,
+          openRowCount
         }
       }
     };

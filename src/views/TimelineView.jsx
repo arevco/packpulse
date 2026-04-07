@@ -63,6 +63,7 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
   var filteredLoads = useMemo(function() {
     var rows = loads.filter(function(l) {
       var d = l.scheduledDate || l.expectedDate || "";
+      if (!d) return true;
       return d >= today && d <= endDateStr;
     });
     if (atRiskOnly) rows = rows.filter(function(r) { return (r.linkedWOCount || 0) > 0; });
@@ -89,12 +90,14 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
     if (state === "matched-fresh") return "Matched (fresh Receive Orders)";
     if (state === "matched-aging") return "Matched (aging Receive Orders)";
     if (state === "matched-stale") return "Matched (stale Receive Orders)";
+    if (state === "receive-order-only") return "Receive Orders only";
     return "OpenDock only";
   };
 
   var matchStyle = function(state) {
     if (state === "matched-fresh") return { color: C.ok, bg: C.okSoft, bd: C.okLine };
     if (state === "matched-aging" || state === "matched-stale") return { color: C.warn, bg: C.warnSoft, bd: C.warnLine };
+    if (state === "receive-order-only") return { color: C.accent, bg: C.accentSoft, bd: C.accentLine };
     return { color: C.dim, bg: C.raised, bd: C.border };
   };
 
@@ -164,11 +167,18 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
       </div>
 
       {isEdrStale && <div style={{ marginBottom: 12, fontSize: 12, color: C.warn, background: C.warnSoft, border: "1px solid " + C.warnLine, borderRadius: 8, padding: "8px 10px" }}>
-        Receive Orders data is stale. This board prioritizes OpenDock schedule truth; material impact details may be limited.
+        Receive Orders data is stale. OpenDock schedule details may still appear, but inbound material coverage may be limited.
       </div>}
 
       <div style={{ display: "flex", gap: 20, marginBottom: 12, flexWrap: "wrap" }}>
-        {[{ l: "Scheduled Loads", v: summary.openDockScheduled, c: C.accent }, { l: "Material Resolved", v: summary.materialResolved, c: C.ok }, { l: "Material Unknown", v: summary.materialUnknown, c: C.warn }, { l: "At-Risk WOs Waiting", v: summary.atRiskWOsWaiting, c: C.bad }, { l: "Potential Units Unlocked", v: (summary.unitsPotentiallyUnlocked || 0).toLocaleString(), c: C.bright }].map(function(s, i) {
+        {[
+          { l: "Inbound Loads", v: summary.totalLoads != null ? summary.totalLoads : summary.openDockScheduled, c: C.accent },
+          { l: "Matched Loads", v: summary.matchedLoads != null ? summary.matchedLoads : summary.materialResolved, c: C.ok },
+          { l: "Receive Orders Only", v: summary.receiveOrderOnly != null ? summary.receiveOrderOnly : summary.materialUnknown, c: C.warn },
+          { l: "OpenDock Only", v: summary.openDockOnly != null ? summary.openDockOnly : 0, c: C.dim },
+          { l: "At-Risk WOs Waiting", v: summary.atRiskWOsWaiting, c: C.bad },
+          { l: "Potential Units Unlocked", v: (summary.unitsPotentiallyUnlocked || 0).toLocaleString(), c: C.bright }
+        ].map(function(s, i) {
           return <div key={i}><div style={{ fontSize: 24, fontWeight: 700, fontFamily: mono, color: s.c, lineHeight: 1 }}>{s.v}</div><div style={{ fontSize: 13, color: C.dim, marginTop: 3 }}>{s.l}</div></div>;
         })}
       </div>
