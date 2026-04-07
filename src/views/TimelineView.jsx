@@ -30,22 +30,11 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
     { key: 14, label: "14d" },
     { key: 30, label: "30d" },
   ];
-
-  if (!timelineData || !deliveriesV2) {
-    return (
-      <Card className="px-[18px] py-5">
-        <div style={{ fontSize: 16, fontWeight: 700, color: C.bright, marginBottom: 6 }}>Deliveries</div>
-        <div style={{ fontSize: 13, color: C.dim, lineHeight: 1.5 }}>
-          No inbound data loaded yet. Sync Receive Orders and OpenDock to see upcoming loads.
-        </div>
-      </Card>
-    );
-  }
-
-  var freshness = deliveriesV2.freshness || { edr: { level: "missing", ageDays: null }, openDock: { level: "missing", ageDays: null }, confidence: { score: 0, label: "Low" } };
-  var summary = deliveriesV2.summary || { openDockScheduled: 0, materialResolved: 0, materialUnknown: 0, atRiskWOsWaiting: 0, unitsPotentiallyUnlocked: 0 };
-  var loads = deliveriesV2.loads || [];
-  var today = timelineData.today || new Date().toISOString().slice(0, 10);
+  var hasInboundData = !!timelineData && !!deliveriesV2;
+  var freshness = (deliveriesV2 && deliveriesV2.freshness) || { edr: { level: "missing", ageDays: null }, openDock: { level: "missing", ageDays: null }, confidence: { score: 0, label: "Low" } };
+  var summary = (deliveriesV2 && deliveriesV2.summary) || { openDockScheduled: 0, materialResolved: 0, materialUnknown: 0, atRiskWOsWaiting: 0, unitsPotentiallyUnlocked: 0 };
+  var loads = (deliveriesV2 && deliveriesV2.loads) || [];
+  var today = (timelineData && timelineData.today) || new Date().toISOString().slice(0, 10);
   var endDate = new Date(today + "T00:00:00");
   endDate.setDate(endDate.getDate() + Math.max(0, windowDays - 1));
   var endDateStr = endDate.toISOString().slice(0, 10);
@@ -85,6 +74,17 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
     }
     return rows;
   }, [loads, today, endDateStr, atRiskOnly, search]);
+
+  if (!hasInboundData) {
+    return (
+      <Card className="px-[18px] py-5">
+        <div style={{ fontSize: 16, fontWeight: 700, color: C.bright, marginBottom: 6 }}>Deliveries</div>
+        <div style={{ fontSize: 13, color: C.dim, lineHeight: 1.5 }}>
+          No inbound data loaded yet. Sync Receive Orders and OpenDock to see upcoming loads.
+        </div>
+      </Card>
+    );
+  }
 
   var matchLabel = function(state) {
     if (state === "matched-fresh") return "Matched (fresh Receive Orders)";
