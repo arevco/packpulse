@@ -1140,14 +1140,22 @@ export default function ProductionReadiness() {
   ];
   var syncProgress = (() => {
     var reportStates = nulogySyncState && nulogySyncState.reportStates ? nulogySyncState.reportStates : null;
-    var steps = [
-      { key:"inventory", label:"Inventory" },
-      { key:"workorders", label:"Work Orders" },
-      { key:"itemmaster", label:"Item Master" },
-      { key:"bom", label:"BOM" },
-      { key:"production", label:"Production" },
+    var nulogySteps = hiddenNulogySyncMode === "production_only"
+      ? [
+          { key:"production", label:"Production" }
+        ]
+      : [
+          { key:"inventory", label:"Inventory" },
+          { key:"workorders", label:"Work Orders" },
+          { key:"itemmaster", label:"Item Master" },
+          { key:"bom", label:"BOM" },
+          { key:"receiveorders", label:"Receive Orders" },
+          { key:"production", label:"Production" },
+          { key:"labor", label:"Labor" }
+        ];
+    var steps = nulogySteps.concat([
       { key:"opendock", label:"OpenDock API", synthetic:true }
-    ];
+    ]);
     var done = 0;
     var active = [];
     var errors = 0;
@@ -1194,7 +1202,6 @@ export default function ProductionReadiness() {
     visibleNulogySyncError
   );
   var isActivelySyncing = showAutoBootstrap && (
-    setupNeedsBootstrap ||
     visibleDockSyncBusy ||
     visibleNulogySyncBusy
   );
