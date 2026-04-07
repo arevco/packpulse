@@ -272,6 +272,53 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
       }
     }
 
+    if (type === "receiveorders") {
+      updateReportState(type, { status: DOWNLOADING, progress: "Pulling Receive Orders export...", error: null });
+      try {
+        const directRes = await fetch("/api/nulogy/receive-orders-rich");
+        const directBody = await directRes.json();
+        if (!directRes.ok) {
+          throw new Error((directBody && directBody.error) || `HTTP ${directRes.status}`);
+        }
+
+        console.log("[Nulogy] receiveorders direct diagnostics:", directBody && directBody.diagnostics ? directBody.diagnostics : {});
+        console.log("[Nulogy] receiveorders original headers:", directBody && directBody.originalHeaders ? directBody.originalHeaders : []);
+        console.log("[Nulogy] receiveorders transformed columns:", directBody && directBody.columns ? directBody.columns : []);
+
+        latestReceiveOrdersRef.current = Array.isArray(directBody && directBody.data) ? directBody.data : [];
+        const audit = applyReceiveOrderAudit(latestReceiveOrdersRef.current);
+        let progressText = `${Number(directBody && directBody.rowCount || 0).toLocaleString()} rows, ${audit.openLineCount.toLocaleString()} open lines, ${Array.isArray(directBody && directBody.columns) ? directBody.columns.length : 0} cols`;
+        if (audit.closedOnlySource) {
+          progressText += " · closed-only source";
+        } else {
+          progressText += ` · ${audit.uniqueReceiveOrders.toLocaleString()} open ROs`;
+        }
+        if (audit.auditCode) {
+          progressText += audit.auditFound ? " · audit hit" : " · audit miss";
+        }
+
+        updateReportState(type, {
+          status: DONE,
+          progress: progressText,
+          rowCount: Number(directBody && directBody.rowCount) || 0,
+          auditSummary: audit && audit.summaryText ? audit.summaryText : "",
+          auditText: audit && audit.auditText ? audit.auditText : "",
+          auditFound: !!(audit && audit.auditFound)
+        });
+
+        return {
+          type,
+          data: latestReceiveOrdersRef.current,
+          rowCount: Number(directBody && directBody.rowCount) || latestReceiveOrdersRef.current.length,
+          receiveOrderAudit: audit,
+          diagnostics: directBody && directBody.diagnostics ? directBody.diagnostics : null
+        };
+      } catch (err) {
+        updateReportState(type, { status: ERROR, progress: "", error: err.message });
+        return null;
+      }
+    }
+
     // Step 1: Create report job
     updateReportState(type, { status: CREATING, progress: "Requesting report from Nulogy...", error: null });
 
