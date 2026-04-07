@@ -116,11 +116,14 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, submitted: rows.length, written: 0, note: "no_positive_unit_rows" });
     }
     const supabase = getSupabaseAdmin();
+    // Keep one extra calendar day in the correction window so the next business-day
+    // refresh can still repair a partial Friday write after a quiet weekend.
+    var correctionDays = Number(process.env.PRODUCTION_EVENT_CORRECTION_DAYS || process.env.NULOGY_EVENT_CORRECTION_DAYS || 4);
     try {
       var writeResult = await writeProductionEventsSafely(supabase, {
         siteId: CACHE_SITE_ID,
         events: events,
-        correctionDays: Number(process.env.PRODUCTION_EVENT_CORRECTION_DAYS || process.env.NULOGY_EVENT_CORRECTION_DAYS || 3)
+        correctionDays: correctionDays
       });
       var refreshResult = { status: "noop", details: null };
       if (writeResult.written > 0) {

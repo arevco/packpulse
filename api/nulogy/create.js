@@ -20,6 +20,20 @@ function shiftIsoDateKey(dateKey, deltaDays) {
   return d.toISOString().slice(0, 10);
 }
 
+function todayEtDateKey() {
+  var parts = {};
+  new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(new Date()).forEach(function(part) {
+    if (part.type !== "literal") parts[part.type] = part.value;
+  });
+  if (!parts.year || !parts.month || !parts.day) return "";
+  return parts.year + "-" + parts.month + "-" + parts.day;
+}
+
 function formatNulogyBoundaryDateTime(dateKey) {
   var base = sanitizeIsoDate(dateKey);
   if (!base) return "";
@@ -101,6 +115,22 @@ export function buildProductionFilters(options) {
   var hoursPerShiftWindow = (24 / Math.max(1, shiftsPerDay)) * Math.max(1, lookbackShifts);
   var lookbackHours = Math.max(1, shiftHours, hoursPerShiftWindow);
   if (syncProfile === "recent_production") {
+    // Pull whole ET calendar days here. Rolling hour windows can truncate the
+    // earliest day, and downstream correction writes replace whole date buckets.
+    var recentWindowDays = Math.max(2, Math.round(recentProductionLookbackDays) + 1);
+    var todayEt = todayEtDateKey();
+    var recentStartDate = todayEt ? shiftIsoDateKey(todayEt, -(recentWindowDays - 1)) : "";
+    var recentEndExclusive = todayEt ? shiftIsoDateKey(todayEt, 1) : "";
+    if (recentStartDate && recentEndExclusive) {
+      return [
+        {
+          column: "produced_at",
+          operator: "between",
+          from_threshold: formatNulogyBoundaryDateTime(recentStartDate),
+          to_threshold: formatNulogyBoundaryDateTime(recentEndExclusive)
+        }
+      ];
+    }
     lookbackHours = Math.max(shiftHours, Math.max(1, recentProductionLookbackDays) * 24);
   } else {
     if (explicitLookbackDays > 0) lookbackHours = Math.max(lookbackHours, explicitLookbackDays * 24);

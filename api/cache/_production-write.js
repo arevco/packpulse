@@ -272,7 +272,7 @@ async function protectRecentSparseDates(supabase, siteId, events) {
 export async function writeProductionEventsSafely(supabase, options) {
   var siteId = String(options && options.siteId || "");
   var allEvents = Array.isArray(options && options.events) ? options.events : [];
-  var correctionDays = Math.max(1, Number(options && options.correctionDays || 3));
+  var correctionDays = Math.max(1, Number(options && options.correctionDays || 4));
   var forceFullBackfill = !!(options && options.forceFullBackfill);
 
   var hasExistingRows = await withRetry(function() {

@@ -488,11 +488,14 @@ export default async function handler(req, res) {
       var performanceViewRefreshStatus = "noop";
       var performanceViewRefreshDetails = null;
       if (productionEvents.length > 0) {
+        // Keep one extra calendar day in the correction window so the next business-day
+        // refresh can still repair a partial Friday write after a quiet weekend.
+        var productionCorrectionDays = Number(process.env.PRODUCTION_EVENT_CORRECTION_DAYS || process.env.NULOGY_EVENT_CORRECTION_DAYS || 4);
         try {
           var productionWrite = await writeProductionEventsSafely(supabase, {
             siteId: CACHE_SITE_ID,
             events: productionEvents,
-            correctionDays: Number(process.env.PRODUCTION_EVENT_CORRECTION_DAYS || process.env.NULOGY_EVENT_CORRECTION_DAYS || 3)
+            correctionDays: productionCorrectionDays
           });
           productionWriteMode = productionWrite.writeMode;
           productionCorrectionStart = productionWrite.correctionStart;
