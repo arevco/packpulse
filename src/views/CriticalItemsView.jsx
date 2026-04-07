@@ -280,8 +280,8 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage, c
               <span style={{ color:C.dim }}>Blocking Component: <span style={{ color:C.bright, fontFamily:mono }}>{ci.sku || "--"}</span></span>
               <span style={{ color:C.dim }}>Component Short: <span style={{ color:C.bad, fontFamily:mono, fontWeight:700 }}>{Math.round(ci.shortQty || 0).toLocaleString()}</span></span>
               <span style={{ color:C.dim }}>Inbound Source: <span style={{ color:C.bright, fontFamily:mono }}>Receive Orders {Math.round(ci.inboundQty || 0).toLocaleString()} | OpenDock Scheduled {Math.round(ci.scheduledQty || 0).toLocaleString()}</span></span>
-              <span style={{ color:C.dim }}>Earliest Inbound: <span style={{ color:C.bright, fontFamily:mono }}>{fmtDate(ci.earliestInboundDate)}</span></span>
-              <span style={{ color:C.dim }}>Earliest Scheduled: <span style={{ color:C.bright, fontFamily:mono }}>{fmtDate(ci.earliestScheduledDate)}</span></span>
+              <span style={{ color:C.dim }}>Earliest Receive Order Date: <span style={{ color:C.bright, fontFamily:mono }}>{fmtDate(ci.earliestInboundDate)}</span></span>
+              <span style={{ color:C.dim }}>Earliest OpenDock Appointment: <span style={{ color:C.bright, fontFamily:mono }}>{fmtDate(ci.earliestScheduledDate)}</span></span>
               <span style={{ color:C.dim }}>POs: <span style={{ color:C.bright }}>{(ci.openPOs || []).length ? ci.openPOs.join(", ") : "--"}</span></span>
               <span style={{ color:C.dim }}>Unlocked Units: <span style={{ color:C.bright }}>{Math.round(ci.unlockedUnits || 0).toLocaleString()}</span></span>
             </div>
