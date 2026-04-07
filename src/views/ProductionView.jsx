@@ -6,6 +6,7 @@ import { Download } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { DatePicker } from "../components/ui/date-picker";
+import SortHeaderButton from "../components/ui/sort-header-button";
 import TableShell from "../components/ui/table-shell";
 
 var MIN_TRUSTED_JOB_LABOR_HOURS = 0.25;
@@ -32,6 +33,38 @@ var LABOR_SHIFT_CONFIG = {
   shift2_end_minute: 23 * 60,
   start_grace_minutes: 10
 };
+var DEFAULT_DETAIL_SORT_FIELD = "units";
+var DEFAULT_DETAIL_SORT_DIR = "desc";
+var DEFAULT_DETAIL_METRIC_FILTERS = {
+  units: "",
+  revenue: "",
+  pricePerUnit: "",
+  laborPayableHours: "",
+  laborCost: "",
+  laborMargin: "",
+  laborMarginPct: "",
+  casesPerMinute: ""
+};
+var DETAIL_SORT_LABELS = {
+  units: "Units",
+  revenue: "Revenue",
+  pricePerUnit: "Price/Unit",
+  laborPayableHours: "Labor Hrs",
+  laborCost: "Labor",
+  laborMargin: "Labor Margin",
+  laborMarginPct: "Margin %",
+  casesPerMinute: "Cases/Min"
+};
+var DETAIL_FILTER_FIELDS = [
+  { key: "units", label: "Units", placeholder: "Min" },
+  { key: "revenue", label: "Revenue", placeholder: "Min $" },
+  { key: "pricePerUnit", label: "Price/Unit", placeholder: "Min $" },
+  { key: "laborPayableHours", label: "Labor Hrs", placeholder: "Min" },
+  { key: "laborCost", label: "Labor", placeholder: "Min $" },
+  { key: "laborMargin", label: "Labor Margin", placeholder: "Min $" },
+  { key: "laborMarginPct", label: "Margin %", placeholder: "Min %" },
+  { key: "casesPerMinute", label: "Cases/Min", placeholder: "Min" }
+];
 
 function fmtMoneyWhole(value) {
   var rounded = Math.round(safeNum(value));
@@ -57,6 +90,60 @@ function normKey(value) {
 
 function normalizeLooseKey(value) {
   return String(value || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+
+function parseFilterThreshold(value) {
+  var raw = String(value == null ? "" : value).trim();
+  if (!raw) return null;
+  var parsed = Number(raw.replace(/[%,$\s]/g, "").replace(/,/g, ""));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function getDetailMetricValue(row, field) {
+  if (!row || typeof row !== "object") return null;
+  if (field === "units") {
+    if (row.unitsProduced != null) return safeNum(row.unitsProduced);
+    if (row.units != null) return safeNum(row.units);
+    return 0;
+  }
+  if (field === "pricePerUnit" || field === "laborMarginPct") {
+    if (row[field] == null || row[field] === "") return null;
+  }
+  var value = Number(row[field]);
+  return Number.isFinite(value) ? value : null;
+}
+
+function rowPassesDetailMetricFilters(row, thresholds) {
+  if (thresholds.units != null && safeNum(getDetailMetricValue(row, "units")) < thresholds.units) return false;
+  if (thresholds.revenue != null && safeNum(getDetailMetricValue(row, "revenue")) < thresholds.revenue) return false;
+  if (thresholds.pricePerUnit != null && safeNum(getDetailMetricValue(row, "pricePerUnit")) < thresholds.pricePerUnit) return false;
+  if (thresholds.laborPayableHours != null && safeNum(getDetailMetricValue(row, "laborPayableHours")) < thresholds.laborPayableHours) return false;
+  if (thresholds.laborCost != null && safeNum(getDetailMetricValue(row, "laborCost")) < thresholds.laborCost) return false;
+  if (thresholds.laborMargin != null && safeNum(getDetailMetricValue(row, "laborMargin")) < thresholds.laborMargin) return false;
+  if (thresholds.laborMarginPct != null && safeNum(getDetailMetricValue(row, "laborMarginPct")) < thresholds.laborMarginPct) return false;
+  if (thresholds.casesPerMinute != null && safeNum(getDetailMetricValue(row, "casesPerMinute")) < thresholds.casesPerMinute) return false;
+  return true;
+}
+
+function compareDetailMetricRows(a, b, sortField, sortDir) {
+  var dir = sortDir === "asc" ? 1 : -1;
+  var valueA = getDetailMetricValue(a, sortField);
+  var valueB = getDetailMetricValue(b, sortField);
+  var missingA = valueA == null || !Number.isFinite(valueA);
+  var missingB = valueB == null || !Number.isFinite(valueB);
+  if (missingA !== missingB) return missingA ? 1 : -1;
+  if (!missingA && !missingB && valueA !== valueB) return (valueA - valueB) * dir;
+
+  var unitsCompare = safeNum(getDetailMetricValue(b, "units")) - safeNum(getDetailMetricValue(a, "units"));
+  if (unitsCompare) return unitsCompare;
+
+  var lineCompare = String(a.line || "").localeCompare(String(b.line || ""));
+  if (lineCompare) return lineCompare;
+
+  var jobCompare = String(a.jobId || "").localeCompare(String(b.jobId || ""));
+  if (jobCompare) return jobCompare;
+
+  return String(a.itemCode || "").localeCompare(String(b.itemCode || ""));
 }
 
 function pickFieldLoose(row, keys) {
@@ -276,6 +363,9 @@ export default function ProductionView({ productionSegments, laborActuals, labor
   const [lineExpansion, setLineExpansion] = useState({});
   const [showLineExecution, setShowLineExecution] = useState(true);
   const [jobExpansion, setJobExpansion] = useState({});
+  const [detailSortField, setDetailSortField] = useState(DEFAULT_DETAIL_SORT_FIELD);
+  const [detailSortDir, setDetailSortDir] = useState(DEFAULT_DETAIL_SORT_DIR);
+  const [detailMetricFilters, setDetailMetricFilters] = useState(DEFAULT_DETAIL_METRIC_FILTERS);
 
   var prodShiftRows = productionSegments && Array.isArray(productionSegments.shiftRows) ? productionSegments.shiftRows : [];
   var prodJobRows = productionSegments && Array.isArray(productionSegments.jobRows) ? productionSegments.jobRows : [];
@@ -827,6 +917,31 @@ export default function ProductionView({ productionSegments, laborActuals, labor
     }).sort(function(a, b) { return b.unitsProduced - a.unitsProduced; });
   }, [jobsWithLabor]);
 
+  var detailMetricThresholds = useMemo(function() {
+    var marginPct = parseFilterThreshold(detailMetricFilters.laborMarginPct);
+    return {
+      units: parseFilterThreshold(detailMetricFilters.units),
+      revenue: parseFilterThreshold(detailMetricFilters.revenue),
+      pricePerUnit: parseFilterThreshold(detailMetricFilters.pricePerUnit),
+      laborPayableHours: parseFilterThreshold(detailMetricFilters.laborPayableHours),
+      laborCost: parseFilterThreshold(detailMetricFilters.laborCost),
+      laborMargin: parseFilterThreshold(detailMetricFilters.laborMargin),
+      laborMarginPct: marginPct == null ? null : (marginPct / 100),
+      casesPerMinute: parseFilterThreshold(detailMetricFilters.casesPerMinute)
+    };
+  }, [detailMetricFilters]);
+
+  var tableJobRollup = useMemo(function() {
+    return jobRollup
+      .filter(function(job) {
+        return rowPassesDetailMetricFilters(job, detailMetricThresholds);
+      })
+      .slice()
+      .sort(function(a, b) {
+        return compareDetailMetricRows(a, b, detailSortField, detailSortDir);
+      });
+  }, [jobRollup, detailMetricThresholds, detailSortField, detailSortDir]);
+
   var detailRowsByJobKey = useMemo(function() {
     var map = {};
     var shiftRank = function(shiftLabel) {
@@ -857,21 +972,72 @@ export default function ProductionView({ productionSegments, laborActuals, labor
 
   var lineExecution = useMemo(function() {
     var jobsByLine = {};
-    jobRollup.forEach(function(job) {
+    var totalUnits = tableJobRollup.reduce(function(sum, job) {
+      return sum + safeNum(job.unitsProduced);
+    }, 0);
+
+    tableJobRollup.forEach(function(job) {
       var line = String(job.line || "Unknown").trim() || "Unknown";
-      if (!jobsByLine[line]) jobsByLine[line] = [];
-      jobsByLine[line].push(Object.assign({}, job, {
+      if (!jobsByLine[line]) {
+        jobsByLine[line] = {
+          line: line,
+          units: 0,
+          laborPayableHours: 0,
+          laborCost: 0,
+          revenue: 0,
+          revenueCoveredUnits: 0,
+          laborMargin: 0,
+          missingRevenueUnits: 0,
+          missingRevenueSkuKeys: {},
+          provisionalLaborRows: 0,
+          finalizedLaborRows: 0,
+          shiftSlots: {},
+          lineJobs: []
+        };
+      }
+      jobsByLine[line].units += safeNum(job.unitsProduced);
+      jobsByLine[line].laborPayableHours += safeNum(job.laborPayableHours);
+      jobsByLine[line].laborCost += safeNum(job.laborCost);
+      jobsByLine[line].revenue += safeNum(job.revenue);
+      jobsByLine[line].revenueCoveredUnits += safeNum(job.revenueCoveredUnits);
+      jobsByLine[line].laborMargin += safeNum(job.laborMargin);
+      jobsByLine[line].missingRevenueUnits += safeNum(job.missingRevenueUnits);
+      jobsByLine[line].provisionalLaborRows += safeNum(job.provisionalLaborRows);
+      jobsByLine[line].finalizedLaborRows += safeNum(job.finalizedLaborRows);
+      Object.keys(job.missingRevenueSkuKeys || {}).forEach(function(key) {
+        jobsByLine[line].missingRevenueSkuKeys[key] = job.missingRevenueSkuKeys[key];
+      });
+      Object.keys(job.shiftSlots || {}).forEach(function(key) {
+        jobsByLine[line].shiftSlots[key] = true;
+      });
+      jobsByLine[line].lineJobs.push(Object.assign({}, job, {
         detailRows: detailRowsByJobKey[job.key] || []
       }));
     });
-    return lineLoad.map(function(line) {
-      var jobs = jobsByLine[line.line] || [];
+
+    return Object.values(jobsByLine).map(function(line) {
+      var shiftSlotCount = Object.keys(line.shiftSlots).length;
+      var shiftMinutes = shiftSlotCount * SHIFT_MINUTES;
       return Object.assign({}, line, {
-        lineJobs: jobs,
-        jobCount: jobs.length
+        sharePct: totalUnits > 0 ? Math.round((line.units / totalUnits) * 100) : 0,
+        shiftSlotCount: shiftSlotCount,
+        shiftMinutes: shiftMinutes,
+        revenueCoveragePct: line.units > 0 ? Math.round((line.revenueCoveredUnits / line.units) * 100) : 0,
+        missingRevenueSkuCount: Object.keys(line.missingRevenueSkuKeys).length,
+        pricePerUnit: line.revenueCoveredUnits > 0 ? (line.revenue / line.revenueCoveredUnits) : null,
+        casesPerMinute: shiftMinutes > 0 ? (line.units / shiftMinutes) : 0,
+        laborCostPerCase: line.units > 0 ? (line.laborCost / line.units) : 0,
+        laborMarginPct: line.revenue > 0 ? (line.laborMargin / line.revenue) : null,
+        laborStatus: deriveLaborStatus(line.finalizedLaborRows, line.provisionalLaborRows),
+        jobCount: line.lineJobs.length,
+        lineJobs: line.lineJobs.slice().sort(function(a, b) {
+          return compareDetailMetricRows(a, b, detailSortField, detailSortDir);
+        })
       });
+    }).sort(function(a, b) {
+      return compareDetailMetricRows(a, b, detailSortField, detailSortDir);
     });
-  }, [lineLoad, jobRollup, detailRowsByJobKey]);
+  }, [tableJobRollup, detailRowsByJobKey, detailSortField, detailSortDir]);
 
   var totalUnitsProduced = jobsWithLabor.reduce(function(sum, r) { return sum + safeNum(r.unitsProduced); }, 0);
   var totalRevenue = jobsWithLabor.reduce(function(sum, r) { return sum + safeNum(r.revenue); }, 0);
@@ -921,6 +1087,29 @@ export default function ProductionView({ productionSegments, laborActuals, labor
   var lineExpanded = function(lineName) {
     return lineExpansion[lineName] !== false;
   };
+  var handleDetailSort = function(field) {
+    if (detailSortField === field) {
+      setDetailSortDir(function(prev) {
+        return prev === "asc" ? "desc" : "asc";
+      });
+      return;
+    }
+    setDetailSortField(field);
+    setDetailSortDir("desc");
+  };
+  var updateDetailMetricFilter = function(field, value) {
+    setDetailMetricFilters(function(prev) {
+      return Object.assign({}, prev, {
+        [field]: value
+      });
+    });
+  };
+  var clearDetailMetricFilters = function() {
+    setDetailMetricFilters(DEFAULT_DETAIL_METRIC_FILTERS);
+  };
+  var hasActiveDetailMetricFilters = Object.keys(detailMetricFilters).some(function(key) {
+    return String(detailMetricFilters[key] || "").trim() !== "";
+  });
   var handleProdDateStartChange = function(nextDate) {
     var next = String(nextDate || "").trim();
     if (!next) {
@@ -1110,6 +1299,9 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         <div className="mb-2 flex items-start justify-between gap-3">
           <div>
             <div className="mb-1 text-sm font-semibold">Job Level Details</div>
+            <div className="text-xs text-[rgb(var(--muted))]">
+              Sort by any metric header. Filters apply to rolled-up jobs; expanded shift buckets stay chronological.
+            </div>
           </div>
           <button
             type="button"
@@ -1121,133 +1313,198 @@ export default function ProductionView({ productionSegments, laborActuals, labor
           </button>
         </div>
         {showLineExecution ? (
-        <TableShell className="overflow-x-auto overflow-y-hidden">
-          <table style={{ width:"100%", minWidth:1300, borderCollapse:"collapse" }}>
-            <thead>
-              <tr style={{ background:C.raised }}>
-                <th style={thS}>Line / Job / Shift</th>
-                <th style={thS}>Context</th>
-                <th style={thS}>Units</th>
-                <th style={thS}>Revenue</th>
-                <th style={thS}>Price/Unit</th>
-                <th style={thS}>Labor Hrs</th>
-                <th style={thS}>Labor</th>
-                <th style={thS}>Labor Margin</th>
-                <th style={thS}>Margin %</th>
-                <th style={thS}>Cases/Min</th>
-              </tr>
-            </thead>
-            <tbody>
-              {lineExecution.map(function(r) {
-                var expanded = lineExpanded(r.line);
-                return [
-                  <tr key={r.line} style={{ borderBottom:"1px solid " + C.border, background:C.surface }}>
-                    <td style={tdM}>
-                      <button
-                        type="button"
-                        onClick={function() { toggleLineExpanded(r.line); }}
-                        style={{ display:"inline-flex", alignItems:"center", gap:8, border:"none", background:"transparent", padding:0, cursor:"pointer", color:C.text, font:"inherit" }}
-                      >
-                        <span style={{ fontFamily:mono, color:C.dim }}>{expanded ? "▾" : "▸"}</span>
-                        <span style={{ fontWeight:700 }}>{r.line}</span>
-                      </button>
-                    </td>
-                    <td style={tdM}>
-                      <div>{r.sharePct}% share · {r.jobCount} jobs</div>
-                      {r.laborStatus !== "finalized" ? (
-                        <div style={{ fontSize:11, color:C.warn }}>{laborStatusLabel(r.laborStatus)}</div>
-                      ) : null}
-                      {r.missingRevenueSkuCount > 0 ? (
-                        <div style={{ fontSize:11, color:C.bad }}>
-                          {r.revenueCoveragePct}% priced · {r.missingRevenueSkuCount} SKU{r.missingRevenueSkuCount === 1 ? "" : "s"} missing revenue
-                        </div>
-                      ) : null}
-                    </td>
-                    <td style={Object.assign({}, tdM, { fontWeight:700, color:C.ok })}>{r.units.toLocaleString()}</td>
-                    <td style={tdM}>{r.revenue > 0 ? fmtMoneyWhole(r.revenue) : "--"}</td>
-                    <td style={tdM}>{r.pricePerUnit != null ? fmtMoney(r.pricePerUnit) : "--"}</td>
-                    <td style={tdM}>{r.laborPayableHours > 0 ? r.laborPayableHours.toFixed(1) : "--"}</td>
-                    <td style={tdM}>{r.laborCost > 0 ? fmtMoneyWhole(r.laborCost) : "--"}</td>
-                    <td style={tdM}>{r.revenue > 0 ? fmtMoneyWhole(r.laborMargin) : "--"}</td>
-                    <td style={tdM}>{r.revenue > 0 ? fmtPct(r.laborMarginPct) : "--"}</td>
-                    <td style={tdM}>{r.casesPerMinute > 0 ? r.casesPerMinute.toFixed(2) : "--"}</td>
-                  </tr>,
-                  expanded ? r.lineJobs.map(function(job) {
-                    var expandedJob = jobExpanded(job.key);
-                    return [
-                      <tr key={job.key} style={{ borderBottom:"1px solid " + C.border, background:C.raised }}>
-                        <td style={Object.assign({}, tdM, { paddingLeft:"28px" })}>
-                          <button
-                            type="button"
-                            onClick={function() { toggleJobExpanded(job.key); }}
-                            style={{ display:"inline-flex", alignItems:"center", gap:8, border:"none", background:"transparent", padding:0, cursor:"pointer", color:C.text, font:"inherit" }}
-                          >
-                            <span style={{ fontFamily:mono, color:C.dim }}>{expandedJob ? "▾" : "▸"}</span>
-                            <span style={{ fontWeight:600, color:C.bright }}>{job.jobId}</span>
-                          </button>
-                          <div style={{ fontSize:11, color:C.dim, paddingLeft:"20px" }}>{job.itemCode}</div>
-                        </td>
-                        <td style={tdM}>
-                          <div>{job.workOrder}</div>
-                          <div style={{ fontSize:11, color:C.dim }}>{job.shiftCount} shift bucket{job.shiftCount === 1 ? "" : "s"}</div>
-                          {job.laborStatus !== "finalized" ? <div style={{ fontSize:11, color:C.warn }}>{laborStatusLabel(job.laborStatus)}</div> : null}
-                          <div style={{ fontSize:11, color:C.dim, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", maxWidth:260 }}>{job.itemDesc}</div>
-                        </td>
-                        <td style={Object.assign({}, tdM, { fontWeight:700, color:C.ok })}>{job.unitsProduced.toLocaleString()}</td>
-                        <td style={tdM}>
-                          {job.revenue > 0 ? fmtMoneyWhole(job.revenue) : <span style={{ color:C.bad, fontWeight:600 }}>Missing</span>}
-                          {job.missingRevenueSkuCount > 0 ? (
-                            <div style={{ fontSize:11, color:C.bad }}>
-                              {job.revenueCoveragePct}% priced · {job.missingRevenueSkuCount} missing
-                            </div>
-                          ) : null}
-                        </td>
-                        <td style={tdM}>{job.pricePerUnit != null ? fmtMoney(job.pricePerUnit) : "--"}</td>
-                        <td style={tdM}>{job.laborPayableHours > 0 ? job.laborPayableHours.toFixed(1) : "--"}</td>
-                        <td style={tdM}>{job.laborCost > 0 ? fmtMoneyWhole(job.laborCost) : "--"}</td>
-                        <td style={tdM}>{job.revenue > 0 ? fmtMoneyWhole(job.laborMargin) : "--"}</td>
-                        <td style={tdM}>{job.revenue > 0 ? fmtPct(job.laborMarginPct) : "--"}</td>
-                        <td style={tdM}>{job.casesPerMinute > 0 ? job.casesPerMinute.toFixed(2) : "--"}</td>
-                      </tr>,
-                      expandedJob ? job.detailRows.map(function(detail, idx) {
-                        return (
-                          <tr key={job.key + "-detail-" + idx} style={{ borderBottom:"1px solid " + C.border, background:"#fbfcfe" }}>
-                            <td style={Object.assign({}, tdM, { paddingLeft:"56px" })}>
-                              <div style={{ fontWeight:600 }}>{shortShift(detail.shift)}</div>
-                              <div style={{ fontSize:11, color:C.dim }}>{detail.date || "--"}</div>
-                            </td>
-                            <td style={tdM}>
-                              <div>{detail.workOrder}</div>
-                              {detail.hasLabor && detail.laborStatus !== "finalized" ? <div style={{ fontSize:11, color:C.warn }}>{laborStatusLabel(detail.laborStatus)}</div> : null}
-                              <div style={{ fontSize:11, color:C.dim, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", maxWidth:260 }}>{formatDescriptionForDisplay(detail.itemDesc) || "--"}</div>
-                            </td>
-                            <td style={Object.assign({}, tdM, { fontWeight:700, color:C.ok })}>{detail.unitsProduced.toLocaleString()}</td>
-                            <td style={tdM}>
-                              {detail.revenue > 0 ? fmtMoneyWhole(detail.revenue) : <span style={{ color:C.bad, fontWeight:600 }}>Missing</span>}
-                            </td>
-                            <td style={tdM}>{detail.pricePerUnit != null ? fmtMoney(detail.pricePerUnit) : "--"}</td>
-                            <td style={tdM}>
-                              <div>{detail.laborPayableHours > 0 ? detail.laborPayableHours.toFixed(1) : "--"}</div>
-                              {detail.hasLabor && detail.laborStatus !== "finalized" ? <div style={{ fontSize:11, color:C.warn }}>{laborStatusLabel(detail.laborStatus)}</div> : null}
-                            </td>
-                            <td style={tdM}>
-                              <div>{detail.laborCost > 0 ? fmtMoneyWhole(detail.laborCost) : "--"}</div>
-                              {detail.hasLabor && detail.laborStatus !== "finalized" ? <div style={{ fontSize:11, color:C.warn }}>provisional</div> : null}
-                            </td>
-                            <td style={tdM}>{detail.revenue > 0 ? fmtMoneyWhole(detail.laborMargin) : "--"}</td>
-                            <td style={tdM}>{detail.revenue > 0 ? fmtPct(detail.laborMarginPct) : "--"}</td>
-                            <td style={tdM}>{detail.casesPerMinute > 0 ? detail.casesPerMinute.toFixed(2) : "--"}</td>
-                          </tr>
-                        );
-                      }) : null
-                    ];
-                  }) : null
-                ];
-              })}
-              {!lineExecution.length && <tr><td colSpan={10} style={{ padding:20, textAlign:"center", color:C.dim }}>No line or job rollups for current filters.</td></tr>}
-            </tbody>
-          </table>
-        </TableShell>
+        <>
+          <div className="mb-3 flex flex-wrap items-end gap-2">
+            {DETAIL_FILTER_FIELDS.map(function(field) {
+              return (
+                <div key={field.key} className="flex flex-col gap-1">
+                  <label className="text-[11px] font-medium text-[rgb(var(--muted))]">{field.label}</label>
+                  <Input
+                    type="text"
+                    inputMode="decimal"
+                    value={detailMetricFilters[field.key]}
+                    onChange={function(event) { updateDetailMetricFilter(field.key, event.target.value); }}
+                    placeholder={field.placeholder}
+                    className="h-9 w-[108px] text-sm"
+                  />
+                </div>
+              );
+            })}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={clearDetailMetricFilters}
+              className="h-9"
+              disabled={!hasActiveDetailMetricFilters}
+            >
+              Clear Metrics
+            </Button>
+            <div className="pb-0.5 text-xs text-[rgb(var(--muted))]">
+              Showing {tableJobRollup.length.toLocaleString()} job{tableJobRollup.length === 1 ? "" : "s"} across {lineExecution.length.toLocaleString()} line{lineExecution.length === 1 ? "" : "s"}.
+              {" "}Sorted by {DETAIL_SORT_LABELS[detailSortField]} {detailSortDir === "asc" ? "ascending" : "descending"}.
+            </div>
+          </div>
+          <TableShell className="overflow-x-auto overflow-y-hidden">
+            <table style={{ width:"100%", minWidth:1300, borderCollapse:"collapse" }}>
+              <thead>
+                <tr style={{ background:C.raised }}>
+                  <th style={thS}>Line / Job / Shift</th>
+                  <th style={thS}>Context</th>
+                  <th style={thS}>
+                    <SortHeaderButton onClick={function() { handleDetailSort("units"); }}>
+                      Units{detailSortField === "units" ? (detailSortDir === "asc" ? " ↑" : " ↓") : ""}
+                    </SortHeaderButton>
+                  </th>
+                  <th style={thS}>
+                    <SortHeaderButton onClick={function() { handleDetailSort("revenue"); }}>
+                      Revenue{detailSortField === "revenue" ? (detailSortDir === "asc" ? " ↑" : " ↓") : ""}
+                    </SortHeaderButton>
+                  </th>
+                  <th style={thS}>
+                    <SortHeaderButton onClick={function() { handleDetailSort("pricePerUnit"); }}>
+                      Price/Unit{detailSortField === "pricePerUnit" ? (detailSortDir === "asc" ? " ↑" : " ↓") : ""}
+                    </SortHeaderButton>
+                  </th>
+                  <th style={thS}>
+                    <SortHeaderButton onClick={function() { handleDetailSort("laborPayableHours"); }}>
+                      Labor Hrs{detailSortField === "laborPayableHours" ? (detailSortDir === "asc" ? " ↑" : " ↓") : ""}
+                    </SortHeaderButton>
+                  </th>
+                  <th style={thS}>
+                    <SortHeaderButton onClick={function() { handleDetailSort("laborCost"); }}>
+                      Labor{detailSortField === "laborCost" ? (detailSortDir === "asc" ? " ↑" : " ↓") : ""}
+                    </SortHeaderButton>
+                  </th>
+                  <th style={thS}>
+                    <SortHeaderButton onClick={function() { handleDetailSort("laborMargin"); }}>
+                      Labor Margin{detailSortField === "laborMargin" ? (detailSortDir === "asc" ? " ↑" : " ↓") : ""}
+                    </SortHeaderButton>
+                  </th>
+                  <th style={thS}>
+                    <SortHeaderButton onClick={function() { handleDetailSort("laborMarginPct"); }}>
+                      Margin %{detailSortField === "laborMarginPct" ? (detailSortDir === "asc" ? " ↑" : " ↓") : ""}
+                    </SortHeaderButton>
+                  </th>
+                  <th style={thS}>
+                    <SortHeaderButton onClick={function() { handleDetailSort("casesPerMinute"); }}>
+                      Cases/Min{detailSortField === "casesPerMinute" ? (detailSortDir === "asc" ? " ↑" : " ↓") : ""}
+                    </SortHeaderButton>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {lineExecution.map(function(r) {
+                  var expanded = lineExpanded(r.line);
+                  return [
+                    <tr key={r.line} style={{ borderBottom:"1px solid " + C.border, background:C.surface }}>
+                      <td style={tdM}>
+                        <button
+                          type="button"
+                          onClick={function() { toggleLineExpanded(r.line); }}
+                          style={{ display:"inline-flex", alignItems:"center", gap:8, border:"none", background:"transparent", padding:0, cursor:"pointer", color:C.text, font:"inherit" }}
+                        >
+                          <span style={{ fontFamily:mono, color:C.dim }}>{expanded ? "▾" : "▸"}</span>
+                          <span style={{ fontWeight:700 }}>{r.line}</span>
+                        </button>
+                      </td>
+                      <td style={tdM}>
+                        <div>{r.sharePct}% share · {r.jobCount} jobs</div>
+                        {r.laborStatus !== "finalized" ? (
+                          <div style={{ fontSize:11, color:C.warn }}>{laborStatusLabel(r.laborStatus)}</div>
+                        ) : null}
+                        {r.missingRevenueSkuCount > 0 ? (
+                          <div style={{ fontSize:11, color:C.bad }}>
+                            {r.revenueCoveragePct}% priced · {r.missingRevenueSkuCount} SKU{r.missingRevenueSkuCount === 1 ? "" : "s"} missing revenue
+                          </div>
+                        ) : null}
+                      </td>
+                      <td style={Object.assign({}, tdM, { fontWeight:700, color:C.ok })}>{r.units.toLocaleString()}</td>
+                      <td style={tdM}>{r.revenue > 0 ? fmtMoneyWhole(r.revenue) : "--"}</td>
+                      <td style={tdM}>{r.pricePerUnit != null ? fmtMoney(r.pricePerUnit) : "--"}</td>
+                      <td style={tdM}>{r.laborPayableHours > 0 ? r.laborPayableHours.toFixed(1) : "--"}</td>
+                      <td style={tdM}>{r.laborCost > 0 ? fmtMoneyWhole(r.laborCost) : "--"}</td>
+                      <td style={tdM}>{r.revenue > 0 ? fmtMoneyWhole(r.laborMargin) : "--"}</td>
+                      <td style={tdM}>{r.revenue > 0 ? fmtPct(r.laborMarginPct) : "--"}</td>
+                      <td style={tdM}>{r.casesPerMinute > 0 ? r.casesPerMinute.toFixed(2) : "--"}</td>
+                    </tr>,
+                    expanded ? r.lineJobs.map(function(job) {
+                      var expandedJob = jobExpanded(job.key);
+                      return [
+                        <tr key={job.key} style={{ borderBottom:"1px solid " + C.border, background:C.raised }}>
+                          <td style={Object.assign({}, tdM, { paddingLeft:"28px" })}>
+                            <button
+                              type="button"
+                              onClick={function() { toggleJobExpanded(job.key); }}
+                              style={{ display:"inline-flex", alignItems:"center", gap:8, border:"none", background:"transparent", padding:0, cursor:"pointer", color:C.text, font:"inherit" }}
+                            >
+                              <span style={{ fontFamily:mono, color:C.dim }}>{expandedJob ? "▾" : "▸"}</span>
+                              <span style={{ fontWeight:600, color:C.bright }}>{job.jobId}</span>
+                            </button>
+                            <div style={{ fontSize:11, color:C.dim, paddingLeft:"20px" }}>{job.itemCode}</div>
+                          </td>
+                          <td style={tdM}>
+                            <div>{job.workOrder}</div>
+                            <div style={{ fontSize:11, color:C.dim }}>{job.shiftCount} shift bucket{job.shiftCount === 1 ? "" : "s"}</div>
+                            {job.laborStatus !== "finalized" ? <div style={{ fontSize:11, color:C.warn }}>{laborStatusLabel(job.laborStatus)}</div> : null}
+                            <div style={{ fontSize:11, color:C.dim, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", maxWidth:260 }}>{job.itemDesc}</div>
+                          </td>
+                          <td style={Object.assign({}, tdM, { fontWeight:700, color:C.ok })}>{job.unitsProduced.toLocaleString()}</td>
+                          <td style={tdM}>
+                            {job.revenue > 0 ? fmtMoneyWhole(job.revenue) : <span style={{ color:C.bad, fontWeight:600 }}>Missing</span>}
+                            {job.missingRevenueSkuCount > 0 ? (
+                              <div style={{ fontSize:11, color:C.bad }}>
+                                {job.revenueCoveragePct}% priced · {job.missingRevenueSkuCount} missing
+                              </div>
+                            ) : null}
+                          </td>
+                          <td style={tdM}>{job.pricePerUnit != null ? fmtMoney(job.pricePerUnit) : "--"}</td>
+                          <td style={tdM}>{job.laborPayableHours > 0 ? job.laborPayableHours.toFixed(1) : "--"}</td>
+                          <td style={tdM}>{job.laborCost > 0 ? fmtMoneyWhole(job.laborCost) : "--"}</td>
+                          <td style={tdM}>{job.revenue > 0 ? fmtMoneyWhole(job.laborMargin) : "--"}</td>
+                          <td style={tdM}>{job.revenue > 0 ? fmtPct(job.laborMarginPct) : "--"}</td>
+                          <td style={tdM}>{job.casesPerMinute > 0 ? job.casesPerMinute.toFixed(2) : "--"}</td>
+                        </tr>,
+                        expandedJob ? job.detailRows.map(function(detail, idx) {
+                          return (
+                            <tr key={job.key + "-detail-" + idx} style={{ borderBottom:"1px solid " + C.border, background:"#fbfcfe" }}>
+                              <td style={Object.assign({}, tdM, { paddingLeft:"56px" })}>
+                                <div style={{ fontWeight:600 }}>{shortShift(detail.shift)}</div>
+                                <div style={{ fontSize:11, color:C.dim }}>{detail.date || "--"}</div>
+                              </td>
+                              <td style={tdM}>
+                                <div>{detail.workOrder}</div>
+                                {detail.hasLabor && detail.laborStatus !== "finalized" ? <div style={{ fontSize:11, color:C.warn }}>{laborStatusLabel(detail.laborStatus)}</div> : null}
+                                <div style={{ fontSize:11, color:C.dim, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", maxWidth:260 }}>{formatDescriptionForDisplay(detail.itemDesc) || "--"}</div>
+                              </td>
+                              <td style={Object.assign({}, tdM, { fontWeight:700, color:C.ok })}>{detail.unitsProduced.toLocaleString()}</td>
+                              <td style={tdM}>
+                                {detail.revenue > 0 ? fmtMoneyWhole(detail.revenue) : <span style={{ color:C.bad, fontWeight:600 }}>Missing</span>}
+                              </td>
+                              <td style={tdM}>{detail.pricePerUnit != null ? fmtMoney(detail.pricePerUnit) : "--"}</td>
+                              <td style={tdM}>
+                                <div>{detail.laborPayableHours > 0 ? detail.laborPayableHours.toFixed(1) : "--"}</div>
+                                {detail.hasLabor && detail.laborStatus !== "finalized" ? <div style={{ fontSize:11, color:C.warn }}>{laborStatusLabel(detail.laborStatus)}</div> : null}
+                              </td>
+                              <td style={tdM}>
+                                <div>{detail.laborCost > 0 ? fmtMoneyWhole(detail.laborCost) : "--"}</div>
+                                {detail.hasLabor && detail.laborStatus !== "finalized" ? <div style={{ fontSize:11, color:C.warn }}>provisional</div> : null}
+                              </td>
+                              <td style={tdM}>{detail.revenue > 0 ? fmtMoneyWhole(detail.laborMargin) : "--"}</td>
+                              <td style={tdM}>{detail.revenue > 0 ? fmtPct(detail.laborMarginPct) : "--"}</td>
+                              <td style={tdM}>{detail.casesPerMinute > 0 ? detail.casesPerMinute.toFixed(2) : "--"}</td>
+                            </tr>
+                          );
+                        }) : null
+                      ];
+                    }) : null
+                  ];
+                })}
+                {!lineExecution.length && <tr><td colSpan={10} style={{ padding:20, textAlign:"center", color:C.dim }}>No jobs match the current metric filters.</td></tr>}
+              </tbody>
+            </table>
+          </TableShell>
+        </>
         ) : null}
       </div>
     </div>
