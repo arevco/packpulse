@@ -1030,7 +1030,13 @@ function preferHigherShiftSeries(primaryRows, fallbackRows) {
   });
 }
 
-export default function OperationsView({ productionSegments, productionDataRaw, laborDataRaw, evoconData, evoconTimestamp, itemMaster, initialFilters, onPermalinkChange, serverSyncVersion, onRefreshProduction, refreshingProduction }) {
+function statusLooksClosed(status) {
+  var s = normalizeStr(status || "");
+  if (!s) return false;
+  return s.includes("close") || s.includes("complete") || s.includes("cancel") || s.includes("archive") || s.includes("done");
+}
+
+export default function OperationsView({ productionSegments, productionDataRaw, laborDataRaw, evoconData, evoconTimestamp, itemMaster, workOrders, initialFilters, onPermalinkChange, serverSyncVersion, onRefreshProduction, refreshingProduction }) {
   const { C, mono } = useTheme();
   const queryClient = useQueryClient();
   var initial = initialFilters || {};
@@ -1804,6 +1810,32 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       presets: presetCards
     };
   }, [effectiveTrends, effectiveBreakdown, forecastPlans, revenueTargetsBySku, itemMasterCostBySku]);
+
+  var monthEndBookedWorkOrderComparison = useMemo(function() {
+    var openBookedTotal = (Array.isArray(workOrders) ? workOrders : []).reduce(function(sum, wo) {
+      var status = normalizeStr(wo && wo.status || "");
+      if (status !== "booked" || statusLooksClosed(status)) return sum;
+      var qtyToProduce = safeNum(wo && wo.qtyToProduce);
+      var unitsRemaining = safeNum(wo && wo.unitsRemaining);
+      if (!(unitsRemaining > 0)) {
+        unitsRemaining = Math.max(0, qtyToProduce - safeNum(wo && wo.unitsProduced));
+      }
+      if (!(unitsRemaining > 0)) return sum;
+      return sum + qtyToProduce;
+    }, 0);
+    if (!(openBookedTotal > 0)) return null;
+    var projectedMonthEndYield = safeNum(metrics.monthlyRunRate);
+    var delta = projectedMonthEndYield - openBookedTotal;
+    return {
+      compareActual: openBookedTotal,
+      compareReferenceLabel: "Open booked WOs",
+      compareReferenceUnits: openBookedTotal,
+      displayDelta: delta,
+      displayDeltaPct: Math.round((delta / openBookedTotal) * 100),
+      displayLabel: "vs open booked WO total",
+      compareLabel: "vs open booked WO total"
+    };
+  }, [workOrders, metrics.monthlyRunRate]);
 
   var shiftPlanVsActual = useMemo(function() {
     if (!showInsightsPanelsReady) return { rows: [], max: 1 };
@@ -2713,12 +2745,18 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
         label: "Month-End Yield",
         value: safeNum(metrics.monthlyRunRate).toLocaleString(),
         note: safeNum(metrics.remainingBusinessDays).toLocaleString() + " business days remaining",
-        subnote: "",
-        detail: "Projected month-end yield",
-        tone: "text-[rgb(var(--muted))]"
+        subnote: monthEndBookedWorkOrderComparison
+          ? referenceNote("Open booked WOs", { latestUnits: safeNum(monthEndBookedWorkOrderComparison.compareReferenceUnits) })
+          : "",
+        detail: monthEndBookedWorkOrderComparison
+          ? compareText(monthEndBookedWorkOrderComparison)
+          : "Projected month-end yield",
+        tone: monthEndBookedWorkOrderComparison
+          ? compareTone(monthEndBookedWorkOrderComparison)
+          : "text-[rgb(var(--muted))]"
       }
     ];
-  }, [commandBoard, metrics]);
+  }, [commandBoard, metrics, monthEndBookedWorkOrderComparison]);
 
   var hasCriticalOperationsData = (effectiveTrends && Array.isArray(effectiveTrends.byDay) && effectiveTrends.byDay.length > 0)
     || (effectiveBreakdown && Array.isArray(effectiveBreakdown.rowsLite) && effectiveBreakdown.rowsLite.length > 0);
