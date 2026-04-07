@@ -57,11 +57,27 @@ function summarizeValues(values, limit) {
   return items.slice(0, limit).join(", ") + " +" + (items.length - limit) + " more";
 }
 
+function classifyReceivedValue(value) {
+  var normalized = normalizeAuditKey(value);
+  if (normalized === "yes" || normalized === "true" || normalized === "1") return "yes";
+  if (normalized === "no" || normalized === "false" || normalized === "0") return "no";
+  return "";
+}
+
 function buildReceiveOrderAuditSummary(rows, auditCode) {
-  var normalizedRows = normalizeInboundRows(Array.isArray(rows) ? rows : [], "receiveorders");
+  var rawRows = Array.isArray(rows) ? rows : [];
+  var normalizedRows = normalizeInboundRows(rawRows, "receiveorders");
   var codeSeen = {};
   var codeList = [];
   var datedRows = 0;
+  var receivedYesRows = 0;
+  var receivedNoRows = 0;
+
+  rawRows.forEach(function(row) {
+    var receivedState = classifyReceivedValue(firstLooseValue(row, ["Received", "Receive Order received"]));
+    if (receivedState === "yes") receivedYesRows += 1;
+    else if (receivedState === "no") receivedNoRows += 1;
+  });
 
   normalizedRows.forEach(function(row) {
     var code = firstLooseValue(row, ["Receive Order Code", "PO Number", "Receive Order"]);
@@ -85,6 +101,7 @@ function buildReceiveOrderAuditSummary(rows, auditCode) {
     : [];
 
   var auditFound = auditMatches.length > 0;
+  var closedOnlySource = rawRows.length > 0 && receivedNoRows === 0 && receivedYesRows > 0 && normalizedRows.length === 0;
   var auditText = "";
   if (trimmedAuditCode) {
     if (auditFound) {
@@ -109,15 +126,25 @@ function buildReceiveOrderAuditSummary(rows, auditCode) {
       auditText = trimmedAuditCode + " not found in synced Receive Orders";
     }
   }
+  if (!auditText && closedOnlySource) {
+    auditText = "Reports API returned only received Receive Orders (" + receivedYesRows.toLocaleString() + " rows, 0 open rows). Supply Risk inbound data will not update from this sync.";
+  }
 
   return {
+    rawRowCount: rawRows.length,
+    openLineCount: normalizedRows.length,
+    receivedYesRows: receivedYesRows,
+    receivedNoRows: receivedNoRows,
+    closedOnlySource: closedOnlySource,
     uniqueReceiveOrders: codeList.length,
     datedRows: datedRows,
     undatedRows: Math.max(0, normalizedRows.length - datedRows),
     sampleCodes: codeList.slice(0, 3),
-    summaryText: codeList.length
-      ? codeList.length.toLocaleString() + " unique ROs · " + datedRows.toLocaleString() + " dated lines" + (codeList.length ? " · Sample " + codeList.slice(0, 3).join(", ") : "")
-      : "No receive orders returned",
+    summaryText: closedOnlySource
+      ? rawRows.length.toLocaleString() + " rows returned · 0 open rows · " + receivedYesRows.toLocaleString() + " received rows"
+      : codeList.length
+        ? codeList.length.toLocaleString() + " open ROs · " + normalizedRows.length.toLocaleString() + " open lines · " + datedRows.toLocaleString() + " dated" + (codeList.length ? " · Sample " + codeList.slice(0, 3).join(", ") : "")
+        : "No receive orders returned",
     auditCode: trimmedAuditCode,
     auditFound: auditFound,
     auditText: auditText
@@ -340,7 +367,12 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
       if (type === "receiveorders") {
         latestReceiveOrdersRef.current = Array.isArray(dlData.data) ? dlData.data : [];
         audit = applyReceiveOrderAudit(latestReceiveOrdersRef.current);
-        progressText = `${dlData.rowCount.toLocaleString()} lines, ${audit.uniqueReceiveOrders.toLocaleString()} unique ROs, ${(dlData.columns || []).length} cols`;
+        progressText = `${dlData.rowCount.toLocaleString()} rows, ${audit.openLineCount.toLocaleString()} open lines, ${(dlData.columns || []).length} cols`;
+        if (audit.closedOnlySource) {
+          progressText += " · closed-only source";
+        } else {
+          progressText += ` · ${audit.uniqueReceiveOrders.toLocaleString()} open ROs`;
+        }
         if (audit.auditCode) {
           progressText += audit.auditFound ? " · audit hit" : " · audit miss";
         }
@@ -355,7 +387,7 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
         auditFound: !!(audit && audit.auditFound)
       });
 
-      return { type, data: dlData.data, rowCount: dlData.rowCount };
+      return { type, data: dlData.data, rowCount: dlData.rowCount, receiveOrderAudit: audit };
 
     } catch (err) {
       updateReportState(type, { status: ERROR, progress: "", error: err.message });

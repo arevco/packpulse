@@ -827,8 +827,16 @@ export default function ProductionReadiness() {
       }
     }
     if (results.receiveorders) {
-      var receiveOrderRows = normalizeInboundRows(getRows(results.receiveorders), "receiveorders");
-      if (!areStructuredValuesEqual(ds.edrData || [], receiveOrderRows)) {
+      var receiveOrderRawRows = getRows(results.receiveorders);
+      var receiveOrderRows = normalizeInboundRows(receiveOrderRawRows, "receiveorders");
+      var receiveOrderAudit = results.receiveorders.receiveOrderAudit || null;
+      var shouldIgnoreReceiveOrderSync = !!(
+        receiveOrderAudit &&
+        receiveOrderAudit.closedOnlySource &&
+        receiveOrderRawRows.length > 0 &&
+        !receiveOrderRows.length
+      );
+      if (!shouldIgnoreReceiveOrderSync && !areStructuredValuesEqual(ds.edrData || [], receiveOrderRows)) {
         ds.setEdrData(receiveOrderRows);
         ds.setEdrFileName("Nulogy Receive Orders");
         ds.setEdrTimestamp(ts);
