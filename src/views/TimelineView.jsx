@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useTheme } from "../theme";
 import { useStyles } from "../hooks/useStyles";
-import { formatDescriptionForDisplay } from "../utils";
+import { formatDescriptionForDisplay, triggerDownload } from "../utils";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Badge } from "../components/ui/badge";
@@ -98,6 +98,48 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
     return { color: C.dim, bg: C.raised, bd: C.border };
   };
 
+  var exportCSV = function() {
+    var escapeCsv = function(value) {
+      return '"' + String(value == null ? "" : value).replace(/"/g, '""') + '"';
+    };
+    var header = [
+      "Scheduled",
+      "Expected",
+      "PO",
+      "Confirmation",
+      "Status",
+      "Materials",
+      "Qty",
+      "Linked WOs",
+      "Units Unlocked",
+      "Match",
+      "Material Detail"
+    ];
+    var body = filteredLoads.map(function(load) {
+      var materialDetail = (Array.isArray(load.materials) ? load.materials : []).map(function(material) {
+        var sku = material.materialSku || "Unknown";
+        var qty = Math.round(material.qty || 0).toLocaleString();
+        var desc = formatDescriptionForDisplay(material.materialDesc || "");
+        return sku + " (" + qty + ")" + (desc ? " " + desc : "");
+      }).join("; ");
+      return [
+        load.scheduledDate || "",
+        load.expectedDate || "",
+        load.po || "",
+        load.confirmation || "",
+        load.status || "",
+        load.materialLineCount || 0,
+        Math.round(load.totalQty || 0),
+        load.linkedWOCount || 0,
+        Math.round(load.unitsUnlocked || 0),
+        matchLabel(load.matchState),
+        materialDetail
+      ].map(escapeCsv).join(",");
+    });
+    var filename = "supply_risk_inbound_" + new Date().toISOString().slice(0, 10) + ".csv";
+    triggerDownload([header.join(",")].concat(body).join("\n"), filename, "text/csv;charset=utf-8;");
+  };
+
   return (
     <div>
       <div className="mb-2.5 flex flex-wrap items-center gap-1.5">
@@ -137,6 +179,8 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
           <Input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search PO / confirmation / material" className="h-10 w-full text-sm sm:w-72" />
           <Button onClick={function() { setAtRiskOnly(function(v) { return !v; }); }} variant={atRiskOnly ? "active" : "outline"} size="default">{atRiskOnly ? "At-Risk WO" : "All Loads"}</Button>
           <Badge variant="secondary">{filteredLoads.length} loads</Badge>
+          <div className="flex-1" />
+          <Button onClick={exportCSV} variant="outline" size="default" disabled={!filteredLoads.length}>CSV</Button>
         </div>
 
         <div style={{ overflowX: "auto" }}>
