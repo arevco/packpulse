@@ -522,6 +522,280 @@ function buildInboundCoverage(criticalItems, inboundLines) {
   };
 }
 
+function compareIsoDates(a, b) {
+  return String(a || "9999-12-31").localeCompare(String(b || "9999-12-31"));
+}
+
+function laterIsoDate(a, b) {
+  if (!a) return b || "";
+  if (!b) return a || "";
+  return a > b ? a : b;
+}
+
+function pickLineAvailabilityDate(line) {
+  if (!line) return "";
+  return laterIsoDate(line.date || "", line.dockScheduledDate || "");
+}
+
+function buildUnlockTimeline(analysis, inboundLines, todayIso) {
+  if (!analysis || !Array.isArray(analysis.results)) {
+    return {
+      summary: {
+        totalBlockedWorkOrders: 0,
+        materialBlockedSkus: 0,
+        runnableNow: 0,
+        unlocking7d: 0,
+        unlocking14d: 0,
+        inboundNoDate: 0,
+        partial: 0,
+        stillBlocked: 0,
+        blockedUnits: 0,
+        unitsUnlocking14d: 0
+      },
+      dateBuckets: [],
+      rows: []
+    };
+  }
+
+  var inboundEvents = (Array.isArray(inboundLines) ? inboundLines : []).map(function(line, index) {
+    var qty = safeNum(line && line.qty);
+    return {
+      id: line && line.id ? line.id : ("unlock-event-" + index),
+      skuKeys: Array.isArray(line && line.skuKeys) && line.skuKeys.length ? line.skuKeys : buildSkuMatchKeys(line && line.sku),
+      qty: qty,
+      remainingQty: qty,
+      availabilityDate: pickLineAvailabilityDate(line),
+      po: line && line.po ? line.po : "",
+      confirmation: line && line.confirmation ? line.confirmation : "",
+      expectedDate: line && line.date ? line.date : "",
+      scheduledDate: line && line.dockScheduledDate ? line.dockScheduledDate : "",
+      dockStatus: line && line.dockStatus ? line.dockStatus : "",
+      isMatched: !!(line && line.matchedAppointmentId)
+    };
+  }).filter(function(event) {
+    return event.qty > 0 && Array.isArray(event.skuKeys) && event.skuKeys.length;
+  });
+
+  var eventsBySkuKey = {};
+  inboundEvents.forEach(function(event) {
+    event.skuKeys.forEach(function(key) {
+      if (!eventsBySkuKey[key]) eventsBySkuKey[key] = [];
+      eventsBySkuKey[key].push(event);
+    });
+  });
+
+  var sortedWorkOrders = analysis.results.filter(function(wo) {
+    if (isWorkOrderClosed(wo)) return false;
+    if (safeNum(wo && wo.unitsRemaining) <= 0) return false;
+    return Array.isArray(wo && wo.components) && wo.components.some(function(component) {
+      return safeNum(component && component.short) > 0;
+    });
+  }).sort(function(a, b) {
+    var dueCompare = compareIsoDates(a && a.dueDate ? a.dueDate : "", b && b.dueDate ? b.dueDate : "");
+    if (dueCompare !== 0) return dueCompare;
+    return String(a && a.woNum ? a.woNum : "").localeCompare(String(b && b.woNum ? b.woNum : ""));
+  });
+
+  var rows = sortedWorkOrders.map(function(wo) {
+    var blockedUnits = Math.max(0, safeNum(wo.unitsRemaining) - safeNum(wo.maxRunnable));
+    var shortageComponents = (wo.components || []).filter(function(component) {
+      return safeNum(component && component.short) > 0;
+    });
+
+    var componentRows = shortageComponents.map(function(component) {
+      var matchKeys = {};
+      buildSkuMatchKeys(component && component.sku).forEach(function(key) { matchKeys[key] = true; });
+      (component && Array.isArray(component.optionDetails) ? component.optionDetails : []).forEach(function(option) {
+        buildSkuMatchKeys(option && option.sku).forEach(function(key) { matchKeys[key] = true; });
+      });
+
+      var seenEvents = {};
+      var candidateEvents = [];
+      Object.keys(matchKeys).forEach(function(key) {
+        (eventsBySkuKey[key] || []).forEach(function(event) {
+          if (seenEvents[event.id]) return;
+          seenEvents[event.id] = true;
+          candidateEvents.push(event);
+        });
+      });
+
+      candidateEvents.sort(function(a, b) {
+        var dateCompare = compareIsoDates(a.availabilityDate, b.availabilityDate);
+        if (dateCompare !== 0) return dateCompare;
+        return String(a.po || "").localeCompare(String(b.po || ""));
+      });
+
+      var neededQty = Math.max(0, safeNum(component && component.short));
+      var coveredQty = 0;
+      var lastCoveredDate = "";
+      var firstInboundDate = "";
+      var usedUndated = false;
+      var allocations = [];
+
+      candidateEvents.forEach(function(event) {
+        if (coveredQty >= neededQty || !(event.remainingQty > 0)) return;
+        var takeQty = Math.min(event.remainingQty, neededQty - coveredQty);
+        if (!(takeQty > 0)) return;
+        event.remainingQty -= takeQty;
+        coveredQty += takeQty;
+        if (event.availabilityDate) {
+          if (!firstInboundDate || event.availabilityDate < firstInboundDate) firstInboundDate = event.availabilityDate;
+          lastCoveredDate = event.availabilityDate;
+        } else {
+          usedUndated = true;
+        }
+        allocations.push({
+          qty: takeQty,
+          availabilityDate: event.availabilityDate,
+          po: event.po,
+          confirmation: event.confirmation,
+          expectedDate: event.expectedDate,
+          scheduledDate: event.scheduledDate,
+          dockStatus: event.dockStatus,
+          isMatched: event.isMatched
+        });
+      });
+
+      var fullyCovered = coveredQty + 0.0001 >= neededQty;
+      var unlockDate = fullyCovered && !usedUndated ? lastCoveredDate : "";
+      var coveragePct = neededQty > 0 ? Math.min(100, Math.round((coveredQty / neededQty) * 100)) : 100;
+      var state = fullyCovered ? (unlockDate ? "unlock-by-date" : "inbound-no-date") : (coveredQty > 0 ? "partial" : "still-blocked");
+      var optionSkus = Array.from(new Set((component && Array.isArray(component.optionDetails) ? component.optionDetails : []).map(function(option) {
+        return String(option && option.sku || "").trim();
+      }).filter(Boolean)));
+
+      return {
+        sku: component && component.sku ? component.sku : "",
+        desc: component && component.desc ? component.desc : "",
+        neededQty: neededQty,
+        coveredQty: Math.round(coveredQty),
+        coveragePct: coveragePct,
+        unlockDate: unlockDate,
+        firstInboundDate: firstInboundDate,
+        state: state,
+        optionSkus: optionSkus,
+        allocations: allocations
+      };
+    });
+
+    var anyCoverage = componentRows.some(function(component) { return component.coveredQty > 0; });
+    var allCovered = componentRows.length > 0 && componentRows.every(function(component) {
+      return component.state === "unlock-by-date" || component.state === "inbound-no-date";
+    });
+    var allCoveredWithDates = componentRows.length > 0 && componentRows.every(function(component) {
+      return component.state === "unlock-by-date" && !!component.unlockDate;
+    });
+    var unlockDate = allCoveredWithDates
+      ? componentRows.reduce(function(maxDate, component) { return laterIsoDate(maxDate, component.unlockDate); }, "")
+      : "";
+    var earliestInboundDate = componentRows
+      .map(function(component) { return component.firstInboundDate; })
+      .filter(Boolean)
+      .sort()[0] || "";
+    var sourcePOs = Array.from(new Set(componentRows.flatMap(function(component) {
+      return component.allocations.map(function(allocation) { return allocation.po; }).filter(Boolean);
+    })));
+    var status = allCoveredWithDates
+      ? "unlock-by-date"
+      : allCovered
+        ? "inbound-no-date"
+        : anyCoverage
+          ? "partial"
+          : "still-blocked";
+
+    return {
+      woNum: wo.woNum,
+      productSku: wo.productSkuRaw,
+      productDesc: wo.productDesc || "",
+      customer: wo.customer || "",
+      dueDate: wo.dueDate || "",
+      status: status,
+      unlockDate: unlockDate,
+      earliestInboundDate: earliestInboundDate,
+      unitsRemaining: Math.round(safeNum(wo.unitsRemaining)),
+      runnableNow: Math.round(safeNum(wo.maxRunnable)),
+      blockedUnits: Math.round(blockedUnits),
+      componentCount: componentRows.length,
+      fullyCoveredComponents: componentRows.filter(function(component) {
+        return component.state === "unlock-by-date" || component.state === "inbound-no-date";
+      }).length,
+      sourcePOs: sourcePOs,
+      components: componentRows
+    };
+  }).sort(function(a, b) {
+    var statusRank = {
+      "unlock-by-date": 0,
+      "inbound-no-date": 1,
+      partial: 2,
+      "still-blocked": 3
+    };
+    var dateCompare = compareIsoDates(a && a.unlockDate ? a.unlockDate : "", b && b.unlockDate ? b && b.unlockDate : "");
+    if (dateCompare !== 0) return dateCompare;
+    if ((statusRank[a.status] || 99) !== (statusRank[b.status] || 99)) {
+      return (statusRank[a.status] || 99) - (statusRank[b.status] || 99);
+    }
+    var dueCompare = compareIsoDates(a && a.dueDate ? a.dueDate : "", b && b.dueDate ? b && b.dueDate : "");
+    if (dueCompare !== 0) return dueCompare;
+    return String(a && a.woNum ? a.woNum : "").localeCompare(String(b && b.woNum ? b && b.woNum : ""));
+  });
+
+  var plusDays = function(baseDate, days) {
+    var d = new Date(baseDate + "T00:00:00");
+    if (isNaN(d)) return "";
+    d.setDate(d.getDate() + days);
+    return d.toISOString().slice(0, 10);
+  };
+  var bucketMap = {};
+  rows.forEach(function(row) {
+    if (!row.unlockDate) return;
+    if (!bucketMap[row.unlockDate]) {
+      bucketMap[row.unlockDate] = {
+        date: row.unlockDate,
+        workOrders: 0,
+        units: 0,
+        skuMap: {}
+      };
+    }
+    bucketMap[row.unlockDate].workOrders += 1;
+    bucketMap[row.unlockDate].units += safeNum(row.blockedUnits);
+    if (row.productSku) bucketMap[row.unlockDate].skuMap[row.productSku] = true;
+  });
+  var dateBuckets = Object.values(bucketMap).sort(function(a, b) {
+    return compareIsoDates(a.date, b.date);
+  }).map(function(bucket) {
+    return {
+      date: bucket.date,
+      workOrders: bucket.workOrders,
+      units: Math.round(bucket.units),
+      skuCount: Object.keys(bucket.skuMap || {}).length
+    };
+  });
+
+  var materialBlockedSkuMap = {};
+  rows.forEach(function(row) {
+    if (row.productSku) materialBlockedSkuMap[row.productSku] = true;
+  });
+
+  return {
+    summary: {
+      totalBlockedWorkOrders: rows.length,
+      materialBlockedSkus: Object.keys(materialBlockedSkuMap).length,
+      runnableNow: rows.filter(function(row) { return safeNum(row.runnableNow) > 0; }).length,
+      unlocking7d: rows.filter(function(row) { return !!row.unlockDate && row.unlockDate <= plusDays(todayIso, 7); }).length,
+      unlocking14d: rows.filter(function(row) { return !!row.unlockDate && row.unlockDate <= plusDays(todayIso, 14); }).length,
+      inboundNoDate: rows.filter(function(row) { return row.status === "inbound-no-date"; }).length,
+      partial: rows.filter(function(row) { return row.status === "partial"; }).length,
+      stillBlocked: rows.filter(function(row) { return row.status === "still-blocked"; }).length,
+      blockedUnits: Math.round(rows.reduce(function(sum, row) { return sum + safeNum(row.blockedUnits); }, 0)),
+      unitsUnlocking14d: Math.round(rows.filter(function(row) { return !!row.unlockDate && row.unlockDate <= plusDays(todayIso, 14); }).reduce(function(sum, row) {
+        return sum + safeNum(row.blockedUnits);
+      }, 0))
+    },
+    dateBuckets: dateBuckets,
+    rows: rows
+  };
+}
+
 function buildLoadBoard(appointments, inboundLines, linkMap, todayIso, freshnessTimestamps) {
   var todayDate = new Date(todayIso + "T00:00:00");
   var loadsById = {};
@@ -836,20 +1110,23 @@ export function buildSupplyRiskModel(options) {
   var linkMap = buildMaterialLinkMap(analysis);
   var inboundLines = normalizeInboundLines(options && options.edrData, windowStart, windowEnd);
   var appointments = normalizeAppointments(options && options.dockData);
+  var todayIso = new Date().toISOString().slice(0, 10);
   matchInboundLinesToAppointments(inboundLines, appointments);
 
   var inboundCoverage = buildInboundCoverage(criticalItems, inboundLines);
+  var unlockTimeline = buildUnlockTimeline(analysis, inboundLines, todayIso);
   var loadBoard = buildLoadBoard(
     appointments,
     inboundLines,
     linkMap,
-    new Date().toISOString().slice(0, 10),
+    todayIso,
     {
       inboundSyncedAt: options && options.inboundSyncedAt,
       dockSyncedAt: options && options.dockSyncedAt
     }
   );
   if (inboundCoverage) inboundCoverage.horizonDays = horizonDays;
+  if (loadBoard && loadBoard.deliveriesV2) loadBoard.deliveriesV2.unlockTimeline = unlockTimeline;
 
   return {
     inboundCoverage: inboundCoverage,

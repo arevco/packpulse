@@ -3,6 +3,7 @@ import { Card } from "../components/ui/card";
 import { useTheme } from "../theme";
 import CriticalItemsView from "./CriticalItemsView";
 import TimelineView from "./TimelineView";
+import UnlockTimelineView from "./UnlockTimelineView";
 
 function safeNum(v) {
   var n = Number(v || 0);
@@ -77,14 +78,14 @@ export default function SupplyRiskView({ rawCriticalItems, inboundCoverage, time
     <div className="space-y-4">
       <div className="space-y-1">
         <div className="text-sm text-[rgb(var(--muted))]">
-          One Supply Risk workflow: start with material shortages, then review the inbound loads that may close those gaps.
+          One Supply Risk workflow: start with material shortages, review the inbound loads behind them, then see which work orders should unlock next.
         </div>
         <div className="text-xs text-[rgb(var(--muted))]">
-          Material Risk shows what is blocked now from work orders plus inventory. Inbound Loads shows what Receive Orders and OpenDock say is coming next.
+          Material Risk shows what is blocked now from work orders plus inventory. Inbound Loads shows what Receive Orders and OpenDock say is coming next. Unlock Timeline turns that inbound into a run-next forecast.
         </div>
       </div>
 
-      <div className="grid gap-2 md:grid-cols-2">
+      <div className="grid gap-2 md:grid-cols-3">
         <Card className="px-3 py-3">
           <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[rgb(var(--muted))]">
             1. Material Risk
@@ -99,6 +100,14 @@ export default function SupplyRiskView({ rawCriticalItems, inboundCoverage, time
           </div>
           <div className="mt-1 text-sm text-[rgb(var(--foreground))]">
             Reconcile Receive Orders with OpenDock so the team can see which loads are scheduled, unmatched, or still not on the dock calendar.
+          </div>
+        </Card>
+        <Card className="px-3 py-3">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[rgb(var(--muted))]">
+            3. Unlock Timeline
+          </div>
+          <div className="mt-1 text-sm text-[rgb(var(--foreground))]">
+            Forecast which blocked work orders should become runnable next, which FG SKUs they affect, and when the remaining material gap closes.
           </div>
         </Card>
       </div>
@@ -137,6 +146,18 @@ export default function SupplyRiskView({ rawCriticalItems, inboundCoverage, time
         </div>
         <div className="p-4">
           <TimelineView timelineData={timelineData} deliveriesV2={deliveriesV2} />
+        </div>
+      </Card>
+
+      <Card className="overflow-hidden">
+        <div className="border-b border-[rgb(var(--border))] px-4 py-3">
+          <div className="text-sm font-semibold text-[rgb(var(--foreground))]">Unlock Timeline</div>
+          <div className="mt-1 text-xs text-[rgb(var(--muted))]">
+            Use this section to see which blocked work orders should unlock next, what materials are still gating them, and whether the inbound date is firm or still TBD.
+          </div>
+        </div>
+        <div className="p-4">
+          <UnlockTimelineView deliveriesV2={deliveriesV2} />
         </div>
       </Card>
     </div>
