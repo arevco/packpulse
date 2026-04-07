@@ -288,6 +288,11 @@ const REPORT_CONFIGS = {
   },
   receiveorders: {
     report: "receive_order",
+    requestBody: {
+      filter_choice: "item_customer",
+      order_by: "receive_order_id",
+      order_direction: "desc"
+    },
     requiredColumns: ["receive_order_code", "item_code", "expected_unit_quantity"],
     columnSets: [
       [
@@ -388,11 +393,11 @@ export async function createReportTask(options) {
   for (let attempt = 0; attempt < config.columnSets.length; attempt++) {
     const columns = config.columnSets[attempt];
 
-    const body = {
+    const body = Object.assign({
       report: config.report,
       columns: columns,
       locale: "en_US"
-    };
+    }, config.requestBody || {});
     if (hasOverrideFilters) {
       body.filters = overrideFilters;
     } else if (config.filters) {
@@ -467,11 +472,11 @@ export async function createReportTask(options) {
             });
             var prunedMissingRequired = missingRequiredColumns(config, prunedColumns);
             if (prunedColumns.length > 0 && prunedColumns.length < columns.length && prunedMissingRequired.length === 0) {
-              const prunedBody = {
+              const prunedBody = Object.assign({
                 report: config.report,
                 columns: prunedColumns,
                 locale: "en_US"
-              };
+              }, config.requestBody || {});
               if (hasOverrideFilters) {
                 prunedBody.filters = overrideFilters;
               } else if (config.filters) {
@@ -514,7 +519,7 @@ export async function createReportTask(options) {
 
         // If error is about filters, retry without them
         if (errorText.includes("filter") && config.filters) {
-          const bodyNoFilter = { report: config.report, columns: columns, locale: "en_US" };
+          const bodyNoFilter = Object.assign({ report: config.report, columns: columns, locale: "en_US" }, config.requestBody || {});
           if (siteUuid) bodyNoFilter.site_uuid = siteUuid;
 
           const retryRes = await fetch(`${NULOGY_URL}/api/reports/report_runs`, {

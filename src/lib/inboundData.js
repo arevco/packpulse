@@ -42,9 +42,18 @@ function inferInboundSource(row, sourceHint) {
   return "Legacy EDR";
 }
 
+function isReceiveOrderSource(source) {
+  return normalizeLooseKey(source).indexOf("receiveorders") !== -1;
+}
+
+function isClosedReceiveOrderValue(value) {
+  var normalized = normalizeLooseKey(value);
+  return normalized === "yes" || normalized === "true" || normalized === "1";
+}
+
 export function normalizeInboundRows(rows, sourceHint) {
   if (!Array.isArray(rows)) return [];
-  return rows.map(function(row) {
+  return rows.reduce(function(out, row) {
     var next = Object.assign({}, row);
     var material = firstNonEmpty(row, [
       "Material",
@@ -100,6 +109,9 @@ export function normalizeInboundRows(rows, sourceHint) {
       "Receive Order received"
     ]);
     var source = inferInboundSource(row, sourceHint);
+    if (isReceiveOrderSource(source) && isClosedReceiveOrderValue(received)) {
+      return out;
+    }
 
     applyAlias(next, "Material", material);
     applyAlias(next, "Item Code", material);
@@ -113,8 +125,9 @@ export function normalizeInboundRows(rows, sourceHint) {
     applyAlias(next, "Unit Of Measure", unitOfMeasure);
     applyAlias(next, "Received", received);
     applyAlias(next, "Inbound Source", source);
-    applyAlias(next, "__inboundSource", normalizeLooseKey(source).indexOf("receiveorders") !== -1 ? "receive_orders" : "legacy_edr");
+    applyAlias(next, "__inboundSource", isReceiveOrderSource(source) ? "receive_orders" : "legacy_edr");
 
-    return next;
-  });
+    out.push(next);
+    return out;
+  }, []);
 }

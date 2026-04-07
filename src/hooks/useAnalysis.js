@@ -73,6 +73,12 @@ function isReceiveOrderInboundRow(row) {
   return false;
 }
 
+function isClosedReceiveOrderInboundRow(row) {
+  if (!isReceiveOrderInboundRow(row)) return false;
+  var received = normalizeStr(firstValueLoose(row, ["Received", "Receive Order received"]));
+  return received === "yes" || received === "true" || received === "1";
+}
+
 function pickInboundDateValue(row, primaryKey) {
   if (row && primaryKey && row[primaryKey] != null && row[primaryKey] !== "") return row[primaryKey];
   return firstValueLoose(row, [
@@ -705,6 +711,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
     var matchedDockApptIds = {};
     if (hasUsableEdr) {
       edrData.forEach(row => {
+        if (isClosedReceiveOrderInboundRow(row)) return;
         var mat = (row[colMat]||"").toString().trim(); var desc = colDesc ? (row[colDesc]||"").toString().trim() : "";
         var rawDate = row[colDate]; var po = colPO ? (row[colPO]||"").toString().trim() : "";
         var poNorm = normalizePoKey(po);
@@ -1204,6 +1211,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
 
     var inboundBySku = {};
     edrRows.forEach(function(row) {
+      if (isClosedReceiveOrderInboundRow(row)) return;
       var skuRaw = (row[colMat] || "").toString().trim();
       var skuKeys = buildSkuMatchKeys(skuRaw);
       if (!skuKeys.length) return;
