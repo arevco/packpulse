@@ -227,7 +227,7 @@ function classifyShiftET(parts) {
   return "Unassigned";
 }
 
-export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMaster, boms, workOrders, productionData, invMapping, bomMapping, woMapping, poData, poMapping, edrData, dockData }) {
+export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMaster, boms, workOrders, productionData, invMapping, bomMapping, woMapping, poData, poMapping, edrData, edrTimestamp, dockData, dockTimestamp }) {
   var [productionAttribution, setProductionAttribution] = useState({ status: "idle", byWorkOrder: {}, bySku: {} });
 
   useEffect(function() {

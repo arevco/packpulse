@@ -228,7 +228,7 @@ export default function ProductionReadiness() {
     inventory: ds.inventory, itemMaster: ds.itemMaster, boms: ds.boms, workOrders: ds.workOrders,
     productionData: ds.productionData,
     invMapping: ds.invMapping, bomMapping: ds.bomMapping, woMapping: ds.woMapping,
-    edrData: ds.edrData, dockData: ds.dockData,
+    edrData: ds.edrData, edrTimestamp: ds.edrTimestamp, dockData: ds.dockData, dockTimestamp: ds.dockTimestamp,
   });
 
   var parseInitialPermalink = function() {
