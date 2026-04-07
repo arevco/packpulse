@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
 import { Card } from "../components/ui/card";
-import { Button } from "../components/ui/button";
 import { useTheme } from "../theme";
 import CriticalItemsView from "./CriticalItemsView";
 import TimelineView from "./TimelineView";
@@ -12,7 +11,6 @@ function safeNum(v) {
 
 export default function SupplyRiskView({ rawCriticalItems, inboundCoverage, timelineData, deliveriesV2 }) {
   const { mono } = useTheme();
-  const [mode, setMode] = useState("risk");
   const [customerFilter, setCustomerFilter] = useState("all");
 
   var filteredCoverageRows = useMemo(function() {
@@ -76,15 +74,33 @@ export default function SupplyRiskView({ rawCriticalItems, inboundCoverage, time
   }, [rawCriticalItems, filteredCoverageRows, deliveriesV2, customerFilter]);
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <div className="space-y-4">
+      <div className="space-y-1">
         <div className="text-sm text-[rgb(var(--muted))]">
-          Single workspace for material shortage risk and inbound execution impact.
+          One Supply Risk workflow: start with material shortages, then review the inbound loads that may close those gaps.
         </div>
-        <div className="flex items-center gap-1.5">
-          <Button onClick={function() { setMode("risk"); }} variant={mode === "risk" ? "active" : "outline"} size="default">Risk Now</Button>
-          <Button onClick={function() { setMode("inbound"); }} variant={mode === "inbound" ? "active" : "outline"} size="default">Inbound Impact</Button>
+        <div className="text-xs text-[rgb(var(--muted))]">
+          Material Risk shows what is blocked now from work orders plus inventory. Inbound Loads shows what Receive Orders and OpenDock say is coming next.
         </div>
+      </div>
+
+      <div className="grid gap-2 md:grid-cols-2">
+        <Card className="px-3 py-3">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[rgb(var(--muted))]">
+            1. Material Risk
+          </div>
+          <div className="mt-1 text-sm text-[rgb(var(--foreground))]">
+            Identify the components blocking finished goods, how much is still uncovered, and where inbound needs to land.
+          </div>
+        </Card>
+        <Card className="px-3 py-3">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[rgb(var(--muted))]">
+            2. Inbound Loads
+          </div>
+          <div className="mt-1 text-sm text-[rgb(var(--foreground))]">
+            Reconcile Receive Orders with OpenDock so the team can see which loads are scheduled, unmatched, or still not on the dock calendar.
+          </div>
+        </Card>
       </div>
 
       <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
@@ -95,16 +111,34 @@ export default function SupplyRiskView({ rawCriticalItems, inboundCoverage, time
         <Card className="px-3 py-2.5"><div className="text-xl font-bold [font-variant-numeric:tabular-nums]" style={{ fontFamily: mono }}>{summary.unmatched.toLocaleString()}</div><div className="text-xs text-[rgb(var(--muted))]">Unmatched Materials</div></Card>
       </div>
 
-      {mode === "risk" ? (
-        <CriticalItemsView
-          rawCriticalItems={rawCriticalItems}
-          inboundCoverage={inboundCoverage}
-          customerFilter={customerFilter}
-          onCustomerFilterChange={setCustomerFilter}
-        />
-      ) : (
-        <TimelineView timelineData={timelineData} deliveriesV2={deliveriesV2} />
-      )}
+      <Card className="overflow-hidden">
+        <div className="border-b border-[rgb(var(--border))] px-4 py-3">
+          <div className="text-sm font-semibold text-[rgb(var(--foreground))]">Material Risk</div>
+          <div className="mt-1 text-xs text-[rgb(var(--muted))]">
+            Use this section to see which components are short now and whether inbound is enough to cover current work-order demand.
+          </div>
+        </div>
+        <div className="p-4">
+          <CriticalItemsView
+            rawCriticalItems={rawCriticalItems}
+            inboundCoverage={inboundCoverage}
+            customerFilter={customerFilter}
+            onCustomerFilterChange={setCustomerFilter}
+          />
+        </div>
+      </Card>
+
+      <Card className="overflow-hidden">
+        <div className="border-b border-[rgb(var(--border))] px-4 py-3">
+          <div className="text-sm font-semibold text-[rgb(var(--foreground))]">Inbound Loads</div>
+          <div className="mt-1 text-xs text-[rgb(var(--muted))]">
+            Use this section to follow the Receive Orders behind those shortages, then confirm whether OpenDock has them scheduled.
+          </div>
+        </div>
+        <div className="p-4">
+          <TimelineView timelineData={timelineData} deliveriesV2={deliveriesV2} />
+        </div>
+      </Card>
     </div>
   );
 }
