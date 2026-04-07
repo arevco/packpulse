@@ -636,9 +636,11 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       criticalItems: criticalItems,
       edrData: edrData,
       dockData: dockData,
+      inboundSyncedAt: edrTimestamp,
+      dockSyncedAt: dockTimestamp,
       horizonDays: 60
     });
-  }, [analysis, criticalItems, edrData, dockData]);
+  }, [analysis, criticalItems, edrData, dockData, edrTimestamp, dockTimestamp]);
 
   var timelineData = supplyRiskModel ? supplyRiskModel.timelineData : null;
   var deliveriesV2 = supplyRiskModel ? supplyRiskModel.deliveriesV2 : null;

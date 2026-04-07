@@ -857,8 +857,10 @@ export default function ProductionReadiness() {
         receiveOrderRawRows.length > 0 &&
         !receiveOrderRows.length
       );
-      if (!shouldIgnoreReceiveOrderSync && !areStructuredValuesEqual(ds.edrData || [], receiveOrderRows)) {
-        ds.setEdrData(receiveOrderRows);
+      if (!shouldIgnoreReceiveOrderSync) {
+        if (!areStructuredValuesEqual(ds.edrData || [], receiveOrderRows)) {
+          ds.setEdrData(receiveOrderRows);
+        }
         ds.setEdrFileName("Nulogy Receive Orders");
         ds.setEdrTimestamp(ts);
       }

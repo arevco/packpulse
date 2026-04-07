@@ -522,7 +522,7 @@ function buildInboundCoverage(criticalItems, inboundLines) {
   };
 }
 
-function buildLoadBoard(appointments, inboundLines, linkMap, todayIso) {
+function buildLoadBoard(appointments, inboundLines, linkMap, todayIso, freshnessTimestamps) {
   var todayDate = new Date(todayIso + "T00:00:00");
   var loadsById = {};
   appointments.forEach(function(appointment) {
@@ -648,11 +648,19 @@ function buildLoadBoard(appointments, inboundLines, linkMap, todayIso) {
   var lastDockDate = loads.reduce(function(maxDate, load) {
     return load.scheduledDate && (!maxDate || load.scheduledDate > maxDate) ? load.scheduledDate : maxDate;
   }, "");
+  var inboundSyncedAt = freshnessTimestamps && freshnessTimestamps.inboundSyncedAt ? new Date(freshnessTimestamps.inboundSyncedAt) : null;
+  var dockSyncedAt = freshnessTimestamps && freshnessTimestamps.dockSyncedAt ? new Date(freshnessTimestamps.dockSyncedAt) : null;
   var toAgeDays = function(dateStr) {
     if (!dateStr) return null;
     var date = new Date(dateStr + "T00:00:00");
     if (isNaN(date)) return null;
     return Math.max(0, Math.floor((todayDate.getTime() - date.getTime()) / 86400000));
+  };
+  var toAgeDaysFromTimestamp = function(value) {
+    if (!value) return null;
+    var ts = value instanceof Date ? value : new Date(value);
+    if (isNaN(ts)) return null;
+    return Math.max(0, Math.floor((Date.now() - ts.getTime()) / 86400000));
   };
   var toFreshnessLevel = function(ageDays) {
     if (ageDays == null) return "missing";
@@ -660,8 +668,12 @@ function buildLoadBoard(appointments, inboundLines, linkMap, todayIso) {
     if (ageDays <= 7) return "aging";
     return "stale";
   };
-  var inboundAgeDays = toAgeDays(lastInboundDate);
-  var dockAgeDays = toAgeDays(lastDockDate);
+  var inboundAgeDays = toAgeDaysFromTimestamp(inboundSyncedAt) != null
+    ? toAgeDaysFromTimestamp(inboundSyncedAt)
+    : toAgeDays(lastInboundDate);
+  var dockAgeDays = toAgeDaysFromTimestamp(dockSyncedAt) != null
+    ? toAgeDaysFromTimestamp(dockSyncedAt)
+    : toAgeDays(lastDockDate);
   var inboundLevel = toFreshnessLevel(inboundAgeDays);
   var matchedState = inboundLevel === "aging" ? "matched-aging" : inboundLevel === "stale" ? "matched-stale" : "matched-fresh";
 
@@ -716,11 +728,13 @@ function buildLoadBoard(appointments, inboundLines, linkMap, todayIso) {
       freshness: {
         edr: {
           lastDate: lastInboundDate,
+          syncedAt: inboundSyncedAt && !isNaN(inboundSyncedAt) ? inboundSyncedAt.toISOString() : "",
           ageDays: inboundAgeDays,
           level: inboundLevel
         },
         openDock: {
           lastDate: lastDockDate,
+          syncedAt: dockSyncedAt && !isNaN(dockSyncedAt) ? dockSyncedAt.toISOString() : "",
           ageDays: dockAgeDays,
           level: toFreshnessLevel(dockAgeDays)
         },
@@ -780,7 +794,16 @@ export function buildSupplyRiskModel(options) {
   matchInboundLinesToAppointments(inboundLines, appointments);
 
   var inboundCoverage = buildInboundCoverage(criticalItems, inboundLines);
-  var loadBoard = buildLoadBoard(appointments, inboundLines, linkMap, new Date().toISOString().slice(0, 10));
+  var loadBoard = buildLoadBoard(
+    appointments,
+    inboundLines,
+    linkMap,
+    new Date().toISOString().slice(0, 10),
+    {
+      inboundSyncedAt: options && options.inboundSyncedAt,
+      dockSyncedAt: options && options.dockSyncedAt
+    }
+  );
   if (inboundCoverage) inboundCoverage.horizonDays = horizonDays;
 
   return {
