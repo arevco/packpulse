@@ -65,6 +65,8 @@ export function normalizeInboundRows(rows, sourceHint) {
       "Expected delivery date",
       "Expected Delivery Date",
       "Receive Order Item expected delivery date",
+      "Expected ship date",
+      "Actual ship date",
       "RO Date",
       "Req Dely"
     ]);

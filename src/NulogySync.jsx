@@ -1,4 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
+import { normalizeInboundRows } from "./lib/inboundData.js";
+import { normalizeStr, safeNum } from "./utils";
 
 // Nulogy sync statuses
 const IDLE = "idle";
@@ -25,6 +27,103 @@ const POLL_INTERVAL = 4000; // 4 seconds between polls
 const MAX_POLLS = 60; // max ~4 minutes of polling
 const BETWEEN_REPORT_DELAY_MS = 450;
 
+function normalizeAuditKey(value) {
+  return normalizeStr(String(value || "").replace(/\.0+$/, ""));
+}
+
+function firstLooseValue(row, keys) {
+  if (!row || typeof row !== "object") return "";
+  var rowKeys = Object.keys(row);
+  for (var i = 0; i < keys.length; i++) {
+    var wanted = normalizeAuditKey(keys[i]);
+    for (var j = 0; j < rowKeys.length; j++) {
+      if (normalizeAuditKey(rowKeys[j]) === wanted) return row[rowKeys[j]];
+    }
+  }
+  return "";
+}
+
+function formatAuditDate(value) {
+  if (!value) return "";
+  var d = value instanceof Date ? value : new Date(value);
+  if (isNaN(d)) return String(value || "").trim();
+  return d.toISOString().slice(0, 10);
+}
+
+function summarizeValues(values, limit) {
+  var items = Array.from(new Set((values || []).map(function(value) { return String(value || "").trim(); }).filter(Boolean)));
+  if (!items.length) return "";
+  if (items.length <= limit) return items.join(", ");
+  return items.slice(0, limit).join(", ") + " +" + (items.length - limit) + " more";
+}
+
+function buildReceiveOrderAuditSummary(rows, auditCode) {
+  var normalizedRows = normalizeInboundRows(Array.isArray(rows) ? rows : [], "receiveorders");
+  var codeSeen = {};
+  var codeList = [];
+  var datedRows = 0;
+
+  normalizedRows.forEach(function(row) {
+    var code = firstLooseValue(row, ["Receive Order Code", "PO Number", "Receive Order"]);
+    var codeKey = normalizeAuditKey(code);
+    if (codeKey && !codeSeen[codeKey]) {
+      codeSeen[codeKey] = true;
+      codeList.push(String(code || "").trim());
+    }
+    if (firstLooseValue(row, ["Delivery Date", "Expected delivery date", "Expected ship date", "Actual ship date", "RO Date"])) {
+      datedRows += 1;
+    }
+  });
+
+  var trimmedAuditCode = String(auditCode || "").trim();
+  var auditNeedle = normalizeAuditKey(trimmedAuditCode);
+  var auditMatches = auditNeedle
+    ? normalizedRows.filter(function(row) {
+        var code = firstLooseValue(row, ["Receive Order Code", "PO Number", "Receive Order"]);
+        return normalizeAuditKey(code) === auditNeedle;
+      })
+    : [];
+
+  var auditFound = auditMatches.length > 0;
+  var auditText = "";
+  if (trimmedAuditCode) {
+    if (auditFound) {
+      var totalQty = auditMatches.reduce(function(sum, row) {
+        return sum + safeNum(firstLooseValue(row, ["Order Quantity", "Expected unit quantity", "Quantity", "Actual Quantity"]));
+      }, 0);
+      var materials = summarizeValues(auditMatches.map(function(row) {
+        return firstLooseValue(row, ["Material", "Item Code"]);
+      }), 3);
+      var dates = summarizeValues(auditMatches.map(function(row) {
+        return formatAuditDate(firstLooseValue(row, ["Delivery Date", "Expected delivery date", "Expected ship date", "Actual ship date", "RO Date"]));
+      }), 2);
+      var references = summarizeValues(auditMatches.map(function(row) {
+        return firstLooseValue(row, ["Reference"]);
+      }), 1);
+      auditText = trimmedAuditCode + " present";
+      if (materials) auditText += " · " + materials;
+      auditText += " · " + Math.round(totalQty).toLocaleString() + " qty";
+      if (dates) auditText += " · " + dates;
+      if (references) auditText += " · Ref " + references;
+    } else {
+      auditText = trimmedAuditCode + " not found in synced Receive Orders";
+    }
+  }
+
+  return {
+    uniqueReceiveOrders: codeList.length,
+    datedRows: datedRows,
+    undatedRows: Math.max(0, normalizedRows.length - datedRows),
+    sampleCodes: codeList.slice(0, 3),
+    summaryText: codeList.length
+      ? codeList.length.toLocaleString() + " unique ROs · " + datedRows.toLocaleString() + " dated lines" + (codeList.length ? " · Sample " + codeList.slice(0, 3).join(", ") : "")
+      : "No receive orders returned",
+    auditCode: trimmedAuditCode,
+    auditFound: auditFound,
+    auditText: auditText
+  };
+}
+
 export default function NulogySync({ onDataLoaded, theme, autoStart = false, hideToggle = false, silent = false, onSyncStateChange, defaultSyncTypes, syncProfile = "full" }) {
   const C = theme;
   const sans = "'Inter', -apple-system, sans-serif";
@@ -35,19 +134,27 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
   const [syncing, setSyncing] = useState(false);
   const [deferredSyncing, setDeferredSyncing] = useState(false);
   const [reportStates, setReportStates] = useState({
-    inventory: { status: IDLE, progress: "", error: null, rowCount: 0 },
-    workorders: { status: IDLE, progress: "", error: null, rowCount: 0 },
-    itemmaster: { status: IDLE, progress: "", error: null, rowCount: 0 },
-    bom: { status: IDLE, progress: "", error: null, rowCount: 0 },
-    receiveorders: { status: IDLE, progress: "", error: null, rowCount: 0 },
-    production: { status: IDLE, progress: "", error: null, rowCount: 0 },
-    labor: { status: IDLE, progress: "", error: null, rowCount: 0 }
+    inventory: { status: IDLE, progress: "", error: null, rowCount: 0, auditSummary: "", auditText: "", auditFound: false },
+    workorders: { status: IDLE, progress: "", error: null, rowCount: 0, auditSummary: "", auditText: "", auditFound: false },
+    itemmaster: { status: IDLE, progress: "", error: null, rowCount: 0, auditSummary: "", auditText: "", auditFound: false },
+    bom: { status: IDLE, progress: "", error: null, rowCount: 0, auditSummary: "", auditText: "", auditFound: false },
+    receiveorders: { status: IDLE, progress: "", error: null, rowCount: 0, auditSummary: "", auditText: "", auditFound: false },
+    production: { status: IDLE, progress: "", error: null, rowCount: 0, auditSummary: "", auditText: "", auditFound: false },
+    labor: { status: IDLE, progress: "", error: null, rowCount: 0, auditSummary: "", auditText: "", auditFound: false }
   });
   const [syncTypes, setSyncTypes] = useState(Array.isArray(defaultSyncTypes) && defaultSyncTypes.length
     ? defaultSyncTypes.slice()
     : ["inventory", "workorders", "itemmaster", "bom", "receiveorders", "production", "labor"]);
+  const [receiveOrderAuditCode, setReceiveOrderAuditCode] = useState(function() {
+    try {
+      return window.localStorage.getItem("packpulse:receive-order-audit-code") || "";
+    } catch (err) {
+      return "";
+    }
+  });
   const abortRef = useRef(false);
   const autoStartedRef = useRef(false);
+  const latestReceiveOrdersRef = useRef([]);
 
   // Test connection on first expand (or immediately in auto mode)
   useEffect(() => {
@@ -77,6 +184,29 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
       [type]: { ...prev[type], ...update }
     }));
   }, []);
+
+  const applyReceiveOrderAudit = useCallback((rows) => {
+    var audit = buildReceiveOrderAuditSummary(rows, receiveOrderAuditCode);
+    updateReportState("receiveorders", {
+      auditSummary: audit.summaryText || "",
+      auditText: audit.auditText || "",
+      auditFound: !!audit.auditFound
+    });
+    return audit;
+  }, [receiveOrderAuditCode, updateReportState]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("packpulse:receive-order-audit-code", receiveOrderAuditCode || "");
+    } catch (err) {
+      // Ignore local storage issues.
+    }
+  }, [receiveOrderAuditCode]);
+
+  useEffect(() => {
+    if (!latestReceiveOrdersRef.current.length) return;
+    applyReceiveOrderAudit(latestReceiveOrdersRef.current);
+  }, [receiveOrderAuditCode, applyReceiveOrderAudit]);
 
   const waitBriefly = useCallback(async () => {
     await new Promise(r => setTimeout(r, BETWEEN_REPORT_DELAY_MS));
@@ -205,10 +335,24 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
       console.log(`[Nulogy] ${type} original headers:`, dlData.originalHeaders);
       console.log(`[Nulogy] ${type} transformed columns:`, dlData.columns);
 
+      var audit = null;
+      var progressText = `${dlData.rowCount.toLocaleString()} rows, ${(dlData.columns || []).length} cols [${(dlData.originalHeaders || []).join(", ")}]`;
+      if (type === "receiveorders") {
+        latestReceiveOrdersRef.current = Array.isArray(dlData.data) ? dlData.data : [];
+        audit = applyReceiveOrderAudit(latestReceiveOrdersRef.current);
+        progressText = `${dlData.rowCount.toLocaleString()} lines, ${audit.uniqueReceiveOrders.toLocaleString()} unique ROs, ${(dlData.columns || []).length} cols`;
+        if (audit.auditCode) {
+          progressText += audit.auditFound ? " · audit hit" : " · audit miss";
+        }
+      }
+
       updateReportState(type, {
         status: DONE,
-        progress: `${dlData.rowCount.toLocaleString()} rows, ${(dlData.columns || []).length} cols [${(dlData.originalHeaders || []).join(", ")}]`,
-        rowCount: dlData.rowCount
+        progress: progressText,
+        rowCount: dlData.rowCount,
+        auditSummary: audit && audit.summaryText ? audit.summaryText : "",
+        auditText: audit && audit.auditText ? audit.auditText : "",
+        auditFound: !!(audit && audit.auditFound)
       });
 
       return { type, data: dlData.data, rowCount: dlData.rowCount };
@@ -217,17 +361,18 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
       updateReportState(type, { status: ERROR, progress: "", error: err.message });
       return null;
     }
-  }, [updateReportState]);
+  }, [applyReceiveOrderAudit, updateReportState]);
 
   const startSync = useCallback(async () => {
     abortRef.current = false;
     setSyncing(true);
     setDeferredSyncing(false);
+    if (syncTypes.includes("receiveorders")) latestReceiveOrdersRef.current = [];
 
     // Reset states for selected types
     const resetStates = {};
     syncTypes.forEach(t => {
-      resetStates[t] = { status: IDLE, progress: "Waiting...", error: null, rowCount: 0 };
+      resetStates[t] = { status: IDLE, progress: "Waiting...", error: null, rowCount: 0, auditSummary: "", auditText: "", auditFound: false };
     });
     setReportStates(prev => ({ ...prev, ...resetStates }));
 
@@ -470,6 +615,59 @@ export default function NulogySync({ onDataLoaded, theme, autoStart = false, hid
                       </button>
                     );
                   })}
+                </div>
+              )}
+
+              {syncTypes.includes("receiveorders") && (
+                <div style={{
+                  marginBottom: 12,
+                  padding: "10px 12px",
+                  borderRadius: 8,
+                  border: "1px solid " + C.border,
+                  background: C.raised
+                }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: C.bright, marginBottom: 6 }}>
+                    Receive Orders audit
+                  </div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                    <input
+                      value={receiveOrderAuditCode}
+                      onChange={function(event) { setReceiveOrderAuditCode(event.target.value); }}
+                      placeholder="Audit RO code, e.g. 471045599"
+                      style={{
+                        flex: "1 1 240px",
+                        minWidth: 220,
+                        height: 34,
+                        borderRadius: 6,
+                        border: "1px solid " + C.border,
+                        background: C.surface,
+                        color: C.bright,
+                        padding: "0 10px",
+                        fontSize: 13,
+                        fontFamily: mono
+                      }}
+                    />
+                    {reportStates.receiveorders.status === DONE && (
+                      <span style={{ fontSize: 12, color: C.dim }}>
+                        {reportStates.receiveorders.auditSummary || "Receive Orders audit ready"}
+                      </span>
+                    )}
+                  </div>
+                  {reportStates.receiveorders.status === DONE && reportStates.receiveorders.auditText && (
+                    <div style={{
+                      marginTop: 8,
+                      fontSize: 12,
+                      color: reportStates.receiveorders.auditFound ? C.ok : C.warn,
+                      lineHeight: 1.5
+                    }}>
+                      {reportStates.receiveorders.auditText}
+                    </div>
+                  )}
+                  {reportStates.receiveorders.status !== DONE && receiveOrderAuditCode && (
+                    <div style={{ marginTop: 8, fontSize: 12, color: C.dim }}>
+                      The next Receive Orders sync will check for {receiveOrderAuditCode}.
+                    </div>
+                  )}
                 </div>
               )}
 

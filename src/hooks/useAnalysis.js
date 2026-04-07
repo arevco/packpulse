@@ -634,7 +634,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
     var findCol = cands => edrCols.find(c => cands.some(p => normalizeStr(c).includes(p)));
     var colMat = pickEdrMaterialColumn(edrCols) || findCol(["material"]) || findCol(["sku","itemcode"]);
     var colDesc = findCol(["shorttext","matdesc","desc"]);
-    var colDate = findCol(["deliverydate","delivery"]) || findCol(["reqdely"]);
+    var colDate = findCol(["deliverydate","delivery"]) || findCol(["reqdely"]) || findCol(["rodate", "expectedship", "actualship", "shipdate"]);
     var colPO = findCol(["purchasingdocument","purchasedoc","ponumber"]);
     var colQtyOpen = findCol(["stilltobedelivered","openqty","stillto"]);
     var colQtyOrd = findCol(["orderquantity","orderqty"]);

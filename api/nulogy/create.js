@@ -290,13 +290,32 @@ const REPORT_CONFIGS = {
     report: "receive_order",
     requiredColumns: ["receive_order_code", "item_code", "expected_unit_quantity"],
     columnSets: [
+      [
+        "actual_ship_at", "actual_unit_quantity", "carrier_name", "expected_delivery_at", "expected_ship_at",
+        "expected_unit_quantity", "internal_notes", "item_alternate_code_2", "item_alternate_code_1",
+        "item_category_name", "item_class", "item_code", "item_customer", "item_description",
+        "item_family_name", "item_gtin", "item_material_cost_per_unit", "item_type_name", "item_upc",
+        "purchase_price_per_unit", "number_of_receipts", "purchaser", "receive_order_code",
+        "receive_order_customer", "received", "reference", "ro_date_at", "site_name", "status",
+        "unit_of_measure", "vendor_name", "vendor_notes", "project_code"
+      ],
+      [
+        "actual_ship_at", "actual_unit_quantity", "expected_delivery_at", "expected_ship_at",
+        "expected_unit_quantity", "item_category_name", "item_code", "item_customer",
+        "item_description", "receive_order_code", "receive_order_customer", "received",
+        "reference", "ro_date_at", "site_name", "status", "unit_of_measure", "vendor_name",
+        "project_code"
+      ],
+      ["receive_order_code", "item_code", "item_customer", "item_description", "expected_unit_quantity",
+       "unit_of_measure", "expected_delivery_at", "expected_ship_at", "actual_ship_at", "reference",
+       "vendor_name", "received", "status", "site_name", "project_code", "ro_date_at"],
       ["receive_order_code", "item_code", "item_description", "expected_unit_quantity", "unit_of_measure",
        "expected_delivery_at", "reference", "vendor_name", "received", "status", "project_code", "ro_date_at"],
       ["receive_order_code", "item_code", "expected_unit_quantity", "unit_of_measure",
        "expected_delivery_at", "reference", "vendor_name", "received", "status", "ro_date_at"],
       ["receive_order_code", "item_code", "expected_unit_quantity", "unit_of_measure",
-       "expected_delivery_at", "received", "status"],
-      ["receive_order_code", "item_code", "expected_unit_quantity", "expected_delivery_at"],
+       "expected_delivery_at", "expected_ship_at", "actual_ship_at", "received", "status"],
+      ["receive_order_code", "item_code", "expected_unit_quantity", "expected_delivery_at", "expected_ship_at", "ro_date_at"],
       ["receive_order_code", "item_code", "expected_unit_quantity"]
     ],
     filters: buildReceiveOrderFilters
