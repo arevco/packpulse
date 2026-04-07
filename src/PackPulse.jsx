@@ -315,6 +315,7 @@ export default function ProductionReadiness() {
   const [hiddenNulogySyncOrigin, setHiddenNulogySyncOrigin] = useState("manual");
   const [syncNonce, setSyncNonce] = useState(0);
   const [nulogySyncState, setNulogySyncState] = useState(null);
+  const [receiveOrderSyncAudit, setReceiveOrderSyncAudit] = useState(null);
   const [autoSyncRetryUntil, setAutoSyncRetryUntil] = useState({ full: 0, production_only: 0 });
   const [dockApiLoading, setDockApiLoading] = useState(false);
   const [dockSyncOrigin, setDockSyncOrigin] = useState("manual");
@@ -481,6 +482,17 @@ export default function ProductionReadiness() {
     return t || "activity";
   };
   var staleLevel = (ts, cad) => { if (!ts) return "stale"; var h = (Date.now()-ts)/3600000; if (cad==="daily") return h<8?"fresh":h<24?"stale":"old"; if (cad==="rare") return h<720?"fresh":"stale"; return h<168?"fresh":"stale"; };
+  var getDataSourceLevel = function(source) {
+    if (!source) return "stale";
+    if (source.forceFresh) return "fresh";
+    if (source.statusOverride) return source.statusOverride;
+    return staleLevel(source.ts, source.cad);
+  };
+  var inboundSyncIssueActive = !!(
+    receiveOrderSyncAudit &&
+    receiveOrderSyncAudit.closedOnlySource &&
+    String(ds.edrFileName || "") === "Nulogy Receive Orders"
+  );
   var dataSourceStatus = [
     { k:"inv", l:"Inventory", ts:ds.invTimestamp, cad:"daily", ref:() => window.__invR && window.__invR.click() },
     { k:"wo", l:"Work Orders", ts:ds.woTimestamp, cad:"monthly", ref:() => window.__woR && window.__woR.click() },
@@ -489,11 +501,19 @@ export default function ProductionReadiness() {
     { k:"labor", l:"Labor", ts:ds.laborTimestamp, cad:"daily", ref:null },
     { k:"evocon", l:"Evocon", ts:ds.evoconTimestamp || evoconLastSyncAt, cad:"daily", ref:null, forceFresh: !!(ds.evoconTimestamp || evoconLastSyncAt || evoconApiInfo) },
     { k:"bom", l:"BOMs", ts:ds.bomTimestamp, cad:"rare", ref:() => window.__bomR && window.__bomR.click() },
-    { k:"edr", l:"Inbound", ts:ds.edrTimestamp, cad:"monthly", ref:() => window.__edrR && window.__edrR.click() },
+    {
+      k:"edr",
+      l:"Inbound",
+      ts:ds.edrTimestamp,
+      cad:"monthly",
+      ref:() => window.__edrR && window.__edrR.click(),
+      statusOverride: inboundSyncIssueActive ? "issue" : "",
+      statusLabelOverride: inboundSyncIssueActive ? "Sync issue" : ""
+    },
     { k:"dock", l:"OpenDock", ts:ds.dockTimestamp, cad:"daily", ref:() => window.__dockR && window.__dockR.click() },
   ];
   var staleSources = dataSourceStatus.filter(function(s) {
-    return (s.forceFresh ? "fresh" : staleLevel(s.ts, s.cad)) !== "fresh";
+    return getDataSourceLevel(s) !== "fresh";
   });
   var freshCount = dataSourceStatus.length - staleSources.length;
   var newestTs = dataSourceStatus.reduce(function(max, s) {
@@ -830,6 +850,7 @@ export default function ProductionReadiness() {
       var receiveOrderRawRows = getRows(results.receiveorders);
       var receiveOrderRows = normalizeInboundRows(receiveOrderRawRows, "receiveorders");
       var receiveOrderAudit = results.receiveorders.receiveOrderAudit || null;
+      setReceiveOrderSyncAudit(receiveOrderAudit ? Object.assign({ syncedAt: ts.toISOString() }, receiveOrderAudit) : null);
       var shouldIgnoreReceiveOrderSync = !!(
         receiveOrderAudit &&
         receiveOrderAudit.closedOnlySource &&
@@ -1036,7 +1057,7 @@ export default function ProductionReadiness() {
     return String(item && item.riskLevel || "").toLowerCase() === "high";
   }).length;
   var dataHealth = (dataSourceStatus || []).map(function(s) {
-    var freshness = s && s.forceFresh ? "fresh" : staleLevel(s && s.ts, s && s.cad);
+    var freshness = getDataSourceLevel(s);
     return {
       key: s && s.k ? s.k : "",
       label: s && s.l ? s.l : "Source",
@@ -1522,9 +1543,9 @@ export default function ProductionReadiness() {
             )}
             <div className="flex flex-wrap items-center gap-1.5">
               {dataSourceStatus.map(function(s) {
-                var sl = s.forceFresh ? "fresh" : staleLevel(s.ts, s.cad);
+                var sl = getDataSourceLevel(s);
                 var dc = sl==="fresh"?C.ok:sl==="stale"?C.warn:C.bad;
-                var statusLabel = sl === "fresh" ? "Fresh" : sl === "stale" ? "Stale" : "Old";
+                var statusLabel = s.statusLabelOverride || (sl === "fresh" ? "Fresh" : sl === "stale" ? "Stale" : sl === "old" ? "Old" : "Attention");
                 return <button key={s.k} onClick={s.ref} className="inline-flex items-center gap-1.5 rounded-md border border-[rgb(var(--border))] bg-white px-2.5 py-1 text-xs font-medium text-[rgb(var(--muted))]">
                   <span style={{ width:6, height:6, borderRadius:"50%", background:dc }} />
                   {s.l}
