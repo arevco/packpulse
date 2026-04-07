@@ -14,6 +14,14 @@ function safeNum(v) {
   return Number.isFinite(n) ? n : 0;
 }
 
+function normalizePoKey(value) {
+  var s = (value || "").toString().trim();
+  if (!s) return "";
+  s = s.replace(/\.0+$/, "");
+  s = s.replace(/[^a-zA-Z0-9]/g, "");
+  return normalizeStr(s);
+}
+
 function buildSkuMatchKeys(value) {
   var raw = (value || "").toString().trim();
   if (!raw) return [];
@@ -53,25 +61,21 @@ function coverageStatusLabel(status) {
   return status || "--";
 }
 
-function coverageTone(item, C) {
-  if (item.status === "missing") return { fg: C.bad, bg: C.badSoft, bd: C.badLine };
-  if (item.status === "unscheduled") return { fg: C.accent, bg: C.accentSoft, bd: C.accentLine };
-  if (item.status === "partial" || item.dueBeforeScheduled) return { fg: C.warn, bg: C.warnSoft, bd: C.warnLine };
-  return { fg: C.ok, bg: C.okSoft, bd: C.okLine };
-}
-
-function unlockTone(status, C) {
-  if (status === "unlock-by-date") return { fg: C.ok, bg: C.okSoft, bd: C.okLine };
-  if (status === "inbound-no-date") return { fg: C.accent, bg: C.accentSoft, bd: C.accentLine };
-  if (status === "partial") return { fg: C.warn, bg: C.warnSoft, bd: C.warnLine };
-  return { fg: C.bad, bg: C.badSoft, bd: C.badLine };
-}
-
 function unlockStatusLabel(status) {
   if (status === "unlock-by-date") return "Unlocks by date";
   if (status === "inbound-no-date") return "Inbound, date TBD";
   if (status === "partial") return "Partially covered";
   return "Still blocked";
+}
+
+function vendorGapLabel(type) {
+  if (type === "missing") return "No Receive Order";
+  if (type === "partial") return "Receive Order short";
+  return "Covered";
+}
+
+function displayDate(value) {
+  return value ? fmtDate(value) : "--";
 }
 
 function daysUntil(value) {
@@ -107,128 +111,92 @@ function sortByDateThenText(a, b, aDate, bDate, aText, bText) {
   return String(aText || "").localeCompare(String(bText || ""));
 }
 
-function summarizeAction(item) {
-  if (!item) return "";
-  if (item.dueBeforeScheduled) return "Due date lands before scheduled inbound. Resequence or expedite immediately.";
-  if (item.status === "missing") return "No open Receive Orders or dock coverage found. Create or expedite inbound now.";
-  if (item.status === "unscheduled") return "Receive Orders exist, but OpenDock is not scheduled yet. Confirm appointments next.";
-  if (item.status === "partial") return "Inbound covers only part of the shortage. Expedite the remaining gap.";
-  if (item.nextUnlockDate) return "Coverage looks healthy. Blocked work should start unlocking by " + fmtDate(item.nextUnlockDate) + ".";
-  if (item.unlockDateTbdCount > 0) return "Inbound is on the way, but at least one blocking component still has no firm unlock date.";
-  return "Coverage is in place. Monitor timing and receiving execution.";
+function listPreview(values, maxItems) {
+  var filtered = (values || []).filter(Boolean);
+  if (!filtered.length) return "--";
+  if (filtered.length <= maxItems) return filtered.join(", ");
+  return filtered.slice(0, maxItems).join(", ") + " +" + (filtered.length - maxItems);
 }
 
-function exportQueueCsv(rows) {
-  var header = [
-    "Material",
-    "Description",
-    "Customer",
-    "Type",
-    "Status",
-    "Action",
-    "On Hand",
-    "Short Qty",
-    "Receive Orders Qty",
-    "OpenDock Scheduled Qty",
-    "Uncovered Qty",
-    "Coverage %",
-    "Earliest Due",
-    "Earliest Receive Order",
-    "Earliest OpenDock Appointment",
-    "Next Unlock",
-    "Affected Work Orders",
-    "POs"
-  ];
+function compactSearchText(parts) {
+  return (parts || []).filter(Boolean).join(" ").toLowerCase();
+}
+
+function exportCsv(filenameBase, header, rows) {
   var escapeCsv = function(value) {
     return '"' + String(value == null ? "" : value).replace(/"/g, '""') + '"';
   };
   var body = (rows || []).map(function(row) {
-    return [
-      row.sku,
-      row.desc,
-      row.customerLabel,
-      row.materialType === "packaging" ? "Packaging" : "WIP",
-      coverageStatusLabel(row.status),
-      summarizeAction(row),
-      Math.round(row.onHand || 0),
-      Math.round(row.shortQty || 0),
-      Math.round(row.inboundQty || 0),
-      Math.round(row.scheduledQty || 0),
-      Math.round(row.uncoveredQty || 0),
-      row.scheduledCoveragePct || 0,
-      row.earliestDueDate || "",
-      row.earliestInboundDate || "",
-      row.earliestScheduledDate || "",
-      row.nextUnlockDate || "",
-      row.affectedWOCount || 0,
-      (row.openPOs || []).join(", ")
-    ].map(escapeCsv).join(",");
+    return row.map(escapeCsv).join(",");
   });
-  triggerDownload([header.join(",")].concat(body).join("\n"), "supply_risk_queue_" + new Date().toISOString().slice(0, 10) + ".csv", "text/csv;charset=utf-8;");
+  triggerDownload([header.join(",")].concat(body).join("\n"), filenameBase + "_" + new Date().toISOString().slice(0, 10) + ".csv", "text/csv;charset=utf-8;");
 }
 
-function exportInboundCsv(loads) {
-  var header = ["Available", "Receive Order", "Confirmation", "Status", "Match", "Qty", "Linked WOs", "Units Unlocked"];
-  var escapeCsv = function(value) {
-    return '"' + String(value == null ? "" : value).replace(/"/g, '""') + '"';
-  };
-  var body = (loads || []).map(function(load) {
-    return [
-      load.availableDate || "",
-      load.po || "",
-      load.confirmation || "",
-      load.status || "",
-      load.matchLabel || "",
-      Math.round(load.qty || 0),
-      load.linkedWOCount || 0,
-      Math.round(load.unitsUnlocked || 0)
-    ].map(escapeCsv).join(",");
-  });
-  triggerDownload([header.join(",")].concat(body).join("\n"), "supply_risk_inbound_detail_" + new Date().toISOString().slice(0, 10) + ".csv", "text/csv;charset=utf-8;");
+function exportRunNextCsv(rows) {
+  exportCsv(
+    "supply_risk_run_next",
+    ["Available By", "Status", "Work Order", "FG SKU", "Description", "Customer", "Due", "Blocked Units", "Runnable Now", "Blocking Materials", "Receive Orders"],
+    (rows || []).map(function(row) {
+      return [
+        row.availableBy || "",
+        unlockStatusLabel(row.status),
+        row.woNum || "",
+        row.productSku || "",
+        row.productDesc || "",
+        row.customerLabel || "",
+        row.dueDate || "",
+        Math.round(row.blockedUnits || 0),
+        Math.round(row.runnableNow || 0),
+        row.blockingMaterialsText || "",
+        (row.sourcePOs || []).join(", ")
+      ];
+    })
+  );
 }
 
-function exportUnlockCsv(rows) {
-  var header = ["Available By", "Work Order", "FG SKU", "Description", "Customer", "Due", "Blocked Units", "Runnable Now", "Coverage %", "Status", "POs"];
-  var escapeCsv = function(value) {
-    return '"' + String(value == null ? "" : value).replace(/"/g, '""') + '"';
-  };
-  var body = (rows || []).map(function(row) {
-    return [
-      row.availableBy || "",
-      row.woNum || "",
-      row.productSku || "",
-      row.productDesc || "",
-      row.customer || "",
-      row.dueDate || "",
-      Math.round(row.blockedUnits || 0),
-      Math.round(row.runnableNow || 0),
-      row.coveragePct || 0,
-      unlockStatusLabel(row.status),
-      (row.sourcePOs || []).join(", ")
-    ].map(escapeCsv).join(",");
-  });
-  triggerDownload([header.join(",")].concat(body).join("\n"), "supply_risk_unlock_detail_" + new Date().toISOString().slice(0, 10) + ".csv", "text/csv;charset=utf-8;");
+function exportVendorCsv(rows) {
+  exportCsv(
+    "supply_risk_vendor_gaps",
+    ["Material", "Description", "Customer", "Status", "Earliest Due", "Short Qty", "On Receive Orders", "Gap To Schedule", "Affected WOs", "Current Receive Orders", "Action"],
+    (rows || []).map(function(row) {
+      return [
+        row.sku || "",
+        row.desc || "",
+        row.customerLabel || "",
+        vendorGapLabel(row.gapType),
+        row.earliestDueDate || "",
+        Math.round(row.shortQty || 0),
+        Math.round(row.inboundQty || 0),
+        Math.round(row.roGapQty || 0),
+        row.affectedWOCount || 0,
+        (row.openPOs || []).join(", "),
+        row.actionLabel || ""
+      ];
+    })
+  );
 }
 
-function queuePriority(item) {
-  var score = 0;
-  var dueDays = daysUntil(item.earliestDueDate);
-  if (item.status === "missing") score += 120;
-  else if (item.status === "unscheduled") score += 100;
-  else if (item.status === "partial") score += 90;
-  else score += 20;
-  if (item.dueBeforeScheduled) score += 50;
-  if (dueDays <= 0) score += 50;
-  else if (dueDays <= 3) score += 35;
-  else if (dueDays <= 7) score += 20;
-  if ((item.riskLevel || "high") === "high") score += 20;
-  else if (item.riskLevel === "medium") score += 10;
-  score += Math.min(40, Math.round(safeNum(item.uncoveredQty) / 5000));
-  score += Math.min(20, safeNum(item.affectedWOCount || 0) * 2);
-  return score;
+function exportDockCsv(rows) {
+  exportCsv(
+    "supply_risk_dock_follow_up",
+    ["Expected Date", "Receive Order", "Customer", "Materials", "Qty", "Linked WOs", "Units Unlocked", "Confirmation", "Action"],
+    (rows || []).map(function(row) {
+      return [
+        row.expectedDate || "",
+        row.po || "",
+        row.customerLabel || "",
+        row.materialSummary || "",
+        Math.round(row.qty || 0),
+        row.linkedWOCount || 0,
+        Math.round(row.unitsUnlocked || 0),
+        row.confirmation || "",
+        row.actionLabel || ""
+      ];
+    })
+  );
 }
 
-function buildQueueData(rawCriticalItems, inboundCoverage, deliveriesV2) {
+function buildMaterialRows(rawCriticalItems, inboundCoverage, deliveriesV2) {
   var rawItems = Array.isArray(rawCriticalItems) ? rawCriticalItems : [];
   var coverageRows = inboundCoverage && Array.isArray(inboundCoverage.rows) ? inboundCoverage.rows : [];
   var loads = deliveriesV2 && Array.isArray(deliveriesV2.loads) ? deliveriesV2.loads : [];
@@ -357,7 +325,7 @@ function buildQueueData(rawCriticalItems, inboundCoverage, deliveriesV2) {
           : load.matchState === "opendock-only"
             ? "OpenDock only"
             : "Matched",
-        materialCount: materials.length
+        materials: materials
       };
     }).sort(function(a, b) {
       return sortByDateThenText(a, b, a.availableDate, b.availableDate, a.po, b.po);
@@ -398,7 +366,6 @@ function buildQueueData(rawCriticalItems, inboundCoverage, deliveriesV2) {
       return load.matchState !== "receive-order-only" && load.matchState !== "opendock-only";
     }).length;
     var roOnlyLoads = relatedLoads.filter(function(load) { return load.matchState === "receive-order-only"; }).length;
-    var dueDays = daysUntil(item.earliestDueDate);
 
     return Object.assign({}, item, {
       key: skuKeys[0] || normalizeStr(item.sku),
@@ -411,15 +378,345 @@ function buildQueueData(rawCriticalItems, inboundCoverage, deliveriesV2) {
       nextUnlockDate: nextUnlockDate,
       unlockDateTbdCount: unlockDateTbdCount,
       nextLoadDate: relatedLoads.map(function(load) { return load.availableDate; }).filter(Boolean).sort()[0] || "",
-      dueDays: dueDays,
-      needsAction: item.status !== "covered" || (item.riskLevel || "high") !== "low" || safeNum(item.uncoveredQty) > 0,
-      priorityScore: queuePriority(item)
+      dueDays: daysUntil(item.earliestDueDate),
+      roGapQty: Math.max(0, safeNum(item.shortQty) - safeNum(item.inboundQty)),
+      needsAction: item.status !== "covered" || safeNum(item.uncoveredQty) > 0
     });
   }).sort(function(a, b) {
-    var scoreCompare = safeNum(b.priorityScore) - safeNum(a.priorityScore);
-    if (scoreCompare !== 0) return scoreCompare;
-    return sortByDateThenText(a, b, a.earliestDueDate, b.earliestDueDate, a.sku, b.sku);
+    var dueCompare = sortByDateThenText(a, b, a.earliestDueDate, b.earliestDueDate, a.sku, b.sku);
+    if (safeNum(a.roGapQty) !== safeNum(b.roGapQty)) return safeNum(b.roGapQty) - safeNum(a.roGapQty);
+    return dueCompare;
   });
+}
+
+function buildMaterialLookup(materialRows) {
+  var lookup = {};
+  (materialRows || []).forEach(function(row) {
+    buildSkuMatchKeys(row && row.sku).forEach(function(key) {
+      if (!lookup[key]) lookup[key] = row;
+    });
+  });
+  return lookup;
+}
+
+function buildLoadsByPo(loads) {
+  var lookup = {};
+  (loads || []).forEach(function(load) {
+    var poKey = normalizePoKey(load && load.po);
+    if (!poKey) return;
+    if (!lookup[poKey]) lookup[poKey] = [];
+    lookup[poKey].push(load);
+  });
+  return lookup;
+}
+
+function buildLoadsBySku(loads) {
+  var lookup = {};
+  (loads || []).forEach(function(load) {
+    (load.materials || []).forEach(function(material) {
+      buildSkuMatchKeys(material && material.materialSku).forEach(function(key) {
+        if (!lookup[key]) lookup[key] = [];
+        lookup[key].push(load);
+      });
+    });
+  });
+  return lookup;
+}
+
+function runNextActionLabel(status) {
+  if (status === "unlock-by-date") return "Plan line + labor";
+  if (status === "inbound-no-date") return "Confirm vendor ETA";
+  if (status === "partial") return "Close remaining supply gap";
+  return "Create / expedite Receive Order";
+}
+
+function buildRunNextRows(deliveriesV2, materialRows) {
+  var unlockRows = deliveriesV2 && deliveriesV2.unlockTimeline && Array.isArray(deliveriesV2.unlockTimeline.rows)
+    ? deliveriesV2.unlockTimeline.rows
+    : [];
+  var loads = deliveriesV2 && Array.isArray(deliveriesV2.loads) ? deliveriesV2.loads : [];
+  var materialLookup = buildMaterialLookup(materialRows);
+  var loadsByPo = buildLoadsByPo(loads);
+  var loadsBySku = buildLoadsBySku(loads);
+
+  return (unlockRows || []).map(function(row) {
+    var components = (row.components || []).map(function(component) {
+      var materialRow = null;
+      buildSkuMatchKeys(component && component.sku).some(function(key) {
+        if (materialLookup[key]) {
+          materialRow = materialLookup[key];
+          return true;
+        }
+        return false;
+      });
+      var sourcePOs = Array.from(new Set((component.allocations || []).map(function(allocation) { return allocation.po; }).filter(Boolean)));
+      return {
+        sku: component && component.sku ? component.sku : "",
+        desc: component && component.desc ? component.desc : (materialRow && materialRow.desc ? materialRow.desc : ""),
+        neededQty: Math.round(safeNum(component && component.neededQty)),
+        coveredQty: Math.round(safeNum(component && component.coveredQty)),
+        coveragePct: Math.round(safeNum(component && component.coveragePct)),
+        state: component && component.state ? component.state : "still-blocked",
+        unlockDate: component && component.unlockDate ? component.unlockDate : "",
+        earliestInboundDate: component && component.firstInboundDate ? component.firstInboundDate : "",
+        sourcePOs: sourcePOs,
+        customerLabel: materialRow && materialRow.customerLabel ? materialRow.customerLabel : (row.customer || "--")
+      };
+    });
+
+    var sourcePOs = Array.from(new Set(
+      (row.sourcePOs || [])
+        .concat(components.flatMap(function(component) { return component.sourcePOs || []; }))
+        .filter(Boolean)
+    ));
+
+    var relatedLoads = uniqueBy(
+      sourcePOs.flatMap(function(po) { return loadsByPo[normalizePoKey(po)] || []; })
+        .concat(components.flatMap(function(component) {
+          return buildSkuMatchKeys(component && component.sku).flatMap(function(key) { return loadsBySku[key] || []; });
+        })),
+      function(load) { return load && load.key; }
+    );
+
+    var blockingMaterials = components.map(function(component) { return component.sku; }).filter(Boolean);
+    var firmAvailableBy = row.unlockDate || "";
+    var softAvailableBy = row.earliestInboundDate || "";
+    var availableBy = firmAvailableBy || softAvailableBy || "";
+
+    return {
+      key: "wo:" + String(row.woNum || Math.random()),
+      woNum: row.woNum || "",
+      productSku: row.productSku || "",
+      productDesc: row.productDesc || "",
+      customerLabel: row.customer || "--",
+      dueDate: row.dueDate || "",
+      blockedUnits: Math.round(safeNum(row.blockedUnits)),
+      runnableNow: Math.round(safeNum(row.runnableNow)),
+      availableBy: availableBy,
+      availableByFirm: !!firmAvailableBy,
+      earliestInboundDate: row.earliestInboundDate || "",
+      status: row.status || "still-blocked",
+      componentCount: components.length,
+      coveredComponentCount: components.filter(function(component) {
+        return component.state === "unlock-by-date" || component.state === "inbound-no-date";
+      }).length,
+      blockingMaterialsText: listPreview(blockingMaterials, 3),
+      sourcePOs: sourcePOs,
+      componentsDetailed: components,
+      relatedLoads: relatedLoads,
+      actionLabel: runNextActionLabel(row.status),
+      searchText: compactSearchText([
+        row.woNum,
+        row.productSku,
+        row.productDesc,
+        row.customer,
+        blockingMaterials.join(" "),
+        sourcePOs.join(" "),
+        unlockStatusLabel(row.status)
+      ])
+    };
+  }).sort(function(a, b) {
+    var statusRank = {
+      "unlock-by-date": 0,
+      "inbound-no-date": 1,
+      partial: 2,
+      "still-blocked": 3
+    };
+    if ((statusRank[a.status] || 99) !== (statusRank[b.status] || 99)) {
+      return (statusRank[a.status] || 99) - (statusRank[b.status] || 99);
+    }
+    return sortByDateThenText(a, b, a.availableBy, b.availableBy, a.dueDate || a.woNum, b.dueDate || b.woNum);
+  });
+}
+
+function buildVendorGapRows(materialRows) {
+  return (materialRows || []).filter(function(row) {
+    return safeNum(row.roGapQty) > 0;
+  }).map(function(row) {
+    var gapType = safeNum(row.inboundQty) <= 0 ? "missing" : "partial";
+    return Object.assign({}, row, {
+      gapType: gapType,
+      actionLabel: gapType === "missing" ? "Create Receive Order" : "Add balance to Receive Order",
+      searchText: compactSearchText([
+        row.sku,
+        row.desc,
+        row.customerLabel,
+        (row.openPOs || []).join(" "),
+        vendorGapLabel(gapType),
+        row.recommendedAction
+      ])
+    });
+  }).sort(function(a, b) {
+    if (a.gapType !== b.gapType) return a.gapType === "missing" ? -1 : 1;
+    if (a.earliestDueDate !== b.earliestDueDate) {
+      return String(a.earliestDueDate || "9999-12-31").localeCompare(String(b.earliestDueDate || "9999-12-31"));
+    }
+    return safeNum(b.roGapQty) - safeNum(a.roGapQty);
+  });
+}
+
+function buildDockGapRows(deliveriesV2, materialRows) {
+  var loads = deliveriesV2 && Array.isArray(deliveriesV2.loads) ? deliveriesV2.loads : [];
+  var materialLookup = buildMaterialLookup(materialRows);
+
+  return loads.filter(function(load) {
+    return load && load.matchState === "receive-order-only";
+  }).map(function(load) {
+    var materials = (load.materials || []).map(function(material) {
+      var materialRow = null;
+      buildSkuMatchKeys(material && material.materialSku).some(function(key) {
+        if (materialLookup[key]) {
+          materialRow = materialLookup[key];
+          return true;
+        }
+        return false;
+      });
+      return {
+        sku: material && material.materialSku ? material.materialSku : "",
+        desc: material && material.materialDesc ? material.materialDesc : (materialRow && materialRow.desc ? materialRow.desc : ""),
+        qty: Math.round(safeNum(material && material.qty)),
+        expectedDate: material && material.expectedDate ? material.expectedDate : (load.expectedDate || ""),
+        linkedWOCount: Math.round(safeNum(material && material.linkedWOCount)),
+        unitsUnlocked: Math.round(safeNum(material && material.unitsUnlocked)),
+        customerLabel: materialRow && materialRow.customerLabel ? materialRow.customerLabel : "--"
+      };
+    });
+
+    var customers = Array.from(new Set(materials.flatMap(function(material) {
+      return String(material.customerLabel || "")
+        .split(",")
+        .map(function(value) { return value.trim(); })
+        .filter(Boolean)
+        .filter(function(value) { return value !== "--"; });
+    })));
+
+    var affectedWOs = uniqueBy(materials.flatMap(function(material) {
+      var materialRow = null;
+      buildSkuMatchKeys(material && material.sku).some(function(key) {
+        if (materialLookup[key]) {
+          materialRow = materialLookup[key];
+          return true;
+        }
+        return false;
+      });
+      return materialRow && Array.isArray(materialRow.affectedWOs) ? materialRow.affectedWOs : [];
+    }), function(wo) {
+      return wo && wo.woNum;
+    });
+
+    return {
+      key: load.key,
+      po: load.po || "",
+      expectedDate: load.expectedDate || materials.map(function(material) { return material.expectedDate; }).filter(Boolean).sort()[0] || "",
+      confirmation: load.confirmation || "",
+      customerLabel: customers.length ? customers.join(", ") : "--",
+      materialSummary: listPreview(materials.map(function(material) { return material.sku; }), 3),
+      materialCount: materials.length,
+      qty: Math.round(safeNum(load.totalQty)),
+      linkedWOCount: Math.round(safeNum(load.linkedWOCount)),
+      unitsUnlocked: Math.round(safeNum(load.unitsUnlocked)),
+      materialsDetailed: materials,
+      affectedWOs: affectedWOs,
+      actionLabel: load.confirmation ? "Book OpenDock appointment" : "Confirm load + book appointment",
+      searchText: compactSearchText([
+        load.po,
+        load.confirmation,
+        customers.join(" "),
+        materials.map(function(material) { return material.sku + " " + material.desc; }).join(" ")
+      ])
+    };
+  }).sort(function(a, b) {
+    var dateCompare = String(a.expectedDate || "9999-12-31").localeCompare(String(b.expectedDate || "9999-12-31"));
+    if (dateCompare !== 0) return dateCompare;
+    if (safeNum(b.linkedWOCount) !== safeNum(a.linkedWOCount)) return safeNum(b.linkedWOCount) - safeNum(a.linkedWOCount);
+    return safeNum(b.qty) - safeNum(a.qty);
+  });
+}
+
+function boardMeta(boardKey) {
+  if (boardKey === "vendor-gaps") {
+    return {
+      title: "Vendor Gaps",
+      subtitle: "Materials still short because Receive Orders do not yet cover the gap. Export this board to vendors.",
+      exportLabel: "Vendor CSV"
+    };
+  }
+  if (boardKey === "dock-follow-up") {
+    return {
+      title: "Dock Follow-up",
+      subtitle: "Receive Orders that exist in Nulogy but still need an OpenDock appointment. Export this board to trucking partners.",
+      exportLabel: "Dock CSV"
+    };
+  }
+  return {
+    title: "Run Next",
+    subtitle: "Blocked work orders sorted by when inbound should unlock them so planners can line up production and labor.",
+    exportLabel: "Run Next CSV"
+  };
+}
+
+function buildFocusOptions(boardKey, rows, todayIso) {
+  if (boardKey === "vendor-gaps") {
+    return [
+      { key: "all", label: "All", count: rows.length },
+      { key: "no-ro", label: "No RO", count: rows.filter(function(row) { return row.gapType === "missing"; }).length },
+      { key: "partial-gap", label: "RO Short", count: rows.filter(function(row) { return row.gapType === "partial"; }).length },
+      { key: "due-7d", label: "Due 7d", count: rows.filter(function(row) { return row.earliestDueDate && row.earliestDueDate <= addDaysIso(todayIso, 7); }).length }
+    ];
+  }
+  if (boardKey === "dock-follow-up") {
+    return [
+      { key: "all", label: "All", count: rows.length },
+      { key: "expected-7d", label: "Expected 7d", count: rows.filter(function(row) { return row.expectedDate && row.expectedDate <= addDaysIso(todayIso, 7); }).length },
+      { key: "high-impact", label: "High Impact", count: rows.filter(function(row) { return safeNum(row.linkedWOCount) > 0 || safeNum(row.unitsUnlocked) > 0; }).length },
+      { key: "no-confirmation", label: "No Conf.", count: rows.filter(function(row) { return !row.confirmation; }).length }
+    ];
+  }
+  return [
+    { key: "all", label: "All", count: rows.length },
+    { key: "unlocking-7d", label: "Unlocking 7d", count: rows.filter(function(row) { return row.status === "unlock-by-date" && row.availableBy && row.availableBy <= addDaysIso(todayIso, 7); }).length },
+    { key: "date-tbd", label: "Date TBD", count: rows.filter(function(row) { return row.status === "inbound-no-date"; }).length },
+    { key: "still-blocked", label: "Still Blocked", count: rows.filter(function(row) { return row.status === "still-blocked" || row.status === "partial"; }).length }
+  ];
+}
+
+function matchesFocus(boardKey, focusKey, row, todayIso) {
+  if (!focusKey || focusKey === "all") return true;
+  if (boardKey === "vendor-gaps") {
+    if (focusKey === "no-ro") return row.gapType === "missing";
+    if (focusKey === "partial-gap") return row.gapType === "partial";
+    if (focusKey === "due-7d") return !!row.earliestDueDate && row.earliestDueDate <= addDaysIso(todayIso, 7);
+    return true;
+  }
+  if (boardKey === "dock-follow-up") {
+    if (focusKey === "expected-7d") return !!row.expectedDate && row.expectedDate <= addDaysIso(todayIso, 7);
+    if (focusKey === "high-impact") return safeNum(row.linkedWOCount) > 0 || safeNum(row.unitsUnlocked) > 0;
+    if (focusKey === "no-confirmation") return !row.confirmation;
+    return true;
+  }
+  if (focusKey === "unlocking-7d") return row.status === "unlock-by-date" && !!row.availableBy && row.availableBy <= addDaysIso(todayIso, 7);
+  if (focusKey === "date-tbd") return row.status === "inbound-no-date";
+  if (focusKey === "still-blocked") return row.status === "still-blocked" || row.status === "partial";
+  return true;
+}
+
+function toneForRunNext(status, C) {
+  if (status === "unlock-by-date") return { fg: C.ok, bg: C.okSoft, bd: C.okLine };
+  if (status === "inbound-no-date") return { fg: C.accent, bg: C.accentSoft, bd: C.accentLine };
+  if (status === "partial") return { fg: C.warn, bg: C.warnSoft, bd: C.warnLine };
+  return { fg: C.bad, bg: C.badSoft, bd: C.badLine };
+}
+
+function toneForVendor(row, C) {
+  if (row.gapType === "missing") return { fg: C.bad, bg: C.badSoft, bd: C.badLine };
+  return { fg: C.warn, bg: C.warnSoft, bd: C.warnLine };
+}
+
+function toneForDock(row, C) {
+  if (row.expectedDate && row.expectedDate <= addDaysIso(new Date().toISOString().slice(0, 10), 7)) {
+    return { fg: C.warn, bg: C.warnSoft, bd: C.warnLine };
+  }
+  return { fg: C.accent, bg: C.accentSoft, bd: C.accentLine };
 }
 
 function StatCard({ label, value, tone, mono, hint }) {
@@ -432,443 +729,616 @@ function StatCard({ label, value, tone, mono, hint }) {
   );
 }
 
+function Pill({ tone, children }) {
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        padding: "2px 8px",
+        borderRadius: 999,
+        fontSize: 11,
+        fontWeight: 600,
+        color: tone.fg,
+        background: tone.bg,
+        border: "1px solid " + tone.bd
+      }}
+    >
+      {children}
+    </span>
+  );
+}
+
+function renderAffectedWosTable(rows, C, thC, tdN, tdM) {
+  return (
+    <TableShell>
+      <div className="flex items-center justify-between gap-2 border-b border-[rgb(var(--border))] px-3 py-2.5">
+        <div className="text-sm font-semibold text-[rgb(var(--foreground))]">Affected Work Orders</div>
+        <Badge variant="secondary">{(rows || []).length} WOs</Badge>
+      </div>
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ background: C.raised }}>
+              {["WO", "FG SKU", "Description", "Customer", "WO Remaining", "Component Needed", "Component Short", "Due"].map(function(label) {
+                return <th key={label} style={thC(false)}>{label}</th>;
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {(rows || []).map(function(wo) {
+              return (
+                <tr key={wo.woNum} style={{ borderBottom: "1px solid " + C.border }}>
+                  <td style={Object.assign({}, tdM, { color: C.bright, fontWeight: 600 })}>{wo.woNum || "--"}</td>
+                  <td style={Object.assign({}, tdM, { color: C.bright })}>{wo.productSku || "--"}</td>
+                  <td style={tdN}>{formatDescriptionForDisplay(wo.productDesc || "") || "--"}</td>
+                  <td style={tdN}>{wo.customer || "--"}</td>
+                  <td style={tdM}>{Math.round(wo.unitsRemaining || 0).toLocaleString()}</td>
+                  <td style={tdM}>{Math.round(wo.needed || 0).toLocaleString()}</td>
+                  <td style={Object.assign({}, tdM, { color: C.bad, fontWeight: 600 })}>{Math.round(wo.short || 0).toLocaleString()}</td>
+                  <td style={tdM}>{displayDate(wo.dueDate)}</td>
+                </tr>
+              );
+            })}
+            {!(rows || []).length && <tr><td colSpan={8} style={{ padding: 24, textAlign: "center", color: C.dim }}>No linked work orders.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </TableShell>
+  );
+}
+
 export default function SupplyRiskWorkbench({ rawCriticalItems, inboundCoverage, deliveriesV2 }) {
   const { C, mono } = useTheme();
   const { thC, tdN, tdM } = useStyles();
 
+  const [boardKey, setBoardKey] = useState("run-next");
   const [search, setSearch] = useState("");
-  const [focusMode, setFocusMode] = useState("needs-action");
   const [customerFilter, setCustomerFilter] = useState("all");
+  const [focusKey, setFocusKey] = useState("all");
   const [selectedKey, setSelectedKey] = useState("");
-  const [detailTab, setDetailTab] = useState("overview");
   const deferredSearch = useDeferredValue(search);
+  var todayIso = new Date().toISOString().slice(0, 10);
 
-  var queueItems = useMemo(function() {
-    return buildQueueData(rawCriticalItems, inboundCoverage, deliveriesV2);
+  var materialRows = useMemo(function() {
+    return buildMaterialRows(rawCriticalItems, inboundCoverage, deliveriesV2);
   }, [rawCriticalItems, inboundCoverage, deliveriesV2]);
+
+  var runNextRows = useMemo(function() {
+    return buildRunNextRows(deliveriesV2, materialRows);
+  }, [deliveriesV2, materialRows]);
+
+  var vendorGapRows = useMemo(function() {
+    return buildVendorGapRows(materialRows);
+  }, [materialRows]);
+
+  var dockGapRows = useMemo(function() {
+    return buildDockGapRows(deliveriesV2, materialRows);
+  }, [deliveriesV2, materialRows]);
+
+  var boardRows = boardKey === "vendor-gaps"
+    ? vendorGapRows
+    : boardKey === "dock-follow-up"
+      ? dockGapRows
+      : runNextRows;
 
   var customerOptions = useMemo(function() {
     var seen = {};
-    queueItems.forEach(function(item) {
-      String(item.customerLabel || "")
+    boardRows.forEach(function(row) {
+      String(row.customerLabel || "")
         .split(",")
         .map(function(value) { return value.trim(); })
         .filter(Boolean)
+        .filter(function(value) { return value !== "--"; })
         .forEach(function(value) { seen[value] = true; });
     });
     return Object.keys(seen).sort();
-  }, [queueItems]);
+  }, [boardRows]);
 
-  var filteredItems = useMemo(function() {
+  var focusOptions = useMemo(function() {
+    return buildFocusOptions(boardKey, boardRows, todayIso);
+  }, [boardKey, boardRows, todayIso]);
+
+  var filteredRows = useMemo(function() {
     var q = String(deferredSearch || "").trim().toLowerCase();
-    return queueItems.filter(function(item) {
+    return boardRows.filter(function(row) {
       if (customerFilter !== "all") {
-        var customers = String(item.customerLabel || "").split(",").map(function(value) { return value.trim(); });
+        var customers = String(row.customerLabel || "").split(",").map(function(value) { return value.trim(); });
         if (!customers.includes(customerFilter)) return false;
       }
-
-      if (focusMode === "needs-action" && !item.needsAction) return false;
-      if (focusMode === "due-soon" && !(item.uncoveredQty > 0 && item.dueDays <= 7)) return false;
-      if (focusMode === "awaiting-dock" && item.status !== "unscheduled") return false;
-      if (focusMode === "unlocking-soon" && !(item.nextUnlockDate && item.nextUnlockDate <= addDaysIso(new Date().toISOString().slice(0, 10), 14))) return false;
-
+      if (!matchesFocus(boardKey, focusKey, row, todayIso)) return false;
       if (!q) return true;
-      return (
-        String(item.sku || "").toLowerCase().includes(q) ||
-        String(item.desc || "").toLowerCase().includes(q) ||
-        String(item.customerLabel || "").toLowerCase().includes(q) ||
-        String(item.recommendedAction || "").toLowerCase().includes(q) ||
-        String(item.nextUnlockDate || "").toLowerCase().includes(q) ||
-        (item.openPOs || []).join(" ").toLowerCase().includes(q) ||
-        (item.affectedWOs || []).some(function(wo) {
-          return (
-            String(wo.woNum || "").toLowerCase().includes(q) ||
-            String(wo.productSku || "").toLowerCase().includes(q) ||
-            String(wo.productDesc || "").toLowerCase().includes(q)
-          );
-        })
-      );
+      return String(row.searchText || "").includes(q);
     });
-  }, [queueItems, deferredSearch, customerFilter, focusMode]);
+  }, [boardRows, deferredSearch, customerFilter, focusKey, boardKey, todayIso]);
 
   useEffect(function() {
-    if (!filteredItems.length) {
+    setFocusKey("all");
+    setSelectedKey("");
+  }, [boardKey]);
+
+  useEffect(function() {
+    if (!filteredRows.length) {
       if (selectedKey) setSelectedKey("");
       return;
     }
-    if (!filteredItems.some(function(item) { return item.key === selectedKey; })) {
-      setSelectedKey(filteredItems[0].key);
+    if (!filteredRows.some(function(row) { return row.key === selectedKey; })) {
+      setSelectedKey(filteredRows[0].key);
     }
-  }, [filteredItems, selectedKey]);
+  }, [filteredRows, selectedKey]);
 
-  var selectedItem = filteredItems.find(function(item) { return item.key === selectedKey; }) ||
-    queueItems.find(function(item) { return item.key === selectedKey; }) ||
-    filteredItems[0] ||
+  var selectedRow = filteredRows.find(function(row) { return row.key === selectedKey; }) ||
+    boardRows.find(function(row) { return row.key === selectedKey; }) ||
+    filteredRows[0] ||
     null;
 
-  var todayIso = new Date().toISOString().slice(0, 10);
-  var kpis = useMemo(function() {
-    var unlockRows = deliveriesV2 && deliveriesV2.unlockTimeline && Array.isArray(deliveriesV2.unlockTimeline.rows)
-      ? deliveriesV2.unlockTimeline.rows
-      : [];
+  var summary = useMemo(function() {
+    var unlock7dRows = runNextRows.filter(function(row) {
+      return row.status === "unlock-by-date" && row.availableBy && row.availableBy <= addDaysIso(todayIso, 7);
+    });
+    var vendorGapUnits = vendorGapRows.reduce(function(sum, row) { return sum + safeNum(row.roGapQty); }, 0);
+    var dockGapQty = dockGapRows.reduce(function(sum, row) { return sum + safeNum(row.qty); }, 0);
+    var blockedUnits = runNextRows.reduce(function(sum, row) { return sum + safeNum(row.blockedUnits); }, 0);
     return {
-      needsAction: queueItems.filter(function(item) { return item.needsAction; }).length,
-      dueThisWeekUnits: Math.round(queueItems.filter(function(item) { return item.uncoveredQty > 0 && item.dueDays <= 7; }).reduce(function(sum, item) {
-        return sum + safeNum(item.uncoveredQty);
-      }, 0)),
-      awaitingDock: queueItems.filter(function(item) { return item.status === "unscheduled"; }).length,
-      unlocking14d: unlockRows.filter(function(row) { return row.unlockDate && row.unlockDate <= addDaysIso(todayIso, 14); }).length
+      unlock7dCount: unlock7dRows.length,
+      unlock7dUnits: Math.round(unlock7dRows.reduce(function(sum, row) { return sum + safeNum(row.blockedUnits); }, 0)),
+      vendorGapCount: vendorGapRows.length,
+      vendorGapUnits: Math.round(vendorGapUnits),
+      dockGapCount: dockGapRows.length,
+      dockGapQty: Math.round(dockGapQty),
+      blockedUnits: Math.round(blockedUnits)
     };
-  }, [queueItems, deliveriesV2, todayIso]);
+  }, [runNextRows, vendorGapRows, dockGapRows, todayIso]);
 
-  var focusOptions = [
-    { key: "needs-action", label: "Needs Action", count: queueItems.filter(function(item) { return item.needsAction; }).length },
-    { key: "due-soon", label: "Due Soon", count: queueItems.filter(function(item) { return item.uncoveredQty > 0 && item.dueDays <= 7; }).length },
-    { key: "awaiting-dock", label: "Awaiting Dock", count: queueItems.filter(function(item) { return item.status === "unscheduled"; }).length },
-    { key: "unlocking-soon", label: "Unlocking Soon", count: queueItems.filter(function(item) { return item.nextUnlockDate && item.nextUnlockDate <= addDaysIso(todayIso, 14); }).length },
-    { key: "all", label: "All", count: queueItems.length }
+  var tabs = [
+    { key: "run-next", label: "Run Next", count: runNextRows.length },
+    { key: "vendor-gaps", label: "Vendor Gaps", count: vendorGapRows.length },
+    { key: "dock-follow-up", label: "Dock Follow-up", count: dockGapRows.length }
   ];
+  var meta = boardMeta(boardKey);
 
-  var queueTabItems = selectedItem ? [
-    { key: "overview", label: "Overview" },
-    { key: "inbound", label: "Inbound", count: selectedItem.relatedLoads.length },
-    { key: "unlock", label: "Unlocks", count: selectedItem.relatedUnlocks.length }
-  ] : [];
+  var handleExport = function() {
+    if (boardKey === "vendor-gaps") exportVendorCsv(filteredRows);
+    else if (boardKey === "dock-follow-up") exportDockCsv(filteredRows);
+    else exportRunNextCsv(filteredRows);
+  };
 
   return (
     <div className="space-y-4">
       <div className="space-y-1">
         <div className="text-lg font-semibold text-[rgb(var(--foreground))]">Supply Risk</div>
         <div className="text-sm text-[rgb(var(--muted))]">
-          One action queue for what needs attention now, with inbound and unlock context on the selected item instead of three separate reports to scan.
+          One spreadsheet-style workbench for three operator jobs: what we can run next, what vendors still need to schedule, and what trucking still needs on OpenDock.
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
-        <StatCard label="Needs Action" value={kpis.needsAction.toLocaleString()} tone={C.bad} mono={mono} />
-        <StatCard label="Due This Week Uncovered" value={kpis.dueThisWeekUnits.toLocaleString()} tone={C.warn} mono={mono} />
-        <StatCard label="Awaiting Dock Scheduling" value={kpis.awaitingDock.toLocaleString()} tone={C.accent} mono={mono} />
-        <StatCard label="Work Orders Unlocking 14d" value={kpis.unlocking14d.toLocaleString()} tone={C.ok} mono={mono} />
+        <StatCard label="Run Next 7d" value={summary.unlock7dCount.toLocaleString()} tone={C.ok} mono={mono} hint={summary.unlock7dUnits.toLocaleString() + " blocked units"} />
+        <StatCard label="Vendor Gaps" value={summary.vendorGapCount.toLocaleString()} tone={C.bad} mono={mono} hint={summary.vendorGapUnits.toLocaleString() + " units not on RO"} />
+        <StatCard label="Dock Follow-up" value={summary.dockGapCount.toLocaleString()} tone={C.accent} mono={mono} hint={summary.dockGapQty.toLocaleString() + " units awaiting appt"} />
+        <StatCard label="Blocked Units" value={summary.blockedUnits.toLocaleString()} tone={C.warn} mono={mono} hint="Across blocked work orders" />
       </div>
 
       <Card className="px-4 py-3">
-        <div className="flex flex-col gap-2 xl:flex-row xl:items-center">
-          <div className="flex flex-1 flex-wrap gap-2">
-            <Input value={search} onChange={function(event) { setSearch(event.target.value); }} placeholder="Search material, customer, PO, work order, or FG SKU" className="h-10 w-full text-sm xl:w-[340px]" />
-            <select value={customerFilter} onChange={function(event) { setCustomerFilter(event.target.value); }} className="h-10 w-full rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))] xl:w-auto">
+        <TabsNav items={tabs} activeKey={boardKey} onChange={setBoardKey} className="mb-3" />
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+          <div className="space-y-1">
+            <div className="text-sm font-semibold text-[rgb(var(--foreground))]">{meta.title}</div>
+            <div className="text-xs text-[rgb(var(--muted))]">{meta.subtitle}</div>
+          </div>
+          <div className="flex flex-col gap-2 xl:flex-row xl:items-center">
+            <Input
+              value={search}
+              onChange={function(event) { setSearch(event.target.value); }}
+              placeholder="Search material, receive order, work order, FG SKU, or customer"
+              className="h-10 w-full text-sm xl:w-[340px]"
+            />
+            <select
+              value={customerFilter}
+              onChange={function(event) { setCustomerFilter(event.target.value); }}
+              className="h-10 w-full rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))] xl:w-auto"
+            >
               <option value="all">All Customers</option>
               {customerOptions.map(function(customer) {
                 return <option key={customer} value={customer}>{customer}</option>;
               })}
             </select>
+            <Button onClick={handleExport} variant="outline" size="sm" disabled={!filteredRows.length}>
+              {meta.exportLabel}
+            </Button>
           </div>
-          <div className="flex flex-wrap gap-1.5">
-            {focusOptions.map(function(option) {
-              return (
-                <Button key={option.key} onClick={function() { setFocusMode(option.key); }} variant={focusMode === option.key ? "active" : "outline"} size="sm">
-                  {option.label}
-                  <span className="ml-1 text-xs opacity-70">{option.count}</span>
-                </Button>
-              );
-            })}
-            <Button onClick={function() { exportQueueCsv(filteredItems); }} variant="outline" size="sm" disabled={!filteredItems.length}>Queue CSV</Button>
-          </div>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {focusOptions.map(function(option) {
+            return (
+              <Button key={option.key} onClick={function() { setFocusKey(option.key); }} variant={focusKey === option.key ? "active" : "outline"} size="sm">
+                {option.label}
+                <span className="ml-1 text-xs opacity-70">{option.count}</span>
+              </Button>
+            );
+          })}
         </div>
       </Card>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(320px,420px)_minmax(0,1fr)]">
-        <Card className="overflow-hidden">
-          <div className="border-b border-[rgb(var(--border))] px-4 py-3">
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <div className="text-sm font-semibold text-[rgb(var(--foreground))]">Action Queue</div>
-                <div className="mt-1 text-xs text-[rgb(var(--muted))]">Sorted by urgency, due risk, and uncovered quantity.</div>
-              </div>
-              <Badge variant="secondary">{filteredItems.length} items</Badge>
-            </div>
+      <Card className="overflow-hidden">
+        <div className="flex items-center justify-between gap-2 border-b border-[rgb(var(--border))] px-4 py-3">
+          <div>
+            <div className="text-sm font-semibold text-[rgb(var(--foreground))]">{meta.title} Board</div>
+            <div className="mt-1 text-xs text-[rgb(var(--muted))]">Spreadsheet-style scan view with full-row selection for deeper context below.</div>
           </div>
-          <div className="max-h-[72vh] overflow-y-auto p-2">
-            {!filteredItems.length ? (
-              <div className="px-3 py-12 text-center text-sm text-[rgb(var(--muted))]">No materials match the current filters.</div>
-            ) : filteredItems.map(function(item) {
-              var tone = coverageTone(item, C);
-              var isSelected = selectedItem && selectedItem.key === item.key;
-              return (
-                <button
-                  key={item.key}
-                  type="button"
-                  onClick={function() { setSelectedKey(item.key); setDetailTab("overview"); }}
-                  className="mb-2 w-full rounded-lg border px-3 py-3 text-left transition-colors"
-                  style={{
-                    borderColor: isSelected ? C.accent : C.border,
-                    background: isSelected ? C.accentSoft : "transparent",
-                    boxShadow: isSelected ? ("inset 0 0 0 1px " + C.accentLine) : "none"
-                  }}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span style={{ fontFamily: mono, fontSize: 13, fontWeight: 700, color: C.bright }}>{item.sku || "--"}</span>
-                        <span style={{
-                          display: "inline-block",
-                          fontSize: 10,
-                          padding: "2px 6px",
-                          borderRadius: 999,
-                          color: item.materialType === "packaging" ? C.accent : C.ok,
-                          background: item.materialType === "packaging" ? C.accentSoft : C.okSoft,
-                          border: "1px solid " + (item.materialType === "packaging" ? C.accentLine : C.okLine),
-                          fontWeight: 600
-                        }}>
-                          {item.materialType === "packaging" ? "Packaging" : "WIP"}
-                        </span>
-                      </div>
-                      <div className="mt-1 text-sm text-[rgb(var(--foreground))]">{formatDescriptionForDisplay(item.desc || "") || "--"}</div>
-                      <div className="mt-1 text-xs text-[rgb(var(--muted))]">{item.customerLabel || "--"}</div>
-                    </div>
-                    <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 999, fontSize: 11, fontWeight: 600, color: tone.fg, background: tone.bg, border: "1px solid " + tone.bd }}>
-                      {coverageStatusLabel(item.status)}
-                    </span>
-                  </div>
+          <Badge variant="secondary">{filteredRows.length} rows</Badge>
+        </div>
+        <div style={{ overflowX: "auto" }}>
+          {boardKey === "run-next" && (
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ background: C.raised }}>
+                  {["Available", "WO", "FG SKU", "Customer", "Due", "Blocked Units", "Runnable Now", "Blocking Materials", "Receive Orders", "Status"].map(function(label) {
+                    return <th key={label} style={thC(false)}>{label}</th>;
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {!filteredRows.length && <tr><td colSpan={10} style={{ padding: 28, textAlign: "center", color: C.dim }}>No work orders match the current filters.</td></tr>}
+                {filteredRows.map(function(row) {
+                  var isSelected = selectedRow && selectedRow.key === row.key;
+                  var tone = toneForRunNext(row.status, C);
+                  return (
+                    <tr
+                      key={row.key}
+                      onClick={function() { setSelectedKey(row.key); }}
+                      style={{
+                        borderBottom: "1px solid " + C.border,
+                        background: isSelected ? C.accentSoft : "transparent",
+                        cursor: "pointer"
+                      }}
+                    >
+                      <td style={Object.assign({}, tdM, { color: row.status === "unlock-by-date" ? C.ok : C.bright })}>{row.availableBy ? displayDate(row.availableBy) : row.status === "inbound-no-date" ? "TBD" : "--"}</td>
+                      <td style={Object.assign({}, tdM, { color: C.bright, fontWeight: 600 })}>{row.woNum || "--"}</td>
+                      <td style={Object.assign({}, tdM, { color: C.bright })}>{row.productSku || "--"}</td>
+                      <td style={tdN}>{row.customerLabel || "--"}</td>
+                      <td style={tdM}>{displayDate(row.dueDate)}</td>
+                      <td style={Object.assign({}, tdM, { color: C.bad, fontWeight: 600 })}>{Math.round(row.blockedUnits || 0).toLocaleString()}</td>
+                      <td style={tdM}>{Math.round(row.runnableNow || 0).toLocaleString()}</td>
+                      <td style={tdN}>{row.blockingMaterialsText || "--"}</td>
+                      <td style={tdN}>{listPreview(row.sourcePOs || [], 2)}</td>
+                      <td style={tdN}><Pill tone={tone}>{unlockStatusLabel(row.status)}</Pill></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
 
-                  <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-xs text-[rgb(var(--muted))]">
-                    <div>Due <span style={{ color: item.dueDays <= 7 && item.uncoveredQty > 0 ? C.bad : C.bright, fontFamily: mono }}>{fmtDate(item.earliestDueDate)}</span></div>
-                    <div>Uncovered <span style={{ color: item.uncoveredQty > 0 ? C.bad : C.ok, fontFamily: mono }}>{Math.round(item.uncoveredQty || 0).toLocaleString()}</span></div>
-                    <div>Next RO <span style={{ color: C.bright, fontFamily: mono }}>{fmtDate(item.earliestInboundDate)}</span></div>
-                    <div>Next Unlock <span style={{ color: item.nextUnlockDate ? C.ok : C.bright, fontFamily: mono }}>{item.nextUnlockDate ? fmtDate(item.nextUnlockDate) : item.unlockDateTbdCount > 0 ? "TBD" : "--"}</span></div>
-                  </div>
+          {boardKey === "vendor-gaps" && (
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ background: C.raised }}>
+                  {["Material", "Description", "Customer", "Due", "Short", "On RO", "Gap To Schedule", "Affected WOs", "Current Receive Orders", "Action"].map(function(label) {
+                    return <th key={label} style={thC(false)}>{label}</th>;
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {!filteredRows.length && <tr><td colSpan={10} style={{ padding: 28, textAlign: "center", color: C.dim }}>No vendor gaps match the current filters.</td></tr>}
+                {filteredRows.map(function(row) {
+                  var isSelected = selectedRow && selectedRow.key === row.key;
+                  var tone = toneForVendor(row, C);
+                  return (
+                    <tr
+                      key={row.key}
+                      onClick={function() { setSelectedKey(row.key); }}
+                      style={{
+                        borderBottom: "1px solid " + C.border,
+                        background: isSelected ? C.accentSoft : "transparent",
+                        cursor: "pointer"
+                      }}
+                    >
+                      <td style={Object.assign({}, tdM, { color: C.bright, fontWeight: 600 })}>{row.sku || "--"}</td>
+                      <td style={tdN}>{formatDescriptionForDisplay(row.desc || "") || "--"}</td>
+                      <td style={tdN}>{row.customerLabel || "--"}</td>
+                      <td style={tdM}>{displayDate(row.earliestDueDate)}</td>
+                      <td style={tdM}>{Math.round(row.shortQty || 0).toLocaleString()}</td>
+                      <td style={tdM}>{Math.round(row.inboundQty || 0).toLocaleString()}</td>
+                      <td style={Object.assign({}, tdM, { color: C.bad, fontWeight: 600 })}>{Math.round(row.roGapQty || 0).toLocaleString()}</td>
+                      <td style={tdM}>{row.affectedWOCount || 0}</td>
+                      <td style={tdN}>{listPreview(row.openPOs || [], 2)}</td>
+                      <td style={tdN}>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Pill tone={tone}>{vendorGapLabel(row.gapType)}</Pill>
+                          <span>{row.actionLabel}</span>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
 
-                  <div className="mt-3">
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <div style={{ flex: 1, height: 6, borderRadius: 999, background: C.border, overflow: "hidden" }}>
-                        <div style={{ width: Math.max(0, Math.min(100, item.scheduledCoveragePct || 0)) + "%", height: "100%", background: (item.scheduledCoveragePct || 0) >= 100 ? C.ok : (item.scheduledCoveragePct || 0) > 0 ? C.warn : C.bad }} />
-                      </div>
-                      <div style={{ fontFamily: mono, fontSize: 12, color: C.bright }}>{item.scheduledCoveragePct || 0}%</div>
-                    </div>
-                  </div>
+          {boardKey === "dock-follow-up" && (
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ background: C.raised }}>
+                  {["Expected", "Receive Order", "Customer", "Materials", "Qty", "Linked WOs", "Units Unlocked", "Confirmation", "Action"].map(function(label) {
+                    return <th key={label} style={thC(false)}>{label}</th>;
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {!filteredRows.length && <tr><td colSpan={9} style={{ padding: 28, textAlign: "center", color: C.dim }}>No dock follow-up loads match the current filters.</td></tr>}
+                {filteredRows.map(function(row) {
+                  var isSelected = selectedRow && selectedRow.key === row.key;
+                  var tone = toneForDock(row, C);
+                  return (
+                    <tr
+                      key={row.key}
+                      onClick={function() { setSelectedKey(row.key); }}
+                      style={{
+                        borderBottom: "1px solid " + C.border,
+                        background: isSelected ? C.accentSoft : "transparent",
+                        cursor: "pointer"
+                      }}
+                    >
+                      <td style={tdM}>{displayDate(row.expectedDate)}</td>
+                      <td style={Object.assign({}, tdM, { color: C.bright, fontWeight: 600 })}>{row.po || "--"}</td>
+                      <td style={tdN}>{row.customerLabel || "--"}</td>
+                      <td style={tdN}>{row.materialSummary || "--"}</td>
+                      <td style={tdM}>{Math.round(row.qty || 0).toLocaleString()}</td>
+                      <td style={tdM}>{row.linkedWOCount || 0}</td>
+                      <td style={tdM}>{Math.round(row.unitsUnlocked || 0).toLocaleString()}</td>
+                      <td style={tdN}>{row.confirmation || "--"}</td>
+                      <td style={tdN}><Pill tone={tone}>{row.actionLabel}</Pill></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </Card>
 
-                  <div className="mt-3 text-xs" style={{ color: item.dueBeforeScheduled || item.status === "missing" ? C.bad : item.status === "unscheduled" || item.status === "partial" ? C.warn : C.dim }}>
-                    {summarizeAction(item)}
+      <Card className="overflow-hidden">
+        {!selectedRow ? (
+          <div className="px-6 py-14 text-center text-sm text-[rgb(var(--muted))]">Select a row to see the full operational context behind it.</div>
+        ) : (
+          <div>
+            <div className="border-b border-[rgb(var(--border))] px-5 py-4">
+              {boardKey === "run-next" && (
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span style={{ fontFamily: mono, fontSize: 16, fontWeight: 700, color: C.bright }}>{selectedRow.woNum || "--"}</span>
+                    <Badge variant="secondary">{selectedRow.customerLabel || "--"}</Badge>
+                    <Pill tone={toneForRunNext(selectedRow.status, C)}>{unlockStatusLabel(selectedRow.status)}</Pill>
                   </div>
-                </button>
-              );
-            })}
-          </div>
-        </Card>
-
-        <Card className="overflow-hidden">
-          {!selectedItem ? (
-            <div className="px-6 py-14 text-center text-sm text-[rgb(var(--muted))]">Select a material from the queue to inspect inbound coverage and unlock timing.</div>
-          ) : (
-            <div>
-              <div className="border-b border-[rgb(var(--border))] px-5 py-4">
-                <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span style={{ fontFamily: mono, fontSize: 16, fontWeight: 700, color: C.bright }}>{selectedItem.sku || "--"}</span>
-                      <Badge variant="secondary">{selectedItem.customerLabel || "--"}</Badge>
-                      <span style={{
-                        display: "inline-block",
-                        fontSize: 11,
-                        padding: "2px 8px",
-                        borderRadius: 999,
-                        color: coverageTone(selectedItem, C).fg,
-                        background: coverageTone(selectedItem, C).bg,
-                        border: "1px solid " + coverageTone(selectedItem, C).bd
-                      }}>
-                        {coverageStatusLabel(selectedItem.status)}
-                      </span>
-                    </div>
-                    <div className="mt-2 text-base text-[rgb(var(--foreground))]">{formatDescriptionForDisplay(selectedItem.desc || "") || "--"}</div>
-                    <div className="mt-2 text-sm text-[rgb(var(--muted))]">{summarizeAction(selectedItem)}</div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 xl:w-[320px]">
-                    <StatCard label="On Hand" value={Math.round(selectedItem.onHand || 0).toLocaleString()} tone={selectedItem.isZeroStock ? C.bad : C.bright} mono={mono} />
-                    <StatCard label="Short" value={Math.round(selectedItem.shortQty || 0).toLocaleString()} tone={C.bad} mono={mono} />
-                    <StatCard label="Receive Orders" value={Math.round(selectedItem.inboundQty || 0).toLocaleString()} tone={C.accent} mono={mono} />
-                    <StatCard label="OpenDock Scheduled" value={Math.round(selectedItem.scheduledQty || 0).toLocaleString()} tone={C.ok} mono={mono} />
+                  <div className="text-base text-[rgb(var(--foreground))]">{selectedRow.productSku || "--"} · {formatDescriptionForDisplay(selectedRow.productDesc || "") || "--"}</div>
+                  <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
+                    <StatCard label="Available By" value={selectedRow.availableBy ? displayDate(selectedRow.availableBy) : selectedRow.status === "inbound-no-date" ? "TBD" : "--"} tone={selectedRow.status === "unlock-by-date" ? C.ok : C.bright} mono={mono} />
+                    <StatCard label="Blocked Units" value={Math.round(selectedRow.blockedUnits || 0).toLocaleString()} tone={C.bad} mono={mono} />
+                    <StatCard label="Runnable Now" value={Math.round(selectedRow.runnableNow || 0).toLocaleString()} tone={C.ok} mono={mono} />
+                    <StatCard label="Receive Orders" value={(selectedRow.sourcePOs || []).length.toLocaleString()} tone={C.accent} mono={mono} />
                   </div>
                 </div>
-              </div>
+              )}
 
-              <div className="px-5 pt-4">
-                <TabsNav
-                  items={queueTabItems}
-                  activeKey={detailTab}
-                  onChange={setDetailTab}
-                  className="mb-0"
-                />
-              </div>
-
-              <div className="px-5 pb-5 pt-4">
-                {detailTab === "overview" && (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
-                      <StatCard label="Uncovered Qty" value={Math.round(selectedItem.uncoveredQty || 0).toLocaleString()} tone={selectedItem.uncoveredQty > 0 ? C.bad : C.ok} mono={mono} />
-                      <StatCard label="Coverage" value={(selectedItem.scheduledCoveragePct || 0) + "%"} tone={(selectedItem.scheduledCoveragePct || 0) >= 100 ? C.ok : (selectedItem.scheduledCoveragePct || 0) > 0 ? C.warn : C.bad} mono={mono} />
-                      <StatCard label="Affected WOs" value={selectedItem.affectedWOCount.toLocaleString()} tone={C.bright} mono={mono} />
-                      <StatCard label="FG SKUs Blocked" value={selectedItem.blockedFinishedGoodsCount.toLocaleString()} tone={C.accent} mono={mono} />
-                    </div>
-
-                    <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(300px,0.8fr)]">
-                      <Card className="px-4 py-4">
-                        <div className="text-sm font-semibold text-[rgb(var(--foreground))]">Timing and Coverage</div>
-                        <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
-                          <div style={{ color: C.dim }}>Earliest Due <div style={{ color: C.bright, fontFamily: mono, marginTop: 2 }}>{fmtDate(selectedItem.earliestDueDate)}</div></div>
-                          <div style={{ color: C.dim }}>Earliest Receive Order <div style={{ color: C.bright, fontFamily: mono, marginTop: 2 }}>{fmtDate(selectedItem.earliestInboundDate)}</div></div>
-                          <div style={{ color: C.dim }}>Earliest OpenDock Appointment <div style={{ color: C.bright, fontFamily: mono, marginTop: 2 }}>{fmtDate(selectedItem.earliestScheduledDate)}</div></div>
-                          <div style={{ color: C.dim }}>Next Unlock Forecast <div style={{ color: selectedItem.nextUnlockDate ? C.ok : C.bright, fontFamily: mono, marginTop: 2 }}>{selectedItem.nextUnlockDate ? fmtDate(selectedItem.nextUnlockDate) : selectedItem.unlockDateTbdCount > 0 ? "TBD" : "--"}</div></div>
-                        </div>
-                        <div className="mt-4 text-xs text-[rgb(var(--muted))]">
-                          POs: {(selectedItem.openPOs || []).length ? selectedItem.openPOs.join(", ") : "--"}
-                        </div>
-                      </Card>
-
-                      <Card className="px-4 py-4">
-                        <div className="text-sm font-semibold text-[rgb(var(--foreground))]">Decision Snapshot</div>
-                        <div className="mt-3 space-y-2 text-sm">
-                          <div style={{ color: C.dim }}>Action</div>
-                          <div style={{ color: C.bright }}>{selectedItem.recommendedAction || "Monitor"}</div>
-                          <div style={{ color: C.dim, marginTop: 10 }}>Why this is surfaced</div>
-                          <div style={{ color: C.bright }}>{summarizeAction(selectedItem)}</div>
-                          <div style={{ color: C.dim, marginTop: 10 }}>Inbound footprint</div>
-                          <div style={{ color: C.bright }}>{selectedItem.relatedLoads.length} loads · {selectedItem.matchedLoads} matched · {selectedItem.receiveOrderOnlyLoads} RO only</div>
-                        </div>
-                      </Card>
-                    </div>
-
-                    <TableShell>
-                      <div className="flex items-center justify-between gap-2 border-b border-[rgb(var(--border))] px-3 py-2.5">
-                        <div className="text-sm font-semibold text-[rgb(var(--foreground))]">Affected Work Orders</div>
-                        <Badge variant="secondary">{selectedItem.affectedWOCount} WOs</Badge>
-                      </div>
-                      <div style={{ overflowX: "auto" }}>
-                        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                          <thead><tr style={{ background: C.raised }}>
-                            {["WO", "FG SKU", "Description", "Customer", "WO Remaining", "Component Needed", "Component Short", "Due"].map(function(label) {
-                              return <th key={label} style={thC(false)}>{label}</th>;
-                            })}
-                          </tr></thead>
-                          <tbody>
-                            {(selectedItem.affectedWOs || []).map(function(wo) {
-                              return (
-                                <tr key={wo.woNum} style={{ borderBottom: "1px solid " + C.border }}>
-                                  <td style={Object.assign({}, tdM, { color: C.bright, fontWeight: 600 })}>{wo.woNum}</td>
-                                  <td style={Object.assign({}, tdM, { color: C.bright })}>{wo.productSku || "--"}</td>
-                                  <td style={tdN}>{formatDescriptionForDisplay(wo.productDesc || "") || "--"}</td>
-                                  <td style={tdN}>{wo.customer || "--"}</td>
-                                  <td style={tdM}>{Math.round(wo.unitsRemaining || 0).toLocaleString()}</td>
-                                  <td style={tdM}>{Math.round(wo.needed || 0).toLocaleString()}</td>
-                                  <td style={Object.assign({}, tdM, { color: C.bad, fontWeight: 600 })}>{Math.round(wo.short || 0).toLocaleString()}</td>
-                                  <td style={tdM}>{fmtDate(wo.dueDate)}</td>
-                                </tr>
-                              );
-                            })}
-                            {!(selectedItem.affectedWOs || []).length && <tr><td colSpan={8} style={{ padding: 24, textAlign: "center", color: C.dim }}>No linked work orders for this material.</td></tr>}
-                          </tbody>
-                        </table>
-                      </div>
-                    </TableShell>
+              {boardKey === "vendor-gaps" && (
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span style={{ fontFamily: mono, fontSize: 16, fontWeight: 700, color: C.bright }}>{selectedRow.sku || "--"}</span>
+                    <Badge variant="secondary">{selectedRow.customerLabel || "--"}</Badge>
+                    <Pill tone={toneForVendor(selectedRow, C)}>{vendorGapLabel(selectedRow.gapType)}</Pill>
                   </div>
-                )}
-
-                {detailTab === "inbound" && (
-                  <div className="space-y-4">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="secondary">{selectedItem.relatedLoads.length} loads</Badge>
-                      <Badge variant="secondary">{selectedItem.matchedLoads} matched</Badge>
-                      <Badge variant="secondary">{selectedItem.receiveOrderOnlyLoads} RO only</Badge>
-                      <div className="flex-1" />
-                      <Button onClick={function() { exportInboundCsv(selectedItem.relatedLoads); }} variant="outline" size="sm" disabled={!selectedItem.relatedLoads.length}>Inbound CSV</Button>
-                    </div>
-
-                    <TableShell>
-                      <div style={{ overflowX: "auto" }}>
-                        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                          <thead><tr style={{ background: C.raised }}>
-                            {["Available", "Receive Order", "Confirmation", "Status", "Match", "Qty", "Linked WOs", "Units Unlocked"].map(function(label) {
-                              return <th key={label} style={thC(false)}>{label}</th>;
-                            })}
-                          </tr></thead>
-                          <tbody>
-                            {selectedItem.relatedLoads.map(function(load) {
-                              var tone = unlockTone(load.matchState === "receive-order-only" ? "inbound-no-date" : load.matchState === "opendock-only" ? "still-blocked" : "unlock-by-date", C);
-                              return (
-                                <tr key={load.key} style={{ borderBottom: "1px solid " + C.border }}>
-                                  <td style={tdM}>{fmtDate(load.availableDate)}</td>
-                                  <td style={Object.assign({}, tdM, { color: C.bright })}>{load.po || "--"}</td>
-                                  <td style={tdN}>{load.confirmation || "--"}</td>
-                                  <td style={tdN}>{load.status || "--"}</td>
-                                  <td style={tdN}>
-                                    <span style={{ display: "inline-block", padding: "2px 7px", borderRadius: 999, fontSize: 11, color: tone.fg, background: tone.bg, border: "1px solid " + tone.bd }}>
-                                      {load.matchLabel}
-                                    </span>
-                                  </td>
-                                  <td style={tdM}>{Math.round(load.qty || 0).toLocaleString()}</td>
-                                  <td style={tdM}>{load.linkedWOCount || 0}</td>
-                                  <td style={tdM}>{Math.round(load.unitsUnlocked || 0).toLocaleString()}</td>
-                                </tr>
-                              );
-                            })}
-                            {!selectedItem.relatedLoads.length && <tr><td colSpan={8} style={{ padding: 24, textAlign: "center", color: C.dim }}>No inbound loads are tied to this material right now.</td></tr>}
-                          </tbody>
-                        </table>
-                      </div>
-                    </TableShell>
+                  <div className="text-base text-[rgb(var(--foreground))]">{formatDescriptionForDisplay(selectedRow.desc || "") || "--"}</div>
+                  <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
+                    <StatCard label="Gap To Schedule" value={Math.round(selectedRow.roGapQty || 0).toLocaleString()} tone={C.bad} mono={mono} />
+                    <StatCard label="Short Qty" value={Math.round(selectedRow.shortQty || 0).toLocaleString()} tone={C.warn} mono={mono} />
+                    <StatCard label="On Receive Orders" value={Math.round(selectedRow.inboundQty || 0).toLocaleString()} tone={C.accent} mono={mono} />
+                    <StatCard label="Affected WOs" value={(selectedRow.affectedWOCount || 0).toLocaleString()} tone={C.bright} mono={mono} />
                   </div>
-                )}
+                </div>
+              )}
 
-                {detailTab === "unlock" && (
-                  <div className="space-y-4">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="secondary">{selectedItem.relatedUnlocks.length} WOs</Badge>
-                      <Badge variant="secondary">{selectedItem.relatedUnlocks.filter(function(row) { return !!row.availableBy; }).length} dated unlocks</Badge>
-                      <Badge variant="secondary">{selectedItem.relatedUnlocks.filter(function(row) { return row.status === "inbound-no-date"; }).length} date TBD</Badge>
-                      <div className="flex-1" />
-                      <Button onClick={function() { exportUnlockCsv(selectedItem.relatedUnlocks); }} variant="outline" size="sm" disabled={!selectedItem.relatedUnlocks.length}>Unlock CSV</Button>
-                    </div>
-
-                    <TableShell>
-                      <div style={{ overflowX: "auto" }}>
-                        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                          <thead><tr style={{ background: C.raised }}>
-                            {["Available By", "WO", "FG SKU", "Customer", "Due", "Blocked Units", "Runnable Now", "Coverage", "POs", "Status"].map(function(label) {
-                              return <th key={label} style={thC(false)}>{label}</th>;
-                            })}
-                          </tr></thead>
-                          <tbody>
-                            {selectedItem.relatedUnlocks.map(function(row) {
-                              var tone = unlockTone(row.status, C);
-                              return (
-                                <tr key={row.woNum} style={{ borderBottom: "1px solid " + C.border }}>
-                                  <td style={Object.assign({}, tdM, { color: row.availableBy ? C.ok : C.dim })}>{row.availableBy ? fmtDate(row.availableBy) : row.earliestInboundDate ? "TBD" : "--"}</td>
-                                  <td style={Object.assign({}, tdM, { color: C.bright, fontWeight: 600 })}>{row.woNum || "--"}</td>
-                                  <td style={Object.assign({}, tdM, { color: C.bright })}>{row.productSku || "--"}</td>
-                                  <td style={tdN}>{row.customer || "--"}</td>
-                                  <td style={tdM}>{fmtDate(row.dueDate)}</td>
-                                  <td style={Object.assign({}, tdM, { color: C.bad, fontWeight: 600 })}>{Math.round(row.blockedUnits || 0).toLocaleString()}</td>
-                                  <td style={tdM}>{Math.round(row.runnableNow || 0).toLocaleString()}</td>
-                                  <td style={tdM}>{row.coveragePct || 0}%</td>
-                                  <td style={tdN}>{(row.sourcePOs || []).length ? row.sourcePOs.join(", ") : "--"}</td>
-                                  <td style={tdN}>
-                                    <span style={{ display: "inline-block", padding: "2px 7px", borderRadius: 999, fontSize: 11, color: tone.fg, background: tone.bg, border: "1px solid " + tone.bd }}>
-                                      {unlockStatusLabel(row.status)}
-                                    </span>
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                            {!selectedItem.relatedUnlocks.length && <tr><td colSpan={10} style={{ padding: 24, textAlign: "center", color: C.dim }}>No unlock forecast rows are tied to this material yet.</td></tr>}
-                          </tbody>
-                        </table>
-                      </div>
-                    </TableShell>
+              {boardKey === "dock-follow-up" && (
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span style={{ fontFamily: mono, fontSize: 16, fontWeight: 700, color: C.bright }}>{selectedRow.po || "--"}</span>
+                    <Badge variant="secondary">{selectedRow.customerLabel || "--"}</Badge>
+                    <Pill tone={toneForDock(selectedRow, C)}>Needs OpenDock appointment</Pill>
                   </div>
-                )}
-              </div>
+                  <div className="text-base text-[rgb(var(--foreground))]">{selectedRow.materialSummary || "--"}</div>
+                  <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
+                    <StatCard label="Expected Date" value={displayDate(selectedRow.expectedDate)} tone={C.accent} mono={mono} />
+                    <StatCard label="Load Qty" value={Math.round(selectedRow.qty || 0).toLocaleString()} tone={C.bright} mono={mono} />
+                    <StatCard label="Linked WOs" value={(selectedRow.linkedWOCount || 0).toLocaleString()} tone={C.warn} mono={mono} />
+                    <StatCard label="Units Unlocked" value={Math.round(selectedRow.unitsUnlocked || 0).toLocaleString()} tone={C.ok} mono={mono} />
+                  </div>
+                </div>
+              )}
             </div>
-          )}
-        </Card>
-      </div>
+
+            <div className="space-y-4 px-5 py-5">
+              {boardKey === "run-next" && (
+                <div className="space-y-4">
+                  <Card className="px-4 py-4">
+                    <div className="text-sm font-semibold text-[rgb(var(--foreground))]">Planning Snapshot</div>
+                    <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                      <div style={{ color: C.dim }}>Due <div style={{ color: C.bright, fontFamily: mono, marginTop: 2 }}>{displayDate(selectedRow.dueDate)}</div></div>
+                      <div style={{ color: C.dim }}>Action <div style={{ color: C.bright, marginTop: 2 }}>{selectedRow.actionLabel}</div></div>
+                      <div style={{ color: C.dim }}>Blocking Materials <div style={{ color: C.bright, marginTop: 2 }}>{selectedRow.blockingMaterialsText || "--"}</div></div>
+                      <div style={{ color: C.dim }}>Receive Orders <div style={{ color: C.bright, marginTop: 2 }}>{(selectedRow.sourcePOs || []).length ? selectedRow.sourcePOs.join(", ") : "--"}</div></div>
+                    </div>
+                  </Card>
+
+                  <TableShell>
+                    <div className="flex items-center justify-between gap-2 border-b border-[rgb(var(--border))] px-3 py-2.5">
+                      <div className="text-sm font-semibold text-[rgb(var(--foreground))]">Blocking Materials</div>
+                      <Badge variant="secondary">{(selectedRow.componentsDetailed || []).length} materials</Badge>
+                    </div>
+                    <div style={{ overflowX: "auto" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                        <thead>
+                          <tr style={{ background: C.raised }}>
+                            {["Material", "Description", "Needed", "Covered", "Coverage", "Earliest RO", "Receive Orders", "Status"].map(function(label) {
+                              return <th key={label} style={thC(false)}>{label}</th>;
+                            })}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(selectedRow.componentsDetailed || []).map(function(component) {
+                            return (
+                              <tr key={component.sku} style={{ borderBottom: "1px solid " + C.border }}>
+                                <td style={Object.assign({}, tdM, { color: C.bright, fontWeight: 600 })}>{component.sku || "--"}</td>
+                                <td style={tdN}>{formatDescriptionForDisplay(component.desc || "") || "--"}</td>
+                                <td style={tdM}>{Math.round(component.neededQty || 0).toLocaleString()}</td>
+                                <td style={tdM}>{Math.round(component.coveredQty || 0).toLocaleString()}</td>
+                                <td style={tdM}>{component.coveragePct || 0}%</td>
+                                <td style={tdM}>{displayDate(component.unlockDate || component.earliestInboundDate)}</td>
+                                <td style={tdN}>{listPreview(component.sourcePOs || [], 2)}</td>
+                                <td style={tdN}><Pill tone={toneForRunNext(component.state, C)}>{unlockStatusLabel(component.state)}</Pill></td>
+                              </tr>
+                            );
+                          })}
+                          {!(selectedRow.componentsDetailed || []).length && <tr><td colSpan={8} style={{ padding: 24, textAlign: "center", color: C.dim }}>No blocking materials found.</td></tr>}
+                        </tbody>
+                      </table>
+                    </div>
+                  </TableShell>
+
+                  <TableShell>
+                    <div className="flex items-center justify-between gap-2 border-b border-[rgb(var(--border))] px-3 py-2.5">
+                      <div className="text-sm font-semibold text-[rgb(var(--foreground))]">Related Inbound Loads</div>
+                      <Badge variant="secondary">{(selectedRow.relatedLoads || []).length} loads</Badge>
+                    </div>
+                    <div style={{ overflowX: "auto" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                        <thead>
+                          <tr style={{ background: C.raised }}>
+                            {["Available", "Receive Order", "Match", "Qty", "Linked WOs", "Units Unlocked"].map(function(label) {
+                              return <th key={label} style={thC(false)}>{label}</th>;
+                            })}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(selectedRow.relatedLoads || []).map(function(load) {
+                            return (
+                              <tr key={load.key} style={{ borderBottom: "1px solid " + C.border }}>
+                                <td style={tdM}>{displayDate(load.availableDate)}</td>
+                                <td style={Object.assign({}, tdM, { color: C.bright })}>{load.po || "--"}</td>
+                                <td style={tdN}>{load.matchLabel || "--"}</td>
+                                <td style={tdM}>{Math.round(load.qty || 0).toLocaleString()}</td>
+                                <td style={tdM}>{load.linkedWOCount || 0}</td>
+                                <td style={tdM}>{Math.round(load.unitsUnlocked || 0).toLocaleString()}</td>
+                              </tr>
+                            );
+                          })}
+                          {!(selectedRow.relatedLoads || []).length && <tr><td colSpan={6} style={{ padding: 24, textAlign: "center", color: C.dim }}>No related inbound loads found.</td></tr>}
+                        </tbody>
+                      </table>
+                    </div>
+                  </TableShell>
+                </div>
+              )}
+
+              {boardKey === "vendor-gaps" && (
+                <div className="space-y-4">
+                  <Card className="px-4 py-4">
+                    <div className="text-sm font-semibold text-[rgb(var(--foreground))]">Vendor Follow-up Snapshot</div>
+                    <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                      <div style={{ color: C.dim }}>Earliest Due <div style={{ color: C.bright, fontFamily: mono, marginTop: 2 }}>{displayDate(selectedRow.earliestDueDate)}</div></div>
+                      <div style={{ color: C.dim }}>Action <div style={{ color: C.bright, marginTop: 2 }}>{selectedRow.actionLabel}</div></div>
+                      <div style={{ color: C.dim }}>Current Receive Orders <div style={{ color: C.bright, marginTop: 2 }}>{(selectedRow.openPOs || []).length ? selectedRow.openPOs.join(", ") : "--"}</div></div>
+                      <div style={{ color: C.dim }}>OpenDock Scheduled <div style={{ color: C.bright, marginTop: 2 }}>{Math.round(selectedRow.scheduledQty || 0).toLocaleString()}</div></div>
+                    </div>
+                  </Card>
+
+                  {renderAffectedWosTable(selectedRow.affectedWOs || [], C, thC, tdN, tdM)}
+
+                  <TableShell>
+                    <div className="flex items-center justify-between gap-2 border-b border-[rgb(var(--border))] px-3 py-2.5">
+                      <div className="text-sm font-semibold text-[rgb(var(--foreground))]">Current Inbound Context</div>
+                      <Badge variant="secondary">{(selectedRow.relatedLoads || []).length} loads</Badge>
+                    </div>
+                    <div style={{ overflowX: "auto" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                        <thead>
+                          <tr style={{ background: C.raised }}>
+                            {["Available", "Receive Order", "Match", "Qty", "Linked WOs", "Units Unlocked"].map(function(label) {
+                              return <th key={label} style={thC(false)}>{label}</th>;
+                            })}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(selectedRow.relatedLoads || []).map(function(load) {
+                            return (
+                              <tr key={load.key} style={{ borderBottom: "1px solid " + C.border }}>
+                                <td style={tdM}>{displayDate(load.availableDate)}</td>
+                                <td style={Object.assign({}, tdM, { color: C.bright })}>{load.po || "--"}</td>
+                                <td style={tdN}>{load.matchLabel || "--"}</td>
+                                <td style={tdM}>{Math.round(load.qty || 0).toLocaleString()}</td>
+                                <td style={tdM}>{load.linkedWOCount || 0}</td>
+                                <td style={tdM}>{Math.round(load.unitsUnlocked || 0).toLocaleString()}</td>
+                              </tr>
+                            );
+                          })}
+                          {!(selectedRow.relatedLoads || []).length && <tr><td colSpan={6} style={{ padding: 24, textAlign: "center", color: C.dim }}>No current inbound lines for this material.</td></tr>}
+                        </tbody>
+                      </table>
+                    </div>
+                  </TableShell>
+                </div>
+              )}
+
+              {boardKey === "dock-follow-up" && (
+                <div className="space-y-4">
+                  <Card className="px-4 py-4">
+                    <div className="text-sm font-semibold text-[rgb(var(--foreground))]">Dock Follow-up Snapshot</div>
+                    <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                      <div style={{ color: C.dim }}>Expected Date <div style={{ color: C.bright, fontFamily: mono, marginTop: 2 }}>{displayDate(selectedRow.expectedDate)}</div></div>
+                      <div style={{ color: C.dim }}>Action <div style={{ color: C.bright, marginTop: 2 }}>{selectedRow.actionLabel}</div></div>
+                      <div style={{ color: C.dim }}>Confirmation <div style={{ color: C.bright, marginTop: 2 }}>{selectedRow.confirmation || "--"}</div></div>
+                      <div style={{ color: C.dim }}>Customer Scope <div style={{ color: C.bright, marginTop: 2 }}>{selectedRow.customerLabel || "--"}</div></div>
+                    </div>
+                  </Card>
+
+                  <TableShell>
+                    <div className="flex items-center justify-between gap-2 border-b border-[rgb(var(--border))] px-3 py-2.5">
+                      <div className="text-sm font-semibold text-[rgb(var(--foreground))]">Materials On This Load</div>
+                      <Badge variant="secondary">{(selectedRow.materialsDetailed || []).length} materials</Badge>
+                    </div>
+                    <div style={{ overflowX: "auto" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                        <thead>
+                          <tr style={{ background: C.raised }}>
+                            {["Material", "Description", "Qty", "Expected", "Linked WOs", "Units Unlocked"].map(function(label) {
+                              return <th key={label} style={thC(false)}>{label}</th>;
+                            })}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(selectedRow.materialsDetailed || []).map(function(material) {
+                            return (
+                              <tr key={material.sku} style={{ borderBottom: "1px solid " + C.border }}>
+                                <td style={Object.assign({}, tdM, { color: C.bright, fontWeight: 600 })}>{material.sku || "--"}</td>
+                                <td style={tdN}>{formatDescriptionForDisplay(material.desc || "") || "--"}</td>
+                                <td style={tdM}>{Math.round(material.qty || 0).toLocaleString()}</td>
+                                <td style={tdM}>{displayDate(material.expectedDate)}</td>
+                                <td style={tdM}>{material.linkedWOCount || 0}</td>
+                                <td style={tdM}>{Math.round(material.unitsUnlocked || 0).toLocaleString()}</td>
+                              </tr>
+                            );
+                          })}
+                          {!(selectedRow.materialsDetailed || []).length && <tr><td colSpan={6} style={{ padding: 24, textAlign: "center", color: C.dim }}>No material detail on this load.</td></tr>}
+                        </tbody>
+                      </table>
+                    </div>
+                  </TableShell>
+
+                  {renderAffectedWosTable(selectedRow.affectedWOs || [], C, thC, tdN, tdM)}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </Card>
     </div>
   );
 }
