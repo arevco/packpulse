@@ -279,7 +279,7 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage, c
             <div style={{ display:"flex", gap:14, flexWrap:"wrap", marginTop:10, marginBottom:8, fontSize:12 }}>
               <span style={{ color:C.dim }}>Blocking Component: <span style={{ color:C.bright, fontFamily:mono }}>{ci.sku || "--"}</span></span>
               <span style={{ color:C.dim }}>Component Short: <span style={{ color:C.bad, fontFamily:mono, fontWeight:700 }}>{Math.round(ci.shortQty || 0).toLocaleString()}</span></span>
-              <span style={{ color:C.dim }}>Inbound Source: <span style={{ color:C.bright, fontFamily:mono }}>EDR {Math.round(ci.inboundQty || 0).toLocaleString()} | OpenDock Scheduled {Math.round(ci.scheduledQty || 0).toLocaleString()}</span></span>
+              <span style={{ color:C.dim }}>Inbound Source: <span style={{ color:C.bright, fontFamily:mono }}>Receive Orders {Math.round(ci.inboundQty || 0).toLocaleString()} | OpenDock Scheduled {Math.round(ci.scheduledQty || 0).toLocaleString()}</span></span>
               <span style={{ color:C.dim }}>Earliest Inbound: <span style={{ color:C.bright, fontFamily:mono }}>{fmtDate(ci.earliestInboundDate)}</span></span>
               <span style={{ color:C.dim }}>Earliest Scheduled: <span style={{ color:C.bright, fontFamily:mono }}>{fmtDate(ci.earliestScheduledDate)}</span></span>
               <span style={{ color:C.dim }}>POs: <span style={{ color:C.bright }}>{(ci.openPOs || []).length ? ci.openPOs.join(", ") : "--"}</span></span>
@@ -362,7 +362,7 @@ export default function CriticalItemsView({ rawCriticalItems, inboundCoverage, c
       {summary.total + " critical materials" + (inboundCoverage ? (" · horizon " + inboundCoverage.horizonDays + "d") : "")}
     </div>
     <div style={{ marginTop:6, fontSize:12, color:C.dim }}>
-      Status guide: <strong>No Inbound Found</strong> = no EDR qty and no OpenDock scheduled qty. <strong>Inbound Not Scheduled</strong> = inbound exists but none is scheduled in OpenDock.
+      Status guide: <strong>No Inbound Found</strong> = no Receive Orders qty and no OpenDock scheduled qty. <strong>Inbound Not Scheduled</strong> = inbound exists but none is scheduled in OpenDock.
     </div>
   </div>);
 }

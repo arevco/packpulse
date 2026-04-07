@@ -1,0 +1,795 @@
+import { normalizeStr, safeNum } from "../utils.js";
+
+function normalizePoKey(value) {
+  var s = (value || "").toString().trim();
+  if (!s) return "";
+  s = s.replace(/\.0+$/, "");
+  s = s.replace(/[^a-zA-Z0-9]/g, "");
+  return normalizeStr(s);
+}
+
+function buildSkuMatchKeys(value) {
+  var raw = (value || "").toString().trim();
+  if (!raw) return [];
+  var noDecimal = raw.replace(/\.0+$/, "");
+  var norm = normalizeStr(noDecimal);
+  if (!norm) return [];
+  var keys = [norm];
+  var stripped = norm.replace(/^0+/, "");
+  if (stripped && stripped !== norm) keys.push(stripped);
+  return Array.from(new Set(keys));
+}
+
+function firstValue(row, keys) {
+  if (!row) return "";
+  for (var i = 0; i < keys.length; i++) {
+    var key = keys[i];
+    if (Object.prototype.hasOwnProperty.call(row, key) && row[key] != null && row[key] !== "") return row[key];
+  }
+  return "";
+}
+
+function firstValueLoose(row, keys) {
+  var direct = firstValue(row, keys);
+  if (direct) return direct;
+  if (!row || !keys || !keys.length) return "";
+  var wanted = {};
+  keys.forEach(function(key) { wanted[normalizeStr(key)] = true; });
+  var rowKeys = Object.keys(row);
+  for (var i = 0; i < rowKeys.length; i++) {
+    var rowKey = rowKeys[i];
+    if (!wanted[normalizeStr(rowKey)]) continue;
+    var value = row[rowKey];
+    if (value != null && value !== "") return value;
+  }
+  return "";
+}
+
+function pickInboundDateValue(row) {
+  return firstValueLoose(row, [
+    "Delivery Date",
+    "Expected delivery date",
+    "Receive Order Item expected delivery date",
+    "RO Date",
+    "Expected ship date",
+    "Actual ship date",
+    "Req Dely"
+  ]);
+}
+
+function parseInboundDateValue(row) {
+  var raw = pickInboundDateValue(row);
+  if (!raw) return null;
+  var d = raw instanceof Date ? raw : new Date(raw);
+  return isNaN(d) ? null : d;
+}
+
+function toIsoDate(value) {
+  if (!value) return "";
+  var d = value instanceof Date ? value : new Date(value);
+  if (isNaN(d)) return "";
+  return d.toISOString().slice(0, 10);
+}
+
+function normalizeDateOnly(value) {
+  if (!value) return null;
+  var d = value instanceof Date ? new Date(value) : new Date(value);
+  if (isNaN(d)) return null;
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function isWorkOrderClosed(wo) {
+  var status = normalizeStr(wo && wo.status ? wo.status : "");
+  if (status && (
+    status.includes("closed") ||
+    status.includes("complete") ||
+    status.includes("completed") ||
+    status.includes("done") ||
+    status.includes("cancelled") ||
+    status.includes("canceled") ||
+    status.includes("archived")
+  )) return true;
+  return safeNum(wo && wo.unitsRemaining) <= 0;
+}
+
+function isReceiveOrderInboundRow(row) {
+  var source = firstValueLoose(row, ["__inboundSource", "Inbound Source", "Source"]);
+  if (normalizeStr(source).includes("receiveorders")) return true;
+  var keys = Object.keys(row || {});
+  for (var i = 0; i < keys.length; i++) {
+    if (normalizeStr(keys[i]).includes("receiveorder")) return true;
+  }
+  return false;
+}
+
+function isClosedReceiveOrderInboundRow(row) {
+  if (!isReceiveOrderInboundRow(row)) return false;
+  var received = normalizeStr(firstValueLoose(row, ["Received", "Receive Order received"]));
+  return received === "yes" || received === "true" || received === "1";
+}
+
+function pushToken(out, seen, value, kind) {
+  var token = normalizePoKey(value);
+  if (!token || seen[token]) return;
+  seen[token] = true;
+  out.push({ token: token, kind: kind || "reference" });
+}
+
+function collectReferenceTokens(row, explicitPairs) {
+  var out = [];
+  var seen = {};
+  (explicitPairs || []).forEach(function(pair) {
+    if (!pair) return;
+    pushToken(out, seen, pair.value, pair.kind);
+  });
+  Object.keys(row || {}).forEach(function(key) {
+    var normalized = normalizeStr(key);
+    if (!(normalized.includes("po") || normalized.includes("purchase") || normalized.includes("reference") || normalized.includes("ref") || normalized.includes("bol") || normalized.includes("document") || normalized.includes("order") || normalized.includes("confirm"))) return;
+    pushToken(out, seen, row[key], normalized.includes("po") ? "po" : normalized.includes("confirm") ? "confirmation" : "reference");
+  });
+  return out;
+}
+
+function isInboundDockRow(row) {
+  if (!row) return false;
+  var keys = Object.keys(row || {});
+  var values = [
+    keys.find(function(key) { return normalizeStr(key).includes("dock"); }),
+    keys.find(function(key) { return normalizeStr(key).includes("loadtype"); }),
+    keys.find(function(key) { return normalizeStr(key).includes("direction"); }),
+    keys.find(function(key) { return normalizeStr(key).includes("type"); })
+  ].filter(Boolean).map(function(key) {
+    return normalizeStr(row[key] || "");
+  }).join(" ");
+  if (!values) return true;
+  if (values.includes("outbound") || values.includes("shipping")) return false;
+  if (values.includes("inbound") || values.includes("receiv")) return true;
+  return true;
+}
+
+function isScheduledDockStatus(status) {
+  return normalizeStr(status || "").includes("scheduled");
+}
+
+function buildMaterialLinkMap(analysis) {
+  var linkMap = {};
+  if (!analysis || !Array.isArray(analysis.results)) return linkMap;
+  var addLink = function(skuRaw, payload) {
+    buildSkuMatchKeys(skuRaw).forEach(function(key) {
+      if (!linkMap[key]) linkMap[key] = [];
+      linkMap[key].push(payload);
+    });
+  };
+  analysis.results.forEach(function(wo) {
+    if (isWorkOrderClosed(wo)) return;
+    (wo.components || []).forEach(function(component) {
+      if (safeNum(component && component.short) <= 0) return;
+      var payload = {
+        woNum: wo.woNum,
+        productSku: wo.productSkuRaw,
+        productDesc: wo.productDesc || "",
+        dueDate: wo.dueDate || "",
+        needed: safeNum(component && component.needed),
+        short: safeNum(component && component.short),
+        qtyToProduce: safeNum(wo.qtyToProduce),
+        unitsRemaining: safeNum(wo.unitsRemaining),
+        customer: wo.customer || "",
+        status: wo.status || "",
+        isOpen: true
+      };
+      addLink(component.sku, payload);
+      (component.optionDetails || []).forEach(function(option) {
+        addLink(option && option.sku, payload);
+      });
+    });
+  });
+  return linkMap;
+}
+
+function resolveMaterialLinks(linkMap, skuKeys) {
+  var keys = Array.isArray(skuKeys) ? skuKeys : buildSkuMatchKeys(skuKeys);
+  for (var i = 0; i < keys.length; i++) {
+    var key = keys[i];
+    if (linkMap[key] && linkMap[key].length) {
+      return {
+        skuKey: key,
+        links: linkMap[key],
+        via: i === 0 ? "exact" : "leading-zero"
+      };
+    }
+  }
+  return {
+    skuKey: keys[0] || "",
+    links: [],
+    via: "none"
+  };
+}
+
+function buildCriticalItemsFallback(analysis) {
+  if (!analysis || !Array.isArray(analysis.results)) return [];
+  var bySku = {};
+  analysis.results.forEach(function(wo) {
+    if (isWorkOrderClosed(wo)) return;
+    (wo.components || []).forEach(function(component) {
+      if (safeNum(component && component.short) <= 0) return;
+      var key = normalizeStr(component.sku);
+      if (!bySku[key]) {
+        bySku[key] = {
+          sku: component.sku,
+          desc: component.desc || "",
+          totalShort: 0,
+          onHand: safeNum(component && component.onHand),
+          unlockedUnits: 0,
+          affectedWOs: [],
+          customersMap: {}
+        };
+      }
+      bySku[key].totalShort += safeNum(component && component.short);
+      bySku[key].unlockedUnits += Math.max(0, safeNum(wo.unitsRemaining) - safeNum(wo.maxRunnable));
+      bySku[key].affectedWOs.push({
+        woNum: wo.woNum,
+        productSku: wo.productSkuRaw,
+        productDesc: wo.productDesc || "",
+        customer: wo.customer || "",
+        qtyToProduce: safeNum(wo.qtyToProduce),
+        unitsRemaining: safeNum(wo.unitsRemaining),
+        needed: safeNum(component && component.needed),
+        short: safeNum(component && component.short),
+        dueDate: wo.dueDate || ""
+      });
+      if (wo.customer) bySku[key].customersMap[wo.customer] = true;
+    });
+  });
+  return Object.values(bySku).map(function(item) {
+    var customers = Object.keys(item.customersMap || {});
+    return {
+      sku: item.sku,
+      desc: item.desc || "",
+      totalShort: item.totalShort,
+      onHand: item.onHand,
+      unlockedUnits: item.unlockedUnits,
+      affectedWOs: item.affectedWOs,
+      customers: customers,
+      customerLabel: customers.length ? customers.join(", ") : "--"
+    };
+  });
+}
+
+function normalizeInboundLines(edrData, windowStart, windowEnd) {
+  var rows = Array.isArray(edrData) ? edrData : [];
+  var lines = [];
+  rows.forEach(function(row, index) {
+    if (isClosedReceiveOrderInboundRow(row)) return;
+    var sku = String(firstValueLoose(row, ["Material", "Item Code", "SKU"]) || "").trim();
+    var skuKeys = buildSkuMatchKeys(sku);
+    if (!skuKeys.length) return;
+    var qtyOpen = safeNum(firstValueLoose(row, ["Still to be delivered", "Open Qty", "still_to_be_delivered", "openqty"]));
+    var qtyOrd = safeNum(firstValueLoose(row, ["Order Quantity", "Expected unit quantity", "Expected Quantity", "Actual unit quantity", "Quantity"]));
+    var qty = qtyOpen > 0 ? qtyOpen : qtyOrd;
+    if (qty <= 0) return;
+    var dateObj = parseInboundDateValue(row);
+    var hasDate = !!dateObj;
+    var isReceiveOrder = isReceiveOrderInboundRow(row);
+    if (hasDate) {
+      dateObj = normalizeDateOnly(dateObj);
+      if (dateObj < windowStart || dateObj > windowEnd) return;
+    } else if (!isReceiveOrder) {
+      return;
+    }
+    var po = String(firstValueLoose(row, ["PO Number", "Receive Order Code", "Receive Order", "Purchasing Document", "Purchase Order Number"]) || "").trim();
+    var reference = String(firstValueLoose(row, ["Reference"]) || "").trim();
+    lines.push({
+      id: "inbound-" + index,
+      row: row,
+      sku: sku,
+      skuKeys: skuKeys,
+      desc: String(firstValueLoose(row, ["Description", "Item Description", "Material Description", "Short Text", "Mat Desc"]) || "").trim(),
+      qty: qty,
+      po: po,
+      poKey: normalizePoKey(po),
+      reference: reference,
+      dateObj: dateObj,
+      date: hasDate && dateObj ? dateObj.toISOString().slice(0, 10) : "",
+      hasDate: hasDate,
+      isReceiveOrder: isReceiveOrder,
+      tokens: collectReferenceTokens(row, [{ value: po, kind: "po" }, { value: reference, kind: "reference" }]),
+      matchKind: "none",
+      matchScore: 0,
+      matchedAppointmentId: "",
+      dockStatus: "",
+      dockScheduledDate: "",
+      confirmation: ""
+    });
+  });
+  return lines;
+}
+
+function normalizeAppointments(dockData) {
+  var rows = Array.isArray(dockData) ? dockData : [];
+  return rows.reduce(function(out, row, index) {
+    if (!isInboundDockRow(row)) return out;
+    var scheduledDate = normalizeDateOnly(firstValueLoose(row, ["Appt Date", "Appointment Date", "Date", "Scheduled Date"]));
+    var po = String(firstValueLoose(row, ["PO", "PO Number", "Reference", "Purchase Order"]) || "").trim();
+    var confirmation = String(firstValueLoose(row, ["Confirmation", "Confirmation Number"]) || "").trim();
+    var status = String(firstValueLoose(row, ["Status"]) || "").trim();
+    if (!scheduledDate && !po && !confirmation && !status) return out;
+    var appointment = {
+      id: "dock-" + index,
+      row: row,
+      scheduledDate: scheduledDate ? scheduledDate.toISOString().slice(0, 10) : "",
+      scheduledDateObj: scheduledDate,
+      po: po,
+      poKey: normalizePoKey(po),
+      confirmation: confirmation,
+      confirmationKey: normalizePoKey(confirmation),
+      status: status,
+      tokens: collectReferenceTokens(row, [{ value: po, kind: "po" }, { value: confirmation, kind: "confirmation" }])
+    };
+    out.push(appointment);
+    return out;
+  }, []);
+}
+
+function matchInboundLinesToAppointments(lines, appointments) {
+  var appointmentsByToken = {};
+  appointments.forEach(function(appointment) {
+    appointment.tokens.forEach(function(token) {
+      if (!appointmentsByToken[token.token]) appointmentsByToken[token.token] = [];
+      appointmentsByToken[token.token].push({ appointment: appointment, kind: token.kind });
+    });
+  });
+
+  var matchedAppointmentIds = {};
+  lines.forEach(function(line) {
+    var candidatesById = {};
+    line.tokens.forEach(function(token) {
+      (appointmentsByToken[token.token] || []).forEach(function(hit) {
+        var baseScore = token.kind === "po" ? 100 : token.kind === "confirmation" ? 95 : 70;
+        if (!candidatesById[hit.appointment.id] || candidatesById[hit.appointment.id].score < baseScore) {
+          candidatesById[hit.appointment.id] = {
+            appointment: hit.appointment,
+            kind: token.kind,
+            score: baseScore
+          };
+        }
+      });
+    });
+
+    var best = null;
+    Object.values(candidatesById).forEach(function(candidate) {
+      var score = candidate.score || 0;
+      if (line.dateObj && candidate.appointment && candidate.appointment.scheduledDateObj) {
+        var diffDays = Math.abs(Math.round((line.dateObj.getTime() - candidate.appointment.scheduledDateObj.getTime()) / 86400000));
+        if (diffDays === 0) score += 20;
+        else if (diffDays === 1) score += 10;
+      }
+      if (!best || score > best.score) {
+        best = {
+          appointment: candidate.appointment,
+          kind: candidate.kind,
+          score: score
+        };
+      }
+    });
+
+    if (!best || best.score < 80) return;
+    line.matchKind = best.kind;
+    line.matchScore = best.score;
+    line.matchedAppointmentId = best.appointment.id;
+    line.dockStatus = best.appointment.status || "";
+    line.dockScheduledDate = best.appointment.scheduledDate || "";
+    line.confirmation = best.appointment.confirmation || "";
+    matchedAppointmentIds[best.appointment.id] = true;
+  });
+
+  return { lines: lines, matchedAppointmentIds: matchedAppointmentIds };
+}
+
+function chooseRiskLevel(status, dueBeforeScheduled, dueWithin48h) {
+  if (status === "missing" || dueBeforeScheduled) return "high";
+  if (status === "unscheduled" || status === "partial" || dueWithin48h) return "medium";
+  return "low";
+}
+
+function chooseRecommendedAction(status, dueBeforeScheduled) {
+  if (dueBeforeScheduled) return "Resequence WO / Expedite";
+  if (status === "missing") return "Create / Expedite PO";
+  if (status === "unscheduled") return "Schedule OpenDock";
+  if (status === "partial") return "Expedite Balance";
+  return "Monitor";
+}
+
+function buildInboundCoverage(criticalItems, inboundLines) {
+  if (!Array.isArray(criticalItems) || !criticalItems.length) return null;
+
+  var inboundBySku = {};
+  inboundLines.forEach(function(line) {
+    line.skuKeys.forEach(function(key) {
+      if (!inboundBySku[key]) inboundBySku[key] = [];
+      inboundBySku[key].push(line);
+    });
+  });
+
+  var now = new Date();
+  var rows = criticalItems.map(function(item) {
+    var inboundRows = [];
+    buildSkuMatchKeys(item && item.sku).forEach(function(key) {
+      inboundRows = inboundRows.concat(inboundBySku[key] || []);
+    });
+    if (inboundRows.length > 1) {
+      var seen = {};
+      inboundRows = inboundRows.filter(function(line) {
+        if (seen[line.id]) return false;
+        seen[line.id] = true;
+        return true;
+      });
+    }
+
+    var shortQty = Math.max(0, safeNum(item && item.totalShort));
+    var inboundQty = inboundRows.reduce(function(sum, line) { return sum + safeNum(line.qty); }, 0);
+    var scheduledRows = inboundRows.filter(function(line) { return isScheduledDockStatus(line.dockStatus) && !!line.matchedAppointmentId; });
+    var scheduledQty = scheduledRows.reduce(function(sum, line) { return sum + safeNum(line.qty); }, 0);
+    var unscheduledQty = Math.max(0, inboundQty - scheduledQty);
+    var uncoveredQty = Math.max(0, shortQty - scheduledQty);
+    var coveragePct = shortQty > 0 ? Math.min(100, Math.round((inboundQty / shortQty) * 100)) : 100;
+    var scheduledCoveragePct = shortQty > 0 ? Math.min(100, Math.round((scheduledQty / shortQty) * 100)) : 100;
+
+    var earliestInboundDate = inboundRows
+      .map(function(line) { return line.date || line.dockScheduledDate || ""; })
+      .filter(Boolean)
+      .sort()[0] || "";
+    var earliestScheduledDate = scheduledRows
+      .map(function(line) { return line.dockScheduledDate || line.date || ""; })
+      .filter(Boolean)
+      .sort()[0] || "";
+
+    var earliestDue = "";
+    var dueDates = (item && item.affectedWOs ? item.affectedWOs : [])
+      .map(function(wo) {
+        var due = normalizeDateOnly(wo && wo.dueDate);
+        return due ? due.toISOString().slice(0, 10) : "";
+      })
+      .filter(Boolean)
+      .sort();
+    if (dueDates.length) earliestDue = dueDates[0];
+
+    var dueWithin48h = false;
+    var dueBeforeScheduled = false;
+    if (earliestDue) {
+      var dueDate = new Date(earliestDue + "T00:00:00");
+      dueWithin48h = dueDate.getTime() - now.getTime() <= 48 * 3600000;
+      if (earliestScheduledDate) dueBeforeScheduled = dueDate < new Date(earliestScheduledDate + "T00:00:00");
+      else if (shortQty > 0) dueBeforeScheduled = true;
+    }
+
+    var status = "covered";
+    if (scheduledQty <= 0 && inboundQty <= 0) status = "missing";
+    else if (scheduledQty <= 0 && inboundQty > 0) status = "unscheduled";
+    else if (scheduledQty < shortQty) status = "partial";
+
+    var openPOs = Array.from(new Set(inboundRows.map(function(line) { return line.po; }).filter(Boolean)));
+    var scheduledPOs = Array.from(new Set(scheduledRows.map(function(line) { return line.po; }).filter(Boolean)));
+    var dockStatuses = Array.from(new Set(scheduledRows.map(function(line) { return line.dockStatus; }).filter(Boolean)));
+
+    return {
+      sku: item && item.sku ? item.sku : "",
+      desc: item && item.desc ? item.desc : "",
+      customerLabel: item && item.customerLabel ? item.customerLabel : "--",
+      shortQty: shortQty,
+      affectedWOCount: item && item.affectedWOs ? item.affectedWOs.length : 0,
+      earliestDueDate: earliestDue,
+      earliestInboundDate: earliestInboundDate,
+      earliestScheduledDate: earliestScheduledDate,
+      inboundQty: inboundQty,
+      scheduledQty: scheduledQty,
+      unscheduledQty: unscheduledQty,
+      uncoveredQty: uncoveredQty,
+      coveragePct: coveragePct,
+      scheduledCoveragePct: scheduledCoveragePct,
+      dueBeforeScheduled: dueBeforeScheduled,
+      dueWithin48h: dueWithin48h,
+      status: status,
+      riskLevel: chooseRiskLevel(status, dueBeforeScheduled, dueWithin48h),
+      dockStatuses: dockStatuses,
+      openPOs: openPOs,
+      scheduledPOs: scheduledPOs,
+      recommendedAction: chooseRecommendedAction(status, dueBeforeScheduled)
+    };
+  }).sort(function(a, b) {
+    var riskRank = { high: 0, medium: 1, low: 2 };
+    var statusRank = { missing: 0, unscheduled: 1, partial: 2, covered: 3 };
+    if (a.riskLevel !== b.riskLevel) return riskRank[a.riskLevel] - riskRank[b.riskLevel];
+    if (a.status !== b.status) return statusRank[a.status] - statusRank[b.status];
+    return b.shortQty - a.shortQty;
+  });
+
+  return {
+    summary: {
+      totalCriticalItems: rows.length,
+      covered: rows.filter(function(row) { return row.status === "covered"; }).length,
+      partial: rows.filter(function(row) { return row.status === "partial"; }).length,
+      unscheduled: rows.filter(function(row) { return row.status === "unscheduled"; }).length,
+      missing: rows.filter(function(row) { return row.status === "missing"; }).length,
+      atRisk: rows.filter(function(row) { return row.riskLevel !== "low"; }).length,
+      dueSoon: rows.filter(function(row) { return row.dueWithin48h; }).length,
+      totalShortQty: rows.reduce(function(sum, row) { return sum + safeNum(row.shortQty); }, 0),
+      totalUncoveredQty: rows.reduce(function(sum, row) { return sum + safeNum(row.uncoveredQty); }, 0),
+      totalInboundQty: rows.reduce(function(sum, row) { return sum + safeNum(row.inboundQty); }, 0),
+      totalScheduledQty: rows.reduce(function(sum, row) { return sum + safeNum(row.scheduledQty); }, 0)
+    },
+    rows: rows
+  };
+}
+
+function buildLoadBoard(appointments, inboundLines, linkMap, todayIso) {
+  var todayDate = new Date(todayIso + "T00:00:00");
+  var loadsById = {};
+  appointments.forEach(function(appointment) {
+    loadsById[appointment.id] = {
+      key: appointment.id,
+      scheduledDate: appointment.scheduledDate || "",
+      expectedDate: appointment.scheduledDate || "",
+      po: appointment.po || "",
+      confirmation: appointment.confirmation || "",
+      status: appointment.status || "",
+      matchState: "opendock-only",
+      isMatched: false,
+      materialLineCount: 0,
+      totalQty: 0,
+      linkedWOCount: 0,
+      unitsUnlocked: 0,
+      materials: [],
+      linkedWOKeys: {}
+    };
+  });
+
+  var byMaterial = {};
+  var matchDiagnostics = {
+    exactSkuMatched: 0,
+    leadingZeroMatched: 0,
+    unmatched: 0,
+    matchedByPo: 0,
+    matchedByReference: 0,
+    matchedByConfirmation: 0
+  };
+
+  inboundLines.forEach(function(line) {
+    var resolved = resolveMaterialLinks(linkMap, line.skuKeys);
+    if (resolved.via === "exact" && resolved.links.length) matchDiagnostics.exactSkuMatched += 1;
+    else if (resolved.via === "leading-zero" && resolved.links.length) matchDiagnostics.leadingZeroMatched += 1;
+    else if (!resolved.links.length) matchDiagnostics.unmatched += 1;
+
+    if (line.matchKind === "po") matchDiagnostics.matchedByPo += 1;
+    else if (line.matchKind === "reference") matchDiagnostics.matchedByReference += 1;
+    else if (line.matchKind === "confirmation") matchDiagnostics.matchedByConfirmation += 1;
+
+    var unitsUnlocked = Math.min(
+      safeNum(line.qty),
+      resolved.links.reduce(function(sum, link) { return sum + Math.max(0, safeNum(link.short)); }, 0)
+    );
+
+    var materialLine = {
+      materialSku: line.sku || "Unknown",
+      materialDesc: line.desc || "",
+      qty: safeNum(line.qty),
+      expectedDate: line.date || line.dockScheduledDate || "",
+      matchState: line.matchedAppointmentId ? "matched-fresh" : "receive-order-only",
+      linkedWOCount: resolved.links.length,
+      unitsUnlocked: unitsUnlocked
+    };
+
+    if (!byMaterial[resolved.skuKey || normalizeStr(line.sku)]) {
+      byMaterial[resolved.skuKey || normalizeStr(line.sku)] = {
+        sku: line.sku,
+        desc: line.desc || "",
+        deliveries: [],
+        affectedWOs: resolved.links
+      };
+    }
+    byMaterial[resolved.skuKey || normalizeStr(line.sku)].deliveries.push({
+      sku: line.sku,
+      skuNorm: resolved.skuKey || normalizeStr(line.sku),
+      desc: line.desc || "",
+      date: line.date || line.dockScheduledDate || "",
+      qty: safeNum(line.qty),
+      po: line.po || "",
+      confirmation: line.confirmation || "",
+      dockStatus: line.dockStatus || "",
+      dockApptDate: line.dockScheduledDate || "",
+      isMatched: !!line.matchedAppointmentId,
+      linkedWOCount: resolved.links.length,
+      isAtRisk: resolved.links.length > 0
+    });
+
+    if (!line.matchedAppointmentId || !loadsById[line.matchedAppointmentId]) return;
+    var load = loadsById[line.matchedAppointmentId];
+    load.isMatched = true;
+    load.matchState = "matched-fresh";
+    if (line.date && (!load.expectedDate || line.date < load.expectedDate)) load.expectedDate = line.date;
+    load.materialLineCount += 1;
+    load.totalQty += safeNum(line.qty);
+    resolved.links.forEach(function(link) {
+      load.linkedWOKeys[link.woNum] = true;
+    });
+    load.unitsUnlocked += unitsUnlocked;
+    load.materials.push(materialLine);
+  });
+
+  var loads = Object.values(loadsById).map(function(load) {
+    return {
+      key: load.key,
+      scheduledDate: load.scheduledDate,
+      expectedDate: load.expectedDate,
+      po: load.po,
+      confirmation: load.confirmation,
+      status: load.status,
+      matchState: load.matchState,
+      isMatched: load.isMatched,
+      materialLineCount: load.materialLineCount,
+      totalQty: Math.round(load.totalQty),
+      linkedWOCount: Object.keys(load.linkedWOKeys || {}).length,
+      unitsUnlocked: Math.round(load.unitsUnlocked),
+      materials: load.materials
+    };
+  }).sort(function(a, b) {
+    return String(a.scheduledDate || "").localeCompare(String(b.scheduledDate || "")) ||
+      String(a.po || "").localeCompare(String(b.po || ""));
+  });
+
+  var allDeliveries = [];
+  Object.keys(byMaterial).forEach(function(key) {
+    allDeliveries = allDeliveries.concat(byMaterial[key].deliveries || []);
+  });
+
+  var lastInboundDate = allDeliveries.reduce(function(maxDate, delivery) {
+    return delivery.date && (!maxDate || delivery.date > maxDate) ? delivery.date : maxDate;
+  }, "");
+  var lastDockDate = loads.reduce(function(maxDate, load) {
+    return load.scheduledDate && (!maxDate || load.scheduledDate > maxDate) ? load.scheduledDate : maxDate;
+  }, "");
+  var toAgeDays = function(dateStr) {
+    if (!dateStr) return null;
+    var date = new Date(dateStr + "T00:00:00");
+    if (isNaN(date)) return null;
+    return Math.max(0, Math.floor((todayDate.getTime() - date.getTime()) / 86400000));
+  };
+  var toFreshnessLevel = function(ageDays) {
+    if (ageDays == null) return "missing";
+    if (ageDays <= 2) return "fresh";
+    if (ageDays <= 7) return "aging";
+    return "stale";
+  };
+  var inboundAgeDays = toAgeDays(lastInboundDate);
+  var dockAgeDays = toAgeDays(lastDockDate);
+  var inboundLevel = toFreshnessLevel(inboundAgeDays);
+  var matchedState = inboundLevel === "aging" ? "matched-aging" : inboundLevel === "stale" ? "matched-stale" : "matched-fresh";
+
+  loads = loads.map(function(load) {
+    if (!load.isMatched) return load;
+    return Object.assign({}, load, {
+      matchState: matchedState,
+      materials: (load.materials || []).map(function(material) {
+        return Object.assign({}, material, { matchState: matchedState });
+      })
+    });
+  });
+
+  var openWorkOrdersWaiting = {};
+  Object.keys(linkMap || {}).forEach(function(key) {
+    (linkMap[key] || []).forEach(function(link) {
+      if (!link || !link.isOpen) return;
+      if (!openWorkOrdersWaiting[link.woNum]) openWorkOrdersWaiting[link.woNum] = true;
+    });
+  });
+  allDeliveries.forEach(function(delivery) {
+    var resolved = resolveMaterialLinks(linkMap, buildSkuMatchKeys(delivery && delivery.sku));
+    (resolved.links || []).forEach(function(link) {
+      delete openWorkOrdersWaiting[link.woNum];
+    });
+  });
+
+  return {
+    timelineData: {
+      today: todayIso,
+      deliveries: allDeliveries,
+      byMaterial: byMaterial,
+      woTimelines: [],
+      matchDiagnostics: matchDiagnostics
+    },
+    deliveriesV2: {
+      todayBoard: {
+        openDockAppointmentsToday: loads.filter(function(load) { return load.scheduledDate === todayIso; }).length,
+        edrLoadsToday: allDeliveries.filter(function(delivery) { return delivery.date === todayIso; }).length,
+        matchedLoadsToday: loads.filter(function(load) { return load.scheduledDate === todayIso && load.isMatched; }).length,
+        unmatchedLoadsToday: loads.filter(function(load) { return load.scheduledDate === todayIso && !load.isMatched; }).length,
+        atRiskLoadsToday: loads.filter(function(load) { return load.scheduledDate === todayIso && (load.linkedWOCount || 0) > 0; }).length,
+        unitsPotentiallyUnlockedToday: Math.round(loads.filter(function(load) { return load.scheduledDate === todayIso; }).reduce(function(sum, load) { return sum + safeNum(load.unitsUnlocked); }, 0))
+      },
+      summary: {
+        openDockScheduled: loads.length,
+        materialResolved: loads.filter(function(load) { return load.materialLineCount > 0; }).length,
+        materialUnknown: loads.filter(function(load) { return load.materialLineCount <= 0; }).length,
+        atRiskWOsWaiting: Object.keys(openWorkOrdersWaiting).length,
+        unitsPotentiallyUnlocked: Math.round(loads.reduce(function(sum, load) { return sum + safeNum(load.unitsUnlocked); }, 0))
+      },
+      freshness: {
+        edr: {
+          lastDate: lastInboundDate,
+          ageDays: inboundAgeDays,
+          level: inboundLevel
+        },
+        openDock: {
+          lastDate: lastDockDate,
+          ageDays: dockAgeDays,
+          level: toFreshnessLevel(dockAgeDays)
+        },
+        confidence: {
+          score: loads.length && inboundLines.length ? 90 : inboundLines.length ? 75 : 40,
+          label: loads.length && inboundLines.length ? "High" : inboundLines.length ? "Medium" : "Low"
+        }
+      },
+      priorityQueue: [],
+      loads: loads,
+      exceptions: {
+        edrWithoutOpenDock: inboundLines.filter(function(line) { return !line.matchedAppointmentId; }).length,
+        openDockWithoutEdr: loads.filter(function(load) { return !load.isMatched; }).length,
+        lateForDueWos: 0,
+        cancelledAtRisk: loads.filter(function(load) { return (load.linkedWOCount || 0) > 0 && normalizeStr(load.status || "").includes("cancel"); }).length
+      },
+      reconciliation: {
+        edrTodayTotal: allDeliveries.filter(function(delivery) { return delivery.date === todayIso; }).length,
+        matchedToday: loads.filter(function(load) { return load.scheduledDate === todayIso && load.isMatched; }).length,
+        unmatchedToday: loads.filter(function(load) { return load.scheduledDate === todayIso && !load.isMatched; }).length,
+        materialColumn: "Material",
+        exactSkuMatched: matchDiagnostics.exactSkuMatched,
+        leadingZeroMatched: matchDiagnostics.leadingZeroMatched,
+        unmatchedSkuRows: matchDiagnostics.unmatched,
+        matchedByPo: matchDiagnostics.matchedByPo,
+        matchedByReference: matchDiagnostics.matchedByReference,
+        dateProximityOnly: 0
+      }
+    }
+  };
+}
+
+export function buildSupplyRiskModel(options) {
+  var analysis = options && options.analysis ? options.analysis : null;
+  if (!analysis) {
+    return {
+      inboundCoverage: null,
+      timelineData: null,
+      deliveriesV2: null,
+      diagnostics: { inboundLines: 0, appointments: 0 }
+    };
+  }
+
+  var horizonDays = Math.max(1, safeNum(options && options.horizonDays ? options.horizonDays : 60));
+  var now = new Date();
+  var windowStart = new Date(now);
+  windowStart.setHours(0, 0, 0, 0);
+  var windowEnd = new Date(windowStart.getTime() + (horizonDays * 86400000));
+  windowEnd.setHours(23, 59, 59, 999);
+
+  var criticalItems = Array.isArray(options && options.criticalItems) && options.criticalItems.length
+    ? options.criticalItems
+    : buildCriticalItemsFallback(analysis);
+  var linkMap = buildMaterialLinkMap(analysis);
+  var inboundLines = normalizeInboundLines(options && options.edrData, windowStart, windowEnd);
+  var appointments = normalizeAppointments(options && options.dockData);
+  matchInboundLinesToAppointments(inboundLines, appointments);
+
+  var inboundCoverage = buildInboundCoverage(criticalItems, inboundLines);
+  var loadBoard = buildLoadBoard(appointments, inboundLines, linkMap, new Date().toISOString().slice(0, 10));
+  if (inboundCoverage) inboundCoverage.horizonDays = horizonDays;
+
+  return {
+    inboundCoverage: inboundCoverage,
+    timelineData: loadBoard.timelineData,
+    deliveriesV2: loadBoard.deliveriesV2,
+    diagnostics: {
+      inboundLines: inboundLines.length,
+      appointments: appointments.length
+    }
+  };
+}

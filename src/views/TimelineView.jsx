@@ -36,7 +36,7 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
       <Card className="px-[18px] py-5">
         <div style={{ fontSize: 16, fontWeight: 700, color: C.bright, marginBottom: 6 }}>Deliveries</div>
         <div style={{ fontSize: 13, color: C.dim, lineHeight: 1.5 }}>
-          No delivery data loaded yet. Sync OpenDock to see scheduled inbounds.
+          No inbound data loaded yet. Sync Receive Orders and OpenDock to see upcoming loads.
         </div>
       </Card>
     );
@@ -86,9 +86,9 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
   }, [loads, today, endDateStr, atRiskOnly, search]);
 
   var matchLabel = function(state) {
-    if (state === "matched-fresh") return "Matched (fresh EDR)";
-    if (state === "matched-aging") return "Matched (aging EDR)";
-    if (state === "matched-stale") return "Matched (stale EDR)";
+    if (state === "matched-fresh") return "Matched (fresh Receive Orders)";
+    if (state === "matched-aging") return "Matched (aging Receive Orders)";
+    if (state === "matched-stale") return "Matched (stale Receive Orders)";
     return "OpenDock only";
   };
 
@@ -155,7 +155,7 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
           <span style={{ fontFamily: mono }}>{freshness.openDock.ageDays == null ? "--" : (freshness.openDock.ageDays + "d")}</span>
         </span>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: edrTone.fg, background: edrTone.bg, border: "1px solid " + edrTone.bd, borderRadius: 999, padding: "4px 10px" }}>
-          EDR {edrTone.label}
+          Receive Orders {edrTone.label}
           <span style={{ fontFamily: mono }}>{freshness.edr.ageDays == null ? "--" : (freshness.edr.ageDays + "d")}</span>
         </span>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: C.accent, background: C.accentSoft, border: "1px solid " + C.accentLine, borderRadius: 999, padding: "4px 10px" }}>
@@ -164,7 +164,7 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
       </div>
 
       {isEdrStale && <div style={{ marginBottom: 12, fontSize: 12, color: C.warn, background: C.warnSoft, border: "1px solid " + C.warnLine, borderRadius: 8, padding: "8px 10px" }}>
-        EDR is stale. This board prioritizes OpenDock schedule truth; material impact details may be limited.
+        Receive Orders data is stale. This board prioritizes OpenDock schedule truth; material impact details may be limited.
       </div>}
 
       <div style={{ display: "flex", gap: 20, marginBottom: 12, flexWrap: "wrap" }}>
@@ -175,7 +175,7 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
 
       <TableShell>
         <div className="flex flex-wrap items-center gap-1.5 border-b border-[rgb(var(--border))] px-3 py-2.5">
-          <div style={{ fontSize: 14, fontWeight: 700, color: C.bright, marginRight: 8 }}>Loads (OpenDock-first)</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: C.bright, marginRight: 8 }}>Inbound Loads</div>
           <Input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search PO / confirmation / material" className="h-10 w-full text-sm sm:w-72" />
           <Button onClick={function() { setAtRiskOnly(function(v) { return !v; }); }} variant={atRiskOnly ? "active" : "outline"} size="default">{atRiskOnly ? "At-Risk WO" : "All Loads"}</Button>
           <Badge variant="secondary">{filteredLoads.length} loads</Badge>
@@ -214,7 +214,7 @@ export default function TimelineView({ timelineData, deliveriesV2 }) {
                     <td colSpan={10} style={{ padding: "10px 12px", borderBottom: "1px solid " + C.border, background: C.surface }}>
                       {isEdrStale ? (
                         <div style={{ fontSize: 12, color: C.dim }}>
-                          Material details unavailable due to stale/missing EDR. Use PO and Confirmation to reconcile in OpenDock.
+                          Material details unavailable due to stale or missing Receive Orders data. Use PO and Confirmation to reconcile in OpenDock.
                         </div>
                       ) : (
                         <div>
