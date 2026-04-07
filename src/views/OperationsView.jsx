@@ -1837,6 +1837,32 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     };
   }, [workOrders, metrics.monthlyRunRate]);
 
+  var weeklyBookedWorkOrderComparison = useMemo(function() {
+    var openBookedTotal = (Array.isArray(workOrders) ? workOrders : []).reduce(function(sum, wo) {
+      var status = normalizeStr(wo && wo.status || "");
+      if (status !== "booked" || statusLooksClosed(status)) return sum;
+      var qtyToProduce = safeNum(wo && wo.qtyToProduce);
+      var unitsRemaining = safeNum(wo && wo.unitsRemaining);
+      if (!(unitsRemaining > 0)) {
+        unitsRemaining = Math.max(0, qtyToProduce - safeNum(wo && wo.unitsProduced));
+      }
+      if (!(unitsRemaining > 0)) return sum;
+      return sum + qtyToProduce;
+    }, 0);
+    if (!(openBookedTotal > 0)) return null;
+    var projectedWeeklyRunRate = safeNum(metrics.weeklyRunRate);
+    var delta = projectedWeeklyRunRate - openBookedTotal;
+    return {
+      compareActual: openBookedTotal,
+      compareReferenceLabel: "Open booked WOs",
+      compareReferenceUnits: openBookedTotal,
+      displayDelta: delta,
+      displayDeltaPct: Math.round((delta / openBookedTotal) * 100),
+      displayLabel: "vs open booked WO total",
+      compareLabel: "vs open booked WO total"
+    };
+  }, [workOrders, metrics.weeklyRunRate]);
+
   var shiftPlanVsActual = useMemo(function() {
     if (!showInsightsPanelsReady) return { rows: [], max: 1 };
     var dayRows = aggregateBreakdownShiftMix(filteredBreakdown.rowsLite || []);
@@ -2736,9 +2762,15 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
         label: "Weekly Run Rate",
         value: safeNum(metrics.weeklyRunRate).toLocaleString(),
         note: "Trailing " + safeNum(metrics.trailingProductionDays).toLocaleString() + " production days",
-        subnote: "",
-        detail: "Current weekly yield pace",
-        tone: "text-[rgb(var(--muted))]"
+        subnote: weeklyBookedWorkOrderComparison
+          ? referenceNote("Open booked WOs", { latestUnits: safeNum(weeklyBookedWorkOrderComparison.compareReferenceUnits) })
+          : "",
+        detail: weeklyBookedWorkOrderComparison
+          ? compareText(weeklyBookedWorkOrderComparison)
+          : "Current weekly yield pace",
+        tone: weeklyBookedWorkOrderComparison
+          ? compareTone(weeklyBookedWorkOrderComparison)
+          : "text-[rgb(var(--muted))]"
       },
       {
         key: "month_end",
@@ -2756,7 +2788,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
           : "text-[rgb(var(--muted))]"
       }
     ];
-  }, [commandBoard, metrics, monthEndBookedWorkOrderComparison]);
+  }, [commandBoard, metrics, weeklyBookedWorkOrderComparison, monthEndBookedWorkOrderComparison]);
 
   var hasCriticalOperationsData = (effectiveTrends && Array.isArray(effectiveTrends.byDay) && effectiveTrends.byDay.length > 0)
     || (effectiveBreakdown && Array.isArray(effectiveBreakdown.rowsLite) && effectiveBreakdown.rowsLite.length > 0);
