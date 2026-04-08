@@ -8,6 +8,7 @@
     "node": ">=20 <21"
   },
   "scripts": {
+    "bot:slack": "node ./bot/slack/server.mjs",
     "dev": "vite",
     "build": "vite build",
     "build:analyze": "BUNDLE_ANALYZE=true vite build",
@@ -20,6 +21,8 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.2.0",
+    "@chat-adapter/slack": "^4.24.0",
+    "@chat-adapter/state-memory": "^4.24.0",
     "@fontsource/inter": "^5.2.8",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@radix-ui/react-popover": "^1.1.15",
@@ -29,6 +32,7 @@
     "@supabase/supabase-js": "^2.98.0",
     "@tanstack/react-query": "^5.96.0",
     "@tanstack/react-virtual": "^3.13.23",
+    "chat": "^4.24.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
