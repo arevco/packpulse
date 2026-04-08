@@ -310,13 +310,13 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
           var key = normalizeStr(opt.sku || "");
           return { key:key, sku:opt.sku || "", isSub:!!opt.isSub };
         }).filter(function(opt) { return !!opt.key; });
-        var optionCountWithStock = options.filter(function(opt) { return (remainingBySku[opt.key] || 0) > 0; }).length;
         var available = options.reduce(function(sum, opt) { return sum + (remainingBySku[opt.key] || 0); }, 0);
         var isolatedAvailable = options.reduce(function(sum, opt) { return sum + (initialBySku[opt.key] || 0); }, 0);
         var consumedBefore = Math.max(0, isolatedAvailable - available);
         var makeUnits = Math.floor(available / qtyPer);
         var isolatedMakeUnits = Math.floor(isolatedAvailable / qtyPer);
         var compKey = normalizeStr(comp.sku || "");
+        var isSharedAcrossWOs = !!(compKey && (usageByPrimary[compKey] || 0) > 1);
         if (compKey) {
           componentPressure[compKey] = {
             usedByWOs: usageByPrimary[compKey] || 1,
@@ -330,7 +330,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
           };
         }
         committed = Math.min(committed, makeUnits);
-        if (optionCountWithStock > 1) sharedDetails.push(comp.sku);
+        if (isSharedAcrossWOs) sharedDetails.push(comp.sku || compKey);
       });
       if (!isFinite(committed)) committed = 0;
       committed = Math.max(0, Math.min(committed, Number(wo.unitsRemaining || 0)));
@@ -364,7 +364,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       map[woCommitKey(wo)] = {
         committedCanMake: committed,
         commitmentGap: gap,
-        sharedConstraint: gap > 0,
+        sharedConstraint: gap > 0 || sharedDetails.length > 0,
         sharedComponents: Array.from(new Set(sharedDetails)).slice(0, 3),
         componentPressure: componentPressure
       };
@@ -1254,8 +1254,8 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
         { key:"readiness", style:Object.assign({}, tdM, { fontWeight:600, color:wo.readiness>=100?C.ok:wo.readiness>=70?C.warn:C.bad }), content:wo.readiness < 0 ? <span style={{color:C.dim}}>--</span> : Math.round(wo.readiness)+"%" },
         { key:"maxRunnable", style:Object.assign({}, tdM, { fontWeight:600, color:wo.runStatus==="ready"?C.ok:wo.runStatus==="nobom"?C.dim:wo.maxRunnable>0?C.warn:C.bad }), content:wo.runStatus==="nobom" ? "--" : wo.maxRunnable.toLocaleString() },
         { key:"committedCanMake", style:Object.assign({}, tdM, { fontWeight:600, color:commitment.committedCanMake>0?C.accent:C.dim }), content:wo.runStatus==="nobom" ? "--" : commitment.committedCanMake.toLocaleString() },
-        { key:"commitmentGap", style:Object.assign({}, tdN, { whiteSpace:"nowrap" }), content:(commitment.commitmentGap > 0) ? (
-          <Badge title={"Shared material demand across active work orders. Order: earliest due date, then WO #. Make: " + wo.maxRunnable.toLocaleString() + " | Net: " + commitment.committedCanMake.toLocaleString() + " | Gap: " + commitment.commitmentGap.toLocaleString()} variant="danger">Shared</Badge>
+        { key:"commitmentGap", style:Object.assign({}, tdN, { whiteSpace:"nowrap" }), content:commitment.sharedConstraint ? (
+          <Badge title={"Shared material demand across active work orders. Order: earliest due date, then WO #. Make: " + wo.maxRunnable.toLocaleString() + " | Net: " + commitment.committedCanMake.toLocaleString() + " | Gap: " + commitment.commitmentGap.toLocaleString()} variant={commitment.commitmentGap > 0 ? "danger" : "warning"}>Shared</Badge>
         ) : <span style={{ color:C.dim }}>--</span> },
         { key:"estHours", style:Object.assign({}, tdM, { color:wo.estHours>0?C.bright:C.dim }), content:wo.estHours > 0 ? wo.estHours+"h" : "--" },
         { key:"dispatchRank", style:Object.assign({}, tdN, { color:runMeta ? C.bright : C.dim, whiteSpace:"nowrap" }), content:runMeta ? <span title={(runMeta.action || "Run Next") + (runMeta.why ? " • " + runMeta.why : "")} style={{ color:C.accent, fontWeight:700 }}>#{runMeta.rank}</span> : "--" },
