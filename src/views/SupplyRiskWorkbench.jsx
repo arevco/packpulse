@@ -790,7 +790,7 @@ function renderAffectedWosTable(rows, C, thC, tdN, tdM) {
 function renderInlineExpansion(children, C) {
   return (
     <div
-      className="space-y-4 px-4 py-4"
+      className="space-y-3 px-3 py-3"
       style={{
         background: C.raised,
         boxShadow: "inset 0 1px 0 " + C.border
@@ -801,101 +801,150 @@ function renderInlineExpansion(children, C) {
   );
 }
 
+function MetricStrip({ items, mono, C }) {
+  return (
+    <Card className="overflow-hidden">
+      <div className="grid grid-cols-2 divide-y xl:grid-cols-4 xl:divide-x xl:divide-y-0" style={{ borderColor: C.border }}>
+        {items.map(function(item, index) {
+          return (
+            <div
+              key={item.label}
+              className="px-3 py-2.5"
+            >
+              <div className="text-lg font-bold [font-variant-numeric:tabular-nums]" style={{ color: item.tone, fontFamily: mono }}>{item.value}</div>
+              <div className="mt-0.5 text-[11px] text-[rgb(var(--muted))]">{item.label}</div>
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
+function FactsStrip({ title, items, C, mono }) {
+  return (
+    <Card className="px-3 py-3">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[rgb(var(--muted))]">{title}</div>
+      <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 xl:grid-cols-4">
+        {items.map(function(item) {
+          return (
+            <div key={item.label}>
+              <div className="text-[11px] text-[rgb(var(--muted))]">{item.label}</div>
+              <div className="mt-0.5 text-sm text-[rgb(var(--foreground))]" style={item.mono ? { fontFamily: mono } : undefined}>{item.value}</div>
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
 function renderRunNextDetail(row, C, mono, thC, tdN, tdM) {
   return renderInlineExpansion(
-    <div className="space-y-4">
-      <div className="space-y-3">
+    <div className="space-y-3">
+      <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-2">
-          <span style={{ fontFamily: mono, fontSize: 16, fontWeight: 700, color: C.bright }}>{row.woNum || "--"}</span>
+          <span style={{ fontFamily: mono, fontSize: 15, fontWeight: 700, color: C.bright }}>{row.woNum || "--"}</span>
           <Badge variant="secondary">{row.customerLabel || "--"}</Badge>
           <Pill tone={toneForRunNext(row.status, C)}>{unlockStatusLabel(row.status)}</Pill>
         </div>
-        <div className="text-base text-[rgb(var(--foreground))]">{row.productSku || "--"} · {formatDescriptionForDisplay(row.productDesc || "") || "--"}</div>
-        <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
-          <StatCard label="Available By" value={row.availableBy ? displayDate(row.availableBy) : row.status === "inbound-no-date" ? "TBD" : "--"} tone={row.status === "unlock-by-date" ? C.ok : C.bright} mono={mono} />
-          <StatCard label="Blocked Units" value={Math.round(row.blockedUnits || 0).toLocaleString()} tone={C.bad} mono={mono} />
-          <StatCard label="Runnable Now" value={Math.round(row.runnableNow || 0).toLocaleString()} tone={C.ok} mono={mono} />
-          <StatCard label="Receive Orders" value={(row.sourcePOs || []).length.toLocaleString()} tone={C.accent} mono={mono} />
-        </div>
+        <div className="text-sm text-[rgb(var(--foreground))]">{row.productSku || "--"} · {formatDescriptionForDisplay(row.productDesc || "") || "--"}</div>
       </div>
 
-      <Card className="px-4 py-4">
-        <div className="text-sm font-semibold text-[rgb(var(--foreground))]">Planning Snapshot</div>
-        <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
-          <div style={{ color: C.dim }}>Due <div style={{ color: C.bright, fontFamily: mono, marginTop: 2 }}>{displayDate(row.dueDate)}</div></div>
-          <div style={{ color: C.dim }}>Action <div style={{ color: C.bright, marginTop: 2 }}>{row.actionLabel}</div></div>
-          <div style={{ color: C.dim }}>Blocking Materials <div style={{ color: C.bright, marginTop: 2 }}>{row.blockingMaterialsText || "--"}</div></div>
-          <div style={{ color: C.dim }}>Receive Orders <div style={{ color: C.bright, marginTop: 2 }}>{(row.sourcePOs || []).length ? row.sourcePOs.join(", ") : "--"}</div></div>
-        </div>
-      </Card>
+      <MetricStrip
+        C={C}
+        mono={mono}
+        items={[
+          { label: "Available By", value: row.availableBy ? displayDate(row.availableBy) : row.status === "inbound-no-date" ? "TBD" : "--", tone: row.status === "unlock-by-date" ? C.ok : C.bright },
+          { label: "Blocked Units", value: Math.round(row.blockedUnits || 0).toLocaleString(), tone: C.bad },
+          { label: "Runnable Now", value: Math.round(row.runnableNow || 0).toLocaleString(), tone: C.ok },
+          { label: "Receive Orders", value: (row.sourcePOs || []).length.toLocaleString(), tone: C.accent }
+        ]}
+      />
 
-      <TableShell>
-        <div className="flex items-center justify-between gap-2 border-b border-[rgb(var(--border))] px-3 py-2.5">
-          <div className="text-sm font-semibold text-[rgb(var(--foreground))]">Blocking Materials</div>
-          <Badge variant="secondary">{(row.componentsDetailed || []).length} materials</Badge>
-        </div>
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ background: C.raised }}>
-                {["Material", "Description", "Needed", "Covered", "Coverage", "Earliest RO", "Receive Orders", "Status"].map(function(label) {
-                  return <th key={label} style={thC(false)}>{label}</th>;
-                })}
-              </tr>
-            </thead>
-            <tbody>
-              {(row.componentsDetailed || []).map(function(component) {
-                return (
-                  <tr key={component.sku} style={{ borderBottom: "1px solid " + C.border }}>
-                    <td style={Object.assign({}, tdM, { color: C.bright, fontWeight: 600 })}>{component.sku || "--"}</td>
-                    <td style={tdN}>{formatDescriptionForDisplay(component.desc || "") || "--"}</td>
-                    <td style={tdM}>{Math.round(component.neededQty || 0).toLocaleString()}</td>
-                    <td style={tdM}>{Math.round(component.coveredQty || 0).toLocaleString()}</td>
-                    <td style={tdM}>{component.coveragePct || 0}%</td>
-                    <td style={tdM}>{displayDate(component.unlockDate || component.earliestInboundDate)}</td>
-                    <td style={tdN}>{listPreview(component.sourcePOs || [], 2)}</td>
-                    <td style={tdN}><Pill tone={toneForRunNext(component.state, C)}>{unlockStatusLabel(component.state)}</Pill></td>
-                  </tr>
-                );
-              })}
-              {!(row.componentsDetailed || []).length && <tr><td colSpan={8} style={{ padding: 24, textAlign: "center", color: C.dim }}>No blocking materials found.</td></tr>}
-            </tbody>
-          </table>
-        </div>
-      </TableShell>
+      <FactsStrip
+        title="Planning Snapshot"
+        C={C}
+        mono={mono}
+        items={[
+          { label: "Due", value: displayDate(row.dueDate), mono: true },
+          { label: "Action", value: row.actionLabel || "--" },
+          { label: "Blocking Materials", value: row.blockingMaterialsText || "--" },
+          { label: "Receive Orders", value: (row.sourcePOs || []).length ? row.sourcePOs.join(", ") : "--" }
+        ]}
+      />
 
-      <TableShell>
-        <div className="flex items-center justify-between gap-2 border-b border-[rgb(var(--border))] px-3 py-2.5">
-          <div className="text-sm font-semibold text-[rgb(var(--foreground))]">Related Inbound Loads</div>
-          <Badge variant="secondary">{(row.relatedLoads || []).length} loads</Badge>
-        </div>
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ background: C.raised }}>
-                {["Available", "Receive Order", "Match", "Qty", "Linked WOs", "Units Unlocked"].map(function(label) {
-                  return <th key={label} style={thC(false)}>{label}</th>;
+      <div className="grid gap-3 xl:grid-cols-2">
+        <TableShell>
+          <div className="flex items-center justify-between gap-2 border-b border-[rgb(var(--border))] px-3 py-2">
+            <div className="text-sm font-semibold text-[rgb(var(--foreground))]">Blocking Materials</div>
+            <Badge variant="secondary">{(row.componentsDetailed || []).length} materials</Badge>
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ background: C.raised }}>
+                  {["Material", "Needed", "Covered", "Earliest RO", "Status"].map(function(label) {
+                    return <th key={label} style={thC(false)}>{label}</th>;
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {(row.componentsDetailed || []).map(function(component) {
+                  return (
+                    <tr key={component.sku} style={{ borderBottom: "1px solid " + C.border }}>
+                      <td style={Object.assign({}, tdM, { color: C.bright, fontWeight: 600 })}>
+                        <div>{component.sku || "--"}</div>
+                        <div className="mt-0.5 text-[11px] text-[rgb(var(--muted))]">{formatDescriptionForDisplay(component.desc || "") || "--"}</div>
+                      </td>
+                      <td style={tdM}>{Math.round(component.neededQty || 0).toLocaleString()}</td>
+                      <td style={tdM}>{Math.round(component.coveredQty || 0).toLocaleString()}</td>
+                      <td style={tdM}>{displayDate(component.unlockDate || component.earliestInboundDate)}</td>
+                      <td style={tdN}><Pill tone={toneForRunNext(component.state, C)}>{unlockStatusLabel(component.state)}</Pill></td>
+                    </tr>
+                  );
                 })}
-              </tr>
-            </thead>
-            <tbody>
-              {(row.relatedLoads || []).map(function(load) {
-                return (
-                  <tr key={load.key} style={{ borderBottom: "1px solid " + C.border }}>
-                    <td style={tdM}>{displayDate(load.availableDate)}</td>
-                    <td style={Object.assign({}, tdM, { color: C.bright })}>{load.po || "--"}</td>
-                    <td style={tdN}>{load.matchLabel || "--"}</td>
-                    <td style={tdM}>{Math.round(load.qty || 0).toLocaleString()}</td>
-                    <td style={tdM}>{load.linkedWOCount || 0}</td>
-                    <td style={tdM}>{Math.round(load.unitsUnlocked || 0).toLocaleString()}</td>
-                  </tr>
-                );
-              })}
-              {!(row.relatedLoads || []).length && <tr><td colSpan={6} style={{ padding: 24, textAlign: "center", color: C.dim }}>No related inbound loads found.</td></tr>}
-            </tbody>
-          </table>
-        </div>
-      </TableShell>
+                {!(row.componentsDetailed || []).length && <tr><td colSpan={5} style={{ padding: 24, textAlign: "center", color: C.dim }}>No blocking materials found.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </TableShell>
+
+        <TableShell>
+          <div className="flex items-center justify-between gap-2 border-b border-[rgb(var(--border))] px-3 py-2">
+            <div className="text-sm font-semibold text-[rgb(var(--foreground))]">Inbound Loads</div>
+            <Badge variant="secondary">{(row.relatedLoads || []).length} loads</Badge>
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ background: C.raised }}>
+                  {["Available", "RO", "Qty", "Linked WOs", "Units"].map(function(label) {
+                    return <th key={label} style={thC(false)}>{label}</th>;
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {(row.relatedLoads || []).map(function(load) {
+                  return (
+                    <tr key={load.key} style={{ borderBottom: "1px solid " + C.border }}>
+                      <td style={tdM}>{displayDate(load.availableDate)}</td>
+                      <td style={Object.assign({}, tdM, { color: C.bright })}>
+                        <div>{load.po || "--"}</div>
+                        <div className="mt-0.5 text-[11px] text-[rgb(var(--muted))]">{load.matchLabel || "--"}</div>
+                      </td>
+                      <td style={tdM}>{Math.round(load.qty || 0).toLocaleString()}</td>
+                      <td style={tdM}>{load.linkedWOCount || 0}</td>
+                      <td style={tdM}>{Math.round(load.unitsUnlocked || 0).toLocaleString()}</td>
+                    </tr>
+                  );
+                })}
+                {!(row.relatedLoads || []).length && <tr><td colSpan={5} style={{ padding: 24, textAlign: "center", color: C.dim }}>No related inbound loads found.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </TableShell>
+      </div>
     </div>,
     C
   );
@@ -903,66 +952,77 @@ function renderRunNextDetail(row, C, mono, thC, tdN, tdM) {
 
 function renderVendorDetail(row, C, mono, thC, tdN, tdM) {
   return renderInlineExpansion(
-    <div className="space-y-4">
-      <div className="space-y-3">
+    <div className="space-y-3">
+      <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-2">
-          <span style={{ fontFamily: mono, fontSize: 16, fontWeight: 700, color: C.bright }}>{row.sku || "--"}</span>
+          <span style={{ fontFamily: mono, fontSize: 15, fontWeight: 700, color: C.bright }}>{row.sku || "--"}</span>
           <Badge variant="secondary">{row.customerLabel || "--"}</Badge>
           <Pill tone={toneForVendor(row, C)}>{vendorGapLabel(row.gapType)}</Pill>
         </div>
-        <div className="text-base text-[rgb(var(--foreground))]">{formatDescriptionForDisplay(row.desc || "") || "--"}</div>
-        <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
-          <StatCard label="Gap To Schedule" value={Math.round(row.roGapQty || 0).toLocaleString()} tone={C.bad} mono={mono} />
-          <StatCard label="Short Qty" value={Math.round(row.shortQty || 0).toLocaleString()} tone={C.warn} mono={mono} />
-          <StatCard label="On Receive Orders" value={Math.round(row.inboundQty || 0).toLocaleString()} tone={C.accent} mono={mono} />
-          <StatCard label="Affected WOs" value={(row.affectedWOCount || 0).toLocaleString()} tone={C.bright} mono={mono} />
-        </div>
+        <div className="text-sm text-[rgb(var(--foreground))]">{formatDescriptionForDisplay(row.desc || "") || "--"}</div>
       </div>
 
-      <Card className="px-4 py-4">
-        <div className="text-sm font-semibold text-[rgb(var(--foreground))]">Vendor Follow-up Snapshot</div>
-        <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
-          <div style={{ color: C.dim }}>Earliest Due <div style={{ color: C.bright, fontFamily: mono, marginTop: 2 }}>{displayDate(row.earliestDueDate)}</div></div>
-          <div style={{ color: C.dim }}>Action <div style={{ color: C.bright, marginTop: 2 }}>{row.actionLabel}</div></div>
-          <div style={{ color: C.dim }}>Current Receive Orders <div style={{ color: C.bright, marginTop: 2 }}>{(row.openPOs || []).length ? row.openPOs.join(", ") : "--"}</div></div>
-          <div style={{ color: C.dim }}>OpenDock Scheduled <div style={{ color: C.bright, marginTop: 2 }}>{Math.round(row.scheduledQty || 0).toLocaleString()}</div></div>
-        </div>
-      </Card>
+      <MetricStrip
+        C={C}
+        mono={mono}
+        items={[
+          { label: "Gap To Schedule", value: Math.round(row.roGapQty || 0).toLocaleString(), tone: C.bad },
+          { label: "Short Qty", value: Math.round(row.shortQty || 0).toLocaleString(), tone: C.warn },
+          { label: "On Receive Orders", value: Math.round(row.inboundQty || 0).toLocaleString(), tone: C.accent },
+          { label: "Affected WOs", value: (row.affectedWOCount || 0).toLocaleString(), tone: C.bright }
+        ]}
+      />
 
-      {renderAffectedWosTable(row.affectedWOs || [], C, thC, tdN, tdM)}
+      <FactsStrip
+        title="Vendor Follow-up Snapshot"
+        C={C}
+        mono={mono}
+        items={[
+          { label: "Earliest Due", value: displayDate(row.earliestDueDate), mono: true },
+          { label: "Action", value: row.actionLabel || "--" },
+          { label: "Current Receive Orders", value: (row.openPOs || []).length ? row.openPOs.join(", ") : "--" },
+          { label: "OpenDock Scheduled", value: Math.round(row.scheduledQty || 0).toLocaleString(), mono: true }
+        ]}
+      />
 
-      <TableShell>
-        <div className="flex items-center justify-between gap-2 border-b border-[rgb(var(--border))] px-3 py-2.5">
-          <div className="text-sm font-semibold text-[rgb(var(--foreground))]">Current Inbound Context</div>
-          <Badge variant="secondary">{(row.relatedLoads || []).length} loads</Badge>
-        </div>
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ background: C.raised }}>
-                {["Available", "Receive Order", "Match", "Qty", "Linked WOs", "Units Unlocked"].map(function(label) {
-                  return <th key={label} style={thC(false)}>{label}</th>;
+      <div className="grid gap-3 xl:grid-cols-2">
+        {renderAffectedWosTable(row.affectedWOs || [], C, thC, tdN, tdM)}
+
+        <TableShell>
+          <div className="flex items-center justify-between gap-2 border-b border-[rgb(var(--border))] px-3 py-2">
+            <div className="text-sm font-semibold text-[rgb(var(--foreground))]">Current Inbound</div>
+            <Badge variant="secondary">{(row.relatedLoads || []).length} loads</Badge>
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ background: C.raised }}>
+                  {["Available", "RO", "Qty", "Linked WOs", "Units"].map(function(label) {
+                    return <th key={label} style={thC(false)}>{label}</th>;
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {(row.relatedLoads || []).map(function(load) {
+                  return (
+                    <tr key={load.key} style={{ borderBottom: "1px solid " + C.border }}>
+                      <td style={tdM}>{displayDate(load.availableDate)}</td>
+                      <td style={Object.assign({}, tdM, { color: C.bright })}>
+                        <div>{load.po || "--"}</div>
+                        <div className="mt-0.5 text-[11px] text-[rgb(var(--muted))]">{load.matchLabel || "--"}</div>
+                      </td>
+                      <td style={tdM}>{Math.round(load.qty || 0).toLocaleString()}</td>
+                      <td style={tdM}>{load.linkedWOCount || 0}</td>
+                      <td style={tdM}>{Math.round(load.unitsUnlocked || 0).toLocaleString()}</td>
+                    </tr>
+                  );
                 })}
-              </tr>
-            </thead>
-            <tbody>
-              {(row.relatedLoads || []).map(function(load) {
-                return (
-                  <tr key={load.key} style={{ borderBottom: "1px solid " + C.border }}>
-                    <td style={tdM}>{displayDate(load.availableDate)}</td>
-                    <td style={Object.assign({}, tdM, { color: C.bright })}>{load.po || "--"}</td>
-                    <td style={tdN}>{load.matchLabel || "--"}</td>
-                    <td style={tdM}>{Math.round(load.qty || 0).toLocaleString()}</td>
-                    <td style={tdM}>{load.linkedWOCount || 0}</td>
-                    <td style={tdM}>{Math.round(load.unitsUnlocked || 0).toLocaleString()}</td>
-                  </tr>
-                );
-              })}
-              {!(row.relatedLoads || []).length && <tr><td colSpan={6} style={{ padding: 24, textAlign: "center", color: C.dim }}>No current inbound lines for this material.</td></tr>}
-            </tbody>
-          </table>
-        </div>
-      </TableShell>
+                {!(row.relatedLoads || []).length && <tr><td colSpan={5} style={{ padding: 24, textAlign: "center", color: C.dim }}>No current inbound lines for this material.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </TableShell>
+      </div>
     </div>,
     C
   );
@@ -970,66 +1030,77 @@ function renderVendorDetail(row, C, mono, thC, tdN, tdM) {
 
 function renderDockDetail(row, C, mono, thC, tdN, tdM) {
   return renderInlineExpansion(
-    <div className="space-y-4">
-      <div className="space-y-3">
+    <div className="space-y-3">
+      <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-2">
-          <span style={{ fontFamily: mono, fontSize: 16, fontWeight: 700, color: C.bright }}>{row.po || "--"}</span>
+          <span style={{ fontFamily: mono, fontSize: 15, fontWeight: 700, color: C.bright }}>{row.po || "--"}</span>
           <Badge variant="secondary">{row.customerLabel || "--"}</Badge>
           <Pill tone={toneForDock(row, C)}>Needs OpenDock appointment</Pill>
         </div>
-        <div className="text-base text-[rgb(var(--foreground))]">{row.materialSummary || "--"}</div>
-        <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
-          <StatCard label="Expected Date" value={displayDate(row.expectedDate)} tone={C.accent} mono={mono} />
-          <StatCard label="Load Qty" value={Math.round(row.qty || 0).toLocaleString()} tone={C.bright} mono={mono} />
-          <StatCard label="Linked WOs" value={(row.linkedWOCount || 0).toLocaleString()} tone={C.warn} mono={mono} />
-          <StatCard label="Units Unlocked" value={Math.round(row.unitsUnlocked || 0).toLocaleString()} tone={C.ok} mono={mono} />
-        </div>
+        <div className="text-sm text-[rgb(var(--foreground))]">{row.materialSummary || "--"}</div>
       </div>
 
-      <Card className="px-4 py-4">
-        <div className="text-sm font-semibold text-[rgb(var(--foreground))]">Dock Follow-up Snapshot</div>
-        <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
-          <div style={{ color: C.dim }}>Expected Date <div style={{ color: C.bright, fontFamily: mono, marginTop: 2 }}>{displayDate(row.expectedDate)}</div></div>
-          <div style={{ color: C.dim }}>Action <div style={{ color: C.bright, marginTop: 2 }}>{row.actionLabel}</div></div>
-          <div style={{ color: C.dim }}>Confirmation <div style={{ color: C.bright, marginTop: 2 }}>{row.confirmation || "--"}</div></div>
-          <div style={{ color: C.dim }}>Customer Scope <div style={{ color: C.bright, marginTop: 2 }}>{row.customerLabel || "--"}</div></div>
-        </div>
-      </Card>
+      <MetricStrip
+        C={C}
+        mono={mono}
+        items={[
+          { label: "Expected Date", value: displayDate(row.expectedDate), tone: C.accent },
+          { label: "Load Qty", value: Math.round(row.qty || 0).toLocaleString(), tone: C.bright },
+          { label: "Linked WOs", value: (row.linkedWOCount || 0).toLocaleString(), tone: C.warn },
+          { label: "Units Unlocked", value: Math.round(row.unitsUnlocked || 0).toLocaleString(), tone: C.ok }
+        ]}
+      />
 
-      <TableShell>
-        <div className="flex items-center justify-between gap-2 border-b border-[rgb(var(--border))] px-3 py-2.5">
-          <div className="text-sm font-semibold text-[rgb(var(--foreground))]">Materials On This Load</div>
-          <Badge variant="secondary">{(row.materialsDetailed || []).length} materials</Badge>
-        </div>
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ background: C.raised }}>
-                {["Material", "Description", "Qty", "Expected", "Linked WOs", "Units Unlocked"].map(function(label) {
-                  return <th key={label} style={thC(false)}>{label}</th>;
+      <FactsStrip
+        title="Dock Follow-up Snapshot"
+        C={C}
+        mono={mono}
+        items={[
+          { label: "Expected Date", value: displayDate(row.expectedDate), mono: true },
+          { label: "Action", value: row.actionLabel || "--" },
+          { label: "Confirmation", value: row.confirmation || "--" },
+          { label: "Customer Scope", value: row.customerLabel || "--" }
+        ]}
+      />
+
+      <div className="grid gap-3 xl:grid-cols-2">
+        <TableShell>
+          <div className="flex items-center justify-between gap-2 border-b border-[rgb(var(--border))] px-3 py-2">
+            <div className="text-sm font-semibold text-[rgb(var(--foreground))]">Materials On This Load</div>
+            <Badge variant="secondary">{(row.materialsDetailed || []).length} materials</Badge>
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ background: C.raised }}>
+                  {["Material", "Qty", "Expected", "Linked WOs", "Units"].map(function(label) {
+                    return <th key={label} style={thC(false)}>{label}</th>;
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {(row.materialsDetailed || []).map(function(material) {
+                  return (
+                    <tr key={material.sku} style={{ borderBottom: "1px solid " + C.border }}>
+                      <td style={Object.assign({}, tdM, { color: C.bright, fontWeight: 600 })}>
+                        <div>{material.sku || "--"}</div>
+                        <div className="mt-0.5 text-[11px] text-[rgb(var(--muted))]">{formatDescriptionForDisplay(material.desc || "") || "--"}</div>
+                      </td>
+                      <td style={tdM}>{Math.round(material.qty || 0).toLocaleString()}</td>
+                      <td style={tdM}>{displayDate(material.expectedDate)}</td>
+                      <td style={tdM}>{material.linkedWOCount || 0}</td>
+                      <td style={tdM}>{Math.round(material.unitsUnlocked || 0).toLocaleString()}</td>
+                    </tr>
+                  );
                 })}
-              </tr>
-            </thead>
-            <tbody>
-              {(row.materialsDetailed || []).map(function(material) {
-                return (
-                  <tr key={material.sku} style={{ borderBottom: "1px solid " + C.border }}>
-                    <td style={Object.assign({}, tdM, { color: C.bright, fontWeight: 600 })}>{material.sku || "--"}</td>
-                    <td style={tdN}>{formatDescriptionForDisplay(material.desc || "") || "--"}</td>
-                    <td style={tdM}>{Math.round(material.qty || 0).toLocaleString()}</td>
-                    <td style={tdM}>{displayDate(material.expectedDate)}</td>
-                    <td style={tdM}>{material.linkedWOCount || 0}</td>
-                    <td style={tdM}>{Math.round(material.unitsUnlocked || 0).toLocaleString()}</td>
-                  </tr>
-                );
-              })}
-              {!(row.materialsDetailed || []).length && <tr><td colSpan={6} style={{ padding: 24, textAlign: "center", color: C.dim }}>No material detail on this load.</td></tr>}
-            </tbody>
-          </table>
-        </div>
-      </TableShell>
+                {!(row.materialsDetailed || []).length && <tr><td colSpan={5} style={{ padding: 24, textAlign: "center", color: C.dim }}>No material detail on this load.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </TableShell>
 
-      {renderAffectedWosTable(row.affectedWOs || [], C, thC, tdN, tdM)}
+        {renderAffectedWosTable(row.affectedWOs || [], C, thC, tdN, tdM)}
+      </div>
     </div>,
     C
   );
