@@ -263,8 +263,8 @@ export default function ProductionReadiness() {
       runNext: qs.get("wo_run_next") === "1",
       batchable: qs.get("wo_batchable") === "1",
       runNextLimit: String(qs.get("wo_run_next_limit") || "12"),
-      sortField: String(qs.get("wo_sort_field") || "readiness"),
-      sortDir: String(qs.get("wo_sort_dir") || "desc"),
+      sortField: String(qs.get("wo_sort_field") || "dispatchRank"),
+      sortDir: String(qs.get("wo_sort_dir") || "asc"),
       preset: preset
     };
     if (preset === "run-next") {
@@ -272,7 +272,7 @@ export default function ProductionReadiness() {
       wo.woStatus = "all";
       wo.runStatus = "all";
       wo.sortField = "dispatchRank";
-      wo.sortDir = "desc";
+      wo.sortDir = "asc";
     } else if (preset === "shared") {
       wo.shared = true;
     } else if (preset === "blocked") {
@@ -361,8 +361,8 @@ export default function ProductionReadiness() {
     params.delete("wo_month");
     setOrDelete("wo_pack", wo.packType || "all", "all");
     setOrDelete("wo_run_next_limit", wo.runNextLimit || "12", "12");
-    setOrDelete("wo_sort_field", wo.sortField || "readiness", "readiness");
-    setOrDelete("wo_sort_dir", wo.sortDir || "desc", "desc");
+    setOrDelete("wo_sort_field", wo.sortField || "dispatchRank", "dispatchRank");
+    setOrDelete("wo_sort_dir", wo.sortDir || "asc", "asc");
     if (wo.pastDue) params.set("wo_past_due", "1"); else params.delete("wo_past_due");
     if (wo.shared) params.set("wo_shared", "1"); else params.delete("wo_shared");
     if (wo.runNext) params.set("wo_run_next", "1"); else params.delete("wo_run_next");

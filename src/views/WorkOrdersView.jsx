@@ -71,9 +71,10 @@ function isWithinDueDateRange(value, start, end) {
 
 var WORK_ORDER_VIRTUAL_THRESHOLD = 80;
 var WORK_ORDER_VIRTUAL_MAX_HEIGHT = "min(72vh, 960px)";
-var WORK_ORDER_GRID_TEMPLATE = "92px 120px 72px 92px 220px 140px 120px 96px 96px 96px 100px 88px 88px 88px 84px 88px 88px";
+var WORK_ORDER_GRID_TEMPLATE = "88px 92px 120px 72px 92px 220px 140px 120px 96px 96px 96px 100px 88px 88px 88px 88px 84px";
 var WORK_ORDER_TABLE_MIN_WIDTH = "1768px";
 var WORK_ORDER_COLUMNS = [
+  { field: "dispatchRank", label: "Run Next", title: "Run Next rank from dispatch scoring" },
   { field: "woNum", label: "WO#" },
   { field: "product", label: "Product" },
   { field: "batchCount", label: "Batch", title: "Open work orders sharing the same item" },
@@ -88,9 +89,8 @@ var WORK_ORDER_COLUMNS = [
   { field: "complete", label: "Complete" },
   { field: "committedCanMake", label: "Net", title: "Capacity after shared-material commitments across active work orders" },
   { field: "readiness", label: "Ready", title: "Net capacity as a percent of remaining units" },
-  { field: "commitmentGap", label: "Gap", title: "Difference between isolated make and commitment-aware net capacity" },
   { field: "estHours", label: "Est Hrs" },
-  { field: "dispatchRank", label: "Run Next", title: "Run Next rank from dispatch scoring" }
+  { field: "commitmentGap", label: "Gap", title: "Difference between isolated make and commitment-aware net capacity" }
 ];
 
 export default function WorkOrdersView({ analysis, woStatuses, woCustomers, recommendations, dispatchQueue, inboundCoverage, initialFilters, onPermalinkChange }) {
@@ -110,14 +110,14 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
   const [filterRunNext, setFilterRunNext] = useState(!!initial.runNext);
   const [filterBatchable, setFilterBatchable] = useState(!!initial.batchable);
   const [runNextLimit, setRunNextLimit] = useState(String(initial.runNextLimit || "12"));
-  const [sortField, setSortField] = useState(
-    initial.sortField === "maxRunnable"
-      ? "committedCanMake"
-      : initial.sortField === "dispatchScore"
-        ? "dispatchRank"
-        : String(initial.sortField || "readiness")
-  );
-  const [sortDir, setSortDir] = useState(String(initial.sortDir || "desc"));
+  var initialSortField = initial.sortField === "maxRunnable"
+    ? "committedCanMake"
+    : initial.sortField === "dispatchScore"
+      ? "dispatchRank"
+      : String(initial.sortField || "dispatchRank");
+  var initialSortDir = String(initial.sortDir || (initialSortField === "dispatchRank" ? "asc" : "desc"));
+  const [sortField, setSortField] = useState(initialSortField);
+  const [sortDir, setSortDir] = useState(initialSortDir);
   const [expandedWOs, setExpandedWOs] = useState({});
   const workOrdersScrollRef = useRef(null);
 
@@ -784,7 +784,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     if (!analysis || !filteredResults.length) return;
     var headers = [
       "WO#","FG SKU","FG Description","Customer","WO Status","Run Status","Due Date","Planned Start","Planned End",
-      "Order Qty","Produced","Remaining","Net","Ready %","Gap","Est Hrs","Batch Count","Run Next Rank",
+      "Run Next Rank","Order Qty","Produced","Remaining","Net","Ready %","Est Hrs","Batch Count","Gap",
       "Component SKU","Component Description","Qty/Unit","Needed","On Hand","Short","Fill %","Shared Component","Shared WO Count",
       "Allocated Before This WO","Available At Turn","Turn Make Units","Alt Options","Vendor Inbound Ask Qty",
       "EDR Inbound Qty","OpenDock Scheduled Qty","Unscheduled Qty","Uncovered Qty","Inbound Coverage %","Scheduled Coverage %",
@@ -832,15 +832,15 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
         row.dueDate,
         row.plannedStart,
         row.plannedEnd,
+        row.runNextRank || "",
         row.orderQty,
         row.produced,
         row.remaining,
         row.netUnits,
         row.readinessPct == null ? "N/A" : row.readinessPct,
-        row.gapUnits,
         row.estHours || "",
         row.batchCount || "",
-        row.runNextRank || "",
+        row.gapUnits,
         row.componentSku,
         row.componentDesc,
         row.qtyPer,
@@ -896,6 +896,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     }).join("");
     var workOrderRowsHtml = exportWorkOrderRows.map(function(row) {
       return "<tr>" +
+        "<td>" + escapeHtml(row.runNextRank == null ? "--" : ("#" + row.runNextRank)) + "</td>" +
         "<td>" + escapeHtml(row.woNum) + "</td>" +
         "<td>" + escapeHtml(row.productSku) + "</td>" +
         "<td>" + escapeHtml(row.customer || "--") + "</td>" +
@@ -903,8 +904,8 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
         "<td>" + escapeHtml(fmtNum(row.remaining)) + "</td>" +
         "<td>" + escapeHtml(fmtNum(row.netUnits)) + "</td>" +
         "<td>" + escapeHtml(row.readinessPct == null ? "N/A" : (row.readinessPct + "%")) + "</td>" +
-        "<td>" + escapeHtml(fmtNum(row.gapUnits)) + "</td>" +
         "<td>" + escapeHtml(row.estHours > 0 ? (row.estHours + "h") : "--") + "</td>" +
+        "<td>" + escapeHtml(fmtNum(row.gapUnits)) + "</td>" +
         "</tr>";
     }).join("");
     var shortageSummaryHtml = exportShortageSummary.length ? exportShortageSummary.map(function(row) {
@@ -969,7 +970,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       "<h2>Work Orders In Scope</h2>",
       '<div class="note">This section follows the current filters in the Work Orders view.</div>',
       "<table><thead><tr>",
-      "<th>WO#</th><th>FG SKU</th><th>Customer</th><th>Due</th><th>Remaining</th><th>Net</th><th>Ready</th><th>Gap</th><th>Est Hrs</th>",
+      "<th>Run Next</th><th>WO#</th><th>FG SKU</th><th>Customer</th><th>Due</th><th>Remaining</th><th>Net</th><th>Ready</th><th>Est Hrs</th><th>Gap</th>",
       "</tr></thead><tbody>",
       workOrderRowsHtml,
       "</tbody></table>",
@@ -1122,6 +1123,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       isExpanded: isExpanded,
       detailContent: isExpanded ? renderWOExpandedDetails(wo, commitment, batchMeta, runMeta) : null,
       summaryCells: [
+        { key:"dispatchRank", style:Object.assign({}, tdN, { color:runMeta ? C.bright : C.dim, whiteSpace:"nowrap" }), content:runMeta ? <span title={(runMeta.action || "Run Next") + (runMeta.why ? " • " + runMeta.why : "")} style={{ color:C.accent, fontWeight:700 }}>#{runMeta.rank}</span> : "--" },
         { key:"woNum", style:Object.assign({}, tdM, { fontWeight:600, color:C.bright }), content:wo.woNum },
         { key:"product", style:tdM, content:wo.productSkuRaw },
         { key:"batchCount", style:Object.assign({}, tdN, { whiteSpace:"nowrap" }), content:batchMeta ? (
@@ -1143,11 +1145,10 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
         { key:"complete", style:Object.assign({}, tdM, { fontWeight:600, color:wo.prodPct>=100?C.ok:wo.prodPct>=50?C.warn:wo.prodPct>0?C.accent:C.dim }), content:wo.prodPct > 0 ? wo.prodPct+"%" : "--" },
         { key:"committedCanMake", style:Object.assign({}, tdM, { fontWeight:600, color:commitment.committedCanMake>0?C.accent:C.dim }), content:wo.runStatus==="nobom" ? "--" : commitment.committedCanMake.toLocaleString() },
         { key:"readiness", style:Object.assign({}, tdM, { fontWeight:600, color:readyPct == null ? C.dim : readyPct>=100?C.ok:readyPct>=70?C.warn:C.bad }), content:readyPct == null ? <span style={{color:C.dim}}>--</span> : readyPct+"%" },
+        { key:"estHours", style:Object.assign({}, tdM, { color:wo.estHours>0?C.bright:C.dim }), content:wo.estHours > 0 ? wo.estHours+"h" : "--" },
         { key:"commitmentGap", style:Object.assign({}, tdN, { whiteSpace:"nowrap" }), content:commitment.sharedConstraint ? (
           <Badge title={"Shared material demand across active work orders. Order: earliest due date, then WO #. Net: " + commitment.committedCanMake.toLocaleString() + " | Ready: " + (readyPct == null ? "--" : readyPct + "%") + " | Gap: " + commitment.commitmentGap.toLocaleString()} variant={commitment.commitmentGap > 0 ? "danger" : "warning"}>Shared</Badge>
-        ) : <span style={{ color:C.dim }}>--</span> },
-        { key:"estHours", style:Object.assign({}, tdM, { color:wo.estHours>0?C.bright:C.dim }), content:wo.estHours > 0 ? wo.estHours+"h" : "--" },
-        { key:"dispatchRank", style:Object.assign({}, tdN, { color:runMeta ? C.bright : C.dim, whiteSpace:"nowrap" }), content:runMeta ? <span title={(runMeta.action || "Run Next") + (runMeta.why ? " • " + runMeta.why : "")} style={{ color:C.accent, fontWeight:700 }}>#{runMeta.rank}</span> : "--" }
+        ) : <span style={{ color:C.dim }}>--</span> }
       ]
     };
   };
@@ -1317,7 +1318,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
           if (next) {
             setFilterWoStatus("all");
             setSortField("dispatchRank");
-            setSortDir("desc");
+            setSortDir("asc");
           }
           return next;
         });
