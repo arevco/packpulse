@@ -271,7 +271,7 @@ export default function ProductionReadiness() {
       wo.runNext = true;
       wo.woStatus = "all";
       wo.runStatus = "all";
-      wo.sortField = "dispatchScore";
+      wo.sortField = "dispatchRank";
       wo.sortDir = "desc";
     } else if (preset === "shared") {
       wo.shared = true;
