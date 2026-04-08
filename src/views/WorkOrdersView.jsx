@@ -3,6 +3,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTheme } from "../theme";
 import { useStyles } from "../hooks/useStyles";
 import { fmtDate, triggerDownload, normalizeStr, formatDescriptionForDisplay, detectPackType, safeNum } from "../utils";
+import { buildWorkOrderCommitKey, buildWorkOrderCommitmentMap, statusLooksClosed } from "../lib/workOrderCommitments.js";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Badge } from "../components/ui/badge";
@@ -209,7 +210,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
   }, [onPermalinkChange, searchTerm, filterStatus, filterWoStatus, filterCustomer, filterDateFrom, filterDateTo, filterPackType, filterPastDue, filterShared, filterRunNext, filterBatchable, runNextLimit, sortField, sortDir]);
 
   var handleSort = f => { if (sortField === f) setSortDir(d => d==="asc"?"desc":"asc"); else { setSortField(f); setSortDir("desc"); } };
-  var woCommitKey = function(wo) { return [wo.woNum || "", wo.productSkuRaw || "", wo.dueDate || ""].join("|"); };
+  var woCommitKey = buildWorkOrderCommitKey;
   var getWorkOrderRowKey = function(wo, idx) {
     var key = woCommitKey(wo);
     return key || [wo && wo.woNum ? wo.woNum : "", idx].join("|");
@@ -223,11 +224,6 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     });
   };
 
-  var statusLooksClosed = function(status) {
-    var s = normalizeStr(status || "");
-    if (!s) return false;
-    return s.includes("close") || s.includes("complete") || s.includes("cancel") || s.includes("archive") || s.includes("done");
-  };
   var parseDueDateTs = function(v) {
     var d = parseDateValue(v);
     return d ? d.getTime() : Number.POSITIVE_INFINITY;
@@ -256,119 +252,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
   };
 
   var commitmentMap = useMemo(() => {
-    if (!analysis) return {};
-    var results = analysis.results || [];
-    var activeWOs = results.filter(function(wo) {
-      if (wo.runStatus === "nobom") return false;
-      if (statusLooksClosed(wo.status)) return false;
-      return true;
-    }).slice().sort(function(a, b) {
-      var dt = parseDueDateTs(a.dueDate) - parseDueDateTs(b.dueDate);
-      if (dt !== 0) return dt;
-      return (a.woNum || "").localeCompare(b.woNum || "");
-    });
-
-    var remainingBySku = {};
-    activeWOs.forEach(function(wo) {
-      (wo.components || []).forEach(function(comp) {
-        var seen = {};
-        var optList = comp.optionDetails && comp.optionDetails.length ? comp.optionDetails : [{ sku:comp.sku, onHand:comp.onHand || 0, isSub:false }];
-        optList.forEach(function(opt) {
-          var k = normalizeStr(opt.sku || "");
-          if (!k || seen[k]) return;
-          seen[k] = true;
-          var onHand = Number(opt.onHand || 0);
-          if (!Object.prototype.hasOwnProperty.call(remainingBySku, k) || onHand > remainingBySku[k]) remainingBySku[k] = onHand;
-        });
-      });
-    });
-    var initialBySku = Object.assign({}, remainingBySku);
-    var usageByPrimary = {};
-    activeWOs.forEach(function(wo) {
-      var seen = {};
-      (wo.components || []).forEach(function(comp) {
-        var pk = normalizeStr(comp.sku || "");
-        if (!pk || seen[pk]) return;
-        seen[pk] = true;
-        usageByPrimary[pk] = (usageByPrimary[pk] || 0) + 1;
-      });
-    });
-
-    var map = {};
-    activeWOs.forEach(function(wo) {
-      var committed = Number.POSITIVE_INFINITY;
-      var sharedDetails = [];
-      var componentPressure = {};
-      var compList = wo.components || [];
-      if (!compList.length) committed = 0;
-      compList.forEach(function(comp) {
-        var qtyPer = Number(comp.qtyPer || 0);
-        if (!(qtyPer > 0)) return;
-        var optionRows = comp.optionDetails && comp.optionDetails.length ? comp.optionDetails : [{ sku:comp.sku, onHand:comp.onHand || 0, isSub:false }];
-        var options = optionRows.map(function(opt) {
-          var key = normalizeStr(opt.sku || "");
-          return { key:key, sku:opt.sku || "", isSub:!!opt.isSub };
-        }).filter(function(opt) { return !!opt.key; });
-        var available = options.reduce(function(sum, opt) { return sum + (remainingBySku[opt.key] || 0); }, 0);
-        var isolatedAvailable = options.reduce(function(sum, opt) { return sum + (initialBySku[opt.key] || 0); }, 0);
-        var consumedBefore = Math.max(0, isolatedAvailable - available);
-        var makeUnits = Math.floor(available / qtyPer);
-        var isolatedMakeUnits = Math.floor(isolatedAvailable / qtyPer);
-        var compKey = normalizeStr(comp.sku || "");
-        var isSharedAcrossWOs = !!(compKey && (usageByPrimary[compKey] || 0) > 1);
-        if (compKey) {
-          componentPressure[compKey] = {
-            usedByWOs: usageByPrimary[compKey] || 1,
-            qtyPer: qtyPer,
-            availableAtTurn: available,
-            isolatedAvailable: isolatedAvailable,
-            consumedBefore: consumedBefore,
-            turnMakeUnits: makeUnits,
-            isolatedMakeUnits: isolatedMakeUnits,
-            reducedUnits: Math.max(0, isolatedMakeUnits - makeUnits)
-          };
-        }
-        committed = Math.min(committed, makeUnits);
-        if (isSharedAcrossWOs) sharedDetails.push(comp.sku || compKey);
-      });
-      if (!isFinite(committed)) committed = 0;
-      committed = Math.max(0, Math.min(committed, Number(wo.unitsRemaining || 0)));
-
-      // Reserve inventory for this WO using same priority order.
-      compList.forEach(function(comp) {
-        var qtyPer = Number(comp.qtyPer || 0);
-        if (!(qtyPer > 0)) return;
-        var need = committed * qtyPer;
-        if (need <= 0) return;
-        var optionRows = comp.optionDetails && comp.optionDetails.length ? comp.optionDetails.slice() : [{ sku:comp.sku, onHand:comp.onHand || 0, isSub:false }];
-        optionRows.sort(function(a, b) {
-          if (!!a.isSub !== !!b.isSub) return a.isSub ? 1 : -1;
-          return Number(b.onHand || 0) - Number(a.onHand || 0);
-        });
-        var remainingNeed = need;
-        optionRows.forEach(function(opt) {
-          if (remainingNeed <= 0) return;
-          var key = normalizeStr(opt.sku || "");
-          if (!key) return;
-          var avail = remainingBySku[key] || 0;
-          if (avail <= 0) return;
-          var take = Math.min(avail, remainingNeed);
-          remainingBySku[key] = avail - take;
-          remainingNeed -= take;
-        });
-      });
-
-      var localCanMake = Number(wo.maxRunnable || 0);
-      var gap = Math.max(0, localCanMake - committed);
-      map[woCommitKey(wo)] = {
-        committedCanMake: committed,
-        commitmentGap: gap,
-        sharedConstraint: gap > 0 || sharedDetails.length > 0,
-        sharedComponents: Array.from(new Set(sharedDetails)).slice(0, 3),
-        componentPressure: componentPressure
-      };
-    });
-    return map;
+    return buildWorkOrderCommitmentMap(analysis && analysis.results ? analysis.results : []);
   }, [analysis]);
 
   var getNetReadyPct = function(wo, commitment) {
@@ -417,6 +301,12 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     var dispatchRows = (dispatchQueue || []).filter(function(r) {
       return !!r && !!r.woNum;
     }).slice().sort(function(a, b) {
+      var aNet = Number(a && a.netUnits || 0);
+      var bNet = Number(b && b.netUnits || 0);
+      var aRunnable = aNet > 0;
+      var bRunnable = bNet > 0;
+      if (aRunnable !== bRunnable) return bRunnable ? 1 : -1;
+      if (bNet !== aNet) return bNet - aNet;
       return Number(b.priorityScore || 0) - Number(a.priorityScore || 0);
     });
     var target = parseInt(runNextLimit, 10) || 12;

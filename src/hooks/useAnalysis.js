@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { safeNum, normalizeStr } from "../utils";
 import { buildSupplyRiskModel } from "../lib/supplyRiskEngine.js";
+import { buildWorkOrderCommitKey, buildWorkOrderCommitmentMap, statusLooksClosed } from "../lib/workOrderCommitments.js";
 
 function normalizePoKey(value) {
   var s = (value || "").toString().trim();
@@ -695,11 +696,6 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       if (days <= 14) return 30;
       return 20;
     };
-    var statusLooksClosed = function(status) {
-      var s = normalizeStr(status || "");
-      return s.includes("close") || s.includes("complete") || s.includes("cancel") || s.includes("archive") || s.includes("done");
-    };
-
     var dataScore = 100;
     if (!boms || !boms.length) dataScore -= 20;
     if (!edrData || !edrData.length) dataScore -= 15;
@@ -712,6 +708,7 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       if (safeNum(wo.unitsRemaining || 0) <= 0) return false;
       return true;
     });
+    var commitmentMap = buildWorkOrderCommitmentMap(analysis.results || []);
     var maxRemaining = activeWOs.reduce(function(m, wo) { return Math.max(m, safeNum(wo.unitsRemaining || 0)); }, 0) || 1;
     var maxUph = activeWOs.reduce(function(m, wo) { return Math.max(m, safeNum(wo.unitsPerHour || 0)); }, 0) || 1;
     var componentUsage = {};
@@ -729,8 +726,12 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       if (wo.runStatus === "nobom") return;
       var unitsRemaining = Math.max(0, safeNum(wo.unitsRemaining || wo.qtyToProduce || 0));
       if (unitsRemaining <= 0) return;
-      var netUnits = Math.max(0, safeNum(wo.maxRunnable || 0));
+      var commitment = commitmentMap[buildWorkOrderCommitKey(wo)] || { committedCanMake:0, commitmentGap:0, sharedConstraint:false };
+      var isolatedUnits = Math.max(0, safeNum(wo.maxRunnable || 0));
+      var netUnits = Math.max(0, safeNum(commitment.committedCanMake || 0));
       var coveragePct = safePct(netUnits, unitsRemaining);
+      var isolatedCoveragePct = safePct(isolatedUnits, unitsRemaining);
+      var coverageLossPct = Math.max(0, isolatedCoveragePct - coveragePct);
       var readiness = clamp(safeNum(wo.readiness || 0), 0, 100);
       var days = dueDays(wo.dueDate);
       var dueScore = dueRiskScore(wo.dueDate);
@@ -742,36 +743,40 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
         var key = normalizeStr(c.sku || "");
         return sum + ((key && (componentUsage[key] || 0) > 1) ? 1 : 0);
       }, 0);
-      var sharedPenalty = Math.min(35, sharedCount * 8);
-      var runWindowScore = shiftCount >= 4 ? 100 : shiftCount >= 3 ? 85 : shiftCount >= 2 ? 65 : shiftCount >= 1 ? 40 : 15;
-      var shortRunPenalty = shiftCount < 1 ? 45 : shiftCount < 2 ? 30 : shiftCount < 4 ? 15 : 0;
+      var sharedPenalty = Math.min(22, sharedCount * 5);
+      var runWindowScore = shiftCount >= 4 ? 100 : shiftCount >= 3 ? 85 : shiftCount >= 2 ? 70 : shiftCount >= 1 ? 50 : netUnits > 0 ? 25 : 0;
+      var shortRunPenalty = netUnits <= 0 ? 55 : shiftCount < 1 ? 28 : shiftCount < 2 ? 14 : shiftCount < 4 ? 5 : 0;
+      var lowCoveragePenalty = coveragePct < 50 ? (50 - coveragePct) * 0.9 : coveragePct < 70 ? (70 - coveragePct) * 0.35 : 0;
+      var shortRunCandidate = netUnits > 0 && coveragePct < 60 && netUnits >= Math.min(1000, Math.max(250, unitsRemaining * 0.15));
+      var shortRunBoost = shortRunCandidate ? 8 : 0;
+      var runnableNowBonus = netUnits > 0 ? (coveragePct >= 80 ? 30 : coveragePct >= 50 ? 22 : 14) : 0;
+      var zeroNetPenalty = netUnits <= 0 ? 70 : 0;
+      var sharedConstraintPenalty = commitment.commitmentGap > 0 ? Math.min(18, safePct(commitment.commitmentGap, unitsRemaining) * 0.3) : 0;
+      var isolatedVsNetPenalty = Math.min(20, coverageLossPct * 0.3);
 
-      // Low coverage is a soft penalty, not exclusion. Allows "patch" runs when useful.
-      var lowCoveragePenalty = coveragePct < 60 ? (60 - coveragePct) * 0.6 : 0;
-      var shortRunCandidate = coveragePct < 60 && netUnits >= Math.min(1000, Math.max(250, unitsRemaining * 0.15));
-      var shortRunBoost = shortRunCandidate ? 10 : 0;
-
-      var service = clamp((0.65 * dueScore) + (0.35 * volumeScore), 0, 100);
-      var feasibility = clamp((0.55 * coveragePct) + (0.20 * readiness) + (0.25 * runWindowScore) - sharedPenalty - lowCoveragePenalty - shortRunPenalty + shortRunBoost, 0, 100);
+      var service = clamp((0.58 * dueScore) + (0.22 * volumeScore) + (0.20 * coveragePct), 0, 100);
+      var feasibility = clamp((0.68 * coveragePct) + (0.12 * readiness) + (0.20 * runWindowScore) + runnableNowBonus + shortRunBoost - sharedPenalty - lowCoveragePenalty - shortRunPenalty - zeroNetPenalty - sharedConstraintPenalty - isolatedVsNetPenalty, 0, 100);
       var uphScore = clamp((safeNum(wo.unitsPerHour || 0) / maxUph) * 100, 0, 100);
-      var flow = clamp((0.5 * uphScore) + (0.5 * runWindowScore), 0, 100);
-      var stability = clamp(dataScore - Math.min(20, sharedCount * 5) - (coveragePct < 60 ? 10 : 0) - Math.min(15, shortRunPenalty * 0.35), 0, 100);
-      var dispatchScore = (0.32 * service) + (0.34 * feasibility) + (0.24 * flow) + (0.10 * stability);
+      var flow = clamp((0.40 * uphScore) + (0.35 * runWindowScore) + (0.25 * coveragePct), 0, 100);
+      var stability = clamp(dataScore - Math.min(18, sharedCount * 4) - Math.min(12, sharedConstraintPenalty) - (netUnits <= 0 ? 15 : 0), 0, 100);
+      var dispatchScore = (0.20 * service) + (0.52 * feasibility) + (0.20 * flow) + (0.08 * stability);
 
       var action = "Run Next";
-      if (shiftCount < 1 && !(days <= 0 && coveragePct >= 80)) action = "Hold / Build Window";
+      if (netUnits <= 0) action = "Hold / Replenish";
+      else if (shiftCount < 1 && !(days <= 0 && coveragePct >= 80)) action = "Hold / Build Window";
       else if (coveragePct < 60 && shortRunCandidate) action = "Short-Run + Replenish";
       else if (days < 0 && coveragePct >= 50) action = "Recover Past Due";
       else if (coveragePct < 60) action = "Hold / Replenish";
-      else if (days <= 1) action = "Run Now";
+      else if (days <= 1 || coveragePct >= 85) action = "Run Now";
 
       var whyBits = [];
       if (days < 0) whyBits.push("Past due");
       else if (days <= 1) whyBits.push("Due " + (days === 0 ? "today" : "tomorrow"));
       else if (days <= 3) whyBits.push("Due in " + days + "d");
-      whyBits.push("Net " + Math.round(coveragePct) + "%");
+      whyBits.push("Net " + Math.round(netUnits).toLocaleString() + " (" + Math.round(coveragePct) + "%)");
       if (unitsPerHour > 0) whyBits.push(Math.round(shiftCount * 10) / 10 + " shifts @ net");
       if (sharedCount > 0) whyBits.push(sharedCount + " shared comps");
+      if (coverageLossPct > 0) whyBits.push(Math.round(coverageLossPct) + "% shared drag");
       if (shortRunCandidate) whyBits.push("partial run viable");
 
       var dispatchRec = {
@@ -785,6 +790,9 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
         action: action,
         why: "WO " + wo.woNum + " \u2022 " + whyBits.join(" \u2022 "),
         impactUnits: shortRunCandidate ? netUnits : unitsRemaining,
+        netUnits: netUnits,
+        netCoveragePct: coveragePct,
+        isolatedUnits: isolatedUnits,
         window: bucketByDate(wo.dueDate),
         confidence: confidenceLabel,
         source: "Dispatch Engine",
@@ -933,23 +941,34 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       });
       var families = Object.keys(grouped).map(function(key) {
         var rows = grouped[key].slice().sort(function(a, b) {
+          var aNet = Number(a && a.netUnits || 0);
+          var bNet = Number(b && b.netUnits || 0);
+          var aRunnable = aNet > 0;
+          var bRunnable = bNet > 0;
+          if (aRunnable !== bRunnable) return bRunnable ? 1 : -1;
+          if (bNet !== aNet) return bNet - aNet;
           var dueDelta = compareDispatchDueAsc(a, b);
           if (dueDelta !== 0) return dueDelta;
           return Number(b.basePriorityScore || b.priorityScore || 0) - Number(a.basePriorityScore || a.priorityScore || 0);
         });
         var familySize = rows.length;
+        var runnableRowCount = rows.reduce(function(sum, row) {
+          return sum + (Number(row && row.netUnits || 0) > 0 ? 1 : 0);
+        }, 0);
         var familyAnchorScore = rows.reduce(function(maxScore, row) {
           return Math.max(maxScore, Number(row.basePriorityScore || row.priorityScore || 0));
-        }, 0) + (familySize > 1 ? Math.min(10, (familySize - 1) * 5) : 0);
+        }, 0) + (familySize > 1 ? Math.min(10, (familySize - 1) * 5) : 0) + (runnableRowCount > 0 ? 12 : -18);
         var earliestDate = rows[0] && rows[0].dueDate ? new Date(rows[0].dueDate) : null;
         return {
           key: key,
           rows: rows,
           familySize: familySize,
+          runnableRowCount: runnableRowCount,
           familyAnchorScore: familyAnchorScore,
           earliestTs: earliestDate && !isNaN(earliestDate) ? earliestDate.getTime() : Number.POSITIVE_INFINITY
         };
       }).sort(function(a, b) {
+        if (b.runnableRowCount !== a.runnableRowCount) return b.runnableRowCount - a.runnableRowCount;
         if (b.familyAnchorScore !== a.familyAnchorScore) return b.familyAnchorScore - a.familyAnchorScore;
         if (a.earliestTs !== b.earliestTs) return a.earliestTs - b.earliestTs;
         return String(a.key || "").localeCompare(String(b.key || ""));
