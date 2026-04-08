@@ -144,7 +144,7 @@ export default function OperationsInsightsPanel({
           <div>
             <div className="text-sm font-semibold">Daily Output & Economics</div>
             <div className="text-xs text-[rgb(var(--muted))]">
-              Cases produced, revenue, and labor cost by day. Default window is the latest 30 days.
+              Cases produced, revenue, labor cost, and labor margin by day. Default window is the latest 30 days.
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
@@ -200,7 +200,7 @@ export default function OperationsInsightsPanel({
                       labelFormatter={function(value) { return value; }}
                       formatter={function(value, _name, item) {
                         var key = String(item && item.dataKey || "");
-                        if (key === "revenue" || key === "labor") return fmtMoney(value);
+                        if (key === "revenue" || key === "labor" || key === "margin") return fmtMoney(value);
                         return Math.round(safeNum(value)).toLocaleString();
                       }}
                     />
@@ -233,6 +233,15 @@ export default function OperationsInsightsPanel({
                   dot={false}
                   activeDot={{ r: 4 }}
                 />
+                <Line
+                  yAxisId="dollars"
+                  type="monotone"
+                  dataKey="margin"
+                  stroke={dailyEconomicsChartConfig.margin.color}
+                  strokeWidth={2.25}
+                  dot={false}
+                  activeDot={{ r: 4 }}
+                />
               </ComposedChart>
             </ResponsiveContainer>
           </ChartContainer>
@@ -243,6 +252,7 @@ export default function OperationsInsightsPanel({
           <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm" style={{ background: dailyEconomicsChartConfig.cases.color }} />Cases Produced</span>
           <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm" style={{ background: dailyEconomicsChartConfig.revenue.color }} />Revenue</span>
           <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm" style={{ background: dailyEconomicsChartConfig.labor.color }} />Labor Cost</span>
+          <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm" style={{ background: dailyEconomicsChartConfig.margin.color }} />Labor Margin</span>
         </div>
       </Card>
 

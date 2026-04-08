@@ -687,7 +687,8 @@ var OPERATIONS_SHIFT_COLORS = {
 var OPERATIONS_ECONOMICS_COLORS = {
   cases: "#0072B2",
   revenue: "#009E73",
-  labor: "#CC79A7"
+  labor: "#CC79A7",
+  margin: "#D55E00"
 };
 
 var COMMAND_BOARD_PRESETS = [
@@ -2640,7 +2641,8 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     return {
       cases: { label: "Cases Produced", color: OPERATIONS_ECONOMICS_COLORS.cases },
       revenue: { label: "Revenue", color: OPERATIONS_ECONOMICS_COLORS.revenue },
-      labor: { label: "Labor Cost", color: OPERATIONS_ECONOMICS_COLORS.labor }
+      labor: { label: "Labor Cost", color: OPERATIONS_ECONOMICS_COLORS.labor },
+      margin: { label: "Labor Margin", color: OPERATIONS_ECONOMICS_COLORS.margin }
     };
   }, []);
 
@@ -2651,7 +2653,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     trendDays.forEach(function(row) {
       var date = String(row && row.date || "");
       if (!date) return;
-      if (!dayMap[date]) dayMap[date] = { date: date, cases: 0, revenue: 0, labor: 0 };
+      if (!dayMap[date]) dayMap[date] = { date: date, cases: 0, revenue: 0, labor: 0, margin: 0 };
       dayMap[date].cases += safeNum(row && row.units);
     });
     var breakdownRows = (effectiveBreakdown && Array.isArray(effectiveBreakdown.rowsLite)) ? effectiveBreakdown.rowsLite : [];
@@ -2660,7 +2662,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       var itemCode = String(row && row.item_code || "");
       var units = safeNum(row && row.units_produced);
       if (!date || !(units > 0)) return;
-      if (!dayMap[date]) dayMap[date] = { date: date, cases: 0, revenue: 0, labor: 0 };
+      if (!dayMap[date]) dayMap[date] = { date: date, cases: 0, revenue: 0, labor: 0, margin: 0 };
       var revenueMatch = revenuePerCaseForRow(itemCode, date);
       var revenuePerCase = safeNum(revenueMatch && revenueMatch.value);
       if (revenuePerCase > 0) dayMap[date].revenue += units * revenuePerCase;
@@ -2669,11 +2671,12 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     laborByDay.forEach(function(row) {
       var date = String(row && row.date_et || "");
       if (!date) return;
-      if (!dayMap[date]) dayMap[date] = { date: date, cases: 0, revenue: 0, labor: 0 };
+      if (!dayMap[date]) dayMap[date] = { date: date, cases: 0, revenue: 0, labor: 0, margin: 0 };
       dayMap[date].labor += safeNum(row && row.labor_cost);
     });
     return eachDayIsoBetween(dailyPerfRange.start, dailyPerfRange.end).map(function(date) {
-      return dayMap[date] || { date: date, cases: 0, revenue: 0, labor: 0 };
+      var row = dayMap[date] || { date: date, cases: 0, revenue: 0, labor: 0, margin: 0 };
+      return Object.assign({}, row, { margin: safeNum(row.revenue) - safeNum(row.labor) });
     });
   }, [effectiveTrends, effectiveBreakdown, laborActuals, revenuePerCaseForRow, dailyPerfRange.start, dailyPerfRange.end, showInsightsPanelsReady]);
 
