@@ -70,8 +70,8 @@ function isWithinDueDateRange(value, start, end) {
 
 var WORK_ORDER_VIRTUAL_THRESHOLD = 80;
 var WORK_ORDER_VIRTUAL_MAX_HEIGHT = "min(72vh, 960px)";
-var WORK_ORDER_GRID_TEMPLATE = "92px 120px 72px 92px 220px 140px 120px 96px 96px 96px 100px 88px 88px 88px 88px 84px 88px 88px 88px";
-var WORK_ORDER_TABLE_MIN_WIDTH = "1944px";
+var WORK_ORDER_GRID_TEMPLATE = "92px 120px 72px 92px 220px 140px 120px 96px 96px 96px 100px 88px 88px 88px 84px 88px 88px 88px";
+var WORK_ORDER_TABLE_MIN_WIDTH = "1856px";
 var WORK_ORDER_COLUMNS = [
   { field: "woNum", label: "WO#" },
   { field: "product", label: "Product" },
@@ -85,9 +85,8 @@ var WORK_ORDER_COLUMNS = [
   { field: "produced", label: "Produced" },
   { field: "remaining", label: "Remaining" },
   { field: "complete", label: "Complete" },
-  { field: "readiness", label: "Ready" },
-  { field: "maxRunnable", label: "Make", title: "Capacity if this work order runs in isolation" },
   { field: "committedCanMake", label: "Net", title: "Capacity after shared-material commitments across active work orders" },
+  { field: "readiness", label: "Ready", title: "Net capacity as a percent of remaining units" },
   { field: "commitmentGap", label: "Gap", title: "Difference between isolated make and commitment-aware net capacity" },
   { field: "estHours", label: "Est Hrs" },
   { field: "dispatchRank", label: "Run Next", title: "Run Next rank from dispatch scoring" },
@@ -111,7 +110,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
   const [filterRunNext, setFilterRunNext] = useState(!!initial.runNext);
   const [filterBatchable, setFilterBatchable] = useState(!!initial.batchable);
   const [runNextLimit, setRunNextLimit] = useState(String(initial.runNextLimit || "12"));
-  const [sortField, setSortField] = useState(String(initial.sortField || "readiness"));
+  const [sortField, setSortField] = useState(initial.sortField === "maxRunnable" ? "committedCanMake" : String(initial.sortField || "readiness"));
   const [sortDir, setSortDir] = useState(String(initial.sortDir || "desc"));
   const [expandedWOs, setExpandedWOs] = useState({});
   const workOrdersScrollRef = useRef(null);
@@ -372,6 +371,14 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     return map;
   }, [analysis]);
 
+  var getNetReadyPct = function(wo, commitment) {
+    if (!wo || wo.runStatus === "nobom" || safeNum(wo.readiness) < 0) return null;
+    var remaining = safeNum(wo.unitsRemaining);
+    if (remaining <= 0) return 100;
+    var netUnits = safeNum(commitment && commitment.committedCanMake);
+    return Math.max(0, Math.min(100, Math.round(netUnits / remaining * 100)));
+  };
+
   var sharedComponentUsage = useMemo(function() {
     if (!analysis) return {};
     var usage = {};
@@ -573,7 +580,6 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       else if (sortField==="produced") c=a.unitsProduced-b.unitsProduced;
       else if (sortField==="remaining") c=a.unitsRemaining-b.unitsRemaining;
       else if (sortField==="complete") c=a.prodPct-b.prodPct;
-      else if (sortField==="maxRunnable") c=a.maxRunnable-b.maxRunnable;
       else if (sortField==="committedCanMake") {
         var ac = commitmentMap[woCommitKey(a)] ? commitmentMap[woCommitKey(a)].committedCanMake : 0;
         var bc = commitmentMap[woCommitKey(b)] ? commitmentMap[woCommitKey(b)].committedCanMake : 0;
@@ -584,7 +590,11 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
         var bg = commitmentMap[woCommitKey(b)] ? commitmentMap[woCommitKey(b)].commitmentGap : 0;
         c = ag - bg;
       }
-      else if (sortField==="readiness") c=a.readiness-b.readiness;
+      else if (sortField==="readiness") {
+        var arPct = getNetReadyPct(a, commitmentMap[woCommitKey(a)]);
+        var brPct = getNetReadyPct(b, commitmentMap[woCommitKey(b)]);
+        c = (arPct == null ? -1 : arPct) - (brPct == null ? -1 : brPct);
+      }
       else if (sortField==="estHours") c=a.estHours-b.estHours;
       else if (sortField==="dispatchRank") {
         var ar = runNextMetaMap[String(a.woNum || "")] ? runNextMetaMap[String(a.woNum || "")].rank : Number.POSITIVE_INFINITY;
@@ -737,6 +747,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       var commitment = commitmentMap[woCommitKey(wo)] || { committedCanMake:0, commitmentGap:0 };
       var batchMeta = batchOpportunityMap[woCommitKey(wo)] || null;
       var runMeta = runNextMetaMap[String(wo.woNum || "")] || null;
+      var readyPct = getNetReadyPct(wo, commitment);
       return {
         woNum: wo.woNum || "",
         productSku: wo.productSkuRaw || wo.productSku || "",
@@ -751,8 +762,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
         produced: Number(wo.unitsProduced || 0),
         remaining: Number(wo.unitsRemaining || 0),
         completePct: Number(wo.prodPct || 0),
-        readinessPct: wo.readiness < 0 ? null : Math.round(Number(wo.readiness || 0)),
-        makeUnits: Number(wo.maxRunnable || 0),
+        readinessPct: readyPct,
         netUnits: Number(commitment.committedCanMake || 0),
         gapUnits: Number(commitment.commitmentGap || 0),
         estHours: Number(wo.estHours || 0),
@@ -768,6 +778,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     var rows = [];
     filteredResults.forEach(function(wo) {
       var commitment = commitmentMap[woCommitKey(wo)] || { committedCanMake:0, commitmentGap:0, componentPressure:{} };
+      var readyPct = getNetReadyPct(wo, commitment);
       var shortageComponents = (wo.components || []).filter(function(comp) { return Number(comp.short || 0) > 0; });
       shortageComponents.forEach(function(comp) {
         var compKey = normalizeStr(comp.sku || "");
@@ -789,8 +800,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
           orderQty: Number(wo.qtyToProduce || 0),
           produced: Number(wo.unitsProduced || 0),
           remaining: Number(wo.unitsRemaining || 0),
-          readinessPct: wo.readiness < 0 ? null : Math.round(Number(wo.readiness || 0)),
-          makeUnits: Number(wo.maxRunnable || 0),
+          readinessPct: readyPct,
           netUnits: Number(commitment.committedCanMake || 0),
           gapUnits: Number(commitment.commitmentGap || 0),
           estHours: Number(wo.estHours || 0),
@@ -892,7 +902,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     if (!analysis || !filteredResults.length) return;
     var headers = [
       "WO#","FG SKU","FG Description","Customer","WO Status","Run Status","Due Date","Planned Start","Planned End",
-      "Order Qty","Produced","Remaining","Ready %","Make","Net","Gap","Est Hrs","Batch Count","Run Next Rank","Run Next Score",
+      "Order Qty","Produced","Remaining","Net","Ready %","Gap","Est Hrs","Batch Count","Run Next Rank","Run Next Score",
       "Component SKU","Component Description","Qty/Unit","Needed","On Hand","Short","Fill %","Shared Component","Shared WO Count",
       "Allocated Before This WO","Available At Turn","Turn Make Units","Alt Options","Vendor Inbound Ask Qty",
       "EDR Inbound Qty","OpenDock Scheduled Qty","Unscheduled Qty","Uncovered Qty","Inbound Coverage %","Scheduled Coverage %",
@@ -943,9 +953,8 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
         row.orderQty,
         row.produced,
         row.remaining,
-        row.readinessPct == null ? "N/A" : row.readinessPct,
-        row.makeUnits,
         row.netUnits,
+        row.readinessPct == null ? "N/A" : row.readinessPct,
         row.gapUnits,
         row.estHours || "",
         row.batchCount || "",
@@ -1011,9 +1020,8 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
         "<td>" + escapeHtml(row.customer || "--") + "</td>" +
         "<td>" + escapeHtml(fmtDate(row.dueDate)) + "</td>" +
         "<td>" + escapeHtml(fmtNum(row.remaining)) + "</td>" +
-        "<td>" + escapeHtml(row.readinessPct == null ? "N/A" : (row.readinessPct + "%")) + "</td>" +
-        "<td>" + escapeHtml(fmtNum(row.makeUnits)) + "</td>" +
         "<td>" + escapeHtml(fmtNum(row.netUnits)) + "</td>" +
+        "<td>" + escapeHtml(row.readinessPct == null ? "N/A" : (row.readinessPct + "%")) + "</td>" +
         "<td>" + escapeHtml(fmtNum(row.gapUnits)) + "</td>" +
         "<td>" + escapeHtml(row.estHours > 0 ? (row.estHours + "h") : "--") + "</td>" +
         "</tr>";
@@ -1080,7 +1088,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       "<h2>Work Orders In Scope</h2>",
       '<div class="note">This section follows the current filters in the Work Orders view.</div>',
       "<table><thead><tr>",
-      "<th>WO#</th><th>FG SKU</th><th>Customer</th><th>Due</th><th>Remaining</th><th>Ready</th><th>Make</th><th>Net</th><th>Gap</th><th>Est Hrs</th>",
+      "<th>WO#</th><th>FG SKU</th><th>Customer</th><th>Due</th><th>Remaining</th><th>Net</th><th>Ready</th><th>Gap</th><th>Est Hrs</th>",
       "</tr></thead><tbody>",
       workOrderRowsHtml,
       "</tbody></table>",
@@ -1227,6 +1235,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     var runMeta = runNextMetaMap[String(wo.woNum || "")] || null;
     var rs = runStatusMeta(wo.runStatus);
     var skuType = detectPackType(wo.productDesc || wo.productSkuRaw || "", wo.productSkuRaw || wo.productSku || "");
+    var readyPct = getNetReadyPct(wo, commitment);
     return {
       rowKey: rowKey,
       isExpanded: isExpanded,
@@ -1251,11 +1260,10 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
         { key:"produced", style:Object.assign({}, tdM, { color:wo.unitsProduced>0?C.ok:C.dim }), content:wo.unitsProduced>0?wo.unitsProduced.toLocaleString():"--" },
         { key:"remaining", style:Object.assign({}, tdM, { color:C.bright }), content:wo.unitsRemaining.toLocaleString() },
         { key:"complete", style:Object.assign({}, tdM, { fontWeight:600, color:wo.prodPct>=100?C.ok:wo.prodPct>=50?C.warn:wo.prodPct>0?C.accent:C.dim }), content:wo.prodPct > 0 ? wo.prodPct+"%" : "--" },
-        { key:"readiness", style:Object.assign({}, tdM, { fontWeight:600, color:wo.readiness>=100?C.ok:wo.readiness>=70?C.warn:C.bad }), content:wo.readiness < 0 ? <span style={{color:C.dim}}>--</span> : Math.round(wo.readiness)+"%" },
-        { key:"maxRunnable", style:Object.assign({}, tdM, { fontWeight:600, color:wo.runStatus==="ready"?C.ok:wo.runStatus==="nobom"?C.dim:wo.maxRunnable>0?C.warn:C.bad }), content:wo.runStatus==="nobom" ? "--" : wo.maxRunnable.toLocaleString() },
         { key:"committedCanMake", style:Object.assign({}, tdM, { fontWeight:600, color:commitment.committedCanMake>0?C.accent:C.dim }), content:wo.runStatus==="nobom" ? "--" : commitment.committedCanMake.toLocaleString() },
+        { key:"readiness", style:Object.assign({}, tdM, { fontWeight:600, color:readyPct == null ? C.dim : readyPct>=100?C.ok:readyPct>=70?C.warn:C.bad }), content:readyPct == null ? <span style={{color:C.dim}}>--</span> : readyPct+"%" },
         { key:"commitmentGap", style:Object.assign({}, tdN, { whiteSpace:"nowrap" }), content:commitment.sharedConstraint ? (
-          <Badge title={"Shared material demand across active work orders. Order: earliest due date, then WO #. Make: " + wo.maxRunnable.toLocaleString() + " | Net: " + commitment.committedCanMake.toLocaleString() + " | Gap: " + commitment.commitmentGap.toLocaleString()} variant={commitment.commitmentGap > 0 ? "danger" : "warning"}>Shared</Badge>
+          <Badge title={"Shared material demand across active work orders. Order: earliest due date, then WO #. Net: " + commitment.committedCanMake.toLocaleString() + " | Ready: " + (readyPct == null ? "--" : readyPct + "%") + " | Gap: " + commitment.commitmentGap.toLocaleString()} variant={commitment.commitmentGap > 0 ? "danger" : "warning"}>Shared</Badge>
         ) : <span style={{ color:C.dim }}>--</span> },
         { key:"estHours", style:Object.assign({}, tdM, { color:wo.estHours>0?C.bright:C.dim }), content:wo.estHours > 0 ? wo.estHours+"h" : "--" },
         { key:"dispatchRank", style:Object.assign({}, tdN, { color:runMeta ? C.bright : C.dim, whiteSpace:"nowrap" }), content:runMeta ? <span title={(runMeta.action || "Run Next") + (runMeta.why ? " • " + runMeta.why : "")} style={{ color:C.accent, fontWeight:700 }}>#{runMeta.rank}</span> : "--" },
