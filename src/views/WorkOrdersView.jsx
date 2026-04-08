@@ -1294,30 +1294,30 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
 
   var scopeCountLabel = analysis ? (filteredResults.length + " of " + analysis.results.length + " WOs") : "0 WOs";
 
-  return (<div>
-    <div className="mb-3 flex flex-wrap items-center gap-2">
-      <Input type="text" placeholder="Search WO / SKU / customer" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="h-10 w-full text-sm sm:w-72" />
-      <select value={filterCustomer} onChange={e => setFilterCustomer(e.target.value)} className="h-10 w-full rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))] sm:w-auto">
+  return (<div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+    <div className="flex flex-wrap items-center gap-1.5">
+      <Input type="text" placeholder="Search WO / SKU / customer" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="h-9 w-full text-sm sm:w-64" />
+      <select value={filterCustomer} onChange={e => setFilterCustomer(e.target.value)} className="h-9 w-full rounded-md border border-[rgb(var(--border))] bg-white px-2.5 text-[13px] text-[rgb(var(--foreground))] sm:w-auto">
         <option value="all">All Customers</option>
         {woCustomers.map(s => <option key={s} value={s}>{s}</option>)}
       </select>
-      <select value={filterWoStatus} onChange={e => setFilterWoStatus(e.target.value)} className="h-10 w-full rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))] sm:w-auto">
+      <select value={filterWoStatus} onChange={e => setFilterWoStatus(e.target.value)} className="h-9 w-full rounded-md border border-[rgb(var(--border))] bg-white px-2.5 text-[13px] text-[rgb(var(--foreground))] sm:w-auto">
         <option value="all">All WO Status</option>
         {woStatuses.map(s => <option key={s} value={s}>{s}</option>)}
       </select>
-      <span style={{ fontSize:13, color:C.dim, marginLeft:4 }}>Due from</span>
-      <DatePicker value={filterDateFrom} onChange={setFilterDateFrom} placeholder="Start date" className="w-full sm:w-36" />
-      <span style={{ fontSize:13, color:C.dim }}>to</span>
-      <DatePicker value={filterDateTo} onChange={setFilterDateTo} placeholder="End date" className="w-full sm:w-36" />
-      {hasActiveFilters && <Button onClick={clearAllFilters} variant="outline" size="default">Clear</Button>}
-      <span style={{ fontSize:13, color:C.dim, marginLeft:4 }}>{scopeCountLabel}</span>
+      <span style={{ fontSize:12, color:C.dim, marginLeft:2 }}>Due</span>
+      <DatePicker value={filterDateFrom} onChange={setFilterDateFrom} placeholder="Start" className="h-9 w-full text-xs sm:w-[132px]" />
+      <span style={{ fontSize:12, color:C.dim }}>to</span>
+      <DatePicker value={filterDateTo} onChange={setFilterDateTo} placeholder="End" className="h-9 w-full text-xs sm:w-[132px]" />
+      {hasActiveFilters && <Button onClick={clearAllFilters} variant="outline" size="sm">Clear</Button>}
+      <span style={{ fontSize:12, color:C.dim, marginLeft:2 }}>{scopeCountLabel}</span>
     </div>
 
-    <div className="mb-4 flex flex-wrap items-center gap-2">
+    <div className="flex flex-wrap items-center gap-1.5">
       <select
         value={filterStatus}
         onChange={function(e) { setFilterStatus(e.target.value); }}
-        className="h-10 w-full rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))] sm:w-auto"
+        className="h-9 w-full rounded-md border border-[rgb(var(--border))] bg-white px-2.5 text-[13px] text-[rgb(var(--foreground))] sm:w-auto"
       >
         <option value="all">All Run Status</option>
         <option value="ready">Ready</option>
@@ -1325,7 +1325,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
         <option value="blocked">Blocked</option>
         <option value="nobom">No BOM</option>
       </select>
-      <select value={filterPackType} onChange={e => setFilterPackType(e.target.value)} className="h-10 w-full rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))] sm:w-auto">
+      <select value={filterPackType} onChange={e => setFilterPackType(e.target.value)} className="h-9 w-full rounded-md border border-[rgb(var(--border))] bg-white px-2.5 text-[13px] text-[rgb(var(--foreground))] sm:w-auto">
         <option value="all">All SKU Types</option>
         {skuTypeOptions.map(function(t) { return <option key={t} value={t}>{t}</option>; })}
       </select>
@@ -1339,39 +1339,39 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
           }
           return next;
         });
-      }} variant={filterRunNext ? "active" : "outline"} size="default">Run Next</Button>
+      }} variant={filterRunNext ? "active" : "outline"} size="sm">Run Next</Button>
       {filterRunNext && (
-        <select value={runNextLimit} onChange={function(e) { setRunNextLimit(e.target.value); }} className="h-10 w-full rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))] sm:w-auto">
+        <select value={runNextLimit} onChange={function(e) { setRunNextLimit(e.target.value); }} className="h-9 w-full rounded-md border border-[rgb(var(--border))] bg-white px-2.5 text-[13px] text-[rgb(var(--foreground))] sm:w-auto">
           <option value="8">Top 8</option>
           <option value="12">Top 12</option>
           <option value="20">Top 20</option>
         </select>
       )}
-      <Button onClick={function() { setFilterBatchable(function(v) { return !v; }); }} variant={filterBatchable ? "active" : "outline"} size="default" title="Show same-item work orders that can be batched to reduce changeovers">
+      <Button onClick={function() { setFilterBatchable(function(v) { return !v; }); }} variant={filterBatchable ? "active" : "outline"} size="sm" title="Show same-item work orders that can be batched to reduce changeovers">
         Batch
       </Button>
-      <Button onClick={function() { setFilterShared(function(v) { return !v; }); }} variant={filterShared ? "active" : "outline"} size="default">Shared</Button>
-      <Button onClick={function() { setFilterPastDue(function(v) { return !v; }); }} variant={filterPastDue ? "active" : "outline"} size="default">Past Due</Button>
-      <Button onClick={exportCSV} variant="outline" size="default">CSV</Button>
-      <Button onClick={exportPDF} variant="outline" size="default">PDF</Button>
+      <Button onClick={function() { setFilterShared(function(v) { return !v; }); }} variant={filterShared ? "active" : "outline"} size="sm">Shared</Button>
+      <Button onClick={function() { setFilterPastDue(function(v) { return !v; }); }} variant={filterPastDue ? "active" : "outline"} size="sm">Past Due</Button>
+      <Button onClick={exportCSV} variant="outline" size="sm">CSV</Button>
+      <Button onClick={exportPDF} variant="outline" size="sm">PDF</Button>
     </div>
 
-    <div style={{ marginBottom:18 }}>
-      <div style={{ fontSize:14, fontWeight:600, color:C.bright, marginBottom:10 }}>Work Order Snapshot</div>
+    <div style={{ marginBottom:12 }}>
+      <div style={{ fontSize:13, fontWeight:600, color:C.bright, marginBottom:8 }}>Work Order Snapshot</div>
       <OverviewView analysis={filteredAnalysis || analysis} onSelectCustomer={handleOverviewCustomerSelect} />
     </div>
     <div id="workorders-table">
-    <div style={{ fontSize:14, fontWeight:600, color:C.bright, marginBottom:10 }}>Work Orders Detail</div>
+    <div style={{ fontSize:13, fontWeight:600, color:C.bright, marginBottom:8 }}>Work Orders Detail</div>
     {commitmentSummary && (
-      <div style={{ marginBottom:10, display:"flex", flexDirection:"column", gap:8 }}>
-        <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
-          <span style={{ display:"inline-flex", alignItems:"center", gap:8, padding:"4px 10px", borderRadius:999, border:"1px solid "+C.border, background:C.surface, fontSize:13, color:C.dim }}>
+      <div style={{ marginBottom:8, display:"flex", flexDirection:"column", gap:6 }}>
+        <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
+          <span style={{ display:"inline-flex", alignItems:"center", gap:6, padding:"3px 8px", borderRadius:999, border:"1px solid "+C.border, background:C.surface, fontSize:12, color:C.dim }}>
             <span style={{ fontWeight:700 }}>Gap</span>
             <span style={{ color:C.bad, fontWeight:700 }}>{commitmentSummary.atRisk} WOs</span>
             <span style={{ color:C.bad, fontWeight:700 }}>{fmtNum(commitmentSummary.reducedUnits)} units</span>
           </span>
           {batchOpportunityGroups.length > 0 && (
-            <span style={{ display:"inline-flex", alignItems:"center", gap:8, padding:"4px 10px", borderRadius:999, border:"1px solid "+(filterBatchable ? C.accentLine : C.border), background:filterBatchable ? C.accentSoft : C.surface, fontSize:13, color:filterBatchable ? C.accent : C.dim }}>
+            <span style={{ display:"inline-flex", alignItems:"center", gap:6, padding:"3px 8px", borderRadius:999, border:"1px solid "+(filterBatchable ? C.accentLine : C.border), background:filterBatchable ? C.accentSoft : C.surface, fontSize:12, color:filterBatchable ? C.accent : C.dim }}>
               <span style={{ fontWeight:700 }}>Batch</span>
               <span style={{ color:filterBatchable ? C.accent : C.bright, fontWeight:700 }}>{batchOpportunityGroups.length} item groups</span>
               <span style={{ color:filterBatchable ? C.accent : C.text, fontWeight:700 }}>
@@ -1381,11 +1381,11 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
           )}
           {woStatusBreakdown.length > 0 && (
             <>
-              <span style={{ fontSize:12, color:C.dim, fontWeight:700, letterSpacing:0.2 }}>WO Status Qty</span>
+              <span style={{ fontSize:11, color:C.dim, fontWeight:700, letterSpacing:0.15 }}>WO Stat</span>
               {woStatusBreakdown.map(function(row) {
                 var active = filterWoStatus !== "all" && filterWoStatus === row.status;
                 return (
-                  <span key={row.status} style={{ display:"inline-flex", alignItems:"center", gap:6, padding:"3px 9px", borderRadius:999, border:"1px solid "+(active ? C.accentLine : C.border), background:active ? C.accentSoft : C.surface, fontSize:12, color:active ? C.accent : C.dim }}>
+                  <span key={row.status} style={{ display:"inline-flex", alignItems:"center", gap:5, padding:"2px 8px", borderRadius:999, border:"1px solid "+(active ? C.accentLine : C.border), background:active ? C.accentSoft : C.surface, fontSize:11, color:active ? C.accent : C.dim }}>
                     <span style={{ fontWeight:700 }}>{row.status}</span>
                     <span style={{ color:active ? C.accent : C.text }}>{row.woCount}</span>
                     <span style={{ opacity:0.65 }}>/</span>
@@ -1398,8 +1398,8 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
         </div>
 
         {packMixBreakdown.length > 0 && (
-          <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
-            <Button onClick={function() { setFilterPackType("all"); }} variant={filterPackType === "all" ? "active" : "outline"} size="sm" className="rounded-full">
+          <div style={{ display:"flex", gap:5, flexWrap:"wrap", alignItems:"center" }}>
+            <Button onClick={function() { setFilterPackType("all"); }} variant={filterPackType === "all" ? "active" : "outline"} size="sm" className="h-7 rounded-full px-2.5 gap-1.5">
               <span style={{ color:C.bright, fontWeight:700 }}>All Packs</span>
               <span style={{ color:C.text }}>{fmtNum(packMixTotalRemaining)}</span>
               <span style={{ color:C.dim }}>(100%)</span>
@@ -1408,7 +1408,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
               var activePack = filterPackType === row.packType;
               var pct = packMixTotalRemaining > 0 ? (Number(row.remainingUnits || 0) / packMixTotalRemaining) * 100 : 0;
               return (
-                <Button key={row.packType} onClick={function() { setFilterPackType(function(curr) { return curr === row.packType ? "all" : row.packType; }); }} variant={activePack ? "active" : "outline"} size="sm" className="rounded-full">
+                <Button key={row.packType} onClick={function() { setFilterPackType(function(curr) { return curr === row.packType ? "all" : row.packType; }); }} variant={activePack ? "active" : "outline"} size="sm" className="h-7 rounded-full px-2.5 gap-1.5">
                   <span style={{ color:C.bright, fontWeight:700 }}>{row.packType}</span>
                   <span style={{ color:C.text }}>{fmtNum(row.remainingUnits)}</span>
                   <span style={{ color:C.dim }}>({Math.round(pct)}%)</span>

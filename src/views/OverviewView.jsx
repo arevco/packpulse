@@ -9,6 +9,9 @@ import SortHeaderButton from "../components/ui/sort-header-button";
 export default function OverviewView({ analysis, onSelectCustomer }) {
   const { C, mono } = useTheme();
   const { thS, tdN, tdM } = useStyles();
+  var compactTh = Object.assign({}, thS, { padding:"7px 10px", fontSize:11 });
+  var compactTdN = Object.assign({}, tdN, { padding:"8px 10px", fontSize:12, lineHeight:1.15 });
+  var compactTdM = Object.assign({}, tdM, { padding:"8px 10px", fontSize:12, lineHeight:1.15 });
 
   const [custSortField, setCustSortField] = useState("remaining");
   const [custSortDir, setCustSortDir] = useState("desc");
@@ -145,27 +148,26 @@ export default function OverviewView({ analysis, onSelectCustomer }) {
     return custSortDir === "desc" ? -c : c;
   });
 
-  return (<div>
-    <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(150px, 1fr))", gap:10, marginBottom:20 }}>
+  return (<div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+    <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(136px, 1fr))", gap:8 }}>
       {[
-        {l:"Total Order Qty", v:overview.totalOrderQty.toLocaleString(), c:C.bright},
+        {l:"Order Qty", v:overview.totalOrderQty.toLocaleString(), c:C.bright},
         {l:"Produced", v:overview.totalProduced.toLocaleString(), c:C.ok},
         {l:"Remaining", v:overview.totalRemaining.toLocaleString(), c:C.warn},
-        {l:"Net Make", v:overview.totalNetMake.toLocaleString(), c:C.accent},
-        {l:"Completion", v:overview.completionPct+"%", c:overview.completionPct>=80?C.ok:overview.completionPct>=50?C.warn:C.bad},
-        {l:"Est Hours Left", v:overview.totalEstHours+"h", c:C.bright},
-        {l:"Late WOs", v:overview.lateWOs.length, c:overview.lateWOs.length>0?C.bad:C.ok}
-      ].map(s => <div key={s.l} style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, padding:"14px 16px" }}>
-        <div style={{ fontSize:24, fontWeight:700, fontFamily:mono, color:s.c, lineHeight:1 }}>{s.v}</div>
-        <div style={{ fontSize:12, color:C.dim, marginTop:5, fontWeight:500, letterSpacing:0.1 }}>{s.l}</div>
+        {l:"Net", v:overview.totalNetMake.toLocaleString(), c:C.accent},
+        {l:"Complete", v:overview.completionPct+"%", c:overview.completionPct>=80?C.ok:overview.completionPct>=50?C.warn:C.bad},
+        {l:"Est Hrs", v:overview.totalEstHours+"h", c:C.bright},
+        {l:"Late", v:overview.lateWOs.length, c:overview.lateWOs.length>0?C.bad:C.ok}
+      ].map(s => <div key={s.l} style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, padding:"10px 12px" }}>
+        <div style={{ fontSize:20, fontWeight:700, fontFamily:mono, color:s.c, lineHeight:1 }}>{s.v}</div>
+        <div style={{ fontSize:11, color:C.dim, marginTop:4, fontWeight:500, letterSpacing:0.08 }}>{s.l}</div>
       </div>)}
     </div>
 
-    <div style={{ marginBottom:20 }}>
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"flex-start", gap:10, marginBottom:10 }}>
-        <div style={{ fontSize:14, fontWeight:600, color:C.bright }}>Work Orders by Customer</div>
-        <Button onClick={function() { setShowByCustomer(function(v) { return !v; }); }} variant="outline" size="sm">
-          <span style={{ marginRight:6 }}>{showByCustomer ? "\u25BE" : "\u25B8"}</span>
+    <div>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"flex-start", gap:8, marginBottom:8 }}>
+        <div style={{ fontSize:13, fontWeight:600, color:C.bright }}>Work Orders by Customer</div>
+        <Button onClick={function() { setShowByCustomer(function(v) { return !v; }); }} variant="outline" size="sm" className="gap-1.5">
           {showByCustomer ? "Hide" : "Show"}
         </Button>
       </div>
@@ -173,10 +175,10 @@ export default function OverviewView({ analysis, onSelectCustomer }) {
       <TableShell>
         <table style={{ width:"100%", borderCollapse:"collapse" }}>
           <thead><tr style={{ background:C.raised }}>
-            {[{l:"Customer",f:"name"},{l:"WOs",f:"count"},{l:"Order Qty",f:"orderQty"},{l:"Produced",f:"produced"},{l:"Remaining",f:"remaining"},{l:"Net Make",f:"netMake"},{l:"Complete",f:"complete"},{l:"Late",f:"late"}].map(function(col) {
+            {[{l:"Customer",f:"name"},{l:"WOs",f:"count"},{l:"Order",f:"orderQty"},{l:"Prod",f:"produced"},{l:"Rem",f:"remaining"},{l:"Net",f:"netMake"},{l:"%",f:"complete"},{l:"Late",f:"late"}].map(function(col) {
               var active = custSortField === col.f;
               var arrow = active ? (custSortDir === "asc" ? " \u2191" : " \u2193") : "";
-              return <th key={col.f} style={Object.assign({}, thS, { color:active ? C.accent : thS.color })}><SortHeaderButton onClick={function() { onCustSort(col.f); }}>{col.l + arrow}</SortHeaderButton></th>;
+              return <th key={col.f} style={Object.assign({}, compactTh, { color:active ? C.accent : compactTh.color })}><SortHeaderButton onClick={function() { onCustSort(col.f); }}>{col.l + arrow}</SortHeaderButton></th>;
             })}
           </tr></thead>
           <tbody>
@@ -185,19 +187,19 @@ export default function OverviewView({ analysis, onSelectCustomer }) {
               return <tr key={i} onClick={() => onSelectCustomer && onSelectCustomer(c.name)} style={{ borderBottom:"1px solid "+C.border, cursor:onSelectCustomer?"pointer":"default" }}
                 onMouseEnter={e => { if (onSelectCustomer) e.currentTarget.style.background = C.hover; }}
                 onMouseLeave={e => { if (onSelectCustomer) e.currentTarget.style.background = "transparent"; }}>
-                <td style={Object.assign({}, tdN, { fontWeight:600, color:C.bright })}>{c.name}</td>
-                <td style={Object.assign({}, tdM, { color:C.dim })}>{c.count}</td>
-                <td style={Object.assign({}, tdM, { color:C.bright })}>{c.orderQty.toLocaleString()}</td>
-                <td style={Object.assign({}, tdM, { color:C.ok })}>{c.produced.toLocaleString()}</td>
-                <td style={Object.assign({}, tdM, { color:C.warn })}>{c.remaining.toLocaleString()}</td>
-                <td style={Object.assign({}, tdM, { color:C.accent })}>{c.netMake.toLocaleString()}</td>
-                <td style={Object.assign({}, tdM, { fontWeight:600, color:pct>=80?C.ok:pct>=50?C.warn:pct>0?C.accent:C.dim })}>{pct+"%"}</td>
-                <td style={Object.assign({}, tdM, { fontWeight:600, color:c.late>0?C.bad:C.dim })}>{c.late > 0 ? c.late : "--"}</td>
+                <td style={Object.assign({}, compactTdN, { fontWeight:600, color:C.bright })}>{c.name}</td>
+                <td style={Object.assign({}, compactTdM, { color:C.dim })}>{c.count}</td>
+                <td style={Object.assign({}, compactTdM, { color:C.bright })}>{c.orderQty.toLocaleString()}</td>
+                <td style={Object.assign({}, compactTdM, { color:C.ok })}>{c.produced.toLocaleString()}</td>
+                <td style={Object.assign({}, compactTdM, { color:C.warn })}>{c.remaining.toLocaleString()}</td>
+                <td style={Object.assign({}, compactTdM, { color:C.accent })}>{c.netMake.toLocaleString()}</td>
+                <td style={Object.assign({}, compactTdM, { fontWeight:600, color:pct>=80?C.ok:pct>=50?C.warn:pct>0?C.accent:C.dim })}>{pct+"%"}</td>
+                <td style={Object.assign({}, compactTdM, { fontWeight:600, color:c.late>0?C.bad:C.dim })}>{c.late > 0 ? c.late : "--"}</td>
               </tr>;
             })}
             {overview.byCustomer.length === 0 && (
               <tr>
-                <td colSpan={8} style={{ padding:24, textAlign:"center", color:C.dim }}>
+                <td colSpan={8} style={{ padding:18, textAlign:"center", color:C.dim, fontSize:12 }}>
                   No customer data available.
                 </td>
               </tr>
