@@ -686,21 +686,29 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       if (isNaN(d)) return 999;
       return Math.floor((d.getTime() - today.getTime()) / 86400000);
     };
-    var dueRiskScore = function(dateStr) {
-      var days = dueDays(dateStr);
-      // Due date is important, but not enough by itself to force poor changeover economics.
-      if (days <= 0) return 85;
-      if (days <= 1) return 75;
-      if (days <= 3) return 62;
-      if (days <= 7) return 48;
-      if (days <= 14) return 30;
-      return 20;
-    };
-    var dataScore = 100;
-    if (!boms || !boms.length) dataScore -= 20;
-    if (!edrData || !edrData.length) dataScore -= 15;
-    if (!dockData || !dockData.length) dataScore -= 10;
-    if ((analysis.flags || []).length > 100) dataScore -= 10;
+	    var dueRiskScore = function(dateStr) {
+	      var days = dueDays(dateStr);
+	      // Due date is important, but not enough by itself to force poor changeover economics.
+	      if (days <= 0) return 85;
+	      if (days <= 1) return 75;
+	      if (days <= 3) return 62;
+	      if (days <= 7) return 48;
+	      if (days <= 14) return 30;
+	      return 20;
+	    };
+	    var dueDateKey = function(dateStr) {
+	      if (!dateStr) return "";
+	      var d = new Date(dateStr);
+	      if (isNaN(d)) return "";
+	      var mm = String(d.getMonth() + 1).padStart(2, "0");
+	      var dd = String(d.getDate()).padStart(2, "0");
+	      return d.getFullYear() + "-" + mm + "-" + dd;
+	    };
+	    var dataScore = 100;
+	    if (!boms || !boms.length) dataScore -= 20;
+	    if (!edrData || !edrData.length) dataScore -= 15;
+	    if (!dockData || !dockData.length) dataScore -= 10;
+	    if ((analysis.flags || []).length > 100) dataScore -= 10;
     var confidenceLabel = dataScore >= 80 ? "High" : dataScore >= 60 ? "Medium" : "Low";
 
     var activeWOs = (analysis.results || []).filter(function(wo) {
@@ -708,35 +716,59 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       if (safeNum(wo.unitsRemaining || 0) <= 0) return false;
       return true;
     });
-    var commitmentMap = buildWorkOrderCommitmentMap(analysis.results || []);
-    var maxRemaining = activeWOs.reduce(function(m, wo) { return Math.max(m, safeNum(wo.unitsRemaining || 0)); }, 0) || 1;
-    var maxUph = activeWOs.reduce(function(m, wo) { return Math.max(m, safeNum(wo.unitsPerHour || 0)); }, 0) || 1;
-    var componentUsage = {};
-    activeWOs.forEach(function(wo) {
-      var seen = {};
-      (wo.components || []).forEach(function(c) {
-        var key = normalizeStr(c.sku || "");
-        if (!key || seen[key]) return;
-        seen[key] = true;
-        componentUsage[key] = (componentUsage[key] || 0) + 1;
-      });
-    });
-
-    activeWOs.forEach(function(wo) {
-      if (wo.runStatus === "nobom") return;
-      var unitsRemaining = Math.max(0, safeNum(wo.unitsRemaining || wo.qtyToProduce || 0));
-      if (unitsRemaining <= 0) return;
+	    var commitmentMap = buildWorkOrderCommitmentMap(analysis.results || []);
+	    var maxRemaining = activeWOs.reduce(function(m, wo) { return Math.max(m, safeNum(wo.unitsRemaining || 0)); }, 0) || 1;
+	    var maxUph = activeWOs.reduce(function(m, wo) { return Math.max(m, safeNum(wo.unitsPerHour || 0)); }, 0) || 1;
+	    var maxNetUnits = 0;
+	    var dueDateNetStats = {};
+	    var componentUsage = {};
+	    activeWOs.forEach(function(wo) {
+	      var commitment = commitmentMap[buildWorkOrderCommitKey(wo)] || { committedCanMake:0 };
+	      var netUnits = Math.max(0, safeNum(commitment.committedCanMake || 0));
+	      maxNetUnits = Math.max(maxNetUnits, netUnits);
+	      var dueKey = dueDateKey(wo.dueDate);
+	      if (dueKey) {
+	        var stat = dueDateNetStats[dueKey] || { count:0, maxNetUnits:0, secondNetUnits:0 };
+	        stat.count += 1;
+	        if (netUnits >= stat.maxNetUnits) {
+	          stat.secondNetUnits = stat.maxNetUnits;
+	          stat.maxNetUnits = netUnits;
+	        } else if (netUnits > stat.secondNetUnits) {
+	          stat.secondNetUnits = netUnits;
+	        }
+	        dueDateNetStats[dueKey] = stat;
+	      }
+	      var seen = {};
+	      (wo.components || []).forEach(function(c) {
+	        var key = normalizeStr(c.sku || "");
+	        if (!key || seen[key]) return;
+	        seen[key] = true;
+	        componentUsage[key] = (componentUsage[key] || 0) + 1;
+	      });
+	    });
+	    if (!(maxNetUnits > 0)) maxNetUnits = 1;
+	
+	    activeWOs.forEach(function(wo) {
+	      if (wo.runStatus === "nobom") return;
+	      var unitsRemaining = Math.max(0, safeNum(wo.unitsRemaining || wo.qtyToProduce || 0));
+	      if (unitsRemaining <= 0) return;
       var commitment = commitmentMap[buildWorkOrderCommitKey(wo)] || { committedCanMake:0, commitmentGap:0, sharedConstraint:false };
-      var isolatedUnits = Math.max(0, safeNum(wo.maxRunnable || 0));
-      var netUnits = Math.max(0, safeNum(commitment.committedCanMake || 0));
-      var coveragePct = safePct(netUnits, unitsRemaining);
-      var isolatedCoveragePct = safePct(isolatedUnits, unitsRemaining);
-      var coverageLossPct = Math.max(0, isolatedCoveragePct - coveragePct);
-      var readiness = clamp(safeNum(wo.readiness || 0), 0, 100);
-      var days = dueDays(wo.dueDate);
-      var dueScore = dueRiskScore(wo.dueDate);
-      var volumeScore = clamp((unitsRemaining / maxRemaining) * 100, 0, 100);
-      var unitsPerHour = Math.max(0, safeNum(wo.unitsPerHour || 0));
+	      var isolatedUnits = Math.max(0, safeNum(wo.maxRunnable || 0));
+	      var netUnits = Math.max(0, safeNum(commitment.committedCanMake || 0));
+	      var coveragePct = safePct(netUnits, unitsRemaining);
+	      var isolatedCoveragePct = safePct(isolatedUnits, unitsRemaining);
+	      var coverageLossPct = Math.max(0, isolatedCoveragePct - coveragePct);
+	      var netVolumeScore = clamp((netUnits / maxNetUnits) * 100, 0, 100);
+	      var sameDueStats = dueDateNetStats[dueDateKey(wo.dueDate)] || null;
+	      var sameDueNetScore = sameDueStats && sameDueStats.maxNetUnits > 0 ? clamp((netUnits / sameDueStats.maxNetUnits) * 100, 0, 100) : 0;
+	      var materialNetLead = !!(sameDueStats && sameDueStats.count > 1 && netUnits > 0 && netUnits === sameDueStats.maxNetUnits && netUnits >= Math.max(1500, safeNum(sameDueStats.secondNetUnits || 0) * 1.5));
+	      var sameDueNetBonus = sameDueStats && sameDueStats.count > 1 && netUnits > 0 ? clamp((sameDueNetScore - 50) * 0.22, 0, 11) : 0;
+	      var materialNetLeadBonus = materialNetLead ? 12 : 0;
+	      var readiness = clamp(safeNum(wo.readiness || 0), 0, 100);
+	      var days = dueDays(wo.dueDate);
+	      var dueScore = dueRiskScore(wo.dueDate);
+	      var volumeScore = clamp((unitsRemaining / maxRemaining) * 100, 0, 100);
+	      var unitsPerHour = Math.max(0, safeNum(wo.unitsPerHour || 0));
       var netHours = unitsPerHour > 0 ? (netUnits / unitsPerHour) : 0;
       var shiftCount = netHours / 8;
       var sharedCount = (wo.components || []).reduce(function(sum, c) {
@@ -748,18 +780,18 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       var shortRunPenalty = netUnits <= 0 ? 55 : shiftCount < 1 ? 28 : shiftCount < 2 ? 14 : shiftCount < 4 ? 5 : 0;
       var lowCoveragePenalty = coveragePct < 50 ? (50 - coveragePct) * 0.9 : coveragePct < 70 ? (70 - coveragePct) * 0.35 : 0;
       var shortRunCandidate = netUnits > 0 && coveragePct < 60 && netUnits >= Math.min(1000, Math.max(250, unitsRemaining * 0.15));
-      var shortRunBoost = shortRunCandidate ? 8 : 0;
-      var runnableNowBonus = netUnits > 0 ? (coveragePct >= 80 ? 30 : coveragePct >= 50 ? 22 : 14) : 0;
-      var zeroNetPenalty = netUnits <= 0 ? 70 : 0;
-      var sharedConstraintPenalty = commitment.commitmentGap > 0 ? Math.min(18, safePct(commitment.commitmentGap, unitsRemaining) * 0.3) : 0;
-      var isolatedVsNetPenalty = Math.min(20, coverageLossPct * 0.3);
-
-      var service = clamp((0.58 * dueScore) + (0.22 * volumeScore) + (0.20 * coveragePct), 0, 100);
-      var feasibility = clamp((0.68 * coveragePct) + (0.12 * readiness) + (0.20 * runWindowScore) + runnableNowBonus + shortRunBoost - sharedPenalty - lowCoveragePenalty - shortRunPenalty - zeroNetPenalty - sharedConstraintPenalty - isolatedVsNetPenalty, 0, 100);
-      var uphScore = clamp((safeNum(wo.unitsPerHour || 0) / maxUph) * 100, 0, 100);
-      var flow = clamp((0.40 * uphScore) + (0.35 * runWindowScore) + (0.25 * coveragePct), 0, 100);
-      var stability = clamp(dataScore - Math.min(18, sharedCount * 4) - Math.min(12, sharedConstraintPenalty) - (netUnits <= 0 ? 15 : 0), 0, 100);
-      var dispatchScore = (0.20 * service) + (0.52 * feasibility) + (0.20 * flow) + (0.08 * stability);
+	      var shortRunBoost = shortRunCandidate ? 8 : 0;
+	      var runnableNowBonus = netUnits > 0 ? (coveragePct >= 80 ? 30 : coveragePct >= 50 ? 22 : 14) : 0;
+	      var zeroNetPenalty = netUnits <= 0 ? 70 : 0;
+	      var sharedConstraintPenalty = commitment.commitmentGap > 0 ? Math.min(18, safePct(commitment.commitmentGap, unitsRemaining) * 0.3) : 0;
+	      var isolatedVsNetPenalty = Math.min(20, coverageLossPct * 0.3);
+	
+	      var service = clamp((0.54 * dueScore) + (0.20 * volumeScore) + (0.14 * coveragePct) + (0.12 * netVolumeScore), 0, 100);
+	      var feasibility = clamp((0.60 * coveragePct) + (0.12 * readiness) + (0.20 * runWindowScore) + (0.08 * netVolumeScore) + runnableNowBonus + shortRunBoost + sameDueNetBonus + materialNetLeadBonus - sharedPenalty - lowCoveragePenalty - shortRunPenalty - zeroNetPenalty - sharedConstraintPenalty - isolatedVsNetPenalty, 0, 100);
+	      var uphScore = clamp((safeNum(wo.unitsPerHour || 0) / maxUph) * 100, 0, 100);
+	      var flow = clamp((0.36 * uphScore) + (0.30 * runWindowScore) + (0.14 * coveragePct) + (0.20 * netVolumeScore), 0, 100);
+	      var stability = clamp(dataScore - Math.min(18, sharedCount * 4) - Math.min(12, sharedConstraintPenalty) - (netUnits <= 0 ? 15 : 0), 0, 100);
+	      var dispatchScore = (0.20 * service) + (0.52 * feasibility) + (0.20 * flow) + (0.08 * stability);
 
       var action = "Run Next";
       if (netUnits <= 0) action = "Hold / Replenish";
@@ -774,10 +806,11 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       else if (days <= 1) whyBits.push("Due " + (days === 0 ? "today" : "tomorrow"));
       else if (days <= 3) whyBits.push("Due in " + days + "d");
       whyBits.push("Net " + Math.round(netUnits).toLocaleString() + " (" + Math.round(coveragePct) + "%)");
-      if (unitsPerHour > 0) whyBits.push(Math.round(shiftCount * 10) / 10 + " shifts @ net");
-      if (sharedCount > 0) whyBits.push(sharedCount + " shared comps");
-      if (coverageLossPct > 0) whyBits.push(Math.round(coverageLossPct) + "% shared drag");
-      if (shortRunCandidate) whyBits.push("partial run viable");
+	      if (unitsPerHour > 0) whyBits.push(Math.round(shiftCount * 10) / 10 + " shifts @ net");
+	      if (sharedCount > 0) whyBits.push(sharedCount + " shared comps");
+	      if (coverageLossPct > 0) whyBits.push(Math.round(coverageLossPct) + "% shared drag");
+	      if (materialNetLead) whyBits.push("largest same-day net");
+	      if (shortRunCandidate) whyBits.push("partial run viable");
 
       var dispatchRec = {
         id: "R" + (nextId++),
@@ -967,12 +1000,12 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
           familyAnchorScore: familyAnchorScore,
           earliestTs: earliestDate && !isNaN(earliestDate) ? earliestDate.getTime() : Number.POSITIVE_INFINITY
         };
-      }).sort(function(a, b) {
-        if (b.runnableRowCount !== a.runnableRowCount) return b.runnableRowCount - a.runnableRowCount;
-        if (b.familyAnchorScore !== a.familyAnchorScore) return b.familyAnchorScore - a.familyAnchorScore;
-        if (a.earliestTs !== b.earliestTs) return a.earliestTs - b.earliestTs;
-        return String(a.key || "").localeCompare(String(b.key || ""));
-      });
+	      }).sort(function(a, b) {
+	        if (b.familyAnchorScore !== a.familyAnchorScore) return b.familyAnchorScore - a.familyAnchorScore;
+	        if (b.runnableRowCount !== a.runnableRowCount) return b.runnableRowCount - a.runnableRowCount;
+	        if (a.earliestTs !== b.earliestTs) return a.earliestTs - b.earliestTs;
+	        return String(a.key || "").localeCompare(String(b.key || ""));
+	      });
       var flattened = [];
       families.forEach(function(family) {
         family.rows.forEach(function(row, idx) {
