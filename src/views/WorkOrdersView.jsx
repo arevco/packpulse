@@ -71,7 +71,7 @@ function isWithinDueDateRange(value, start, end) {
 
 var WORK_ORDER_VIRTUAL_THRESHOLD = 80;
 var WORK_ORDER_VIRTUAL_MAX_HEIGHT = "min(72vh, 960px)";
-var WORK_ORDER_GRID_TEMPLATE = "72px 88px 104px 54px 64px 180px 112px 92px 70px 88px 82px 88px 56px 78px 62px 62px 72px";
+var WORK_ORDER_GRID_TEMPLATE = "72px 88px 104px 54px 64px 170px 118px 96px 70px 84px 82px 90px 56px 78px 68px 68px 62px";
 var WORK_ORDER_TABLE_MIN_WIDTH = "1424px";
 var WORK_ORDER_COLUMNS = [
   { field: "dispatchRank", label: "Run", title: "Run Next rank from dispatch scoring" },
@@ -80,16 +80,16 @@ var WORK_ORDER_COLUMNS = [
   { field: "batchCount", label: "Batch", title: "Open work orders sharing the same item" },
   { field: "skuType", label: "Type" },
   { field: "desc", label: "Desc" },
-  { field: "customer", label: "Cust" },
-  { field: "status", label: "Stat" },
+  { field: "customer", label: "Customer" },
+  { field: "status", label: "Status" },
   { field: "dueDate", label: "Due" },
   { field: "qty", label: "Order" },
   { field: "produced", label: "Prod" },
-  { field: "remaining", label: "Rem" },
-  { field: "complete", label: "%" },
+  { field: "remaining", label: "Remain" },
+  { field: "complete", label: "Comp", title: "Percent complete" },
   { field: "committedCanMake", label: "Net", title: "Capacity after shared-material commitments across active work orders" },
-  { field: "readiness", label: "Rdy", title: "Net capacity as a percent of remaining units" },
-  { field: "estHours", label: "Hrs" },
+  { field: "readiness", label: "Ready", title: "Net capacity as a percent of remaining units" },
+  { field: "estHours", label: "Hours" },
   { field: "commitmentGap", label: "Gap", title: "Difference between isolated make and commitment-aware net capacity" }
 ];
 
@@ -98,10 +98,10 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
   const { thC, tdN, tdM, thDS, tdDN, tdDM, truncate } = useStyles();
   var initial = initialFilters || {};
   var denseHeaderStyle = function(active) {
-    return Object.assign({}, thC(active), { padding:"6px 8px", fontSize:11, letterSpacing:0.15 });
+    return Object.assign({}, thC(active), { padding:"6px 7px", fontSize:12, lineHeight:1.15, letterSpacing:0.12 });
   };
-  var denseTdN = Object.assign({}, tdN, { padding:"6px 8px", fontSize:12, lineHeight:1.15 });
-  var denseTdM = Object.assign({}, tdM, { padding:"6px 8px", fontSize:12, lineHeight:1.15 });
+  var denseTdN = Object.assign({}, tdN, { padding:"6px 7px", fontSize:12.5, lineHeight:1.2 });
+  var denseTdM = Object.assign({}, tdM, { padding:"6px 7px", fontSize:12.5, lineHeight:1.2 });
 
   const [searchTerm, setSearchTerm] = useState(String(initial.q || ""));
   const [filterStatus, setFilterStatus] = useState(String(initial.runStatus || "all"));
@@ -1145,16 +1145,16 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
         { key:"batchCount", style:Object.assign({}, denseTdN, { whiteSpace:"nowrap" }), content:batchMeta ? (
           <Badge
             variant="info"
-            className="min-w-[24px] px-1 py-0 text-[10px] leading-4"
+            className="min-w-[24px] px-1 py-0 text-[11px] leading-4"
             title={"Batch opportunity across " + batchMeta.batchCount + " open work orders for item " + (wo.productSkuRaw || wo.productSku || "--") + " \u2022 Remaining " + fmtNum(batchMeta.totalRemainingUnits) + " \u2022 WO order: " + batchMeta.woNums.join(", ")}
           >
             {"x" + batchMeta.batchCount}
           </Badge>
         ) : <span style={{ color:C.dim }}>--</span> },
-        { key:"skuType", style:Object.assign({}, denseTdN, { whiteSpace:"nowrap" }), content:<Badge variant="secondary" className="px-1 py-0 text-[10px] leading-4">{compactPackType(skuType)}</Badge> },
-        { key:"desc", style:Object.assign({}, denseTdN, { color:C.dim }, truncate(180)), content:formatDescriptionForDisplay(wo.productDesc) || "--" },
-        { key:"customer", style:Object.assign({}, denseTdN, { color:C.dim }, truncate(112)), content:wo.customer || "--" },
-        { key:"status", style:Object.assign({}, denseTdN, { whiteSpace:"nowrap" }), content:<><Badge title={wo.runStatus || ""} variant={rs.variant} className="mr-1 min-w-[28px] justify-center px-1 py-0 text-[10px] font-bold leading-4">{rs.label}</Badge><Badge title={wo.status || ""} variant="secondary" className="min-w-[28px] justify-center px-1 py-0 text-[10px] font-bold leading-4">{shortWoStatus(wo.status)}</Badge></> },
+        { key:"skuType", style:Object.assign({}, denseTdN, { whiteSpace:"nowrap" }), content:<Badge variant="secondary" className="px-1 py-0 text-[11px] leading-4">{compactPackType(skuType)}</Badge> },
+        { key:"desc", style:Object.assign({}, denseTdN, { color:C.dim }, truncate(170)), content:formatDescriptionForDisplay(wo.productDesc) || "--" },
+        { key:"customer", style:Object.assign({}, denseTdN, { color:C.dim }, truncate(118)), content:wo.customer || "--" },
+        { key:"status", style:Object.assign({}, denseTdN, { whiteSpace:"nowrap" }), content:<><Badge title={wo.runStatus || ""} variant={rs.variant} className="mr-1 min-w-[28px] justify-center px-1 py-0 text-[11px] font-bold leading-4">{rs.label}</Badge><Badge title={wo.status || ""} variant="secondary" className="min-w-[28px] justify-center px-1 py-0 text-[11px] font-bold leading-4">{shortWoStatus(wo.status)}</Badge></> },
         { key:"dueDate", style:Object.assign({}, denseTdM, { color:C.text }), content:<span title={fmtDate(wo.dueDate)}>{fmtRowDate(wo.dueDate)}</span> },
         { key:"qty", style:Object.assign({}, denseTdM, { color:C.bright }), content:wo.qtyToProduce.toLocaleString() },
         { key:"produced", style:Object.assign({}, denseTdM, { color:wo.unitsProduced>0?C.ok:C.dim }), content:wo.unitsProduced>0?wo.unitsProduced.toLocaleString():"--" },
@@ -1164,7 +1164,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
         { key:"readiness", style:Object.assign({}, denseTdM, { fontWeight:600, color:readyPct == null ? C.dim : readyPct>=100?C.ok:readyPct>=70?C.warn:C.bad }), content:readyPct == null ? <span style={{color:C.dim}}>--</span> : readyPct+"%" },
         { key:"estHours", style:Object.assign({}, denseTdM, { color:wo.estHours>0?C.bright:C.dim }), content:wo.estHours > 0 ? wo.estHours.toLocaleString() : "--" },
         { key:"commitmentGap", style:Object.assign({}, denseTdN, { whiteSpace:"nowrap" }), content:commitment.sharedConstraint ? (
-          <Badge title={"Shared material demand across active work orders. Order: earliest due date, then WO #. Net: " + commitment.committedCanMake.toLocaleString() + " | Ready: " + (readyPct == null ? "--" : readyPct + "%") + " | Gap: " + commitment.commitmentGap.toLocaleString()} variant={commitment.commitmentGap > 0 ? "danger" : "warning"} className="px-1 py-0 text-[10px] leading-4">{commitment.commitmentGap > 0 ? commitment.commitmentGap.toLocaleString() : "SHR"}</Badge>
+          <Badge title={"Shared material demand across active work orders. Order: earliest due date, then WO #. Net: " + commitment.committedCanMake.toLocaleString() + " | Ready: " + (readyPct == null ? "--" : readyPct + "%") + " | Gap: " + commitment.commitmentGap.toLocaleString()} variant={commitment.commitmentGap > 0 ? "danger" : "warning"} className="px-1 py-0 text-[11px] leading-4">{commitment.commitmentGap > 0 ? commitment.commitmentGap.toLocaleString() : "SHR"}</Badge>
         ) : <span style={{ color:C.dim }}>--</span> }
       ]
     };
@@ -1306,9 +1306,9 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
         {woStatuses.map(s => <option key={s} value={s}>{s}</option>)}
       </select>
       <span style={{ fontSize:12, color:C.dim, marginLeft:2 }}>Due</span>
-      <DatePicker value={filterDateFrom} onChange={setFilterDateFrom} placeholder="Start" className="h-9 w-full text-xs sm:w-[132px]" />
+      <DatePicker value={filterDateFrom} onChange={setFilterDateFrom} placeholder="Start" className="h-9 w-full text-sm sm:w-[132px]" />
       <span style={{ fontSize:12, color:C.dim }}>to</span>
-      <DatePicker value={filterDateTo} onChange={setFilterDateTo} placeholder="End" className="h-9 w-full text-xs sm:w-[132px]" />
+      <DatePicker value={filterDateTo} onChange={setFilterDateTo} placeholder="End" className="h-9 w-full text-sm sm:w-[132px]" />
       {hasActiveFilters && <Button onClick={clearAllFilters} variant="outline" size="sm">Clear</Button>}
       <span style={{ fontSize:12, color:C.dim, marginLeft:2 }}>{scopeCountLabel}</span>
     </div>
@@ -1381,11 +1381,11 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
           )}
           {woStatusBreakdown.length > 0 && (
             <>
-              <span style={{ fontSize:11, color:C.dim, fontWeight:700, letterSpacing:0.15 }}>WO Stat</span>
+              <span style={{ fontSize:12, color:C.dim, fontWeight:700, letterSpacing:0.12 }}>Status</span>
               {woStatusBreakdown.map(function(row) {
                 var active = filterWoStatus !== "all" && filterWoStatus === row.status;
                 return (
-                  <span key={row.status} style={{ display:"inline-flex", alignItems:"center", gap:5, padding:"2px 8px", borderRadius:999, border:"1px solid "+(active ? C.accentLine : C.border), background:active ? C.accentSoft : C.surface, fontSize:11, color:active ? C.accent : C.dim }}>
+                  <span key={row.status} style={{ display:"inline-flex", alignItems:"center", gap:5, padding:"2px 8px", borderRadius:999, border:"1px solid "+(active ? C.accentLine : C.border), background:active ? C.accentSoft : C.surface, fontSize:12, color:active ? C.accent : C.dim }}>
                     <span style={{ fontWeight:700 }}>{row.status}</span>
                     <span style={{ color:active ? C.accent : C.text }}>{row.woCount}</span>
                     <span style={{ opacity:0.65 }}>/</span>

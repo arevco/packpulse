@@ -9,9 +9,9 @@ import SortHeaderButton from "../components/ui/sort-header-button";
 export default function OverviewView({ analysis, onSelectCustomer }) {
   const { C, mono } = useTheme();
   const { thS, tdN, tdM } = useStyles();
-  var compactTh = Object.assign({}, thS, { padding:"7px 10px", fontSize:11 });
-  var compactTdN = Object.assign({}, tdN, { padding:"8px 10px", fontSize:12, lineHeight:1.15 });
-  var compactTdM = Object.assign({}, tdM, { padding:"8px 10px", fontSize:12, lineHeight:1.15 });
+  var compactTh = Object.assign({}, thS, { padding:"7px 10px", fontSize:12, lineHeight:1.15 });
+  var compactTdN = Object.assign({}, tdN, { padding:"8px 10px", fontSize:12.5, lineHeight:1.2 });
+  var compactTdM = Object.assign({}, tdM, { padding:"8px 10px", fontSize:12.5, lineHeight:1.2 });
 
   const [custSortField, setCustSortField] = useState("remaining");
   const [custSortDir, setCustSortDir] = useState("desc");
@@ -156,11 +156,11 @@ export default function OverviewView({ analysis, onSelectCustomer }) {
         {l:"Remaining", v:overview.totalRemaining.toLocaleString(), c:C.warn},
         {l:"Net", v:overview.totalNetMake.toLocaleString(), c:C.accent},
         {l:"Complete", v:overview.completionPct+"%", c:overview.completionPct>=80?C.ok:overview.completionPct>=50?C.warn:C.bad},
-        {l:"Est Hrs", v:overview.totalEstHours+"h", c:C.bright},
-        {l:"Late", v:overview.lateWOs.length, c:overview.lateWOs.length>0?C.bad:C.ok}
+        {l:"Est Hours", v:overview.totalEstHours+"h", c:C.bright},
+        {l:"Late WOs", v:overview.lateWOs.length, c:overview.lateWOs.length>0?C.bad:C.ok}
       ].map(s => <div key={s.l} style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:8, padding:"10px 12px" }}>
         <div style={{ fontSize:20, fontWeight:700, fontFamily:mono, color:s.c, lineHeight:1 }}>{s.v}</div>
-        <div style={{ fontSize:11, color:C.dim, marginTop:4, fontWeight:500, letterSpacing:0.08 }}>{s.l}</div>
+        <div style={{ fontSize:12, color:C.dim, marginTop:4, fontWeight:500, letterSpacing:0.06 }}>{s.l}</div>
       </div>)}
     </div>
 
@@ -175,7 +175,7 @@ export default function OverviewView({ analysis, onSelectCustomer }) {
       <TableShell>
         <table style={{ width:"100%", borderCollapse:"collapse" }}>
           <thead><tr style={{ background:C.raised }}>
-            {[{l:"Customer",f:"name"},{l:"WOs",f:"count"},{l:"Order",f:"orderQty"},{l:"Prod",f:"produced"},{l:"Rem",f:"remaining"},{l:"Net",f:"netMake"},{l:"%",f:"complete"},{l:"Late",f:"late"}].map(function(col) {
+            {[{l:"Customer",f:"name"},{l:"WOs",f:"count"},{l:"Order Qty",f:"orderQty"},{l:"Produced",f:"produced"},{l:"Remaining",f:"remaining"},{l:"Net",f:"netMake"},{l:"Complete",f:"complete"},{l:"Late",f:"late"}].map(function(col) {
               var active = custSortField === col.f;
               var arrow = active ? (custSortDir === "asc" ? " \u2191" : " \u2193") : "";
               return <th key={col.f} style={Object.assign({}, compactTh, { color:active ? C.accent : compactTh.color })}><SortHeaderButton onClick={function() { onCustSort(col.f); }}>{col.l + arrow}</SortHeaderButton></th>;
