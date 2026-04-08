@@ -333,7 +333,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
         if (optionCountWithStock > 1) sharedDetails.push(comp.sku);
       });
       if (!isFinite(committed)) committed = 0;
-      committed = Math.max(0, Math.min(committed, Number(wo.qtyToProduce || 0)));
+      committed = Math.max(0, Math.min(committed, Number(wo.unitsRemaining || 0)));
 
       // Reserve inventory for this WO using same priority order.
       compList.forEach(function(comp) {
