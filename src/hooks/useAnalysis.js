@@ -973,12 +973,18 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
         grouped[key].push(row);
       });
       var families = Object.keys(grouped).map(function(key) {
-        var rows = grouped[key].slice().sort(function(a, b) {
+        var familyRows = grouped[key] || [];
+        var isBatchFamily = familyRows.length > 1;
+        var rows = familyRows.slice().sort(function(a, b) {
           var aNet = Number(a && a.netUnits || 0);
           var bNet = Number(b && b.netUnits || 0);
           var aRunnable = aNet > 0;
           var bRunnable = bNet > 0;
           if (aRunnable !== bRunnable) return bRunnable ? 1 : -1;
+          if (isBatchFamily) {
+            var batchDueDelta = compareDispatchDueAsc(a, b);
+            if (batchDueDelta !== 0) return batchDueDelta;
+          }
           if (bNet !== aNet) return bNet - aNet;
           var dueDelta = compareDispatchDueAsc(a, b);
           if (dueDelta !== 0) return dueDelta;
