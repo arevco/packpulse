@@ -88,6 +88,7 @@ export default function OperationsInsightsPanel({
   showProductionJobsLoading,
   showProductionJobsError,
   serverProductionSegments,
+  setProductionJobsRequestedRange,
   revenuePerCaseForRow,
   dailyPerfRange,
   setDailyPerfStart,
@@ -135,6 +136,7 @@ export default function OperationsInsightsPanel({
             laborActuals={laborActuals}
             laborDataRaw={[]}
             resolveRevenueForRow={revenuePerCaseForRow}
+            setRequestedRange={setProductionJobsRequestedRange}
           />
         )}
       </Card>

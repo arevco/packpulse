@@ -76,16 +76,16 @@ async function fetchJsonWithCredentials(url) {
   return { response: response, body: body };
 }
 
-async function fetchOperationsSummary(fetchDays) {
-  var result = await fetchJsonWithCredentials("/api/ops/production-breakdown?days=" + fetchDays + "&summary=1");
+async function fetchOperationsSummary(start, end) {
+  var result = await fetchJsonWithCredentials("/api/ops/production-breakdown?start=" + encodeURIComponent(start) + "&end=" + encodeURIComponent(end) + "&summary=1");
   if (!result.response.ok) {
     throw new Error((result.body && result.body.error) || "Could not load production summary");
   }
   return normalizeBreakdownPayload(result.body);
 }
 
-async function fetchOperationsBreakdown(fetchDays) {
-  var result = await fetchJsonWithCredentials("/api/ops/production-breakdown?days=" + fetchDays);
+async function fetchOperationsBreakdown(start, end) {
+  var result = await fetchJsonWithCredentials("/api/ops/production-breakdown?start=" + encodeURIComponent(start) + "&end=" + encodeURIComponent(end));
   if (!result.response.ok) {
     throw new Error((result.body && result.body.error) || "Could not load production breakdown");
   }
@@ -543,6 +543,26 @@ function daysInclusive(startIso, endIso) {
   var end = new Date(endIso + "T00:00:00");
   if (isNaN(start) || isNaN(end) || end < start) return 0;
   return Math.floor((end - start) / 86400000) + 1;
+}
+
+function isIsoDateKey(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || "").trim());
+}
+
+function isValidIsoRange(range) {
+  var start = String(range && range.start || "");
+  var end = String(range && range.end || "");
+  return isIsoDateKey(start) && isIsoDateKey(end) && end >= start;
+}
+
+function mergeIsoRangeBounds(bounds, range) {
+  if (!isValidIsoRange(range)) return bounds;
+  var start = String(range.start || "");
+  var end = String(range.end || "");
+  return {
+    start: !bounds.start || start < bounds.start ? start : bounds.start,
+    end: !bounds.end || end > bounds.end ? end : bounds.end
+  };
 }
 
 function shiftRange(range, days) {
@@ -1053,6 +1073,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   const [showLossPriorities, setShowLossPriorities] = useState(false);
   const [dailyPerfStart, setDailyPerfStart] = useState("");
   const [dailyPerfEnd, setDailyPerfEnd] = useState("");
+  const [productionJobsRequestedRange, setProductionJobsRequestedRange] = useState({ start: "", end: "" });
 
   var range = useMemo(function() {
     if (windowPreset === "custom") {
@@ -1071,11 +1092,19 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     return toIsoDateET(new Date());
   }, []);
 
-  var dailyPerfFetchDays = useMemo(function() {
+  var dailyPerfRequestedRange = useMemo(function() {
     var fetchEnd = dailyPerfEnd || todayEt;
     var fetchStart = dailyPerfStart || shiftDays(fetchEnd, -29);
-    if (!fetchStart || !fetchEnd || fetchStart > fetchEnd) return 30;
-    return Math.max(30, daysInclusive(fetchStart, fetchEnd));
+    if (!isValidIsoRange({ start: fetchStart, end: fetchEnd })) {
+      return {
+        start: shiftDays(todayEt, -29),
+        end: todayEt
+      };
+    }
+    return {
+      start: fetchStart,
+      end: fetchEnd
+    };
   }, [dailyPerfStart, dailyPerfEnd, todayEt]);
 
   useEffect(function() {
@@ -1097,37 +1126,48 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     return Object.keys(wanted).sort();
   }, [range.start, range.end]);
 
-  var commandBoardFetchDays = useMemo(function() {
-    var today = todayEt;
-    var earliestNeeded = today;
+  var commandBoardFetchRange = useMemo(function() {
+    var bounds = { start: "", end: "" };
     OPERATIONS_SNAPSHOT_CARD_KEYS.forEach(function(key) {
       var preset = presetRange(key);
-      if (preset && preset.start && preset.start < earliestNeeded) earliestNeeded = preset.start;
+      bounds = mergeIsoRangeBounds(bounds, preset);
       if (key === "today" || key === "this_week" || key === "this_month") {
         var compareInfo = comparableRangeForPreset(key, preset);
         var compareRange = compareInfo && compareInfo.range ? compareInfo.range : null;
-        if (compareRange && compareRange.start && compareRange.start < earliestNeeded) earliestNeeded = compareRange.start;
+        bounds = mergeIsoRangeBounds(bounds, compareRange);
       }
     });
-    return Math.max(30, daysInclusive(earliestNeeded, today));
+    if (!isValidIsoRange(bounds)) {
+      return {
+        start: todayEt,
+        end: todayEt
+      };
+    }
+    return bounds;
   }, [todayEt]);
 
-  var operationsFetchDays = useMemo(function() {
-    return Math.max(range.fetchDays, dailyPerfFetchDays, commandBoardFetchDays);
-  }, [range.fetchDays, dailyPerfFetchDays, commandBoardFetchDays]);
-
-  var laborFetchEnd = todayEt;
-  var laborFetchStart = useMemo(function() {
-    return shiftDays(laborFetchEnd, -(operationsFetchDays - 1));
-  }, [laborFetchEnd, operationsFetchDays]);
+  var productionDataFetchRange = useMemo(function() {
+    var bounds = { start: "", end: "" };
+    bounds = mergeIsoRangeBounds(bounds, range);
+    bounds = mergeIsoRangeBounds(bounds, dailyPerfRequestedRange);
+    bounds = mergeIsoRangeBounds(bounds, commandBoardFetchRange);
+    bounds = mergeIsoRangeBounds(bounds, productionJobsRequestedRange);
+    if (!isValidIsoRange(bounds)) {
+      return {
+        start: shiftDays(todayEt, -29),
+        end: todayEt
+      };
+    }
+    return bounds;
+  }, [range, dailyPerfRequestedRange, commandBoardFetchRange, productionJobsRequestedRange, todayEt]);
 
   var forecastMonthsKey = forecastPlanMonths.join(",");
   var summaryQueryKey = useMemo(function() {
-    return ["operations", "summary", safeNum(serverSyncVersion), operationsFetchDays];
-  }, [serverSyncVersion, operationsFetchDays]);
+    return ["operations", "summary", safeNum(serverSyncVersion), productionDataFetchRange.start, productionDataFetchRange.end];
+  }, [serverSyncVersion, productionDataFetchRange.start, productionDataFetchRange.end]);
   var breakdownQueryKey = useMemo(function() {
-    return ["operations", "breakdown", safeNum(serverSyncVersion), operationsFetchDays];
-  }, [serverSyncVersion, operationsFetchDays]);
+    return ["operations", "breakdown", safeNum(serverSyncVersion), productionDataFetchRange.start, productionDataFetchRange.end];
+  }, [serverSyncVersion, productionDataFetchRange.start, productionDataFetchRange.end]);
   var forecastQueryKey = useMemo(function() {
     return ["operations", "forecast", safeNum(serverSyncVersion), forecastMonthsKey];
   }, [serverSyncVersion, forecastMonthsKey]);
@@ -1135,20 +1175,21 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     return ["operations", "config", safeNum(serverSyncVersion)];
   }, [serverSyncVersion]);
   var laborSummaryQueryKey = useMemo(function() {
-    return ["operations", "labor-summary", safeNum(serverSyncVersion), laborFetchStart, laborFetchEnd];
-  }, [serverSyncVersion, laborFetchStart, laborFetchEnd]);
+    return ["operations", "labor-summary", safeNum(serverSyncVersion), productionDataFetchRange.start, productionDataFetchRange.end];
+  }, [serverSyncVersion, productionDataFetchRange.start, productionDataFetchRange.end]);
   var laborDetailQueryKey = useMemo(function() {
-    return ["operations", "labor-detail", safeNum(serverSyncVersion), laborFetchStart, laborFetchEnd];
-  }, [serverSyncVersion, laborFetchStart, laborFetchEnd]);
+    return ["operations", "labor-detail", safeNum(serverSyncVersion), productionDataFetchRange.start, productionDataFetchRange.end];
+  }, [serverSyncVersion, productionDataFetchRange.start, productionDataFetchRange.end]);
   var deferredQueryKey = useMemo(function() {
     return [
       safeNum(serverSyncVersion),
-      operationsFetchDays,
+      productionDataFetchRange.start,
+      productionDataFetchRange.end,
       forecastMonthsKey,
-      laborFetchStart,
-      laborFetchEnd
+      productionDataFetchRange.start,
+      productionDataFetchRange.end
     ].join("|");
-  }, [serverSyncVersion, operationsFetchDays, forecastMonthsKey, laborFetchStart, laborFetchEnd]);
+  }, [serverSyncVersion, productionDataFetchRange.start, productionDataFetchRange.end, forecastMonthsKey]);
   var hasCachedBreakdown = !!queryClient.getQueryData(breakdownQueryKey);
 
   useEffect(function() {
@@ -1177,7 +1218,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   var summaryQuery = useQuery({
     queryKey: summaryQueryKey,
     queryFn: function() {
-      return fetchOperationsSummary(operationsFetchDays);
+      return fetchOperationsSummary(productionDataFetchRange.start, productionDataFetchRange.end);
     },
     staleTime: OPERATIONS_PRIMARY_STALE_MS
   });
@@ -1193,7 +1234,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   var breakdownQuery = useQuery({
     queryKey: breakdownQueryKey,
     queryFn: function() {
-      return fetchOperationsBreakdown(operationsFetchDays);
+      return fetchOperationsBreakdown(productionDataFetchRange.start, productionDataFetchRange.end);
     },
     enabled: deferredFetchReady,
     staleTime: OPERATIONS_PRIMARY_STALE_MS
@@ -1215,7 +1256,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   var laborSummaryQuery = useQuery({
     queryKey: laborSummaryQueryKey,
     queryFn: function() {
-      return fetchOperationsLaborSummary(laborFetchStart, laborFetchEnd);
+      return fetchOperationsLaborSummary(productionDataFetchRange.start, productionDataFetchRange.end);
     },
     enabled: deferredFetchReady,
     staleTime: OPERATIONS_PRIMARY_STALE_MS
@@ -1226,7 +1267,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   var laborDetailQuery = useQuery({
     queryKey: laborDetailQueryKey,
     queryFn: function() {
-      return fetchOperationsLaborDetail(laborFetchStart, laborFetchEnd);
+      return fetchOperationsLaborDetail(productionDataFetchRange.start, productionDataFetchRange.end);
     },
     enabled: deferredFetchReady && laborSummarySettled,
     staleTime: OPERATIONS_PRIMARY_STALE_MS
@@ -2871,6 +2912,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
             showProductionJobsLoading={showProductionJobsLoading}
             showProductionJobsError={showProductionJobsError}
             serverProductionSegments={serverProductionSegments}
+            setProductionJobsRequestedRange={setProductionJobsRequestedRange}
             revenuePerCaseForRow={revenuePerCaseForRow}
             dailyPerfRange={dailyPerfRange}
             setDailyPerfStart={setDailyPerfStart}

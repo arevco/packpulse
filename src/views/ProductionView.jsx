@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTheme } from "../theme";
 import { useStyles } from "../hooks/useStyles";
 import { safeNum, formatDescriptionForDisplay, triggerDownload } from "../utils";
@@ -351,7 +351,7 @@ function todayEtDateKey() {
   return parts.year + "-" + parts.month + "-" + parts.day;
 }
 
-export default function ProductionView({ productionSegments, laborActuals, laborDataRaw, resolveRevenueForRow }) {
+export default function ProductionView({ productionSegments, laborActuals, laborDataRaw, resolveRevenueForRow, setRequestedRange }) {
   const { C, mono } = useTheme();
   const { thS, tdN, tdM } = useStyles();
 
@@ -385,6 +385,17 @@ export default function ProductionView({ productionSegments, laborActuals, labor
     rangeStart = rangeEnd;
     rangeEnd = tmpRangeDate;
   }
+
+  useEffect(function() {
+    if (typeof setRequestedRange !== "function") return;
+    setRequestedRange(function(prev) {
+      var nextStart = rangeStart || "";
+      var nextEnd = rangeEnd || "";
+      if (prev && prev.start === nextStart && prev.end === nextEnd) return prev;
+      return { start: nextStart, end: nextEnd };
+    });
+  }, [rangeStart, rangeEnd, setRequestedRange]);
+
   var isAllMatchingDays = !!rangeStart && !!rangeEnd && !!earliestProdDate && !!latestProdDate && rangeStart === earliestProdDate && rangeEnd === latestProdDate;
   var selectedRangeLabel = !rangeStart
     ? "selected day"
