@@ -267,15 +267,15 @@ function pickItemMasterCostValue(row) {
 }
 
 function businessDaysBetween(fromDate, toDate) {
-  var from = new Date(fromDate);
-  var to = new Date(toDate);
+  var from = new Date(String(fromDate || "") + "T00:00:00Z");
+  var to = new Date(String(toDate || "") + "T00:00:00Z");
   if (isNaN(from) || isNaN(to) || from > to) return 0;
   var c = 0;
   var d = new Date(from);
   while (d <= to) {
-    var dow = d.getDay();
+    var dow = d.getUTCDay();
     if (dow !== 0 && dow !== 6) c += 1;
-    d.setDate(d.getDate() + 1);
+    d.setUTCDate(d.getUTCDate() + 1);
   }
   return c;
 }
