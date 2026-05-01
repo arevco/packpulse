@@ -49,6 +49,24 @@ const PALLET_AGING_COLUMNS = [
   "site_name"
 ];
 
+const RETRYABLE_FETCH_STATUSES = {
+  408: true,
+  425: true,
+  429: true,
+  500: true,
+  502: true,
+  503: true,
+  504: true
+};
+const RETRYABLE_XML_ERROR_CODES = {
+  InternalError: true,
+  RequestTimeout: true,
+  ServiceUnavailable: true,
+  SlowDown: true
+};
+const FETCH_RETRY_ATTEMPTS = 3;
+const FETCH_RETRY_BASE_DELAY_MS = 750;
+
 function formatNulogyUiDateTime(date) {
   const d = date instanceof Date ? date : new Date(date);
   if (Number.isNaN(d.getTime())) return "";
@@ -599,21 +617,111 @@ function mergeInventoryRows(currentRows, locatorRows) {
 }
 
 async function fetchNulogyText(path, auth) {
-  const response = await fetch(NULOGY_URL + path, {
+  const response = await fetchTextWithRetries(NULOGY_URL + path, {
     method: "GET",
     headers: {
       "Authorization": "Basic " + auth,
       "Accept": "text/csv,text/plain,text/html,application/xhtml+xml"
     }
-  });
-  if (!response.ok) {
-    const text = await response.text().catch(function() { return ""; });
-    throw new Error("Nulogy fetch failed (" + response.status + "): " + String(text || "").slice(0, 180));
-  }
+  }, "Nulogy fetch failed");
   return {
-    text: await response.text(),
-    contentType: response.headers.get("content-type") || ""
+    text: response.text,
+    contentType: response.contentType || ""
   };
+}
+
+function sleep(ms) {
+  return new Promise(function(resolve) {
+    setTimeout(resolve, ms);
+  });
+}
+
+function summarizeErrorText(text) {
+  return String(text || "").replace(/\s+/g, " ").trim().slice(0, 180);
+}
+
+function extractXmlErrorCode(text) {
+  const match = String(text || "").match(/<Code>([^<]+)<\/Code>/i);
+  return match ? String(match[1] || "").trim() : "";
+}
+
+function hasXmlErrorPayload(text, contentType) {
+  const raw = String(text || "").trim();
+  const normalizedType = String(contentType || "").toLowerCase();
+  if (!raw) return false;
+  if (normalizedType.indexOf("xml") === -1 && raw.indexOf("<?xml") !== 0) return false;
+  return raw.indexOf("<Error>") !== -1 && !!extractXmlErrorCode(raw);
+}
+
+function isRetryableXmlError(text, contentType) {
+  if (!hasXmlErrorPayload(text, contentType)) return false;
+  return !!RETRYABLE_XML_ERROR_CODES[extractXmlErrorCode(text)];
+}
+
+function isRetryableFetchError(error) {
+  const causeCode = String(error && error.cause && error.cause.code || "").toUpperCase();
+  if (
+    causeCode === "ECONNRESET" ||
+    causeCode === "ETIMEDOUT" ||
+    causeCode === "EAI_AGAIN" ||
+    causeCode === "UND_ERR_CONNECT_TIMEOUT" ||
+    causeCode === "UND_ERR_SOCKET"
+  ) {
+    return true;
+  }
+  const message = String(error && error.message || "").toLowerCase();
+  return (
+    message.indexOf("fetch failed") !== -1 ||
+    message.indexOf("socket") !== -1 ||
+    message.indexOf("timeout") !== -1 ||
+    message.indexOf("econnreset") !== -1
+  );
+}
+
+async function fetchTextWithRetries(url, options, errorLabel) {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= FETCH_RETRY_ATTEMPTS; attempt++) {
+    try {
+      const response = await fetch(url, options);
+      const text = await response.text().catch(function() { return ""; });
+      const contentType = response.headers.get("content-type") || "";
+      const xmlErrorPayload = hasXmlErrorPayload(text, contentType);
+      const retryableXmlError = isRetryableXmlError(text, contentType);
+
+      if (!response.ok || xmlErrorPayload) {
+        const prefix = attempt > 1 ? (errorLabel + " after " + attempt + " attempts") : errorLabel;
+        const error = new Error(prefix + " (" + response.status + "): " + summarizeErrorText(text));
+        error.statusCode = response.status;
+        error.retryable = !!RETRYABLE_FETCH_STATUSES[response.status] || retryableXmlError;
+        error.responseText = summarizeErrorText(text);
+        error.contentType = contentType;
+        lastError = error;
+        if (error.retryable && attempt < FETCH_RETRY_ATTEMPTS) {
+          await sleep(FETCH_RETRY_BASE_DELAY_MS * attempt);
+          continue;
+        }
+        throw error;
+      }
+
+      return {
+        text: text,
+        contentType: contentType
+      };
+    } catch (error) {
+      lastError = error;
+      const retryable = typeof (error && error.retryable) === "boolean"
+        ? error.retryable
+        : isRetryableFetchError(error);
+      if (retryable && attempt < FETCH_RETRY_ATTEMPTS) {
+        await sleep(FETCH_RETRY_BASE_DELAY_MS * attempt);
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw lastError || new Error(errorLabel + " failed.");
 }
 
 function summarizeReportFailure(result, report) {
@@ -639,17 +747,13 @@ async function fetchReportCsv(report, columns) {
   if (!body.downloadUrl) {
     throw new Error("Completed " + report + " run did not return a download URL.");
   }
-  const downloadResponse = await fetch(body.downloadUrl, {
+  const downloadResult = await fetchTextWithRetries(body.downloadUrl, {
     method: "GET",
     headers: {
-      "Accept": "text/csv,text/plain"
+      "Accept": "text/csv,text/plain,application/xml,text/xml"
     }
-  });
-  if (!downloadResponse.ok) {
-    const text = await downloadResponse.text().catch(function() { return ""; });
-    throw new Error("Failed to download " + report + " CSV (" + downloadResponse.status + "): " + String(text || "").slice(0, 180));
-  }
-  const csvText = await downloadResponse.text();
+  }, "Failed to download " + report + " CSV");
+  const csvText = downloadResult.text;
   const parsedRows = parseCSV(csvText);
   return {
     report: report,
@@ -683,7 +787,6 @@ async function fetchReportInventoryData() {
       key: "inventory_snapshot_report",
       error: error && error.message ? error.message : "unknown"
     });
-    Sentry.captureException(error);
   }
 
   try {
@@ -702,7 +805,6 @@ async function fetchReportInventoryData() {
       key: "pallet_aging_report",
       error: error && error.message ? error.message : "unknown"
     });
-    Sentry.captureException(error);
   }
 
   const mergedRows = snapshotRows.length && palletRows.length
@@ -764,7 +866,6 @@ async function fetchInventorySeed(auth) {
         key: source.key,
         error: err && err.message ? err.message : "unknown"
       });
-      Sentry.captureException(err);
     }
   }
 
