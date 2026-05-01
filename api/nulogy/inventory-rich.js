@@ -48,6 +48,10 @@ const PALLET_AGING_COLUMNS = [
   "pallet_number",
   "site_name"
 ];
+const INVENTORY_TRANSACTION_HISTORY_COLUMNS = [
+  "created_at",
+  "pallet"
+];
 
 const RETRYABLE_FETCH_STATUSES = {
   408: true,
@@ -80,6 +84,43 @@ function formatNulogyUiDateTime(date) {
   let hour12 = hour24 % 12;
   if (hour12 === 0) hour12 = 12;
   return `${year}-${month}-${day} ${hour12}:${minute} ${ampm}`;
+}
+
+function parseNulogyDateTime(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const match = raw.match(/^(\d{4})-([A-Za-z]{3})-(\d{1,2})\s+(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (match) {
+    const months = {
+      jan: 0,
+      feb: 1,
+      mar: 2,
+      apr: 3,
+      may: 4,
+      jun: 5,
+      jul: 6,
+      aug: 7,
+      sep: 8,
+      oct: 9,
+      nov: 10,
+      dec: 11
+    };
+    const year = Number(match[1]);
+    const monthIndex = months[String(match[2] || "").toLowerCase()];
+    const day = Number(match[3]);
+    let hour = Number(match[4]);
+    const minute = Number(match[5]);
+    const meridiem = String(match[6] || "").toUpperCase();
+    if (!Number.isFinite(year) || monthIndex == null || !Number.isFinite(day) || !Number.isFinite(hour) || !Number.isFinite(minute)) {
+      return null;
+    }
+    if (meridiem === "PM" && hour < 12) hour += 12;
+    if (meridiem === "AM" && hour === 12) hour = 0;
+    const parsed = new Date(year, monthIndex, day, hour, minute);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  const fallback = new Date(raw);
+  return Number.isNaN(fallback.getTime()) ? null : fallback;
 }
 
 function buildInventorySnapshotPath() {
@@ -733,12 +774,15 @@ function summarizeReportFailure(result, report) {
 }
 
 async function fetchReportCsv(report, columns) {
+  const options = arguments.length > 2 && arguments[2] ? arguments[2] : {};
   const executed = await executeReportRun({
     report: report,
     columns: columns,
+    filters: Array.isArray(options.filters) ? options.filters : undefined,
+    sort_by: options.sortBy || undefined,
     waitForCompletion: true,
     pollIntervalMs: 2500,
-    maxPolls: 60
+    maxPolls: Number(options.maxPolls) > 0 ? Number(options.maxPolls) : 60
   });
   if (!executed.ok) {
     throw new Error(summarizeReportFailure(executed, report));
@@ -764,15 +808,63 @@ async function fetchReportCsv(report, columns) {
   };
 }
 
+function buildLatestTransactionByPallet(rows) {
+  const latestByPallet = {};
+  (Array.isArray(rows) ? rows : []).forEach(function(row) {
+    const palletNumber = String(pickLooseValue(row, ["Pallet", "pallet", "Pallet Number", "pallet_number"]) || "").trim();
+    const createdAt = String(pickLooseValue(row, ["Created at", "created_at", "Created At"]) || "").trim();
+    if (!palletNumber || !createdAt) return;
+
+    const key = normalizeKey(palletNumber);
+    if (!key) return;
+
+    const parsed = parseNulogyDateTime(createdAt);
+    const sortValue = parsed ? parsed.getTime() : 0;
+    if (!latestByPallet[key] || sortValue > latestByPallet[key].sortValue) {
+      latestByPallet[key] = {
+        value: createdAt,
+        sortValue: sortValue
+      };
+    }
+  });
+  return latestByPallet;
+}
+
+function attachLatestTransactionToInventoryRows(rows, latestByPallet) {
+  if (!Array.isArray(rows) || !rows.length) return [];
+  const lookup = latestByPallet && typeof latestByPallet === "object" ? latestByPallet : {};
+  return rows.map(function(row) {
+    const palletNumber = String(row && row["Pallet Number"] || "").trim();
+    const key = normalizeKey(palletNumber);
+    const latest = key ? lookup[key] : null;
+    if (!latest || !latest.value) return row;
+    return {
+      ...row,
+      "Last Pallet Transaction At": latest.value
+    };
+  });
+}
+
 async function fetchReportInventoryData() {
   const attempts = [];
   let snapshotRows = [];
   let snapshotHeaders = [];
   let palletRows = [];
   let palletHeaders = [];
+  let transactionRows = [];
+  let transactionHeaders = [];
 
-  try {
-    const inventorySnapshot = await fetchReportCsv("inventory_snapshot", INVENTORY_SNAPSHOT_COLUMNS);
+  const results = await Promise.allSettled([
+    fetchReportCsv("inventory_snapshot", INVENTORY_SNAPSHOT_COLUMNS),
+    fetchReportCsv("pallet_aging", PALLET_AGING_COLUMNS),
+    fetchReportCsv("canned_inventory_transaction_history", INVENTORY_TRANSACTION_HISTORY_COLUMNS, {
+      sortBy: { column: "created_at", direction: "desc" },
+      maxPolls: 90
+    })
+  ]);
+
+  if (results[0] && results[0].status === "fulfilled") {
+    const inventorySnapshot = results[0].value;
     snapshotHeaders = inventorySnapshot.headers || [];
     snapshotRows = parseCurrentInventoryRows(inventorySnapshot.rows, "inventory_snapshot_report");
     attempts.push({
@@ -782,15 +874,16 @@ async function fetchReportInventoryData() {
       rowCount: snapshotRows.length,
       warnings: inventorySnapshot.warnings || []
     });
-  } catch (error) {
+  } else {
+    const error = results[0] && results[0].reason;
     attempts.push({
       key: "inventory_snapshot_report",
       error: error && error.message ? error.message : "unknown"
     });
   }
 
-  try {
-    const palletAging = await fetchReportCsv("pallet_aging", PALLET_AGING_COLUMNS);
+  if (results[1] && results[1].status === "fulfilled") {
+    const palletAging = results[1].value;
     palletHeaders = palletAging.headers || [];
     palletRows = parseLocatorRows(palletAging.rows, "pallet_aging");
     attempts.push({
@@ -800,16 +893,38 @@ async function fetchReportInventoryData() {
       rowCount: palletRows.length,
       warnings: palletAging.warnings || []
     });
-  } catch (error) {
+  } else {
+    const error = results[1] && results[1].reason;
     attempts.push({
       key: "pallet_aging_report",
       error: error && error.message ? error.message : "unknown"
     });
   }
 
-  const mergedRows = snapshotRows.length && palletRows.length
+  if (results[2] && results[2].status === "fulfilled") {
+    const transactionHistory = results[2].value;
+    transactionHeaders = transactionHistory.headers || [];
+    transactionRows = Array.isArray(transactionHistory.rows) ? transactionHistory.rows : [];
+    attempts.push({
+      key: "canned_inventory_transaction_history_report",
+      format: "csv",
+      headers: transactionHeaders,
+      rowCount: transactionRows.length,
+      warnings: transactionHistory.warnings || []
+    });
+  } else {
+    const error = results[2] && results[2].reason;
+    attempts.push({
+      key: "canned_inventory_transaction_history_report",
+      error: error && error.message ? error.message : "unknown"
+    });
+  }
+
+  const latestTransactionByPallet = buildLatestTransactionByPallet(transactionRows);
+  const mergedBaseRows = snapshotRows.length && palletRows.length
     ? mergeInventoryRows(snapshotRows, palletRows)
     : (palletRows.length ? coalesceRows(palletRows) : coalesceRows(snapshotRows));
+  const mergedRows = attachLatestTransactionToInventoryRows(mergedBaseRows, latestTransactionByPallet);
 
   if (!mergedRows.length) {
     const detail = attempts.map(function(attempt) {
@@ -827,7 +942,9 @@ async function fetchReportInventoryData() {
     inventorySeedHeaders: snapshotHeaders,
     inventorySeedRows: snapshotRows.length,
     itemLocatorHeaders: palletHeaders,
-    itemLocatorRows: palletRows.length
+    itemLocatorRows: palletRows.length,
+    transactionHeaders: transactionHeaders,
+    transactionRows: transactionRows.length
   };
 }
 
@@ -946,6 +1063,8 @@ export default async function handler(req, res) {
           }),
           itemLocatorHeaders: reportData.itemLocatorHeaders || [],
           itemLocatorRows: reportData.itemLocatorRows || 0,
+          transactionHeaders: reportData.transactionHeaders || [],
+          transactionRows: reportData.transactionRows || 0,
           itemLocatorFormat: "csv",
           itemLocatorError: ""
         }

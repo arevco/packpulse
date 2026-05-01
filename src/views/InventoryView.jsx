@@ -64,6 +64,41 @@ function parseInventoryDate(value) {
   return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
 }
 
+function parseInventoryDateTime(value) {
+  var raw = String(value || "").trim();
+  if (!raw) return null;
+  var nulogy = raw.match(/^(\d{4})-([A-Za-z]{3})-(\d{1,2})\s+(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (nulogy) {
+    var monthLookup = {
+      jan: 0,
+      feb: 1,
+      mar: 2,
+      apr: 3,
+      may: 4,
+      jun: 5,
+      jul: 6,
+      aug: 7,
+      sep: 8,
+      oct: 9,
+      nov: 10,
+      dec: 11
+    };
+    var year = Number(nulogy[1]);
+    var monthIndex = monthLookup[String(nulogy[2] || "").toLowerCase()];
+    var day = Number(nulogy[3]);
+    var hour = Number(nulogy[4]);
+    var minute = Number(nulogy[5]);
+    var meridiem = String(nulogy[6] || "").toUpperCase();
+    if (meridiem === "PM" && hour < 12) hour += 12;
+    if (meridiem === "AM" && hour === 12) hour = 0;
+    var parsedNulogy = new Date(year, monthIndex, day, hour, minute);
+    return isNaN(parsedNulogy) ? null : parsedNulogy;
+  }
+  var parsed = new Date(raw);
+  if (isNaN(parsed)) return null;
+  return parsed;
+}
+
 function daysUntilInventoryDate(value) {
   var dt = parseInventoryDate(value);
   if (!dt) return null;
@@ -126,6 +161,12 @@ function sortInventoryRows(rows, sortField, sortDir) {
   data.sort(function(a, b) {
     var dir = sortDir === "asc" ? 1 : -1;
     if (sortField === "qtyOnHand") return (a.qtyOnHand - b.qtyOnHand) * dir;
+    if (sortField === "lastPalletTransactionAt") {
+      if (a.lastPalletTransactionAtMs == null && b.lastPalletTransactionAtMs == null) return 0;
+      if (a.lastPalletTransactionAtMs == null) return 1;
+      if (b.lastPalletTransactionAtMs == null) return -1;
+      return (a.lastPalletTransactionAtMs - b.lastPalletTransactionAtMs) * dir;
+    }
     if (sortField === "daysToExpiry") {
       var aDays = a.daysToExpiry == null ? Number.POSITIVE_INFINITY : a.daysToExpiry;
       var bDays = b.daysToExpiry == null ? Number.POSITIVE_INFINITY : b.daysToExpiry;
@@ -156,7 +197,8 @@ function matchesInventoryFilters(row, q, filters) {
     row.source,
     row.itemCategory,
     row.siteName,
-    row.zone
+    row.zone,
+    row.lastPalletTransactionAt
   ].join(" ").toLowerCase();
   return haystack.includes(q);
 }
@@ -309,6 +351,8 @@ export default function InventoryView({
       var siteName = String(pickLooseValue(row, ["Site Name", "site_name"]) || "").trim();
       var zone = String(pickLooseValue(row, ["Zone", "warehouse_zone"]) || "").trim();
       var storedSince = String(pickLooseValue(row, ["Stored Since", "stored_since"]) || "").trim();
+      var lastPalletTransactionAt = String(pickLooseValue(row, ["Last Pallet Transaction At", "last_pallet_transaction_at", "Last Transaction At", "last_transaction_at"]) || "").trim();
+      var lastPalletTransactionAtParsed = parseInventoryDateTime(lastPalletTransactionAt);
       var bucketRows = statusBucketRows(row);
       var hasBucketedStatuses = bucketRows.length > 0;
 
@@ -339,6 +383,8 @@ export default function InventoryView({
           siteName: siteName || "",
           zone: zone || "",
           storedSince: storedSince || "",
+          lastPalletTransactionAt: lastPalletTransactionAt || "",
+          lastPalletTransactionAtMs: lastPalletTransactionAtParsed ? lastPalletTransactionAtParsed.getTime() : null,
           daysToExpiry: expiryDate ? daysUntilInventoryDate(expiryDate) : null,
           sourceRows: 1,
           raw: row
@@ -366,6 +412,10 @@ export default function InventoryView({
       if (!grouped[key].siteName && row.siteName) grouped[key].siteName = row.siteName;
       if (!grouped[key].zone && row.zone) grouped[key].zone = row.zone;
       if (!grouped[key].storedSince && row.storedSince) grouped[key].storedSince = row.storedSince;
+      if (row.lastPalletTransactionAtMs != null && (grouped[key].lastPalletTransactionAtMs == null || row.lastPalletTransactionAtMs > grouped[key].lastPalletTransactionAtMs)) {
+        grouped[key].lastPalletTransactionAt = row.lastPalletTransactionAt;
+        grouped[key].lastPalletTransactionAtMs = row.lastPalletTransactionAtMs;
+      }
     });
     return Object.values(grouped);
   }, [rawRows]);
@@ -468,7 +518,8 @@ export default function InventoryView({
       lotRows: rawRows.filter(function(row) { return !!String(row.lotCode || "").trim(); }).length,
       expiryRows: rawRows.filter(function(row) { return !!String(row.expiryDate || "").trim(); }).length,
       palletRows: rawRows.filter(function(row) { return !!String(row.palletNumber || "").trim(); }).length,
-      customerRows: rawRows.filter(function(row) { return !!String(row.customer || "").trim() && row.customer !== "--"; }).length
+      customerRows: rawRows.filter(function(row) { return !!String(row.customer || "").trim() && row.customer !== "--"; }).length,
+      lastTransactionRows: rawRows.filter(function(row) { return !!String(row.lastPalletTransactionAt || "").trim(); }).length
     };
   }, [rawRows]);
 
@@ -519,6 +570,9 @@ export default function InventoryView({
   var hasPalletColumn = useMemo(function() {
     return rawRows.some(function(row) { return !!String(row.palletNumber || "").trim(); });
   }, [rawRows]);
+  var hasLastPalletTransactionColumn = useMemo(function() {
+    return rawRows.some(function(row) { return !!String(row.lastPalletTransactionAt || "").trim(); });
+  }, [rawRows]);
   var hasCustomerColumn = useMemo(function() {
     return rawRows.some(function(row) { return !!String(row.customer || "").trim() && row.customer !== "--"; });
   }, [rawRows]);
@@ -563,6 +617,7 @@ export default function InventoryView({
       "expiry_date",
       "days_to_expiry",
       "pallet_number",
+      "last_pallet_transaction_at",
       "qty_on_hand",
       "base_uom",
       "status",
@@ -580,6 +635,7 @@ export default function InventoryView({
         csvCell(row.expiryDate || ""),
         csvCell(row.daysToExpiry == null ? "" : String(row.daysToExpiry)),
         csvCell(row.palletNumber),
+        csvCell(row.lastPalletTransactionAt || ""),
         csvCell(String(Math.round((row.qtyOnHand || 0) * 100) / 100)),
         csvCell(row.baseUom || ""),
         csvCell(row.status),
@@ -631,13 +687,13 @@ export default function InventoryView({
     <div className="space-y-4">
       <div>
         <h2 className="text-2xl font-semibold tracking-[-0.02em] text-[rgb(var(--foreground))]">Inventory Lookup</h2>
-        <p className="mt-1 text-sm text-[rgb(var(--muted))]">Search inventory by SKU, customer, location, lot code, expiry date, pallet, and report source.</p>
+        <p className="mt-1 text-sm text-[rgb(var(--muted))]">Search inventory by SKU, customer, location, lot code, expiry date, pallet, last transaction timestamp, and report source.</p>
       </div>
 
       <div className="grid gap-2 xl:grid-cols-[minmax(0,1fr),repeat(5,minmax(0,190px))]">
         <Input
           type="text"
-          placeholder="Search SKU / description / customer / lot / pallet"
+          placeholder="Search SKU / description / customer / lot / pallet / last txn"
           value={searchTerm}
           onChange={function(event) { setSearchTerm(event.target.value); }}
           className="h-10 min-w-0 text-sm"
@@ -761,6 +817,7 @@ export default function InventoryView({
         <Badge variant="secondary">Lot coverage {coveragePct(coverage.lotRows, rawRows.length)}%</Badge>
         <Badge variant="secondary">Expiry coverage {coveragePct(coverage.expiryRows, rawRows.length)}%</Badge>
         <Badge variant="secondary">Pallet coverage {coveragePct(coverage.palletRows, rawRows.length)}%</Badge>
+        {hasLastPalletTransactionColumn ? <Badge variant="secondary">Last txn coverage {coveragePct(coverage.lastTransactionRows, rawRows.length)}%</Badge> : null}
         {hasCustomerColumn ? <Badge variant="secondary">Customer coverage {coveragePct(coverage.customerRows, rawRows.length)}%</Badge> : null}
       </div>
 
@@ -822,6 +879,7 @@ export default function InventoryView({
                 {hasLotColumn ? <th style={thC(sortField === "lotCode")}><SortHeaderButton onClick={function() { handleSort("lotCode"); }}>Lot Code</SortHeaderButton></th> : null}
                 {hasExpiryColumn ? <th style={thC(sortField === "daysToExpiry")}><SortHeaderButton onClick={function() { handleSort("daysToExpiry"); }}>Expiry</SortHeaderButton></th> : null}
                 {hasPalletColumn ? <th style={thC(sortField === "palletNumber")}><SortHeaderButton onClick={function() { handleSort("palletNumber"); }}>Pallet</SortHeaderButton></th> : null}
+                {hasLastPalletTransactionColumn ? <th style={thC(sortField === "lastPalletTransactionAt")}><SortHeaderButton onClick={function() { handleSort("lastPalletTransactionAt"); }}>Last Txn</SortHeaderButton></th> : null}
                 {viewMode === "raw" && hasZoneColumn ? <th style={thC(sortField === "zone")}><SortHeaderButton onClick={function() { handleSort("zone"); }}>Zone</SortHeaderButton></th> : null}
                 <th style={thC(sortField === "qtyOnHand")}><SortHeaderButton onClick={function() { handleSort("qtyOnHand"); }}>Qty On Hand</SortHeaderButton></th>
                 <th style={thC(sortField === "status")}><SortHeaderButton onClick={function() { handleSort("status"); }}>Status</SortHeaderButton></th>
@@ -848,6 +906,7 @@ export default function InventoryView({
                       </td>
                     ) : null}
                     {hasPalletColumn ? <td style={Object.assign({}, tdN, { fontFamily: mono })}>{row.palletNumber || "--"}</td> : null}
+                    {hasLastPalletTransactionColumn ? <td style={Object.assign({}, tdN, { fontFamily: mono })}>{row.lastPalletTransactionAt || "--"}</td> : null}
                     {viewMode === "raw" && hasZoneColumn ? <td style={Object.assign({}, tdN, truncate(120))}>{row.zone || "--"}</td> : null}
                     <td style={Object.assign({}, tdM, { fontWeight: 700, color: C.ok })}>
                       {Math.round((row.qtyOnHand || 0) * 100) / 100}
@@ -858,7 +917,7 @@ export default function InventoryView({
                 );
               }) : (
                 <tr>
-                  <td colSpan={2 + (hasCustomerColumn ? 1 : 0) + (viewMode === "raw" && hasItemCategoryColumn ? 1 : 0) + (hasLocationColumn ? 1 : 0) + (hasLotColumn ? 1 : 0) + (hasExpiryColumn ? 1 : 0) + (hasPalletColumn ? 1 : 0) + (viewMode === "raw" && hasZoneColumn ? 1 : 0) + 2} style={Object.assign({}, tdN, { padding: "28px 16px", textAlign: "center", color: C.dim })}>
+                  <td colSpan={2 + (hasCustomerColumn ? 1 : 0) + (viewMode === "raw" && hasItemCategoryColumn ? 1 : 0) + (hasLocationColumn ? 1 : 0) + (hasLotColumn ? 1 : 0) + (hasExpiryColumn ? 1 : 0) + (hasPalletColumn ? 1 : 0) + (hasLastPalletTransactionColumn ? 1 : 0) + (viewMode === "raw" && hasZoneColumn ? 1 : 0) + 2} style={Object.assign({}, tdN, { padding: "28px 16px", textAlign: "center", color: C.dim })}>
                     No inventory rows match the current filters.
                   </td>
                 </tr>
