@@ -16,11 +16,120 @@ var authCache = {
 };
 
 var AUTH_CACHE_MS = 45 * 60 * 1000;
+var FETCH_RETRY_ATTEMPTS = 3;
+var FETCH_RETRY_BASE_DELAY_MS = 350;
+var FETCH_TIMEOUT_MS = 15 * 1000;
+var RETRYABLE_FETCH_STATUSES = {
+  408: true,
+  425: true,
+  429: true,
+  500: true,
+  502: true,
+  503: true,
+  504: true,
+};
 
 function sleep(ms) {
   return new Promise(function (resolve) {
     setTimeout(resolve, ms);
   });
+}
+
+function summarizeErrorText(text) {
+  return String(text || "").replace(/\s+/g, " ").trim().slice(0, 180);
+}
+
+function createTimeoutSignal(timeoutMs) {
+  if (typeof AbortSignal === "undefined" || !AbortSignal || typeof AbortSignal.timeout !== "function") {
+    return undefined;
+  }
+  return AbortSignal.timeout(timeoutMs);
+}
+
+function isRetryableFetchError(error) {
+  var statusCode = Number(error && error.statusCode);
+  var hasUpstreamStatus = Number.isFinite(statusCode) && statusCode > 0;
+  var causeCode = String((error && error.cause && error.cause.code) || "").toUpperCase();
+  if (
+    causeCode === "ECONNRESET" ||
+    causeCode === "ETIMEDOUT" ||
+    causeCode === "EAI_AGAIN" ||
+    causeCode === "UND_ERR_CONNECT_TIMEOUT" ||
+    causeCode === "UND_ERR_HEADERS_TIMEOUT" ||
+    causeCode === "UND_ERR_SOCKET"
+  ) {
+    return true;
+  }
+  var message = String((error && error.message) || "").toLowerCase();
+  return (
+    (!hasUpstreamStatus && message.indexOf("fetch failed") !== -1) ||
+    message.indexOf("socket") !== -1 ||
+    message.indexOf("timeout") !== -1 ||
+    message.indexOf("terminated") !== -1 ||
+    message.indexOf("other side closed") !== -1 ||
+    message.indexOf("econnreset") !== -1
+  );
+}
+
+function isTransientOpenDockError(error) {
+  var statusCode = Number(error && error.statusCode);
+  if (Number.isFinite(statusCode) && RETRYABLE_FETCH_STATUSES[statusCode]) return true;
+  return isRetryableFetchError(error);
+}
+
+function isUpstreamHttpError(error) {
+  var statusCode = Number(error && error.statusCode);
+  return Number.isFinite(statusCode) && statusCode >= 400;
+}
+
+async function fetchTextWithRetries(url, options, errorLabel) {
+  var lastError = null;
+
+  for (var attempt = 1; attempt <= FETCH_RETRY_ATTEMPTS; attempt++) {
+    try {
+      var requestOptions = Object.assign({}, options || {});
+      if (!requestOptions.signal) requestOptions.signal = createTimeoutSignal(FETCH_TIMEOUT_MS);
+
+      var response = await fetch(url, requestOptions);
+      var text = "";
+      try {
+        text = await response.text();
+      } catch (bodyErr) {
+        bodyErr.statusCode = response.status;
+        bodyErr.retryable = isRetryableFetchError(bodyErr) || !!RETRYABLE_FETCH_STATUSES[response.status];
+        throw bodyErr;
+      }
+
+      var body = parseJsonSafe(text);
+      if (!response.ok) {
+        var error = new Error(errorLabel + " (" + response.status + "): " + summarizeErrorText(text || response.statusText || "unknown"));
+        error.publicError = errorLabel;
+        error.statusCode = response.status;
+        error.retryable = !!RETRYABLE_FETCH_STATUSES[response.status];
+        error.responseBody = body;
+        error.responseText = summarizeErrorText(text);
+        throw error;
+      }
+
+      return {
+        response: response,
+        text: text,
+        body: body,
+        attempts: attempt,
+      };
+    } catch (error) {
+      lastError = error;
+      var retryable = typeof error.retryable === "boolean" ? error.retryable : isRetryableFetchError(error);
+      if (retryable && attempt < FETCH_RETRY_ATTEMPTS) {
+        await sleep(FETCH_RETRY_BASE_DELAY_MS * attempt);
+        continue;
+      }
+      error.attempts = attempt;
+      throw error;
+    }
+  }
+
+  throw lastError || new Error(errorLabel || "OpenDock request failed.");
 }
 
 function extractBearerToken(value) {
@@ -406,14 +515,15 @@ function withinWindow(startIso, fromMs, toMs) {
 
 async function fetchLookupMap(baseUrl, token, endpoint, idFieldCandidates, nameFieldCandidates) {
   try {
-    var resp = await fetch(baseUrl + endpoint, {
-      method: "GET",
-      headers: { Authorization: "Bearer " + token, Accept: "application/json" },
-    });
-    if (!resp.ok) return {};
-    var text = await resp.text();
-    var body = parseJsonSafe(text);
-    var rows = pickArray(body);
+    var lookupPayload = await fetchTextWithRetries(
+      baseUrl + endpoint,
+      {
+        method: "GET",
+        headers: { Authorization: "Bearer " + token, Accept: "application/json" },
+      },
+      "OpenDock lookup failed."
+    );
+    var rows = pickArray(lookupPayload.body);
     var map = {};
     rows.forEach(function (row) {
       if (!row || typeof row !== "object") return;
@@ -468,36 +578,18 @@ export default async function handler(req, res) {
     if (authCache.token && authCache.expiresAt > Date.now()) {
       token = authCache.token;
     } else {
-      var loginResp = null;
-      var loginText = "";
-      var loginBody = null;
-      var attempt = 0;
-      var maxAttempts = 3;
-      while (attempt < maxAttempts) {
-        attempt++;
-        loginResp = await fetch(baseUrl + "/auth/login", {
+      var loginPayload = await fetchTextWithRetries(
+        baseUrl + "/auth/login",
+        {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ email: email, password: password }),
-        });
-        loginText = await loginResp.text();
-        loginBody = parseJsonSafe(loginText);
-        if (loginResp.ok) break;
-        if (loginResp.status === 429 && attempt < maxAttempts) {
-          await sleep(500 * attempt);
-          continue;
-        }
-        if (loginResp.status === 429) {
-          return res.status(429).json({
-            error: "OpenDock rate limit reached. Please wait 1-2 minutes and try again.",
-            details: loginBody || loginText || "Too Many Requests",
-          });
-        }
-        return res.status(502).json({
-          error: "OpenDock login failed.",
-          details: loginBody || loginText || "Unknown auth error",
-        });
-      }
+        },
+        "OpenDock login failed."
+      );
+      var loginResp = loginPayload.response;
+      var loginText = loginPayload.text;
+      var loginBody = loginPayload.body;
 
       token = findTokenDeep(loginBody, 0);
       if (!token) {
@@ -521,22 +613,18 @@ export default async function handler(req, res) {
       authCache.expiresAt = Date.now() + AUTH_CACHE_MS;
     }
 
-    var apptResp = await fetch(baseUrl + "/appointment", {
-      method: "GET",
-      headers: {
-        Authorization: "Bearer " + token,
-        Accept: "application/json",
+    var apptPayload = await fetchTextWithRetries(
+      baseUrl + "/appointment",
+      {
+        method: "GET",
+        headers: {
+          Authorization: "Bearer " + token,
+          Accept: "application/json",
+        },
       },
-    });
-    var apptText = await apptResp.text();
-    var apptBody = parseJsonSafe(apptText);
-
-    if (!apptResp.ok) {
-      return res.status(502).json({
-        error: "OpenDock appointment fetch failed.",
-        details: apptBody || apptText || "Unknown appointment error",
-      });
-    }
+      "OpenDock appointment fetch failed."
+    );
+    var apptBody = apptPayload.body;
 
     var rawRows = pickArray(apptBody);
     var filtered = rawRows.filter(function (appt) {
@@ -568,6 +656,30 @@ export default async function handler(req, res) {
       message: "Loaded " + rows.length + " OpenDock appointments",
     });
   } catch (err) {
+    if (Number(err && err.statusCode) === 429) {
+      return res.status(429).json({
+        error: "OpenDock rate limit reached. Please wait 1-2 minutes and try again.",
+        details: (err && err.responseBody) || (err && err.responseText) || "Too Many Requests",
+      });
+    }
+    if (isUpstreamHttpError(err)) {
+      if (isTransientOpenDockError(err)) {
+        return res.status(502).json({
+          error: "OpenDock temporarily unavailable.",
+          details: summarizeErrorText((err && err.responseText) || (err && err.message) || "Upstream request failed"),
+        });
+      }
+      return res.status(502).json({
+        error: (err && err.publicError) || "OpenDock request failed.",
+        details: (err && err.responseBody) || (err && err.responseText) || summarizeErrorText(err && err.message ? err.message : String(err)),
+      });
+    }
+    if (isTransientOpenDockError(err)) {
+      return res.status(502).json({
+        error: "OpenDock temporarily unavailable.",
+        details: summarizeErrorText(err && err.message ? err.message : String(err)),
+      });
+    }
     Sentry.captureException(err);
     return res.status(500).json({
       error: "Unexpected OpenDock proxy error.",
