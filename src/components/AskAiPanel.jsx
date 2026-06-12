@@ -266,7 +266,6 @@ export default function AskAiPanel(props) {
     operations: "Operations",
     workorders: "Work Orders",
     supplyrisk: "Supply Risk",
-    sandbox: "Sandbox",
     flags: "Data Flags",
   };
 

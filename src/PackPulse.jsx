@@ -46,7 +46,6 @@ var operationsViewImportPromise = null;
 var operationsInsightsPanelImportPromise = null;
 var forecastViewImportPromise = null;
 var inventoryViewImportPromise = null;
-var teamBoardViewImportPromise = null;
 var invoicingViewImportPromise = null;
 var onboardingViewImportPromise = null;
 
@@ -68,11 +67,6 @@ function importForecastView() {
 function importInventoryView() {
   if (!inventoryViewImportPromise) inventoryViewImportPromise = import("./views/InventoryView");
   return inventoryViewImportPromise;
-}
-
-function importTeamBoardView() {
-  if (!teamBoardViewImportPromise) teamBoardViewImportPromise = import("./views/TeamBoardView");
-  return teamBoardViewImportPromise;
 }
 
 function importInvoicingView() {
@@ -100,10 +94,6 @@ function prefetchInventoryView() {
   return importInventoryView().catch(function() {});
 }
 
-function prefetchTeamBoardView() {
-  return importTeamBoardView().catch(function() {});
-}
-
 function prefetchInvoicingView() {
   return importInvoicingView().catch(function() {});
 }
@@ -117,7 +107,6 @@ function prefetchLikelyNextViews(activeView) {
   if (activeView !== "operations") prefetchers.push(prefetchOperationsView);
   if (activeView !== "inventory") prefetchers.push(prefetchInventoryView);
   if (activeView !== "forecast") prefetchers.push(prefetchForecastView);
-  if (activeView !== "teamboard") prefetchers.push(prefetchTeamBoardView);
   if (activeView !== "invoicing") prefetchers.push(prefetchInvoicingView);
   if (activeView !== "onboarding") prefetchers.push(prefetchOnboardingView);
   return prefetchers.reduce(function(chain, prefetch) {
@@ -216,13 +205,11 @@ const OperationsView = lazySafe(importOperationsView, "Operations");
 const ForecastView = lazySafe(importForecastView, "Forecast");
 const WorkOrdersView = lazySafe(function() { return import("./views/WorkOrdersView"); }, "Work Orders");
 const InventoryView = lazySafe(importInventoryView, "Inventory");
-const TeamBoardView = lazySafe(importTeamBoardView, "Team Board");
 const InvoicingView = lazySafe(importInvoicingView, "Invoicing");
 const OnboardingView = lazySafe(importOnboardingView, "Onboarding");
 const SupplyRiskView = lazySafe(function() { return import("./views/SupplyRiskView"); }, "Supply Risk");
 const ItemMasterView = lazySafe(function() { return import("./views/ItemMasterView"); }, "Item Master");
 const FlagsView = lazySafe(function() { return import("./views/FlagsView"); }, "Data Flags");
-const SandboxView = lazySafe(function() { return import("./views/SandboxView"); }, "Sandbox");
 const AICopilotView = lazySafe(function() { return import("./views/AICopilotView"); }, "AI Copilot");
 
 export default function ProductionReadiness() {
@@ -246,7 +233,7 @@ export default function ProductionReadiness() {
   var parseInitialPermalink = function() {
     if (typeof window === "undefined") return { view: "workorders", wo: {}, forecast: {}, operations: {}, invoicing: {} };
     var qs = new URLSearchParams(window.location.search || "");
-    var allowedViews = { aicopilot:true, operations:true, invoicing:true, forecast:true, workorders:true, inventory:true, teamboard:true, onboarding:true, supplyrisk:true, sandbox:true, flags:true, itemmaster:true };
+    var allowedViews = { aicopilot:true, operations:true, invoicing:true, forecast:true, workorders:true, inventory:true, onboarding:true, supplyrisk:true, flags:true, itemmaster:true };
     var rawView = String(qs.get("view") || "workorders");
     if (rawView === "overview") rawView = "workorders";
     var view = allowedViews[rawView] ? rawView : "workorders";
@@ -436,12 +423,10 @@ export default function ProductionReadiness() {
     invoicing: prefetchInvoicingView,
     inventory: prefetchInventoryView,
     forecast: prefetchForecastView,
-    teamboard: prefetchTeamBoardView,
     onboarding: prefetchOnboardingView,
   };
 
-  var navItems = [{key:"workorders",label:"Work Orders",count:null},{key:"inventory",label:"Inventory",count:null},{key:"teamboard",label:"Team Board",count:null},{key:"onboarding",label:"Onboarding",count:null,alert:false},{key:"operations",label:"Operations",count:null,alert:false},{key:"invoicing",label:"Invoicing",count:null,alert:false},{key:"supplyrisk",label:"Supply Risk",count:null,alert:false},{key:"forecast",label:"Forecast",count:null,alert:false},{key:"aicopilot",label:"AI Copilot",count:null,alert:false}]
-    .concat([{key:"sandbox",label:"Sandbox",count:null,alert:false}])
+  var navItems = [{key:"workorders",label:"Work Orders",count:null},{key:"inventory",label:"Inventory",count:null},{key:"onboarding",label:"Onboarding",count:null,alert:false},{key:"operations",label:"Operations",count:null,alert:false},{key:"invoicing",label:"Invoicing",count:null,alert:false},{key:"supplyrisk",label:"Supply Risk",count:null,alert:false},{key:"forecast",label:"Forecast",count:null,alert:false},{key:"aicopilot",label:"AI Copilot",count:null,alert:false}]
     .map(function(item) {
       return Object.assign({}, item, {
         href: buildPermalinkUrl(item.key, workOrdersPermalinkState, forecastPermalinkState, operationsPermalinkState, invoicingPermalinkState),
@@ -1654,11 +1639,9 @@ export default function ProductionReadiness() {
               inventoryFileName={ds.invFileName || ""}
             />
           )}
-          {activeView === "teamboard" && <TeamBoardView />}
           {activeView === "onboarding" && <OnboardingView />}
           {activeView === "itemmaster" && <ItemMasterView itemMaster={ds.itemMaster || []} inventory={ds.inventory || []} />}
           {activeView === "supplyrisk" && <SupplyRiskView rawCriticalItems={criticalItemsForUI} inboundCoverage={inboundCoverage} timelineData={timelineData} deliveriesV2={deliveriesV2} />}
-          {activeView === "sandbox" && <SandboxView />}
           {activeView === "flags" && <FlagsView flags={analysisForUI.flags} />}
         </Suspense>
 
