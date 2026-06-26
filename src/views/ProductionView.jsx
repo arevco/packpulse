@@ -10,7 +10,6 @@ import SortHeaderButton from "../components/ui/sort-header-button";
 import TableShell from "../components/ui/table-shell";
 
 var MIN_TRUSTED_JOB_LABOR_HOURS = 0.25;
-var SHIFT_MINUTES = 480;
 var MONTH_INDEX = {
   jan: 0,
   feb: 1,
@@ -82,6 +81,12 @@ function fmtMoney(value) {
 function fmtPct(value) {
   if (value == null || !Number.isFinite(value)) return "--";
   return (safeNum(value) * 100).toFixed(1) + "%";
+}
+
+function productionSpanSourceLabel(source) {
+  if (source === "actual_job_window") return "Actual Job Window";
+  if (source === "observed_fg_output_span") return "Observed FG Output Span";
+  return "Measured span unavailable";
 }
 
 function normKey(value) {
@@ -736,7 +741,10 @@ export default function ProductionView({ productionSegments, laborActuals, labor
       var laborMargin = revenue - laborCost;
       var laborMarginPct = revenue > 0 ? (laborMargin / revenue) : null;
       var missingRevenue = unitsProduced > 0 && !(revenue > 0);
-      var shiftMinutes = hasAssignedShift(r.shift) ? SHIFT_MINUTES : 0;
+      var productionMinutes = safeNum(r.productionMinutes);
+      var casesPerProductionMinute = productionMinutes > 0
+        ? safeNum(r.casesPerProductionMinute || (unitsProduced / productionMinutes))
+        : 0;
       return Object.assign({}, r, {
         laborPayableHours: payableHours,
         laborProductiveHours: productiveHours,
@@ -750,8 +758,9 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         missingRevenue: missingRevenue,
         missingRevenueUnits: missingRevenue ? unitsProduced : 0,
         missingRevenueSkuKey: normKey(r.itemCode) || "unknown",
-        shiftMinutes: shiftMinutes,
-        casesPerMinute: shiftMinutes > 0 ? (unitsProduced / shiftMinutes) : 0,
+        productionMinutes: productionMinutes,
+        productionMinutesSource: String(r.productionMinutesSource || "unavailable"),
+        casesPerMinute: casesPerProductionMinute,
         casesPerPayableHour: payableHours > 0 ? (unitsProduced / payableHours) : 0,
         laborCostPerCase: unitsProduced > 0 ? (laborCost / unitsProduced) : 0,
         hasLabor: payableHours > 0,
@@ -832,6 +841,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
           revenue: 0,
           revenueCoveredUnits: 0,
           laborMargin: 0,
+          productionMinutes: 0,
           shiftSlots: {},
           missingRevenueUnits: 0,
           missingRevenueSkuKeys: {},
@@ -846,6 +856,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
       map[line].revenue += safeNum(r.revenue);
       map[line].revenueCoveredUnits += safeNum(r.revenueCoveredUnits);
       map[line].laborMargin += safeNum(r.laborMargin);
+      map[line].productionMinutes += safeNum(r.productionMinutes);
       map[line].missingRevenueUnits += safeNum(r.missingRevenueUnits);
       if (r.missingRevenue) map[line].missingRevenueSkuKeys[r.missingRevenueSkuKey] = r.itemCode || "Unknown SKU";
       if (hasAssignedShift(r.shift) && r.date) map[line].shiftSlots[String(r.date) + "|" + String(r.shift)] = true;
@@ -854,15 +865,15 @@ export default function ProductionView({ productionSegments, laborActuals, labor
     });
     return Object.values(map).map(function(r) {
       var shiftSlotCount = Object.keys(r.shiftSlots).length;
-      var shiftMinutes = shiftSlotCount * SHIFT_MINUTES;
+      var productionMinutes = safeNum(r.productionMinutes);
       return Object.assign({}, r, {
         sharePct: totalUnits > 0 ? Math.round((r.units / totalUnits) * 100) : 0,
         shiftSlotCount: shiftSlotCount,
-        shiftMinutes: shiftMinutes,
+        productionMinutes: productionMinutes,
         revenueCoveragePct: r.units > 0 ? Math.round((r.revenueCoveredUnits / r.units) * 100) : 0,
         missingRevenueSkuCount: Object.keys(r.missingRevenueSkuKeys).length,
         pricePerUnit: r.revenueCoveredUnits > 0 ? (r.revenue / r.revenueCoveredUnits) : null,
-        casesPerMinute: shiftMinutes > 0 ? (r.units / shiftMinutes) : 0,
+        casesPerMinute: productionMinutes > 0 ? (r.units / productionMinutes) : 0,
         laborCostPerCase: r.units > 0 ? (r.laborCost / r.units) : 0,
         laborMarginPct: r.revenue > 0 ? (r.laborMargin / r.revenue) : null,
         laborStatus: deriveLaborStatus(r.finalizedLaborRows, r.provisionalLaborRows)
@@ -888,6 +899,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
           revenue: 0,
           revenueCoveredUnits: 0,
           laborMargin: 0,
+          productionMinutes: 0,
           shifts: {},
           shiftSlots: {},
           missingRevenueUnits: 0,
@@ -902,6 +914,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
       map[key].revenue += safeNum(r.revenue);
       map[key].revenueCoveredUnits += safeNum(r.revenueCoveredUnits);
       map[key].laborMargin += safeNum(r.laborMargin);
+      map[key].productionMinutes += safeNum(r.productionMinutes);
       map[key].missingRevenueUnits += safeNum(r.missingRevenueUnits);
       if (r.missingRevenue) map[key].missingRevenueSkuKeys[r.missingRevenueSkuKey] = r.itemCode || "Unknown SKU";
       map[key].shifts[String(r.shift || "Unassigned")] = true;
@@ -911,12 +924,12 @@ export default function ProductionView({ productionSegments, laborActuals, labor
     });
     return Object.values(map).map(function(r) {
       var shiftSlotCount = Object.keys(r.shiftSlots).length;
-      var shiftMinutes = shiftSlotCount * SHIFT_MINUTES;
+      var productionMinutes = safeNum(r.productionMinutes);
       return Object.assign({}, r, {
         shiftCount: Object.keys(r.shifts).length,
         shiftSlotCount: shiftSlotCount,
-        shiftMinutes: shiftMinutes,
-        casesPerMinute: shiftMinutes > 0 ? (r.unitsProduced / shiftMinutes) : 0,
+        productionMinutes: productionMinutes,
+        casesPerMinute: productionMinutes > 0 ? (r.unitsProduced / productionMinutes) : 0,
         casesPerPayableHour: r.laborPayableHours > 0 ? (r.unitsProduced / r.laborPayableHours) : 0,
         laborCostPerCase: r.unitsProduced > 0 ? (r.laborCost / r.unitsProduced) : 0,
         revenueCoveragePct: r.unitsProduced > 0 ? Math.round((r.revenueCoveredUnits / r.unitsProduced) * 100) : 0,
@@ -998,6 +1011,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
           revenue: 0,
           revenueCoveredUnits: 0,
           laborMargin: 0,
+          productionMinutes: 0,
           missingRevenueUnits: 0,
           missingRevenueSkuKeys: {},
           provisionalLaborRows: 0,
@@ -1012,6 +1026,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
       jobsByLine[line].revenue += safeNum(job.revenue);
       jobsByLine[line].revenueCoveredUnits += safeNum(job.revenueCoveredUnits);
       jobsByLine[line].laborMargin += safeNum(job.laborMargin);
+      jobsByLine[line].productionMinutes += safeNum(job.productionMinutes);
       jobsByLine[line].missingRevenueUnits += safeNum(job.missingRevenueUnits);
       jobsByLine[line].provisionalLaborRows += safeNum(job.provisionalLaborRows);
       jobsByLine[line].finalizedLaborRows += safeNum(job.finalizedLaborRows);
@@ -1028,15 +1043,15 @@ export default function ProductionView({ productionSegments, laborActuals, labor
 
     return Object.values(jobsByLine).map(function(line) {
       var shiftSlotCount = Object.keys(line.shiftSlots).length;
-      var shiftMinutes = shiftSlotCount * SHIFT_MINUTES;
+      var productionMinutes = safeNum(line.productionMinutes);
       return Object.assign({}, line, {
         sharePct: totalUnits > 0 ? Math.round((line.units / totalUnits) * 100) : 0,
         shiftSlotCount: shiftSlotCount,
-        shiftMinutes: shiftMinutes,
+        productionMinutes: productionMinutes,
         revenueCoveragePct: line.units > 0 ? Math.round((line.revenueCoveredUnits / line.units) * 100) : 0,
         missingRevenueSkuCount: Object.keys(line.missingRevenueSkuKeys).length,
         pricePerUnit: line.revenueCoveredUnits > 0 ? (line.revenue / line.revenueCoveredUnits) : null,
-        casesPerMinute: shiftMinutes > 0 ? (line.units / shiftMinutes) : 0,
+        casesPerMinute: productionMinutes > 0 ? (line.units / productionMinutes) : 0,
         laborCostPerCase: line.units > 0 ? (line.laborCost / line.units) : 0,
         laborMarginPct: line.revenue > 0 ? (line.laborMargin / line.revenue) : null,
         laborStatus: deriveLaborStatus(line.finalizedLaborRows, line.provisionalLaborRows),
@@ -1181,7 +1196,12 @@ export default function ProductionView({ productionSegments, laborActuals, labor
       "labor_margin_pct",
       "cases_per_minute",
       "cases_per_payable_hour",
-      "shift_minutes",
+      "production_minutes",
+      "production_minutes_source",
+      "job_start_at_utc",
+      "job_end_at_utc",
+      "first_produced_at_utc",
+      "last_produced_at_utc",
       "has_labor",
       "labor_status",
       "labor_is_provisional",
@@ -1213,7 +1233,12 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         csvNumber(row.laborMarginPct != null ? row.laborMarginPct * 100 : null, 1),
         csvNumber(row.casesPerMinute, 2),
         csvNumber(row.casesPerPayableHour, 2),
-        csvNumber(row.shiftMinutes, 0),
+        csvNumber(row.productionMinutes, 0),
+        row.productionMinutesSource || "",
+        row.jobStartAtUtc || "",
+        row.jobEndAtUtc || "",
+        row.firstProducedAtUtc || "",
+        row.lastProducedAtUtc || "",
         row.hasLabor ? "yes" : "no",
         row.laborStatus || "",
         row.laborIsProvisional ? "yes" : "no",
@@ -1311,7 +1336,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
           <div>
             <div className="mb-1 text-sm font-semibold">Job Level Details</div>
             <div className="text-xs text-[rgb(var(--muted))]">
-              Sort by any metric header. Filters apply to rolled-up jobs; expanded shift buckets stay chronological.
+              Cases/Min uses actual Nulogy job windows when available; otherwise it falls back to Observed FG Output Span. Filters apply to rolled-up jobs; expanded shift buckets stay chronological.
             </div>
           </div>
           <button
@@ -1429,6 +1454,11 @@ export default function ProductionView({ productionSegments, laborActuals, labor
                             {r.revenueCoveragePct}% priced · {r.missingRevenueSkuCount} SKU{r.missingRevenueSkuCount === 1 ? "" : "s"} missing revenue
                           </div>
                         ) : null}
+                        {r.productionMinutes > 0 ? (
+                          <div style={{ fontSize:11, color:C.dim }}>
+                            {Math.round(r.productionMinutes).toLocaleString()} measured min
+                          </div>
+                        ) : null}
                       </td>
                       <td style={Object.assign({}, tdM, { fontWeight:700, color:C.ok })}>{r.units.toLocaleString()}</td>
                       <td style={tdM}>{r.revenue > 0 ? fmtMoneyWhole(r.revenue) : "--"}</td>
@@ -1458,6 +1488,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
                             <div>{job.workOrder}</div>
                             <div style={{ fontSize:11, color:C.dim }}>{job.shiftCount} shift bucket{job.shiftCount === 1 ? "" : "s"}</div>
                             {job.laborStatus !== "finalized" ? <div style={{ fontSize:11, color:C.warn }}>{laborStatusLabel(job.laborStatus)}</div> : null}
+                            {job.productionMinutes > 0 ? <div style={{ fontSize:11, color:C.dim }}>{Math.round(job.productionMinutes).toLocaleString()} measured min</div> : null}
                             <div style={{ fontSize:11, color:C.dim, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", maxWidth:260 }}>{job.itemDesc}</div>
                           </td>
                           <td style={Object.assign({}, tdM, { fontWeight:700, color:C.ok })}>{job.unitsProduced.toLocaleString()}</td>
@@ -1486,6 +1517,13 @@ export default function ProductionView({ productionSegments, laborActuals, labor
                               <td style={tdM}>
                                 <div>{detail.workOrder}</div>
                                 {detail.hasLabor && detail.laborStatus !== "finalized" ? <div style={{ fontSize:11, color:C.warn }}>{laborStatusLabel(detail.laborStatus)}</div> : null}
+                                {detail.productionMinutes > 0 ? (
+                                  <div style={{ fontSize:11, color:C.dim }}>
+                                    {productionSpanSourceLabel(detail.productionMinutesSource)} · {Math.round(detail.productionMinutes).toLocaleString()} min
+                                  </div>
+                                ) : (
+                                  <div style={{ fontSize:11, color:C.dim }}>{productionSpanSourceLabel(detail.productionMinutesSource)}</div>
+                                )}
                                 <div style={{ fontSize:11, color:C.dim, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", maxWidth:260 }}>{formatDescriptionForDisplay(detail.itemDesc) || "--"}</div>
                               </td>
                               <td style={Object.assign({}, tdM, { fontWeight:700, color:C.ok })}>{detail.unitsProduced.toLocaleString()}</td>

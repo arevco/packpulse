@@ -44,6 +44,7 @@ function createEmptyLaborActuals(status, productionStatus) {
 var EMPTY_BREAKDOWN = { rowsLite: [], bySku: [], byLine: [], latestByLine: [], latestDate: null, totalRows: 0, summaryOnly: false, querySource: "" };
 var OPERATIONS_PRIMARY_STALE_MS = 5 * 60 * 1000;
 var OPERATIONS_SUPPORTING_STALE_MS = 15 * 60 * 1000;
+var MAX_PRODUCTION_WINDOW_MINUTES = 960;
 var operationsInsightsPanelImportPromise = null;
 
 function importOperationsInsightsPanel() {
@@ -223,6 +224,75 @@ function elapsedMinutesBetween(startUtc, endUtc) {
   var end = endUtc ? new Date(endUtc) : null;
   if (!start || !end || isNaN(start) || isNaN(end) || end <= start) return 0;
   return Math.max(0, Math.round((end.getTime() - start.getTime()) / 60000));
+}
+
+function clampProductionMinutes(minutes) {
+  var value = safeNum(minutes);
+  if (!(value > 0)) return 0;
+  return Math.min(MAX_PRODUCTION_WINDOW_MINUTES, value);
+}
+
+function normalizeProductionShiftBucket(label) {
+  var text = String(label || "").toLowerCase();
+  if (text.indexOf("1") !== -1) return "shift_1";
+  if (text.indexOf("2") !== -1) return "shift_2";
+  return "unassigned";
+}
+
+function parseIsoDateParts(dateKey) {
+  var match = String(dateKey || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  return {
+    year: parseInt(match[1], 10),
+    monthIndex: parseInt(match[2], 10) - 1,
+    day: parseInt(match[3], 10)
+  };
+}
+
+function productionShiftWindowRange(dateKey, shiftLabel) {
+  var parts = parseIsoDateParts(dateKey);
+  if (!parts) return null;
+  if (shiftLabel === "Shift 1 (7a-3p)") {
+    return {
+      start: easternWallClockToDateLocal(parts.year, parts.monthIndex, parts.day, 7, 0, 0),
+      end: easternWallClockToDateLocal(parts.year, parts.monthIndex, parts.day, 15, 6, 0)
+    };
+  }
+  if (shiftLabel === "Shift 2 (3p-11p)") {
+    return {
+      start: easternWallClockToDateLocal(parts.year, parts.monthIndex, parts.day, 15, 6, 0),
+      end: easternWallClockToDateLocal(parts.year, parts.monthIndex, parts.day, 24, 0, 0)
+    };
+  }
+  return null;
+}
+
+function actualWindowMinutesForShiftBucket(dateKey, shiftLabel, startUtc, endUtc) {
+  var range = productionShiftWindowRange(dateKey, shiftLabel);
+  var start = parseDateLooseLocal(startUtc);
+  var end = parseDateLooseLocal(endUtc);
+  if (!range || !start || !end || isNaN(start) || isNaN(end) || end <= start) return 0;
+  var overlapStart = Math.max(start.getTime(), range.start.getTime());
+  var overlapEnd = Math.min(end.getTime(), range.end.getTime());
+  if (!(overlapEnd > overlapStart)) return 0;
+  return clampProductionMinutes(Math.round((overlapEnd - overlapStart) / 60000));
+}
+
+function measureProductionWindow(startUtc, endUtc, firstProducedAtUtc, lastProducedAtUtc) {
+  var actualElapsedMinutes = clampProductionMinutes(elapsedMinutesBetween(startUtc, endUtc));
+  var observedElapsedMinutes = clampProductionMinutes(elapsedMinutesBetween(firstProducedAtUtc, lastProducedAtUtc));
+  var hasActualWindow = actualElapsedMinutes > 0;
+  var hasObservedSpan = !hasActualWindow && observedElapsedMinutes > 0;
+  return {
+    actualElapsedMinutes: actualElapsedMinutes,
+    observedElapsedMinutes: observedElapsedMinutes,
+    productionMinutes: hasActualWindow
+      ? actualElapsedMinutes
+      : (hasObservedSpan ? observedElapsedMinutes : 0),
+    hasActualWindow: hasActualWindow,
+    hasObservedSpan: hasObservedSpan,
+    spanSource: hasActualWindow ? "actual_job_window" : (hasObservedSpan ? "observed_fg_output_span" : "unavailable")
+  };
 }
 
 function formatTimeEt(value) {
@@ -1057,7 +1127,7 @@ function statusLooksClosed(status) {
   return s.includes("close") || s.includes("complete") || s.includes("cancel") || s.includes("archive") || s.includes("done");
 }
 
-export default function OperationsView({ productionSegments, productionDataRaw, laborDataRaw, evoconData, evoconTimestamp, itemMaster, workOrders, initialFilters, onPermalinkChange, serverSyncVersion, onRefreshProduction, refreshingProduction }) {
+export default function OperationsView({ productionSegments, productionDataRaw, laborDataRaw, evoconData, evoconTimestamp, itemMaster, workOrders, dispatchQueue, initialFilters, onPermalinkChange, serverSyncVersion, onRefreshProduction, refreshingProduction }) {
   const { C, mono } = useTheme();
   const queryClient = useQueryClient();
   var initial = initialFilters || {};
@@ -1472,6 +1542,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     var rows = (effectiveBreakdown && Array.isArray(effectiveBreakdown.rowsLite)) ? effectiveBreakdown.rowsLite : [];
     var byShiftDay = {};
     var byJob = {};
+    var productionRunsByKey = {};
     var totalRows = rows.length;
     var rowsWithShift = 0;
 
@@ -1492,7 +1563,39 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       var itemCode = String(r && r.item_code || "").trim();
       var itemDesc = String(r && r.item_desc || "").trim();
       var line = String(r && r.line || "Unknown").trim() || "Unknown";
-      var jobKey = [date, shift, jobId, workOrder, itemCode].join("|");
+      var producedAtUtc = String(r && r.produced_at_utc || "").trim();
+      var jobStartAtUtc = String(r && r.job_start_at_utc || "").trim();
+      var jobEndAtUtc = String(r && (r.job_end_at_utc || r.produced_at_utc) || "").trim();
+      var productionRunKey = productionJobKey({
+        produced_date_et: date,
+        job_id: jobId,
+        work_order_code: workOrder,
+        line: line,
+        item_code: itemCode
+      });
+      if (!productionRunsByKey[productionRunKey]) {
+        productionRunsByKey[productionRunKey] = {
+          key: productionRunKey,
+          jobStartAtUtc: "",
+          jobEndAtUtc: "",
+          firstProducedAtUtc: "",
+          lastProducedAtUtc: ""
+        };
+      }
+      if (jobStartAtUtc && (!productionRunsByKey[productionRunKey].jobStartAtUtc || jobStartAtUtc < productionRunsByKey[productionRunKey].jobStartAtUtc)) {
+        productionRunsByKey[productionRunKey].jobStartAtUtc = jobStartAtUtc;
+      }
+      if (jobEndAtUtc && (!productionRunsByKey[productionRunKey].jobEndAtUtc || jobEndAtUtc > productionRunsByKey[productionRunKey].jobEndAtUtc)) {
+        productionRunsByKey[productionRunKey].jobEndAtUtc = jobEndAtUtc;
+      }
+      if (producedAtUtc && (!productionRunsByKey[productionRunKey].firstProducedAtUtc || producedAtUtc < productionRunsByKey[productionRunKey].firstProducedAtUtc)) {
+        productionRunsByKey[productionRunKey].firstProducedAtUtc = producedAtUtc;
+      }
+      if (producedAtUtc && (!productionRunsByKey[productionRunKey].lastProducedAtUtc || producedAtUtc > productionRunsByKey[productionRunKey].lastProducedAtUtc)) {
+        productionRunsByKey[productionRunKey].lastProducedAtUtc = producedAtUtc;
+      }
+
+      var jobKey = [date, shift, jobId, workOrder, line, itemCode].join("|");
       if (!byJob[jobKey]) {
         byJob[jobKey] = {
           date: date,
@@ -1502,12 +1605,23 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
           line: line,
           itemCode: itemCode || "--",
           itemDesc: itemDesc || "--",
-          unitsProduced: 0
+          unitsProduced: 0,
+          firstProducedAtUtc: "",
+          lastProducedAtUtc: "",
+          productionRunKey: productionRunKey
         };
       }
       byJob[jobKey].unitsProduced += units;
+      if (producedAtUtc && (!byJob[jobKey].firstProducedAtUtc || producedAtUtc < byJob[jobKey].firstProducedAtUtc)) byJob[jobKey].firstProducedAtUtc = producedAtUtc;
+      if (producedAtUtc && (!byJob[jobKey].lastProducedAtUtc || producedAtUtc > byJob[jobKey].lastProducedAtUtc)) byJob[jobKey].lastProducedAtUtc = producedAtUtc;
       if ((!byJob[jobKey].itemDesc || byJob[jobKey].itemDesc === "--") && itemDesc) byJob[jobKey].itemDesc = itemDesc;
       if ((!byJob[jobKey].line || byJob[jobKey].line === "Unknown") && line) byJob[jobKey].line = line;
+    });
+
+    Object.keys(productionRunsByKey).forEach(function(key) {
+      var run = productionRunsByKey[key];
+      var measured = measureProductionWindow(run.jobStartAtUtc, run.jobEndAtUtc, run.firstProducedAtUtc, run.lastProducedAtUtc);
+      productionRunsByKey[key] = Object.assign({}, run, measured);
     });
 
     return {
@@ -1515,7 +1629,33 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
         if (a.date !== b.date) return String(b.date || "").localeCompare(String(a.date || ""));
         return String(a.shift || "").localeCompare(String(b.shift || ""));
       }),
-      jobRows: Object.values(byJob).sort(function(a, b) {
+      jobRows: Object.values(byJob).map(function(row) {
+        var productionRun = productionRunsByKey[row.productionRunKey] || null;
+        var actualBucketMinutes = productionRun && productionRun.hasActualWindow
+          ? (
+            row.shift === "Unassigned"
+              ? safeNum(productionRun.productionMinutes)
+              : actualWindowMinutesForShiftBucket(row.date, row.shift, productionRun.jobStartAtUtc, productionRun.jobEndAtUtc)
+          )
+          : 0;
+        var observedBucketMinutes = clampProductionMinutes(elapsedMinutesBetween(row.firstProducedAtUtc, row.lastProducedAtUtc));
+        var hasActualBucketWindow = actualBucketMinutes > 0;
+        var hasObservedBucketSpan = !hasActualBucketWindow && observedBucketMinutes > 0;
+        var productionMinutes = hasActualBucketWindow
+          ? actualBucketMinutes
+          : (hasObservedBucketSpan ? observedBucketMinutes : 0);
+        return Object.assign({}, row, {
+          jobStartAtUtc: productionRun && productionRun.jobStartAtUtc ? productionRun.jobStartAtUtc : null,
+          jobEndAtUtc: productionRun && productionRun.jobEndAtUtc ? productionRun.jobEndAtUtc : null,
+          firstProducedAtUtc: row.firstProducedAtUtc || null,
+          lastProducedAtUtc: row.lastProducedAtUtc || null,
+          productionMinutes: productionMinutes,
+          casesPerProductionMinute: productionMinutes > 0 ? (safeNum(row.unitsProduced) / productionMinutes) : 0,
+          productionMinutesSource: hasActualBucketWindow ? "actual_job_window" : (hasObservedBucketSpan ? "observed_fg_output_span" : "unavailable"),
+          hasActualWindow: hasActualBucketWindow,
+          hasObservedSpan: hasObservedBucketSpan
+        });
+      }).sort(function(a, b) {
         if (a.date !== b.date) return String(b.date || "").localeCompare(String(a.date || ""));
         return safeNum(b.unitsProduced) - safeNum(a.unitsProduced);
       }),
@@ -1655,7 +1795,24 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       projectionStartDate = nextProjectionDay > projectionReferenceDate ? nextProjectionDay : projectionReferenceDate;
     }
     var remainingBusinessDays = businessDaysBetween(projectionStartDate, monthEnd(projectionReferenceDate));
-    var monthlyRunRate = monthActualUnits + (trailingDailyVelocity * remainingBusinessDays);
+    var paceRemainingUnits = trailingDailyVelocity * remainingBusinessDays;
+    var queueSeen = {};
+    var runnableQueueRemainingUnits = (Array.isArray(dispatchQueue) ? dispatchQueue : []).reduce(function(sum, row) {
+      var woNum = String(row && row.woNum || "");
+      if (!woNum || queueSeen[woNum]) return sum;
+      queueSeen[woNum] = true;
+      var action = String(row && row.action || "");
+      var netUnits = Math.max(0, safeNum(row && row.netUnits));
+      if (!(netUnits > 0) || action === "Hold / Replenish") return sum;
+      return sum + netUnits;
+    }, 0);
+    var remainingProjectedUnits = paceRemainingUnits;
+    var monthlyRunRateCapped = false;
+    if (runnableQueueRemainingUnits > 0 && runnableQueueRemainingUnits < paceRemainingUnits) {
+      remainingProjectedUnits = runnableQueueRemainingUnits;
+      monthlyRunRateCapped = true;
+    }
+    var monthlyRunRate = monthActualUnits + remainingProjectedUnits;
     var selectedPlanInfo = forecastPlanForRange(effectiveRange, avgDailyUnits);
     var selectedPlanUnits = selectedPlanInfo.units;
     var forecastDeltaUnits = totalUnits - selectedPlanUnits;
@@ -1669,16 +1826,20 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       trailingDailyVelocity: trailingDailyVelocity,
       weeklyRunRate: weeklyRunRate,
       monthlyRunRate: monthlyRunRate,
+      monthlyRunRateCapped: monthlyRunRateCapped,
       monthBusinessDays: monthBusinessDays,
       monthActualUnits: monthActualUnits,
       remainingBusinessDays: remainingBusinessDays,
+      remainingProjectedUnits: remainingProjectedUnits,
+      remainingPaceUnits: paceRemainingUnits,
+      runnableQueueRemainingUnits: runnableQueueRemainingUnits,
       selectedPlanUnits: selectedPlanUnits,
       selectedPlanSource: selectedPlanInfo.source,
       forecastDeltaUnits: forecastDeltaUnits,
       forecastDeltaPct: forecastDeltaPct,
       byShift: byShift,
     };
-  }, [effectiveTrends, filteredTrends, filteredBreakdown, effectiveRange]);
+  }, [effectiveTrends, filteredTrends, filteredBreakdown, effectiveRange, dispatchQueue]);
 
   var commandBoard = useMemo(function() {
     var allDays = (effectiveTrends && Array.isArray(effectiveTrends.byDay)) ? effectiveTrends.byDay : [];
@@ -1879,9 +2040,10 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       displayDelta: delta,
       displayDeltaPct: Math.round((delta / openBookedTotal) * 100),
       displayLabel: "vs open booked WO total",
-      compareLabel: "vs open booked WO total"
+      compareLabel: "vs open booked WO total",
+      capNote: metrics.monthlyRunRateCapped ? "capped by runnable Run Next queue" : ""
     };
-  }, [openBookedWorkOrderTotal, metrics.monthlyRunRate]);
+  }, [openBookedWorkOrderTotal, metrics.monthlyRunRate, metrics.monthlyRunRateCapped]);
 
   var weeklyBookedWorkOrderComparison = useMemo(function() {
     var openBookedTotal = safeNum(openBookedWorkOrderTotal);
@@ -2164,12 +2326,6 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     serverRows.forEach(function(row) { collectWindow(row, "server"); });
     rawRows.forEach(function(row) { collectWindow(row, "raw"); });
     var grouped = {};
-    var normalizeShiftBucket = function(label) {
-      var text = String(label || "").toLowerCase();
-      if (text.indexOf("1") !== -1) return "shift_1";
-      if (text.indexOf("2") !== -1) return "shift_2";
-      return "unassigned";
-    };
 
     sourceRows.forEach(function(row) {
       var date = String(row && row.produced_date_et || "");
@@ -2200,7 +2356,7 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
         };
       }
       grouped[key].casesProduced += safeNum(row && row.units_produced);
-      grouped[key].shiftSlots[normalizeShiftBucket(row && row.shift_label)] = true;
+      grouped[key].shiftSlots[normalizeProductionShiftBucket(row && row.shift_label)] = true;
       var producedAtUtc = String(row && row.produced_at_utc || "").trim();
       if (window && window.startAtUtc && (!grouped[key].jobStartAtUtc || window.startAtUtc < grouped[key].jobStartAtUtc)) grouped[key].jobStartAtUtc = window.startAtUtc;
       if (window && window.endAtUtc && (!grouped[key].jobEndAtUtc || window.endAtUtc > grouped[key].jobEndAtUtc)) grouped[key].jobEndAtUtc = window.endAtUtc;
@@ -2212,13 +2368,10 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     var ranked = Object.values(grouped)
       .map(function(row) {
         var casesProduced = safeNum(row.casesProduced);
-        var actualElapsedMinutes = elapsedMinutesBetween(row.jobStartAtUtc, row.jobEndAtUtc);
-        var observedElapsedMinutes = elapsedMinutesBetween(row.firstProducedAtUtc, row.lastProducedAtUtc);
-        var hasActualWindow = actualElapsedMinutes > 0;
-        var hasObservedSpan = !hasActualWindow && observedElapsedMinutes > 0;
-        var productionMinutes = hasActualWindow
-          ? Math.min(960, actualElapsedMinutes)
-          : (hasObservedSpan ? Math.min(960, observedElapsedMinutes) : 0);
+        var measured = measureProductionWindow(row.jobStartAtUtc, row.jobEndAtUtc, row.firstProducedAtUtc, row.lastProducedAtUtc);
+        var hasActualWindow = measured.hasActualWindow;
+        var hasObservedSpan = measured.hasObservedSpan;
+        var productionMinutes = measured.productionMinutes;
         return Object.assign({}, row, {
           productionMinutes: productionMinutes,
           hasActualWindow: hasActualWindow,
@@ -2750,11 +2903,12 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       var prefix = delta > 0 ? "+" : "";
       var pctText = compareActual > 0 ? " (" + (pct > 0 ? "+" : "") + pct + "%)" : "";
       var label = String(card.displayLabel || card.compareLabel || "");
+      var suffix = card.capNote ? (" · " + String(card.capNote)) : "";
       var stateLabel = delta > 0 ? "Ahead" : delta < 0 ? "Behind" : "Flat";
       if (card.paceProjectedUnits != null) {
-        return "Pacing " + safeNum(card.paceProjectedUnits).toLocaleString() + " · " + stateLabel + " " + prefix + delta.toLocaleString() + pctText + " " + label;
+        return "Pacing " + safeNum(card.paceProjectedUnits).toLocaleString() + " · " + stateLabel + " " + prefix + delta.toLocaleString() + pctText + " " + label + suffix;
       }
-      return stateLabel + " " + prefix + delta.toLocaleString() + pctText + " " + label;
+      return stateLabel + " " + prefix + delta.toLocaleString() + pctText + " " + label + suffix;
     };
     return [
       {
