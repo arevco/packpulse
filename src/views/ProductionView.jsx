@@ -65,13 +65,14 @@ var DETAIL_FILTER_FIELDS = [
   { key: "casesPerMinute", label: "Cases/Min", placeholder: "Min" }
 ];
 var PRODUCTION_RANGE_PRESET_OPTIONS = [
-  { value: "latest_day", label: "Latest Day" },
   { value: "today", label: "Today" },
   { value: "yesterday", label: "Yesterday" },
   { value: "this_week", label: "This Week" },
   { value: "last_week", label: "Last Week" },
   { value: "this_month", label: "This Month" },
-  { value: "last_month", label: "Last Month" }
+  { value: "last_month", label: "Last Month" },
+  { value: "latest_day", label: "Latest Day" },
+  { value: "custom_range", label: "Custom Range" }
 ];
 
 function fmtMoneyWhole(value) {
@@ -424,7 +425,7 @@ function productionPresetSelection(start, end) {
   var normalizedStart = String(start || "").trim();
   var normalizedEnd = String(end || "").trim();
   if (!normalizedStart && !normalizedEnd) return "latest_day";
-  if (!normalizedStart || !normalizedEnd) return "";
+  if (!normalizedStart || !normalizedEnd) return "custom_range";
   if (normalizedEnd < normalizedStart) {
     var tmp = normalizedStart;
     normalizedStart = normalizedEnd;
@@ -432,24 +433,24 @@ function productionPresetSelection(start, end) {
   }
   for (var i = 0; i < PRODUCTION_RANGE_PRESET_OPTIONS.length; i += 1) {
     var option = PRODUCTION_RANGE_PRESET_OPTIONS[i];
-    if (!option || option.value === "latest_day") continue;
+    if (!option || option.value === "latest_day" || option.value === "custom_range") continue;
     var preset = productionPresetRange(option.value);
     if (preset && preset.start === normalizedStart && preset.end === normalizedEnd) {
       return option.value;
     }
   }
-  return "";
+  return "custom_range";
 }
 
 export default function ProductionView({ productionSegments, laborActuals, laborDataRaw, resolveRevenueForRow, setRequestedRange }) {
   const { C, mono } = useTheme();
   const { thS, tdN, tdM } = useStyles();
 
-  const [prodDateStart, setProdDateStart] = useState("");
-  const [prodDateEnd, setProdDateEnd] = useState("");
-  const [prodDateDraftStart, setProdDateDraftStart] = useState("");
-  const [prodDateDraftEnd, setProdDateDraftEnd] = useState("");
-  const [quickRangeSelection, setQuickRangeSelection] = useState("latest_day");
+  const [prodDateStart, setProdDateStart] = useState(function() { return todayEtDateKey(); });
+  const [prodDateEnd, setProdDateEnd] = useState(function() { return todayEtDateKey(); });
+  const [prodDateDraftStart, setProdDateDraftStart] = useState(function() { return todayEtDateKey(); });
+  const [prodDateDraftEnd, setProdDateDraftEnd] = useState(function() { return todayEtDateKey(); });
+  const [quickRangeSelection, setQuickRangeSelection] = useState("today");
   const [search, setSearch] = useState("");
   const [lineFilter, setLineFilter] = useState("all");
   const [shiftFilter, setShiftFilter] = useState("all");
@@ -1259,6 +1260,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
     var next = String(event && event.target && event.target.value || "");
     setQuickRangeSelection(next);
     if (!next) return;
+    if (next === "custom_range") return;
     if (next === "latest_day") {
       resetProdDateRange();
       return;
@@ -1415,7 +1417,6 @@ export default function ProductionView({ productionSegments, laborActuals, labor
           aria-label="Production Jobs quick range"
           className="h-10 min-w-[148px] rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]"
         >
-          <option value="">Quick Range</option>
           {PRODUCTION_RANGE_PRESET_OPTIONS.map(function(option) {
             return <option key={option.value} value={option.value}>{option.label}</option>;
           })}
