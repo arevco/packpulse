@@ -18,6 +18,17 @@ function parseDateValue(value) {
   var raw = String(value).trim();
   if (!raw) return null;
 
+  // Treat date-only ISO strings as local calendar dates so range filters
+  // stay inclusive in the user's timezone.
+  var isoDateOnly = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoDateOnly) {
+    var isoYear = parseInt(isoDateOnly[1], 10);
+    var isoMonth = parseInt(isoDateOnly[2], 10);
+    var isoDay = parseInt(isoDateOnly[3], 10);
+    var parsedIsoDate = new Date(isoYear, isoMonth - 1, isoDay);
+    return isNaN(parsedIsoDate) ? null : parsedIsoDate;
+  }
+
   // Handles M/D/YYYY and MM/DD/YYYY explicitly to avoid lexicographic ordering bugs.
   var mdy = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
   if (mdy) {
@@ -206,8 +217,8 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
   };
   var fmtRowDate = function(value) {
     if (!value) return "--";
-    var d = value instanceof Date ? value : new Date(value);
-    if (isNaN(d)) return String(value);
+    var d = parseDateValue(value);
+    if (!d || isNaN(d)) return String(value);
     return (d.getMonth() + 1) + "/" + d.getDate();
   };
 
