@@ -44,8 +44,13 @@ function createEmptyLaborActuals(status, productionStatus) {
 var EMPTY_BREAKDOWN = { rowsLite: [], bySku: [], byLine: [], latestByLine: [], latestDate: null, totalRows: 0, summaryOnly: false, querySource: "" };
 var OPERATIONS_PRIMARY_STALE_MS = 5 * 60 * 1000;
 var OPERATIONS_SUPPORTING_STALE_MS = 15 * 60 * 1000;
+var OPERATIONS_DEFAULT_PRESET = "last_30";
 var MAX_PRODUCTION_WINDOW_MINUTES = 960;
 var operationsInsightsPanelImportPromise = null;
+
+function keepPreviousQueryData(previousData) {
+  return previousData;
+}
 
 function importOperationsInsightsPanel() {
   if (!operationsInsightsPanelImportPromise) operationsInsightsPanelImportPromise = import("./OperationsInsightsPanel");
@@ -138,7 +143,15 @@ function normalizeBreakdownPayload(body) {
       latestDate: body && body.latestDate ? body.latestDate : null,
       totalRows: safeNum(body && body.totalRows),
       summaryOnly: !!(body && body.summaryOnly),
-      querySource: String(body && body.querySource || "")
+      querySource: String(body && body.querySource || ""),
+      productionSegments: body && body.productionSegments && typeof body.productionSegments === "object"
+        ? {
+            shiftRows: Array.isArray(body.productionSegments.shiftRows) ? body.productionSegments.shiftRows : [],
+            jobRows: Array.isArray(body.productionSegments.jobRows) ? body.productionSegments.jobRows : [],
+            totalRows: safeNum(body.productionSegments.totalRows),
+            rowsWithShift: safeNum(body.productionSegments.rowsWithShift)
+          }
+        : null
     }
   };
 }
@@ -1131,9 +1144,9 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   const { C, mono } = useTheme();
   const queryClient = useQueryClient();
   var initial = initialFilters || {};
-  var initialPreset = String(initial.preset || "last_14");
+  var initialPreset = String(initial.preset || OPERATIONS_DEFAULT_PRESET);
   const [windowPreset, setWindowPreset] = useState(initialPreset);
-  const initialRange = presetRange("last_14");
+  const initialRange = presetRange(OPERATIONS_DEFAULT_PRESET);
   const [rangeStart, setRangeStart] = useState(String(initial.start || initialRange.start));
   const [rangeEnd, setRangeEnd] = useState(String(initial.end || initialRange.end));
   const [showInsightsPanelsReady, setShowInsightsPanelsReady] = useState(false);
@@ -1143,6 +1156,8 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   const [showLossPriorities, setShowLossPriorities] = useState(false);
   const [dailyPerfStart, setDailyPerfStart] = useState("");
   const [dailyPerfEnd, setDailyPerfEnd] = useState("");
+  const [dailyPerfDraftStart, setDailyPerfDraftStart] = useState("");
+  const [dailyPerfDraftEnd, setDailyPerfDraftEnd] = useState("");
   const [productionJobsRequestedRange, setProductionJobsRequestedRange] = useState({ start: "", end: "" });
 
   var range = useMemo(function() {
@@ -1176,6 +1191,20 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       end: fetchEnd
     };
   }, [dailyPerfStart, dailyPerfEnd, todayEt]);
+
+  var dailyPerfDirty = dailyPerfStart !== dailyPerfDraftStart || dailyPerfEnd !== dailyPerfDraftEnd;
+
+  var applyDailyPerfRange = function() {
+    setDailyPerfStart(dailyPerfDraftStart);
+    setDailyPerfEnd(dailyPerfDraftEnd);
+  };
+
+  var resetDailyPerfRange = function() {
+    setDailyPerfDraftStart("");
+    setDailyPerfDraftEnd("");
+    setDailyPerfStart("");
+    setDailyPerfEnd("");
+  };
 
   useEffect(function() {
     if (!onPermalinkChange) return;
@@ -1216,11 +1245,23 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     return bounds;
   }, [todayEt]);
 
-  var productionDataFetchRange = useMemo(function() {
+  var summaryDataFetchRange = useMemo(function() {
+    var bounds = { start: "", end: "" };
+    bounds = mergeIsoRangeBounds(bounds, range);
+    bounds = mergeIsoRangeBounds(bounds, commandBoardFetchRange);
+    if (!isValidIsoRange(bounds)) {
+      return {
+        start: shiftDays(todayEt, -59),
+        end: todayEt
+      };
+    }
+    return bounds;
+  }, [range, commandBoardFetchRange, todayEt]);
+
+  var detailDataFetchRange = useMemo(function() {
     var bounds = { start: "", end: "" };
     bounds = mergeIsoRangeBounds(bounds, range);
     bounds = mergeIsoRangeBounds(bounds, dailyPerfRequestedRange);
-    bounds = mergeIsoRangeBounds(bounds, commandBoardFetchRange);
     bounds = mergeIsoRangeBounds(bounds, productionJobsRequestedRange);
     if (!isValidIsoRange(bounds)) {
       return {
@@ -1229,15 +1270,15 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       };
     }
     return bounds;
-  }, [range, dailyPerfRequestedRange, commandBoardFetchRange, productionJobsRequestedRange, todayEt]);
+  }, [range, dailyPerfRequestedRange, productionJobsRequestedRange, todayEt]);
 
   var forecastMonthsKey = forecastPlanMonths.join(",");
   var summaryQueryKey = useMemo(function() {
-    return ["operations", "summary", safeNum(serverSyncVersion), productionDataFetchRange.start, productionDataFetchRange.end];
-  }, [serverSyncVersion, productionDataFetchRange.start, productionDataFetchRange.end]);
+    return ["operations", "summary", safeNum(serverSyncVersion), summaryDataFetchRange.start, summaryDataFetchRange.end];
+  }, [serverSyncVersion, summaryDataFetchRange.start, summaryDataFetchRange.end]);
   var breakdownQueryKey = useMemo(function() {
-    return ["operations", "breakdown", safeNum(serverSyncVersion), productionDataFetchRange.start, productionDataFetchRange.end];
-  }, [serverSyncVersion, productionDataFetchRange.start, productionDataFetchRange.end]);
+    return ["operations", "breakdown", safeNum(serverSyncVersion), detailDataFetchRange.start, detailDataFetchRange.end];
+  }, [serverSyncVersion, detailDataFetchRange.start, detailDataFetchRange.end]);
   var forecastQueryKey = useMemo(function() {
     return ["operations", "forecast", safeNum(serverSyncVersion), forecastMonthsKey];
   }, [serverSyncVersion, forecastMonthsKey]);
@@ -1245,27 +1286,22 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     return ["operations", "config", safeNum(serverSyncVersion)];
   }, [serverSyncVersion]);
   var laborSummaryQueryKey = useMemo(function() {
-    return ["operations", "labor-summary", safeNum(serverSyncVersion), productionDataFetchRange.start, productionDataFetchRange.end];
-  }, [serverSyncVersion, productionDataFetchRange.start, productionDataFetchRange.end]);
+    return ["operations", "labor-summary", safeNum(serverSyncVersion), detailDataFetchRange.start, detailDataFetchRange.end];
+  }, [serverSyncVersion, detailDataFetchRange.start, detailDataFetchRange.end]);
   var laborDetailQueryKey = useMemo(function() {
-    return ["operations", "labor-detail", safeNum(serverSyncVersion), productionDataFetchRange.start, productionDataFetchRange.end];
-  }, [serverSyncVersion, productionDataFetchRange.start, productionDataFetchRange.end]);
+    return ["operations", "labor-detail", safeNum(serverSyncVersion), detailDataFetchRange.start, detailDataFetchRange.end];
+  }, [serverSyncVersion, detailDataFetchRange.start, detailDataFetchRange.end]);
   var deferredQueryKey = useMemo(function() {
     return [
       safeNum(serverSyncVersion),
-      productionDataFetchRange.start,
-      productionDataFetchRange.end,
+      detailDataFetchRange.start,
+      detailDataFetchRange.end,
       forecastMonthsKey,
-      productionDataFetchRange.start,
-      productionDataFetchRange.end
+      detailDataFetchRange.start,
+      detailDataFetchRange.end
     ].join("|");
-  }, [serverSyncVersion, productionDataFetchRange.start, productionDataFetchRange.end, forecastMonthsKey]);
+  }, [serverSyncVersion, detailDataFetchRange.start, detailDataFetchRange.end, forecastMonthsKey]);
   var hasCachedBreakdown = !!queryClient.getQueryData(breakdownQueryKey);
-
-  useEffect(function() {
-    setDeferredFetchReady(hasCachedBreakdown);
-    if (!hasCachedBreakdown) setShowInsightsPanelsReady(false);
-  }, [deferredQueryKey, hasCachedBreakdown]);
 
   var setCustomStart = function(v) {
     if (!v) return;
@@ -1288,9 +1324,10 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   var summaryQuery = useQuery({
     queryKey: summaryQueryKey,
     queryFn: function() {
-      return fetchOperationsSummary(productionDataFetchRange.start, productionDataFetchRange.end);
+      return fetchOperationsSummary(summaryDataFetchRange.start, summaryDataFetchRange.end);
     },
-    staleTime: OPERATIONS_PRIMARY_STALE_MS
+    staleTime: OPERATIONS_PRIMARY_STALE_MS,
+    placeholderData: keepPreviousQueryData
   });
 
   useEffect(function() {
@@ -1304,32 +1341,43 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   var breakdownQuery = useQuery({
     queryKey: breakdownQueryKey,
     queryFn: function() {
-      return fetchOperationsBreakdown(productionDataFetchRange.start, productionDataFetchRange.end);
+      return fetchOperationsBreakdown(detailDataFetchRange.start, detailDataFetchRange.end);
     },
     enabled: deferredFetchReady,
-    staleTime: OPERATIONS_PRIMARY_STALE_MS
+    staleTime: OPERATIONS_PRIMARY_STALE_MS,
+    placeholderData: keepPreviousQueryData
   });
+  var hasVisibleBreakdownData = hasCachedBreakdown || !!breakdownQuery.data;
+
+  useEffect(function() {
+    setDeferredFetchReady(hasVisibleBreakdownData);
+    if (!hasVisibleBreakdownData) setShowInsightsPanelsReady(false);
+  }, [deferredQueryKey, hasVisibleBreakdownData]);
+
   var forecastQuery = useQuery({
     queryKey: forecastQueryKey,
     queryFn: function() {
       return fetchOperationsForecastPlans(forecastPlanMonths);
     },
     enabled: deferredFetchReady && forecastPlanMonths.length > 0,
-    staleTime: OPERATIONS_SUPPORTING_STALE_MS
+    staleTime: OPERATIONS_SUPPORTING_STALE_MS,
+    placeholderData: keepPreviousQueryData
   });
   var configQuery = useQuery({
     queryKey: configQueryKey,
     queryFn: fetchOperationsConfig,
     enabled: deferredFetchReady,
-    staleTime: OPERATIONS_SUPPORTING_STALE_MS
+    staleTime: OPERATIONS_SUPPORTING_STALE_MS,
+    placeholderData: keepPreviousQueryData
   });
   var laborSummaryQuery = useQuery({
     queryKey: laborSummaryQueryKey,
     queryFn: function() {
-      return fetchOperationsLaborSummary(productionDataFetchRange.start, productionDataFetchRange.end);
+      return fetchOperationsLaborSummary(detailDataFetchRange.start, detailDataFetchRange.end);
     },
     enabled: deferredFetchReady,
-    staleTime: OPERATIONS_PRIMARY_STALE_MS
+    staleTime: OPERATIONS_PRIMARY_STALE_MS,
+    placeholderData: keepPreviousQueryData
   });
   var laborSummarySettled = !!queryClient.getQueryData(laborSummaryQueryKey)
     || laborSummaryQuery.status === "success"
@@ -1337,17 +1385,21 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   var laborDetailQuery = useQuery({
     queryKey: laborDetailQueryKey,
     queryFn: function() {
-      return fetchOperationsLaborDetail(productionDataFetchRange.start, productionDataFetchRange.end);
+      return fetchOperationsLaborDetail(detailDataFetchRange.start, detailDataFetchRange.end);
     },
     enabled: deferredFetchReady && laborSummarySettled,
-    staleTime: OPERATIONS_PRIMARY_STALE_MS
+    staleTime: OPERATIONS_PRIMARY_STALE_MS,
+    placeholderData: keepPreviousQueryData
   });
 
-  var serverPayload = breakdownQuery.data || summaryQuery.data || null;
-  var trends = serverPayload && serverPayload.trends ? serverPayload.trends : null;
-  var breakdown = breakdownQuery.data && breakdownQuery.data.breakdown
-    ? breakdownQuery.data.breakdown
-    : (serverPayload && serverPayload.breakdown ? serverPayload.breakdown : EMPTY_BREAKDOWN);
+  var summaryPayload = summaryQuery.data || null;
+  var detailPayload = breakdownQuery.data || null;
+  var trends = summaryPayload && summaryPayload.trends
+    ? summaryPayload.trends
+    : (detailPayload && detailPayload.trends ? detailPayload.trends : null);
+  var breakdown = detailPayload && detailPayload.breakdown
+    ? detailPayload.breakdown
+    : (summaryPayload && summaryPayload.breakdown ? summaryPayload.breakdown : EMPTY_BREAKDOWN);
   var forecastPlans = forecastPlanMonths.length ? (forecastQuery.data || {}) : {};
   var configPayload = configQuery.data || {};
   var opsSkuTargets = Array.isArray(configPayload.skuTargets) ? configPayload.skuTargets : [];
@@ -1363,16 +1415,24 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     if (deferredFetchReady) return createEmptyLaborActuals("loading", "loading");
     return createEmptyLaborActuals("idle", "ok");
   }, [laborDetailQuery.data, laborDetailQuery.isError, laborSummaryQuery.data, deferredFetchReady]);
-  var loading = !serverPayload && summaryQuery.isPending;
-  var err = !serverPayload && summaryQuery.isError
+  var loading = !summaryPayload && summaryQuery.isPending;
+  var err = !summaryPayload && summaryQuery.isError
     ? (summaryQuery.error && summaryQuery.error.message ? summaryQuery.error.message : "Failed loading Operations data")
     : "";
+  var summaryRefreshing = !!summaryPayload && summaryQuery.isFetching;
   var deferredLoading = {
     detail: !breakdownQuery.data && (!deferredFetchReady || breakdownQuery.isPending),
     forecast: forecastPlanMonths.length > 0 && !forecastQuery.data && (!deferredFetchReady || forecastQuery.isPending),
     config: !configQuery.data && (!deferredFetchReady || configQuery.isPending),
     labor: !laborDetailQuery.data && (!deferredFetchReady || !laborSummarySettled || laborDetailQuery.isPending)
   };
+  var detailRefreshing = !!(
+    (breakdownQuery.data && breakdownQuery.isFetching) ||
+    (forecastQuery.data && forecastQuery.isFetching) ||
+    (configQuery.data && configQuery.isFetching) ||
+    (laborSummaryQuery.data && laborSummaryQuery.isFetching) ||
+    (laborDetailQuery.data && laborDetailQuery.isFetching)
+  );
   var defaultDailyPerfEnd = useMemo(function() {
     var dates = (trends && Array.isArray(trends.byDay) ? trends.byDay : [])
       .map(function(row) { return String(row && row.date || ""); })
@@ -1380,6 +1440,20 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       .sort();
     return dates.length ? dates[dates.length - 1] : todayEt;
   }, [trends, todayEt]);
+  var dailyPerfDraftRange = useMemo(function() {
+    var fetchEnd = dailyPerfDraftEnd || defaultDailyPerfEnd;
+    var fetchStart = dailyPerfDraftStart || shiftDays(fetchEnd, -29);
+    if (!isValidIsoRange({ start: fetchStart, end: fetchEnd })) {
+      return {
+        start: shiftDays(defaultDailyPerfEnd, -29),
+        end: defaultDailyPerfEnd
+      };
+    }
+    return {
+      start: fetchStart,
+      end: fetchEnd
+    };
+  }, [dailyPerfDraftStart, dailyPerfDraftEnd, defaultDailyPerfEnd]);
   var dailyPerfRange = useMemo(function() {
     var start = dailyPerfStart || shiftDays(defaultDailyPerfEnd, -29);
     var end = dailyPerfEnd || defaultDailyPerfEnd;
@@ -1538,6 +1612,17 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
   var serverProductionSegments = useMemo(function() {
     if (!showInsightsPanelsReady) {
       return { shiftRows: [], jobRows: [], totalRows: 0, rowsWithShift: 0 };
+    }
+    var directSegments = effectiveBreakdown && effectiveBreakdown.productionSegments && typeof effectiveBreakdown.productionSegments === "object"
+      ? effectiveBreakdown.productionSegments
+      : null;
+    if (directSegments && (Array.isArray(directSegments.shiftRows) || Array.isArray(directSegments.jobRows))) {
+      return {
+        shiftRows: Array.isArray(directSegments.shiftRows) ? directSegments.shiftRows : [],
+        jobRows: Array.isArray(directSegments.jobRows) ? directSegments.jobRows : [],
+        totalRows: safeNum(directSegments.totalRows),
+        rowsWithShift: safeNum(directSegments.rowsWithShift)
+      };
     }
     var rows = (effectiveBreakdown && Array.isArray(effectiveBreakdown.rowsLite)) ? effectiveBreakdown.rowsLite : [];
     var byShiftDay = {};
@@ -3054,7 +3139,9 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {loading ? <div className="text-xs text-[rgb(var(--muted))]">Refreshing production snapshot...</div> : null}
+            {!loading && summaryRefreshing ? <div className="text-xs text-[rgb(var(--muted))]">Updating production snapshot...</div> : null}
             {isDeferredLoading ? <div className="text-xs text-[rgb(var(--muted))]">Loading production detail, labor, forecast, and cost overlays...</div> : null}
+            {!isDeferredLoading && detailRefreshing ? <div className="text-xs text-[rgb(var(--muted))]">Updating production detail, labor, forecast, and cost overlays...</div> : null}
             {onRefreshProduction ? (
               <Button variant="outline" size="sm" onClick={onRefreshProduction} disabled={!!refreshingProduction}>
                 <span className="mr-1" aria-hidden="true">↻</span>
@@ -3091,9 +3178,12 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
             serverProductionSegments={serverProductionSegments}
             setProductionJobsRequestedRange={setProductionJobsRequestedRange}
             revenuePerCaseForRow={revenuePerCaseForRow}
-            dailyPerfRange={dailyPerfRange}
-            setDailyPerfStart={setDailyPerfStart}
-            setDailyPerfEnd={setDailyPerfEnd}
+            dailyPerfDraftRange={dailyPerfDraftRange}
+            setDailyPerfDraftStart={setDailyPerfDraftStart}
+            setDailyPerfDraftEnd={setDailyPerfDraftEnd}
+            applyDailyPerfRange={applyDailyPerfRange}
+            resetDailyPerfRange={resetDailyPerfRange}
+            dailyPerfDirty={dailyPerfDirty}
             dailyEconomicsRows={dailyEconomicsRows}
             dailyEconomicsChartConfig={dailyEconomicsChartConfig}
             dailyPlanVsActual={dailyPlanVsActual}

@@ -90,9 +90,12 @@ export default function OperationsInsightsPanel({
   serverProductionSegments,
   setProductionJobsRequestedRange,
   revenuePerCaseForRow,
-  dailyPerfRange,
-  setDailyPerfStart,
-  setDailyPerfEnd,
+  dailyPerfDraftRange,
+  setDailyPerfDraftStart,
+  setDailyPerfDraftEnd,
+  applyDailyPerfRange,
+  resetDailyPerfRange,
+  dailyPerfDirty,
   dailyEconomicsRows,
   dailyEconomicsChartConfig,
   dailyPlanVsActual,
@@ -150,21 +153,26 @@ export default function OperationsInsightsPanel({
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
-            <DatePicker value={dailyPerfRange.start} onChange={setDailyPerfStart} className="h-9 w-[132px]" />
+            <DatePicker value={dailyPerfDraftRange.start} onChange={setDailyPerfDraftStart} className="h-9 w-[132px]" />
             <span className="text-xs text-[rgb(var(--muted))] whitespace-nowrap">-</span>
-            <DatePicker value={dailyPerfRange.end} onChange={setDailyPerfEnd} className="h-9 w-[132px]" />
+            <DatePicker value={dailyPerfDraftRange.end} onChange={setDailyPerfDraftEnd} className="h-9 w-[132px]" />
+            <Button variant={dailyPerfDirty ? "active" : "outline"} size="sm" onClick={applyDailyPerfRange} disabled={!dailyPerfDirty}>
+              Apply
+            </Button>
             <Button
               variant="outline"
               size="sm"
-              onClick={function() {
-                setDailyPerfStart("");
-                setDailyPerfEnd("");
-              }}
+              onClick={resetDailyPerfRange}
             >
               Last 30D
             </Button>
           </div>
         </div>
+        {dailyPerfDirty ? (
+          <div className="mb-3 text-xs text-[rgb(var(--muted))]">
+            Date changes are staged until you apply them.
+          </div>
+        ) : null}
         {dailyEconomicsRows.length ? (
           <ChartContainer config={dailyEconomicsChartConfig} className="h-64">
             <ResponsiveContainer width="100%" height="100%">

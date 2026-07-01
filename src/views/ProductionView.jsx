@@ -362,6 +362,8 @@ export default function ProductionView({ productionSegments, laborActuals, labor
 
   const [prodDateStart, setProdDateStart] = useState("");
   const [prodDateEnd, setProdDateEnd] = useState("");
+  const [prodDateDraftStart, setProdDateDraftStart] = useState("");
+  const [prodDateDraftEnd, setProdDateDraftEnd] = useState("");
   const [search, setSearch] = useState("");
   const [lineFilter, setLineFilter] = useState("all");
   const [shiftFilter, setShiftFilter] = useState("all");
@@ -383,6 +385,13 @@ export default function ProductionView({ productionSegments, laborActuals, labor
   var prodDates = Array.from(new Set(prodShiftRows.map(function(r) { return r.date; }))).sort().reverse();
   var latestProdDate = prodDates[0] || "";
   var earliestProdDate = prodDates.length ? prodDates[prodDates.length - 1] : "";
+  var draftRangeStart = prodDateDraftStart || latestProdDate;
+  var draftRangeEnd = prodDateDraftEnd || latestProdDate || draftRangeStart;
+  if (draftRangeEnd && draftRangeStart && draftRangeEnd < draftRangeStart) {
+    var tmpDraftRangeDate = draftRangeStart;
+    draftRangeStart = draftRangeEnd;
+    draftRangeEnd = tmpDraftRangeDate;
+  }
   var rangeStart = prodDateStart || latestProdDate;
   var rangeEnd = prodDateEnd || latestProdDate || rangeStart;
   if (rangeEnd && rangeStart && rangeEnd < rangeStart) {
@@ -390,6 +399,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
     rangeStart = rangeEnd;
     rangeEnd = tmpRangeDate;
   }
+  var prodDateDirty = prodDateStart !== prodDateDraftStart || prodDateEnd !== prodDateDraftEnd;
 
   useEffect(function() {
     if (typeof setRequestedRange !== "function") return;
@@ -1136,25 +1146,35 @@ export default function ProductionView({ productionSegments, laborActuals, labor
   var hasActiveDetailMetricFilters = Object.keys(detailMetricFilters).some(function(key) {
     return String(detailMetricFilters[key] || "").trim() !== "";
   });
+  var applyProdDateRange = function() {
+    setProdDateStart(prodDateDraftStart);
+    setProdDateEnd(prodDateDraftEnd);
+  };
+  var resetProdDateRange = function() {
+    setProdDateDraftStart("");
+    setProdDateDraftEnd("");
+    setProdDateStart("");
+    setProdDateEnd("");
+  };
   var handleProdDateStartChange = function(nextDate) {
     var next = String(nextDate || "").trim();
     if (!next) {
-      setProdDateStart("");
+      setProdDateDraftStart("");
       return;
     }
-    var currentEnd = rangeEnd || next;
-    setProdDateStart(next);
-    if (currentEnd && next > currentEnd) setProdDateEnd(next);
+    var currentEnd = draftRangeEnd || next;
+    setProdDateDraftStart(next);
+    if (currentEnd && next > currentEnd) setProdDateDraftEnd(next);
   };
   var handleProdDateEndChange = function(nextDate) {
     var next = String(nextDate || "").trim();
     if (!next) {
-      setProdDateEnd("");
+      setProdDateDraftEnd("");
       return;
     }
-    var currentStart = rangeStart || next;
-    if (currentStart && next < currentStart) setProdDateStart(next);
-    setProdDateEnd(next);
+    var currentStart = draftRangeStart || next;
+    if (currentStart && next < currentStart) setProdDateDraftStart(next);
+    setProdDateDraftEnd(next);
   };
   var toggleLineExpanded = function(lineName) {
     setLineExpansion(function(prev) {
@@ -1271,9 +1291,15 @@ export default function ProductionView({ productionSegments, laborActuals, labor
     <div>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Input type="text" placeholder="Search WO / SKU / job / line" value={search} onChange={function(e) { setSearch(e.target.value); }} className="h-10 w-full text-sm sm:w-72" />
-        <DatePicker value={rangeStart} onChange={handleProdDateStartChange} placeholder="Start date" className="h-10 w-[132px]" />
+        <DatePicker value={draftRangeStart} onChange={handleProdDateStartChange} placeholder="Start date" className="h-10 w-[132px]" />
         <span className="text-xs text-[rgb(var(--muted))] whitespace-nowrap">-</span>
-        <DatePicker value={rangeEnd} onChange={handleProdDateEndChange} placeholder="End date" className="h-10 w-[132px]" />
+        <DatePicker value={draftRangeEnd} onChange={handleProdDateEndChange} placeholder="End date" className="h-10 w-[132px]" />
+        <Button variant={prodDateDirty ? "active" : "outline"} size="default" className="h-10 shrink-0" onClick={applyProdDateRange} disabled={!prodDateDirty}>
+          Apply
+        </Button>
+        <Button variant="outline" size="default" className="h-10 shrink-0" onClick={resetProdDateRange}>
+          Latest Day
+        </Button>
         <select value={lineFilter} onChange={function(e) { setLineFilter(e.target.value); }} className="h-10 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]">
           <option value="all">All Lines</option>
           {lineOptions.map(function(line) { return <option key={line} value={line}>{line}</option>; })}
@@ -1287,6 +1313,11 @@ export default function ProductionView({ productionSegments, laborActuals, labor
           Export Jobs Data
         </Button>
       </div>
+      {prodDateDirty ? (
+        <div className="mb-3 text-xs text-[rgb(var(--muted))]">
+          Production Jobs date changes are staged until you apply them.
+        </div>
+      ) : null}
 
       <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
         {[

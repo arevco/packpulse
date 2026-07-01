@@ -2,6 +2,9 @@ import Sentry from "../_sentry.js";
 import { CACHE_SITE_ID, getAuthenticatedUser, getSupabaseAdmin, toDateEt, toNum, withCors } from "./_common.js";
 import { classifyShiftET, toEasternParts, toIso } from "../_labor.js";
 
+var ET_TIME_ZONE = "America/New_York";
+var MAX_PRODUCTION_WINDOW_MINUTES = 960;
+
 function pickFieldLoose(row, keys) {
   if (!row || typeof row !== "object") return "";
   var rowKeys = Object.keys(row);
@@ -41,6 +44,268 @@ function resolveProductionTiming(row) {
 function sanitizeIsoDate(value) {
   var s = String(value || "").trim();
   return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : "";
+}
+
+function timeZoneParts(date, timeZone) {
+  if (!(date instanceof Date) || isNaN(date)) return null;
+  var out = {};
+  new Intl.DateTimeFormat("en-US", {
+    timeZone: timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  }).formatToParts(date).forEach(function(part) {
+    if (part.type !== "literal") out[part.type] = part.value;
+  });
+  if (!out.year || !out.month || !out.day) return null;
+  return {
+    year: parseInt(out.year, 10),
+    month: parseInt(out.month, 10),
+    day: parseInt(out.day, 10),
+    hour: parseInt(out.hour || "0", 10),
+    minute: parseInt(out.minute || "0", 10),
+    second: parseInt(out.second || "0", 10)
+  };
+}
+
+function timeZoneOffsetMillis(date, timeZone) {
+  var parts = timeZoneParts(date, timeZone);
+  if (!parts) return 0;
+  var asUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+  return asUtc - date.getTime();
+}
+
+function easternWallClockToDate(dateKey, hour24, minute, second) {
+  var match = String(dateKey || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  var year = parseInt(match[1], 10);
+  var monthIndex = parseInt(match[2], 10) - 1;
+  var day = parseInt(match[3], 10);
+  var utcGuess = Date.UTC(year, monthIndex, day, hour24, minute || 0, second || 0);
+  var offset = timeZoneOffsetMillis(new Date(utcGuess), ET_TIME_ZONE);
+  var actual = utcGuess - offset;
+  var resolvedOffset = timeZoneOffsetMillis(new Date(actual), ET_TIME_ZONE);
+  if (resolvedOffset !== offset) actual = utcGuess - resolvedOffset;
+  return new Date(actual);
+}
+
+function elapsedMinutesBetween(startUtc, endUtc) {
+  var start = startUtc ? new Date(startUtc) : null;
+  var end = endUtc ? new Date(endUtc) : null;
+  if (!start || !end || isNaN(start) || isNaN(end) || end <= start) return 0;
+  return Math.max(0, Math.round((end.getTime() - start.getTime()) / 60000));
+}
+
+function clampProductionMinutes(minutes) {
+  var value = toNum(minutes);
+  if (!(value > 0)) return 0;
+  return Math.min(MAX_PRODUCTION_WINDOW_MINUTES, value);
+}
+
+function productionShiftWindowRange(dateKey, shiftLabel) {
+  if (shiftLabel === "Shift 1 (7a-3p)") {
+    return {
+      start: easternWallClockToDate(dateKey, 7, 0, 0),
+      end: easternWallClockToDate(dateKey, 15, 6, 0)
+    };
+  }
+  if (shiftLabel === "Shift 2 (3p-11p)") {
+    return {
+      start: easternWallClockToDate(dateKey, 15, 6, 0),
+      end: easternWallClockToDate(dateKey, 24, 0, 0)
+    };
+  }
+  return null;
+}
+
+function actualWindowMinutesForShiftBucket(dateKey, shiftLabel, startUtc, endUtc) {
+  var range = productionShiftWindowRange(dateKey, shiftLabel);
+  var start = startUtc ? new Date(startUtc) : null;
+  var end = endUtc ? new Date(endUtc) : null;
+  if (!range || !range.start || !range.end || !start || !end || isNaN(start) || isNaN(end) || end <= start) return 0;
+  var overlapStart = Math.max(start.getTime(), range.start.getTime());
+  var overlapEnd = Math.min(end.getTime(), range.end.getTime());
+  if (!(overlapEnd > overlapStart)) return 0;
+  return clampProductionMinutes(Math.round((overlapEnd - overlapStart) / 60000));
+}
+
+function measureProductionWindow(startUtc, endUtc, firstProducedAtUtc, lastProducedAtUtc) {
+  var actualElapsedMinutes = clampProductionMinutes(elapsedMinutesBetween(startUtc, endUtc));
+  var observedElapsedMinutes = clampProductionMinutes(elapsedMinutesBetween(firstProducedAtUtc, lastProducedAtUtc));
+  var hasActualWindow = actualElapsedMinutes > 0;
+  var hasObservedSpan = !hasActualWindow && observedElapsedMinutes > 0;
+  return {
+    actualElapsedMinutes: actualElapsedMinutes,
+    observedElapsedMinutes: observedElapsedMinutes,
+    productionMinutes: hasActualWindow
+      ? actualElapsedMinutes
+      : (hasObservedSpan ? observedElapsedMinutes : 0),
+    hasActualWindow: hasActualWindow,
+    hasObservedSpan: hasObservedSpan,
+    spanSource: hasActualWindow ? "actual_job_window" : (hasObservedSpan ? "observed_fg_output_span" : "unavailable")
+  };
+}
+
+function productionJobKey(row) {
+  var date = String(row && row.produced_date_et || "");
+  var jobId = String(row && row.job_id || "").trim();
+  var workOrder = String(row && row.work_order_code || "").trim();
+  var line = String(row && row.line || "Unknown").trim() || "Unknown";
+  var itemCode = String(row && row.item_code || "").trim();
+  return [date, jobId, workOrder, line, itemCode].join("|");
+}
+
+function buildProductionSegmentsFromRowsLite(rowsLite) {
+  var rows = Array.isArray(rowsLite) ? rowsLite : [];
+  var byShiftDay = {};
+  var byJob = {};
+  var productionRunsByKey = {};
+  var knownLinesByBaseJobKey = {};
+  var totalRows = rows.length;
+  var rowsWithShift = 0;
+
+  rows.forEach(function(r) {
+    var date = String(r && r.produced_date_et || "");
+    var shift = String(r && r.shift_label || "Unassigned");
+    var units = toNum(r && r.units_produced);
+    if (!(units > 0) || !date) return;
+    var jobId = String(r && r.job_id || "").trim() || "Unknown Job";
+    var workOrder = String(r && r.work_order_code || "").trim();
+    var itemCode = String(r && r.item_code || "").trim();
+    var line = String(r && r.line || "Unknown").trim() || "Unknown";
+    if (!line || line === "Unknown") return;
+    var baseJobKey = [date, shift, jobId, workOrder, itemCode].join("|");
+    if (!knownLinesByBaseJobKey[baseJobKey]) knownLinesByBaseJobKey[baseJobKey] = {};
+    knownLinesByBaseJobKey[baseJobKey][line] = (knownLinesByBaseJobKey[baseJobKey][line] || 0) + units;
+  });
+
+  rows.forEach(function(r) {
+    var date = String(r && r.produced_date_et || "");
+    var shift = String(r && r.shift_label || "Unassigned");
+    var units = toNum(r && r.units_produced);
+    if (!(units > 0) || !date) return;
+    rowsWithShift += 1;
+
+    var shiftKey = date + "|" + shift;
+    if (!byShiftDay[shiftKey]) byShiftDay[shiftKey] = { date: date, shift: shift, unitsProduced: 0, jobs: 0 };
+    byShiftDay[shiftKey].unitsProduced += units;
+    byShiftDay[shiftKey].jobs += 1;
+
+    var jobId = String(r && r.job_id || "").trim() || "Unknown Job";
+    var workOrder = String(r && r.work_order_code || "").trim();
+    var itemCode = String(r && r.item_code || "").trim();
+    var itemDesc = String(r && r.item_desc || "").trim();
+    var rawLine = String(r && r.line || "Unknown").trim() || "Unknown";
+    var baseJobKey = [date, shift, jobId, workOrder, itemCode].join("|");
+    var knownLineMap = knownLinesByBaseJobKey[baseJobKey] || null;
+    var knownLines = knownLineMap ? Object.keys(knownLineMap) : [];
+    var line = rawLine;
+    if ((!line || line === "Unknown") && knownLines.length === 1) {
+      line = knownLines[0];
+    }
+    var producedAtUtc = String(r && r.produced_at_utc || "").trim();
+    var jobStartAtUtc = String(r && r.job_start_at_utc || "").trim();
+    var jobEndAtUtc = String(r && (r.job_end_at_utc || r.produced_at_utc) || "").trim();
+    var runKey = productionJobKey({
+      produced_date_et: date,
+      job_id: jobId,
+      work_order_code: workOrder,
+      line: line,
+      item_code: itemCode
+    });
+    if (!productionRunsByKey[runKey]) {
+      productionRunsByKey[runKey] = {
+        key: runKey,
+        jobStartAtUtc: "",
+        jobEndAtUtc: "",
+        firstProducedAtUtc: "",
+        lastProducedAtUtc: ""
+      };
+    }
+    if (jobStartAtUtc && (!productionRunsByKey[runKey].jobStartAtUtc || jobStartAtUtc < productionRunsByKey[runKey].jobStartAtUtc)) {
+      productionRunsByKey[runKey].jobStartAtUtc = jobStartAtUtc;
+    }
+    if (jobEndAtUtc && (!productionRunsByKey[runKey].jobEndAtUtc || jobEndAtUtc > productionRunsByKey[runKey].jobEndAtUtc)) {
+      productionRunsByKey[runKey].jobEndAtUtc = jobEndAtUtc;
+    }
+    if (producedAtUtc && (!productionRunsByKey[runKey].firstProducedAtUtc || producedAtUtc < productionRunsByKey[runKey].firstProducedAtUtc)) {
+      productionRunsByKey[runKey].firstProducedAtUtc = producedAtUtc;
+    }
+    if (producedAtUtc && (!productionRunsByKey[runKey].lastProducedAtUtc || producedAtUtc > productionRunsByKey[runKey].lastProducedAtUtc)) {
+      productionRunsByKey[runKey].lastProducedAtUtc = producedAtUtc;
+    }
+
+    var jobKey = [date, shift, jobId, workOrder, line, itemCode].join("|");
+    if (!byJob[jobKey]) {
+      byJob[jobKey] = {
+        date: date,
+        shift: shift,
+        jobId: jobId,
+        workOrder: workOrder || "--",
+        line: line,
+        itemCode: itemCode || "--",
+        itemDesc: itemDesc || "--",
+        unitsProduced: 0,
+        firstProducedAtUtc: "",
+        lastProducedAtUtc: "",
+        productionRunKey: runKey
+      };
+    }
+    byJob[jobKey].unitsProduced += units;
+    if (producedAtUtc && (!byJob[jobKey].firstProducedAtUtc || producedAtUtc < byJob[jobKey].firstProducedAtUtc)) byJob[jobKey].firstProducedAtUtc = producedAtUtc;
+    if (producedAtUtc && (!byJob[jobKey].lastProducedAtUtc || producedAtUtc > byJob[jobKey].lastProducedAtUtc)) byJob[jobKey].lastProducedAtUtc = producedAtUtc;
+    if ((!byJob[jobKey].itemDesc || byJob[jobKey].itemDesc === "--") && itemDesc) byJob[jobKey].itemDesc = itemDesc;
+    if ((!byJob[jobKey].line || byJob[jobKey].line === "Unknown") && line) byJob[jobKey].line = line;
+  });
+
+  Object.keys(productionRunsByKey).forEach(function(key) {
+    var run = productionRunsByKey[key];
+    var measured = measureProductionWindow(run.jobStartAtUtc, run.jobEndAtUtc, run.firstProducedAtUtc, run.lastProducedAtUtc);
+    productionRunsByKey[key] = Object.assign({}, run, measured);
+  });
+
+  return {
+    shiftRows: Object.values(byShiftDay).sort(function(a, b) {
+      if (a.date !== b.date) return String(b.date || "").localeCompare(String(a.date || ""));
+      return String(a.shift || "").localeCompare(String(b.shift || ""));
+    }),
+    jobRows: Object.values(byJob).map(function(row) {
+      var productionRun = productionRunsByKey[row.productionRunKey] || null;
+      var actualBucketMinutes = productionRun && productionRun.hasActualWindow
+        ? (
+          row.shift === "Unassigned"
+            ? toNum(productionRun.productionMinutes)
+            : actualWindowMinutesForShiftBucket(row.date, row.shift, productionRun.jobStartAtUtc, productionRun.jobEndAtUtc)
+        )
+        : 0;
+      var observedBucketMinutes = clampProductionMinutes(elapsedMinutesBetween(row.firstProducedAtUtc, row.lastProducedAtUtc));
+      var hasActualBucketWindow = actualBucketMinutes > 0;
+      var hasObservedBucketSpan = !hasActualBucketWindow && observedBucketMinutes > 0;
+      var productionMinutes = hasActualBucketWindow
+        ? actualBucketMinutes
+        : (hasObservedBucketSpan ? observedBucketMinutes : 0);
+      return Object.assign({}, row, {
+        jobStartAtUtc: productionRun && productionRun.jobStartAtUtc ? productionRun.jobStartAtUtc : null,
+        jobEndAtUtc: productionRun && productionRun.jobEndAtUtc ? productionRun.jobEndAtUtc : null,
+        firstProducedAtUtc: row.firstProducedAtUtc || null,
+        lastProducedAtUtc: row.lastProducedAtUtc || null,
+        productionMinutes: productionMinutes,
+        casesPerProductionMinute: productionMinutes > 0 ? (toNum(row.unitsProduced) / productionMinutes) : 0,
+        productionMinutesSource: hasActualBucketWindow ? "actual_job_window" : (hasObservedBucketSpan ? "observed_fg_output_span" : "unavailable"),
+        hasActualWindow: hasActualBucketWindow,
+        hasObservedSpan: hasObservedBucketSpan
+      });
+    }).sort(function(a, b) {
+      if (a.date !== b.date) return String(b.date || "").localeCompare(String(a.date || ""));
+      return toNum(b.unitsProduced) - toNum(a.unitsProduced);
+    }),
+    totalRows: totalRows,
+    rowsWithShift: rowsWithShift
+  };
 }
 
 function resolveJobWindow(row) {
@@ -176,6 +441,7 @@ function buildDetailedPayloadFromRows(rows, querySource) {
   var byDate = {};
   var byDaySku = {};
   var byShift = {};
+  var rowsLite = [];
 
   (Array.isArray(rows) ? rows : []).forEach(function(r) {
     const timing = resolveProductionTiming(r);
@@ -209,33 +475,32 @@ function buildDetailedPayloadFromRows(rows, querySource) {
       if (!byDaySku[dateKey][sku]) byDaySku[dateKey][sku] = { day_key: dateKey, item_code: sku, units: 0 };
       byDaySku[dateKey][sku].units += units;
     }
+    var window = resolveJobWindow(r);
+    var itemDesc = pickFieldLoose(r.raw, ["item_description", "Item Description", "Description", "description"]);
+    rowsLite.push({
+      produced_at_utc: r.produced_at_utc || null,
+      produced_date_et: timing.date || r.produced_date_et || null,
+      shift_label: timing.shift || r.shift_label || null,
+      job_id: r.job_id || null,
+      item_code: r.item_code || null,
+      item_desc: itemDesc ? String(itemDesc) : null,
+      units_produced: units,
+      line: r.line || null,
+      work_order_code: r.work_order_code || null,
+      job_start_at_utc: window.startAtUtc || null,
+      job_end_at_utc: window.endAtUtc || null
+    });
   });
 
   const latestDate = Object.keys(byDate).sort().pop() || null;
   const latestByLine = latestDate ? Object.values(byDate[latestDate]).sort(function(a, b) { return b.units - a.units; }) : [];
+  var productionSegments = buildProductionSegmentsFromRowsLite(rowsLite);
 
   return {
     querySource: querySource || "production_events",
     summaryOnly: false,
     totalRows: rows.length,
-    rowsLite: rows.map(function(r) {
-      var timing = resolveProductionTiming(r);
-      var window = resolveJobWindow(r);
-      var itemDesc = pickFieldLoose(r.raw, ["item_description", "Item Description", "Description", "description"]);
-      return {
-        produced_at_utc: r.produced_at_utc || null,
-        produced_date_et: timing.date || r.produced_date_et || null,
-        shift_label: timing.shift || r.shift_label || null,
-        job_id: r.job_id || null,
-        item_code: r.item_code || null,
-        item_desc: itemDesc ? String(itemDesc) : null,
-        units_produced: toNum(r.units_produced),
-        line: r.line || null,
-        work_order_code: r.work_order_code || null,
-        job_start_at_utc: window.startAtUtc || null,
-        job_end_at_utc: window.endAtUtc || null
-      };
-    }),
+    rowsLite: rowsLite,
     byDay: Object.keys(byDate).sort().reverse().map(function(dateKey) {
       var lineMap = byDate[dateKey] || {};
       var totals = Object.values(lineMap).reduce(function(acc, row) {
@@ -253,6 +518,7 @@ function buildDetailedPayloadFromRows(rows, querySource) {
     byLine: Object.values(byLine).sort(function(a, b) { return b.units - a.units; }),
     latestDate: latestDate,
     latestByLine: latestByLine,
+    productionSegments: productionSegments,
     byDaySku: Object.keys(byDaySku).sort().reduce(function(out, dayKey) {
       return out.concat(Object.values(byDaySku[dayKey]).sort(function(a, b) {
         return b.units - a.units;
