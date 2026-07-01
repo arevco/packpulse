@@ -64,6 +64,15 @@ var DETAIL_FILTER_FIELDS = [
   { key: "laborMarginPct", label: "Margin %", placeholder: "Min %" },
   { key: "casesPerMinute", label: "Cases/Min", placeholder: "Min" }
 ];
+var PRODUCTION_RANGE_PRESET_OPTIONS = [
+  { value: "latest_day", label: "Latest Day" },
+  { value: "today", label: "Today" },
+  { value: "yesterday", label: "Yesterday" },
+  { value: "this_week", label: "This Week" },
+  { value: "last_week", label: "Last Week" },
+  { value: "this_month", label: "This Month" },
+  { value: "last_month", label: "Last Month" }
+];
 
 function fmtMoneyWhole(value) {
   var rounded = Math.round(safeNum(value));
@@ -356,6 +365,61 @@ function todayEtDateKey() {
   return parts.year + "-" + parts.month + "-" + parts.day;
 }
 
+function toIsoDateUTC(d) {
+  return d.toISOString().slice(0, 10);
+}
+
+function shiftDays(dateIso, n) {
+  var d = new Date(dateIso + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + n);
+  return toIsoDateUTC(d);
+}
+
+function weekStart(dateIso) {
+  var d = new Date(dateIso + "T00:00:00Z");
+  var dow = d.getUTCDay();
+  var delta = dow === 0 ? -6 : 1 - dow;
+  d.setUTCDate(d.getUTCDate() + delta);
+  return toIsoDateUTC(d);
+}
+
+function monthStart(dateIso) {
+  var d = new Date(dateIso + "T00:00:00Z");
+  d.setUTCDate(1);
+  return toIsoDateUTC(d);
+}
+
+function monthEnd(dateIso) {
+  var d = new Date(dateIso + "T00:00:00Z");
+  d.setUTCDate(1);
+  d.setUTCMonth(d.getUTCMonth() + 1);
+  d.setUTCDate(0);
+  return toIsoDateUTC(d);
+}
+
+function productionPresetRange(preset) {
+  var today = todayEtDateKey();
+  if (!today) return null;
+  if (preset === "today") return { start: today, end: today };
+  if (preset === "yesterday") {
+    var yesterday = shiftDays(today, -1);
+    return { start: yesterday, end: yesterday };
+  }
+  if (preset === "this_week") return { start: weekStart(today), end: today };
+  if (preset === "last_week") {
+    var thisStart = weekStart(today);
+    var lastEnd = shiftDays(thisStart, -1);
+    return { start: shiftDays(lastEnd, -6), end: lastEnd };
+  }
+  if (preset === "this_month") return { start: monthStart(today), end: today };
+  if (preset === "last_month") {
+    var thisMonthStart = monthStart(today);
+    var prevMonthEnd = shiftDays(thisMonthStart, -1);
+    return { start: monthStart(prevMonthEnd), end: monthEnd(prevMonthEnd) };
+  }
+  return null;
+}
+
 export default function ProductionView({ productionSegments, laborActuals, laborDataRaw, resolveRevenueForRow, setRequestedRange }) {
   const { C, mono } = useTheme();
   const { thS, tdN, tdM } = useStyles();
@@ -364,6 +428,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
   const [prodDateEnd, setProdDateEnd] = useState("");
   const [prodDateDraftStart, setProdDateDraftStart] = useState("");
   const [prodDateDraftEnd, setProdDateDraftEnd] = useState("");
+  const [quickRangeSelection, setQuickRangeSelection] = useState("");
   const [search, setSearch] = useState("");
   const [lineFilter, setLineFilter] = useState("all");
   const [shiftFilter, setShiftFilter] = useState("all");
@@ -1150,11 +1215,32 @@ export default function ProductionView({ productionSegments, laborActuals, labor
     setProdDateStart(prodDateDraftStart);
     setProdDateEnd(prodDateDraftEnd);
   };
+  var applyExplicitProdRange = function(nextStart, nextEnd) {
+    setProdDateDraftStart(nextStart || "");
+    setProdDateDraftEnd(nextEnd || "");
+    setProdDateStart(nextStart || "");
+    setProdDateEnd(nextEnd || "");
+  };
   var resetProdDateRange = function() {
     setProdDateDraftStart("");
     setProdDateDraftEnd("");
     setProdDateStart("");
     setProdDateEnd("");
+  };
+  var handleQuickRangeChange = function(event) {
+    var next = String(event && event.target && event.target.value || "");
+    setQuickRangeSelection(next);
+    if (!next) return;
+    if (next === "latest_day") {
+      resetProdDateRange();
+      setQuickRangeSelection("");
+      return;
+    }
+    var preset = productionPresetRange(next);
+    if (preset && preset.start && preset.end) {
+      applyExplicitProdRange(preset.start, preset.end);
+    }
+    setQuickRangeSelection("");
   };
   var handleProdDateStartChange = function(nextDate) {
     var next = String(nextDate || "").trim();
@@ -1297,9 +1383,17 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         <Button variant={prodDateDirty ? "active" : "outline"} size="default" className="h-10 shrink-0" onClick={applyProdDateRange} disabled={!prodDateDirty}>
           Apply
         </Button>
-        <Button variant="outline" size="default" className="h-10 shrink-0" onClick={resetProdDateRange}>
-          Latest Day
-        </Button>
+        <select
+          value={quickRangeSelection}
+          onChange={handleQuickRangeChange}
+          aria-label="Production Jobs quick range"
+          className="h-10 min-w-[148px] rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]"
+        >
+          <option value="">Quick Range</option>
+          {PRODUCTION_RANGE_PRESET_OPTIONS.map(function(option) {
+            return <option key={option.value} value={option.value}>{option.label}</option>;
+          })}
+        </select>
         <select value={lineFilter} onChange={function(e) { setLineFilter(e.target.value); }} className="h-10 rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))]">
           <option value="all">All Lines</option>
           {lineOptions.map(function(line) { return <option key={line} value={line}>{line}</option>; })}
