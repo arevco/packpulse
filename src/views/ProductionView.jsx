@@ -71,7 +71,7 @@ var PRODUCTION_RANGE_PRESET_OPTIONS = [
   { value: "last_week", label: "Last Week" },
   { value: "this_month", label: "This Month" },
   { value: "last_month", label: "Last Month" },
-  { value: "latest_day", label: "Latest Day" },
+  { value: "latest_day", label: "Latest Available" },
   { value: "custom_range", label: "Custom Range" }
 ];
 
