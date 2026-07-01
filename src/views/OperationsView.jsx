@@ -1543,8 +1543,24 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
     var byShiftDay = {};
     var byJob = {};
     var productionRunsByKey = {};
+    var knownLinesByBaseJobKey = {};
     var totalRows = rows.length;
     var rowsWithShift = 0;
+
+    rows.forEach(function(r) {
+      var date = String(r && r.produced_date_et || "");
+      var shift = String(r && r.shift_label || "Unassigned");
+      var units = safeNum(r && r.units_produced);
+      if (!(units > 0) || !date) return;
+      var jobId = String(r && r.job_id || "").trim() || "Unknown Job";
+      var workOrder = String(r && r.work_order_code || "").trim();
+      var itemCode = String(r && r.item_code || "").trim();
+      var line = String(r && r.line || "Unknown").trim() || "Unknown";
+      if (!line || line === "Unknown") return;
+      var baseJobKey = [date, shift, jobId, workOrder, itemCode].join("|");
+      if (!knownLinesByBaseJobKey[baseJobKey]) knownLinesByBaseJobKey[baseJobKey] = {};
+      knownLinesByBaseJobKey[baseJobKey][line] = (knownLinesByBaseJobKey[baseJobKey][line] || 0) + units;
+    });
 
     rows.forEach(function(r) {
       var date = String(r && r.produced_date_et || "");
@@ -1562,7 +1578,14 @@ export default function OperationsView({ productionSegments, productionDataRaw, 
       var workOrder = String(r && r.work_order_code || "").trim();
       var itemCode = String(r && r.item_code || "").trim();
       var itemDesc = String(r && r.item_desc || "").trim();
-      var line = String(r && r.line || "Unknown").trim() || "Unknown";
+      var rawLine = String(r && r.line || "Unknown").trim() || "Unknown";
+      var baseJobKey = [date, shift, jobId, workOrder, itemCode].join("|");
+      var knownLineMap = knownLinesByBaseJobKey[baseJobKey] || null;
+      var knownLines = knownLineMap ? Object.keys(knownLineMap) : [];
+      var line = rawLine;
+      if ((!line || line === "Unknown") && knownLines.length === 1) {
+        line = knownLines[0];
+      }
       var producedAtUtc = String(r && r.produced_at_utc || "").trim();
       var jobStartAtUtc = String(r && r.job_start_at_utc || "").trim();
       var jobEndAtUtc = String(r && (r.job_end_at_utc || r.produced_at_utc) || "").trim();
