@@ -420,6 +420,27 @@ function productionPresetRange(preset) {
   return null;
 }
 
+function productionPresetSelection(start, end) {
+  var normalizedStart = String(start || "").trim();
+  var normalizedEnd = String(end || "").trim();
+  if (!normalizedStart && !normalizedEnd) return "latest_day";
+  if (!normalizedStart || !normalizedEnd) return "";
+  if (normalizedEnd < normalizedStart) {
+    var tmp = normalizedStart;
+    normalizedStart = normalizedEnd;
+    normalizedEnd = tmp;
+  }
+  for (var i = 0; i < PRODUCTION_RANGE_PRESET_OPTIONS.length; i += 1) {
+    var option = PRODUCTION_RANGE_PRESET_OPTIONS[i];
+    if (!option || option.value === "latest_day") continue;
+    var preset = productionPresetRange(option.value);
+    if (preset && preset.start === normalizedStart && preset.end === normalizedEnd) {
+      return option.value;
+    }
+  }
+  return "";
+}
+
 export default function ProductionView({ productionSegments, laborActuals, laborDataRaw, resolveRevenueForRow, setRequestedRange }) {
   const { C, mono } = useTheme();
   const { thS, tdN, tdM } = useStyles();
@@ -428,7 +449,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
   const [prodDateEnd, setProdDateEnd] = useState("");
   const [prodDateDraftStart, setProdDateDraftStart] = useState("");
   const [prodDateDraftEnd, setProdDateDraftEnd] = useState("");
-  const [quickRangeSelection, setQuickRangeSelection] = useState("");
+  const [quickRangeSelection, setQuickRangeSelection] = useState("latest_day");
   const [search, setSearch] = useState("");
   const [lineFilter, setLineFilter] = useState("all");
   const [shiftFilter, setShiftFilter] = useState("all");
@@ -475,6 +496,13 @@ export default function ProductionView({ productionSegments, laborActuals, labor
       return { start: nextStart, end: nextEnd };
     });
   }, [rangeStart, rangeEnd, setRequestedRange]);
+
+  useEffect(function() {
+    var nextSelection = productionPresetSelection(prodDateStart, prodDateEnd);
+    setQuickRangeSelection(function(prev) {
+      return prev === nextSelection ? prev : nextSelection;
+    });
+  }, [prodDateStart, prodDateEnd]);
 
   var isAllMatchingDays = !!rangeStart && !!rangeEnd && !!earliestProdDate && !!latestProdDate && rangeStart === earliestProdDate && rangeEnd === latestProdDate;
   var selectedRangeLabel = !rangeStart
@@ -1233,14 +1261,12 @@ export default function ProductionView({ productionSegments, laborActuals, labor
     if (!next) return;
     if (next === "latest_day") {
       resetProdDateRange();
-      setQuickRangeSelection("");
       return;
     }
     var preset = productionPresetRange(next);
     if (preset && preset.start && preset.end) {
       applyExplicitProdRange(preset.start, preset.end);
     }
-    setQuickRangeSelection("");
   };
   var handleProdDateStartChange = function(nextDate) {
     var next = String(nextDate || "").trim();
