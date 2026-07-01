@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useTheme } from "../theme";
 import { useStyles } from "../hooks/useStyles";
 import { safeNum, formatDescriptionForDisplay, triggerDownload } from "../utils";
-import { Download } from "lucide-react";
+import { Download, Info } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { DatePicker } from "../components/ui/date-picker";
@@ -1365,9 +1365,16 @@ export default function ProductionView({ productionSegments, laborActuals, labor
       <div className="mb-3 rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-3">
         <div className="mb-2 flex items-start justify-between gap-3">
           <div>
-            <div className="mb-1 text-sm font-semibold">Job Level Details</div>
-            <div className="text-xs text-[rgb(var(--muted))]">
-              Cases/Min uses actual Nulogy job windows when available; otherwise it falls back to Observed FG Output Span. Filters apply to rolled-up jobs; expanded shift buckets stay chronological.
+            <div className="mb-1 flex items-center gap-1.5 text-sm font-semibold">
+              <span>Job Level Details</span>
+              <button
+                type="button"
+                title="Cases/Min uses actual Nulogy job windows when available; otherwise it falls back to Observed FG Output Span. Filters apply to rolled-up jobs; expanded shift buckets stay chronological."
+                aria-label="Production job detail logic"
+                className="inline-flex h-5 w-5 items-center justify-center rounded-full text-[rgb(var(--muted))] transition-colors hover:text-[rgb(var(--foreground))]"
+              >
+                <Info className="h-3.5 w-3.5" />
+              </button>
             </div>
           </div>
           <button
