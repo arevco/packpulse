@@ -141,11 +141,14 @@ function buildAllocatedLaborSegments(row, todayEt) {
   var productiveHours = toNum(row && row.productive_hours);
   var startMs = parseUtcMillis(row && row.clock_in_at_utc);
   var endMs = parseUtcMillis(row && row.clock_out_at_utc);
+  var workedAtMs = parseUtcMillis(row && row.worked_at_utc);
   var explicitShift = resolveExplicitShiftFromRaw(row && row.raw);
   var fallbackDate = sanitizeDate(row && row.worked_date_et);
   var fallbackShift = explicitShift || textKey(row && row.shift_label, "Unassigned");
   var fallbackFinalized = fallbackDate ? (fallbackDate < todayEt) : false;
   var hasSingleEndpoint = (startMs > 0) !== (endMs > 0);
+  var hasClockEvidence = startMs > 0 || endMs > 0 || workedAtMs > 0;
+  var fallbackShiftTrusted = !!explicitShift || (isSpecificShiftLabel(fallbackShift) && hasClockEvidence);
 
   var buildFallback = function() {
     return [Object.assign({}, row, {
@@ -153,8 +156,8 @@ function buildAllocatedLaborSegments(row, todayEt) {
       shift_label: fallbackShift,
       is_finalized: fallbackFinalized,
       allocation_method: "stored_bucket",
-      has_trusted_shift: !!explicitShift,
-      shift_match_confidence: explicitShift ? "trusted" : (hasSingleEndpoint ? "low" : "unknown")
+      has_trusted_shift: fallbackShiftTrusted,
+      shift_match_confidence: fallbackShiftTrusted ? "trusted" : (hasSingleEndpoint ? "low" : "unknown")
     })];
   };
 
