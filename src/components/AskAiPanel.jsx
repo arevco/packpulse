@@ -263,6 +263,7 @@ export default function AskAiPanel(props) {
   var metrics = props.metrics && typeof props.metrics === "object" ? props.metrics : {};
   var labelByView = {
     aicopilot: "AI Copilot",
+    calendar: "Calendar",
     operations: "Operations",
     workorders: "Work Orders",
     supplyrisk: "Supply Risk",
