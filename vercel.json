@@ -1,9 +1,6 @@
 {
   "framework": "vite",
   "functions": {
-    "api/gusto/*.js": {
-      "maxDuration": 60
-    },
     "api/nulogy/*.js": {
       "maxDuration": 60
     }
