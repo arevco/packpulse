@@ -7,3 +7,4 @@ artifacts/nulogy/runs/
 .playwright-cli/
 .vercel
 .env*.local
+.local/
