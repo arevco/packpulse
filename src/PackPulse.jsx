@@ -47,6 +47,7 @@ var operationsInsightsPanelImportPromise = null;
 var forecastViewImportPromise = null;
 var inventoryViewImportPromise = null;
 var invoicingViewImportPromise = null;
+var reportingViewImportPromise = null;
 var onboardingViewImportPromise = null;
 var calendarViewImportPromise = null;
 var safetyViewImportPromise = null;
@@ -74,6 +75,11 @@ function importInventoryView() {
 function importInvoicingView() {
   if (!invoicingViewImportPromise) invoicingViewImportPromise = import("./views/InvoicingView");
   return invoicingViewImportPromise;
+}
+
+function importReportingView() {
+  if (!reportingViewImportPromise) reportingViewImportPromise = import("./views/ReportingView");
+  return reportingViewImportPromise;
 }
 
 function importOnboardingView() {
@@ -110,6 +116,10 @@ function prefetchInvoicingView() {
   return importInvoicingView().catch(function() {});
 }
 
+function prefetchReportingView() {
+  return importReportingView().catch(function() {});
+}
+
 function prefetchOnboardingView() {
   return importOnboardingView().catch(function() {});
 }
@@ -128,6 +138,7 @@ function prefetchLikelyNextViews(activeView) {
   if (activeView !== "inventory") prefetchers.push(prefetchInventoryView);
   if (activeView !== "forecast") prefetchers.push(prefetchForecastView);
   if (activeView !== "invoicing") prefetchers.push(prefetchInvoicingView);
+  if (activeView !== "reporting") prefetchers.push(prefetchReportingView);
   if (activeView !== "onboarding") prefetchers.push(prefetchOnboardingView);
   if (activeView !== "calendar") prefetchers.push(prefetchCalendarView);
   if (activeView !== "safety") prefetchers.push(prefetchSafetyView);
@@ -228,6 +239,7 @@ const ForecastView = lazySafe(importForecastView, "Forecast");
 const WorkOrdersView = lazySafe(function() { return import("./views/WorkOrdersView"); }, "Work Orders");
 const InventoryView = lazySafe(importInventoryView, "Inventory");
 const InvoicingView = lazySafe(importInvoicingView, "Invoicing");
+const ReportingView = lazySafe(importReportingView, "Reporting");
 const OnboardingView = lazySafe(importOnboardingView, "Onboarding");
 const CalendarView = lazySafe(importCalendarView, "Calendar");
 const SafetyView = lazySafe(importSafetyView, "Safety");
@@ -257,7 +269,7 @@ export default function ProductionReadiness() {
   var parseInitialPermalink = function() {
     if (typeof window === "undefined") return { view: "workorders", wo: {}, forecast: {}, operations: {}, invoicing: {} };
     var qs = new URLSearchParams(window.location.search || "");
-    var allowedViews = { aicopilot:true, operations:true, safety:true, invoicing:true, forecast:true, workorders:true, inventory:true, onboarding:true, calendar:true, supplyrisk:true, flags:true, itemmaster:true };
+    var allowedViews = { aicopilot:true, operations:true, safety:true, invoicing:true, reporting:true, forecast:true, workorders:true, inventory:true, onboarding:true, calendar:true, supplyrisk:true, flags:true, itemmaster:true };
     var rawView = String(qs.get("view") || "workorders");
     if (rawView === "overview") rawView = "workorders";
     var view = allowedViews[rawView] ? rawView : "workorders";
@@ -448,13 +460,14 @@ export default function ProductionReadiness() {
     operations: prefetchOperationsView,
     safety: prefetchSafetyView,
     invoicing: prefetchInvoicingView,
+    reporting: prefetchReportingView,
     inventory: prefetchInventoryView,
     forecast: prefetchForecastView,
     onboarding: prefetchOnboardingView,
     calendar: prefetchCalendarView,
   };
 
-  var navItems = [{key:"workorders",label:"Work Orders",count:null},{key:"inventory",label:"Inventory",count:null},{key:"onboarding",label:"Onboarding",count:null,alert:false},{key:"operations",label:"Operations",count:null,alert:false},{key:"safety",label:"Safety",count:null,alert:false},{key:"invoicing",label:"Invoicing",count:null,alert:false},{key:"supplyrisk",label:"Supply Risk",count:null,alert:false},{key:"forecast",label:"Forecast",count:null,alert:false},{key:"calendar",label:"Calendar",count:null,alert:false},{key:"aicopilot",label:"AI Copilot",count:null,alert:false}]
+  var navItems = [{key:"workorders",label:"Work Orders",count:null},{key:"inventory",label:"Inventory",count:null},{key:"reporting",label:"Reporting",count:null},{key:"onboarding",label:"Onboarding",count:null,alert:false},{key:"operations",label:"Operations",count:null,alert:false},{key:"safety",label:"Safety",count:null,alert:false},{key:"invoicing",label:"Invoicing",count:null,alert:false},{key:"supplyrisk",label:"Supply Risk",count:null,alert:false},{key:"forecast",label:"Forecast",count:null,alert:false},{key:"calendar",label:"Calendar",count:null,alert:false},{key:"aicopilot",label:"AI Copilot",count:null,alert:false}]
     .map(function(item) {
       return Object.assign({}, item, {
         href: buildPermalinkUrl(item.key, workOrdersPermalinkState, forecastPermalinkState, operationsPermalinkState, invoicingPermalinkState),
@@ -1658,6 +1671,7 @@ export default function ProductionReadiness() {
           {activeView === "operations" && <OperationsView productionSegments={productionSegmentsForUI} productionDataRaw={ds.productionData || []} laborDataRaw={ds.laborData || []} evoconData={ds.evoconData || []} evoconTimestamp={ds.evoconTimestamp || evoconLastSyncAt} itemMaster={ds.itemMaster || []} workOrders={analysisForUI.results || []} dispatchQueue={dispatchQueue || []} initialFilters={operationsPermalinkState} onPermalinkChange={handleOperationsPermalinkChange} serverSyncVersion={operationsServerSyncVersion} onRefreshProduction={triggerProductionRefresh} refreshingProduction={visibleNulogySyncBusy} />}
           {activeView === "safety" && <SafetyView />}
           {activeView === "invoicing" && <InvoicingView productionData={ds.productionData || []} workOrders={ds.workOrders || []} itemMaster={ds.itemMaster || []} productionTimestamp={ds.productionTimestamp} initialFilters={invoicingPermalinkState} onPermalinkChange={handleInvoicingPermalinkChange} />}
+          {activeView === "reporting" && <ReportingView />}
           {activeView === "forecast" && <ForecastView workOrders={ds.workOrders || []} itemMaster={ds.itemMaster || []} productionData={ds.productionData || []} laborData={ds.laborData || []} initialFilters={forecastPermalinkState} onPermalinkChange={handleForecastPermalinkChange} />}
           {activeView === "workorders" && <WorkOrdersView analysis={analysisForUI} woStatuses={woStatusesForUI} woCustomers={woCustomersForUI} recommendations={recommendationsForUI} dispatchQueue={dispatchQueue || []} inboundCoverage={inboundCoverage} initialFilters={workOrdersPermalinkState} onPermalinkChange={handleWorkOrdersPermalinkChange} />}
           {activeView === "inventory" && (
