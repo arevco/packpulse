@@ -54,3 +54,21 @@
 - `marchDailyTargetRemaining`
   - Formula: `ceil(March remaining units / remaining business days)`.
 
+## Safety KPIs
+- `recordablesThisYear`
+  - Definition: count of `safety_cases` for the selected year and establishment where `recordability_status = 'recordable'`.
+- `daysAwayCases`
+  - Definition: count of recordable cases whose most serious outcome is `days_away`.
+- `restrictedTransferCases`
+  - Definition: count of recordable cases whose most serious outcome is `job_transfer_or_restriction`.
+- `totalRecordableCaseRate`
+  - Definition: OSHA total recordable case rate for the selected year.
+  - Formula: `(total recordable cases * 200000) / total hours worked`
+  - Source: `safety_cases` + `safety_annual_summaries.total_hours_worked`
+- `dartRate`
+  - Definition: OSHA Days Away, Restricted, or Transferred incidence rate.
+  - Formula: `((days away cases + restricted/transfer cases) * 200000) / total hours worked`
+  - Source: `safety_cases` + `safety_annual_summaries.total_hours_worked`
+- `daysSinceLastRecordable`
+  - Definition: number of days since the most recent recordable case incident date.
+  - Source: latest recordable `safety_cases.incident_date`

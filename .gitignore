@@ -5,3 +5,5 @@ dist
 .DS_Store
 artifacts/nulogy/runs/
 .playwright-cli/
+.vercel
+.env*.local

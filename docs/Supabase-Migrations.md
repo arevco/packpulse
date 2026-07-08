@@ -28,6 +28,8 @@ Track SQL setup order and what each script provisions.
    - Query diagnostics extensions + latest artifact lookup index
 12. `/Users/aj/Documents/New project/docs/supabase-ai-trends-performance.sql`
    - AI/trends follow-up indexes + refresh function `ANALYZE` pass
+13. `/Users/aj/Documents/New project/docs/supabase-safety-osha.sql`
+   - OSHA / safety recordkeeping establishments, cases, annual summaries, and attachments
 
 ## Required Environment Variables
 - `SUPABASE_URL`
@@ -47,6 +49,10 @@ Track SQL setup order and what each script provisions.
   - `select count(*) from user_login_events;`
 - Team board loaded:
   - `select count(*) from team_board_tasks;`
+- Safety tables loaded:
+  - `select count(*) from safety_establishments;`
+  - `select count(*) from safety_cases;`
+  - `select count(*) from safety_annual_summaries;`
 - Performance materialized views loaded:
   - `select count(*) from ops_work_order_production_totals_mv;`
   - `select count(*) from ops_daily_line_metrics_mv;`
@@ -55,7 +61,7 @@ Track SQL setup order and what each script provisions.
 - Query diagnostics extensions enabled:
   - `select extname from pg_extension where extname in ('pg_stat_statements','hypopg','index_advisor') order by extname;`
 - RLS status:
-  - `select schemaname, tablename, rowsecurity from pg_tables where schemaname = 'public' and tablename in ('cache_snapshots','cache_snapshot_history','production_events','labor_events','ops_shift_inputs','ops_rates','ops_sku_targets','user_login_events','team_board_tasks','forecast_versions','forecast_assumptions','sync_runs') order by tablename;`
+  - `select schemaname, tablename, rowsecurity from pg_tables where schemaname = 'public' and tablename in ('cache_snapshots','cache_snapshot_history','production_events','labor_events','ops_shift_inputs','ops_rates','ops_sku_targets','user_login_events','team_board_tasks','forecast_versions','forecast_assumptions','sync_runs','safety_establishments','safety_cases','safety_case_private','safety_case_updates','safety_annual_summaries','safety_attachments') order by tablename;`
 
 ## Common Issues
 - “Could not find table … in schema cache”
