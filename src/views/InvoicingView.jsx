@@ -10,6 +10,7 @@ import { DatePicker } from "../components/ui/date-picker";
 import { Input } from "../components/ui/input";
 import SortHeaderButton from "../components/ui/sort-header-button";
 import TableShell from "../components/ui/table-shell";
+import TabsNav from "../components/ui/tabs-nav";
 
 var MONTH_INDEX = {
   jan: 0,
@@ -27,6 +28,12 @@ var MONTH_INDEX = {
 };
 
 var REVENUE_CONFIG_STALE_MS = 15 * 60 * 1000;
+var DEFAULT_INVOICE_MODE = "production";
+var DEFAULT_WAREHOUSE_RATE_DRAFT = {
+  inboundRate: "7.50",
+  outboundRate: "7.50",
+  storageRate: "9.00"
+};
 var DEFAULT_CANDIDATE_SORT_FIELD = "status";
 var DEFAULT_CANDIDATE_SORT_DIR = "asc";
 var CANDIDATE_SORT_LABELS = {
@@ -72,6 +79,10 @@ function normalizeLooseKey(value) {
   return String(value || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
 }
 
+function normalizeInvoiceMode(value) {
+  return String(value || "").trim().toLowerCase() === "warehousing" ? "warehousing" : DEFAULT_INVOICE_MODE;
+}
+
 function normalizeSearchValue(value) {
   return String(value || "").trim().toLowerCase();
 }
@@ -92,6 +103,25 @@ function normalizeLookupKey(value) {
 
 function normalizeItemCode(value) {
   return normalizeLookupKey(value);
+}
+
+function normalizeWarehouseRateInput(value, fallback) {
+  var text = String(value == null ? "" : value).trim();
+  if (!text) return fallback;
+  var numeric = safeNum(text);
+  if (!(numeric >= 0)) return fallback;
+  return numeric.toFixed(2);
+}
+
+function createDefaultWarehouseFeeDraft(overrides) {
+  var source = overrides && typeof overrides === "object" ? overrides : {};
+  return {
+    included: source.included !== false,
+    inboundRate: normalizeWarehouseRateInput(source.inboundRate, DEFAULT_WAREHOUSE_RATE_DRAFT.inboundRate),
+    outboundRate: normalizeWarehouseRateInput(source.outboundRate, DEFAULT_WAREHOUSE_RATE_DRAFT.outboundRate),
+    storageRate: normalizeWarehouseRateInput(source.storageRate, DEFAULT_WAREHOUSE_RATE_DRAFT.storageRate),
+    note: String(source.note || "")
+  };
 }
 
 function pickFieldLoose(row, keys) {
@@ -1141,12 +1171,17 @@ export default function InvoicingView(props) {
   var onPermalinkChange = typeof props.onPermalinkChange === "function" ? props.onPermalinkChange : null;
   var defaults = defaultInvoicingRange();
   var initialBillingWindow = resolveInitialBillingWindow(initialFilters, defaults);
+  var initialInvoiceMode = normalizeInvoiceMode(initialFilters.mode || DEFAULT_INVOICE_MODE);
 
+  var [invoiceMode, setInvoiceMode] = useState(initialInvoiceMode);
   var [startDate, setStartDate] = useState(initialBillingWindow.start || "");
   var [endDate, setEndDate] = useState(initialBillingWindow.end || "");
   var [customerFilter, setCustomerFilter] = useState(String(initialFilters.customer || "all"));
   var [statusFilter, setStatusFilter] = useState(String(initialFilters.status || "all"));
   var [searchTerm, setSearchTerm] = useState(String(initialFilters.q || ""));
+  var [warehouseFeeDrafts, setWarehouseFeeDrafts] = useState(function() {
+    return {};
+  });
   var [candidateSortField, setCandidateSortField] = useState(DEFAULT_CANDIDATE_SORT_FIELD);
   var [candidateSortDir, setCandidateSortDir] = useState(DEFAULT_CANDIDATE_SORT_DIR);
   var [candidateColumnFilters, setCandidateColumnFilters] = useState(createDefaultCandidateColumnFilters);
@@ -1171,13 +1206,14 @@ export default function InvoicingView(props) {
     if (!onPermalinkChange) return;
     if (!hasValidDateRange) return;
     onPermalinkChange({
+      mode: invoiceMode,
       start: startDate || "",
       end: endDate || "",
       customer: customerFilter || "all",
       status: statusFilter || "all",
       q: searchTerm || ""
     });
-  }, [onPermalinkChange, hasValidDateRange, startDate, endDate, customerFilter, statusFilter, searchTerm]);
+  }, [onPermalinkChange, hasValidDateRange, invoiceMode, startDate, endDate, customerFilter, statusFilter, searchTerm]);
 
   useEffect(function() {
     if (!quickBooksNotice.message) return;
@@ -1735,6 +1771,20 @@ export default function InvoicingView(props) {
   }, [customerPeriodRows]);
 
   useEffect(function() {
+    if (!customerOptions.length) return;
+    setWarehouseFeeDrafts(function(previous) {
+      var next = Object.assign({}, previous || {});
+      var changed = false;
+      customerOptions.forEach(function(customer) {
+        if (next[customer]) return;
+        next[customer] = createDefaultWarehouseFeeDraft();
+        changed = true;
+      });
+      return changed ? next : previous;
+    });
+  }, [customerOptions]);
+
+  useEffect(function() {
     if (customerFilter === "all") return;
     if (customerOptions.indexOf(customerFilter) !== -1) return;
     setCustomerFilter("all");
@@ -1763,6 +1813,32 @@ export default function InvoicingView(props) {
     setCandidateSortField(DEFAULT_CANDIDATE_SORT_FIELD);
     setCandidateSortDir(DEFAULT_CANDIDATE_SORT_DIR);
     setCandidateColumnFilters(createDefaultCandidateColumnFilters());
+  }
+
+  function updateWarehouseFeeDraft(customer, field, value) {
+    setWarehouseFeeDrafts(function(previous) {
+      var next = Object.assign({}, previous || {});
+      next[customer] = Object.assign(
+        {},
+        createDefaultWarehouseFeeDraft(previous && previous[customer]),
+        field === "included"
+          ? { included: !!value }
+          : field === "note"
+            ? { note: String(value || "") }
+            : { [field]: String(value == null ? "" : value) }
+      );
+      return next;
+    });
+  }
+
+  function resetWarehouseFeeDrafts() {
+    setWarehouseFeeDrafts(function() {
+      var next = {};
+      customerOptions.forEach(function(customer) {
+        next[customer] = createDefaultWarehouseFeeDraft();
+      });
+      return next;
+    });
   }
 
   function toggleCandidateSelection(key, checked) {
@@ -2056,6 +2132,52 @@ export default function InvoicingView(props) {
     triggerDownload([header.join(",")].concat(body).join("\n"), filename, "text/csv;charset=utf-8;");
   }
 
+  var warehouseClientRows = useMemo(function() {
+    return customerOptions.map(function(customer) {
+      return Object.assign({ customer: customer }, createDefaultWarehouseFeeDraft(warehouseFeeDrafts[customer]));
+    });
+  }, [customerOptions, warehouseFeeDrafts]);
+
+  var warehouseSummary = useMemo(function() {
+    var includedCount = 0;
+    var zeroRateCount = 0;
+    var nonDefaultCount = 0;
+    warehouseClientRows.forEach(function(row) {
+      if (row.included) includedCount += 1;
+      var inboundRate = safeNum(row.inboundRate);
+      var outboundRate = safeNum(row.outboundRate);
+      var storageRate = safeNum(row.storageRate);
+      var isDefaultRate =
+        row.inboundRate === DEFAULT_WAREHOUSE_RATE_DRAFT.inboundRate &&
+        row.outboundRate === DEFAULT_WAREHOUSE_RATE_DRAFT.outboundRate &&
+        row.storageRate === DEFAULT_WAREHOUSE_RATE_DRAFT.storageRate;
+      if (!isDefaultRate || !row.included || String(row.note || "").trim()) nonDefaultCount += 1;
+      if (inboundRate <= 0 && outboundRate <= 0 && storageRate <= 0) zeroRateCount += 1;
+    });
+    return {
+      clientCount: warehouseClientRows.length,
+      includedCount: includedCount,
+      excludedCount: Math.max(0, warehouseClientRows.length - includedCount),
+      zeroRateCount: zeroRateCount,
+      nonDefaultCount: nonDefaultCount
+    };
+  }, [warehouseClientRows]);
+
+  var invoiceModeTabs = useMemo(function() {
+    return [
+      {
+        key: "production",
+        label: "Production",
+        count: summary.invoiceLines
+      },
+      {
+        key: "warehousing",
+        label: "Warehousing",
+        count: warehouseSummary.clientCount
+      }
+    ];
+  }, [summary.invoiceLines, warehouseSummary.clientCount]);
+
   if (!hasValidDateRange) {
     return (
       <Card className="mt-3">
@@ -2194,8 +2316,219 @@ export default function InvoicingView(props) {
     );
   }
 
+  var invoiceModeSwitcher = (
+    <Card>
+      <CardContent className="px-4 py-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="text-xs font-medium uppercase tracking-[0.12em] text-[rgb(var(--muted))]">Invoice Type</div>
+            <div className="mt-1 text-lg font-semibold text-[rgb(var(--foreground))]">
+              {invoiceMode === "production" ? "Production Invoicing" : "Warehousing Invoicing"}
+            </div>
+            <div className="mt-1 max-w-3xl text-sm text-[rgb(var(--muted))]">
+              {invoiceMode === "production"
+                ? "Use the existing PO, SKU, lot, and rate workflow for finished-good billing."
+                : "Set up client-level pallet fees first, then layer monthly inbound, outbound, and storage charges onto the same invoicing workspace."}
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {invoiceMode === "production" ? (
+              <>
+                <Badge variant="info">{filteredRows.length.toLocaleString()} production rows</Badge>
+                <Badge variant="secondary">{summary.customers.toLocaleString()} customers</Badge>
+              </>
+            ) : (
+              <>
+                <Badge variant="info">{warehouseSummary.clientCount.toLocaleString()} clients in scope</Badge>
+                <Badge variant="secondary">Monthly by client</Badge>
+              </>
+            )}
+          </div>
+        </div>
+        <TabsNav items={invoiceModeTabs} activeKey={invoiceMode} onChange={setInvoiceMode} className="mb-0 mt-4" />
+      </CardContent>
+    </Card>
+  );
+
+  if (invoiceMode === "warehousing") {
+    return (
+      <div className="space-y-4">
+        {invoiceModeSwitcher}
+
+        <Card>
+          <CardHeader className="flex flex-col gap-3 border-b border-[rgb(var(--border))] pb-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <div className="text-lg font-semibold text-[rgb(var(--foreground))]">Warehousing Billing Workspace</div>
+              <div className="mt-1 max-w-3xl text-sm text-[rgb(var(--muted))]">
+                Monthly warehouse billing should summarize by client instead of by PO line. This first pass keeps every client visible and gives us a place to tune inbound, outbound, and storage pallet fees before the source counts are wired in.
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="warning">UI first pass</Badge>
+              <Badge variant="secondary">
+                Billing window {formatDateLabel(startDate)} to {formatDateLabel(endDate)}
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4 px-4 py-4">
+            <div className="rounded-md border border-[rgb(var(--accent))]/20 bg-[color-mix(in_oklab,rgb(var(--accent))_6%,white)] p-4">
+              <div className="text-sm font-medium text-[rgb(var(--foreground))]">Planned monthly formula</div>
+              <div className="mt-2 grid gap-3 md:grid-cols-3">
+                <div className="rounded-lg border border-[rgb(var(--border))] bg-white px-3 py-3">
+                  <div className="text-xs uppercase tracking-[0.12em] text-[rgb(var(--muted))]">Inbound</div>
+                  <div className="mt-2 text-sm font-medium text-[rgb(var(--foreground))]">Inbound pallets x client inbound fee</div>
+                </div>
+                <div className="rounded-lg border border-[rgb(var(--border))] bg-white px-3 py-3">
+                  <div className="text-xs uppercase tracking-[0.12em] text-[rgb(var(--muted))]">Outbound</div>
+                  <div className="mt-2 text-sm font-medium text-[rgb(var(--foreground))]">Outbound pallets x client outbound fee</div>
+                </div>
+                <div className="rounded-lg border border-[rgb(var(--border))] bg-white px-3 py-3">
+                  <div className="text-xs uppercase tracking-[0.12em] text-[rgb(var(--muted))]">Storage</div>
+                  <div className="mt-2 text-sm font-medium text-[rgb(var(--foreground))]">Active storage pallets x monthly storage fee</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              {[
+                metricCard("Clients In Scope", warehouseSummary.clientCount.toLocaleString(), "All currently visible customers stay on the warehouse worksheet for now.", "default"),
+                metricCard("Included", warehouseSummary.includedCount.toLocaleString(), warehouseSummary.excludedCount ? (warehouseSummary.excludedCount.toLocaleString() + " hidden from the worksheet draft.") : "Every client remains included in the draft.", warehouseSummary.excludedCount ? "warning" : "success"),
+                metricCard("Custom Fee Rows", warehouseSummary.nonDefaultCount.toLocaleString(), warehouseSummary.nonDefaultCount ? "Rows with non-default fees, notes, or inclusion changes." : "All rows still use the default fee profile.", warehouseSummary.nonDefaultCount ? "info" : "default"),
+                metricCard("Zero-Rate Rows", warehouseSummary.zeroRateCount.toLocaleString(), warehouseSummary.zeroRateCount ? "Useful for non-paying clients that should remain visible." : "No clients have all warehouse fees zeroed out.", warehouseSummary.zeroRateCount ? "warning" : "default")
+              ]}
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(320px,0.9fr)]">
+          <Card>
+            <CardHeader className="flex flex-col gap-3 border-b border-[rgb(var(--border))] pb-3 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <div className="text-base font-semibold text-[rgb(var(--foreground))]">Fee Structure By Client</div>
+                <div className="mt-1 text-sm text-[rgb(var(--muted))]">
+                  Default every client to $7.50 inbound per pallet, $7.50 outbound per pallet, and $9.00 monthly storage per pallet. This draft is local UI state only for now.
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="secondary">{warehouseClientRows.length.toLocaleString()} clients</Badge>
+                <Button onClick={resetWarehouseFeeDrafts} variant="outline" size="sm" disabled={!warehouseClientRows.length}>
+                  Reset To Defaults
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="px-0 py-0">
+              <TableShell className="rounded-none border-x-0 border-b-0">
+                <div className="overflow-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-[rgb(var(--surface))] text-[rgb(var(--muted))]">
+                      <tr className="border-b border-[rgb(var(--border))]">
+                        <th className="px-4 py-3 text-center font-medium">Include</th>
+                        <th className="px-4 py-3 text-left font-medium">Client</th>
+                        <th className="px-4 py-3 text-right font-medium">Inbound / Pallet</th>
+                        <th className="px-4 py-3 text-right font-medium">Outbound / Pallet</th>
+                        <th className="px-4 py-3 text-right font-medium">Storage / Pallet / Mo</th>
+                        <th className="px-4 py-3 text-left font-medium">Notes</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {warehouseClientRows.length ? warehouseClientRows.map(function(row) {
+                        return (
+                          <tr key={"warehouse-fee-" + row.customer} className="border-t border-[rgb(var(--border))] align-top odd:bg-[color-mix(in_oklab,rgb(var(--surface))_40%,white)]">
+                            <td className="px-4 py-3 text-center">
+                              <input
+                                type="checkbox"
+                                checked={!!row.included}
+                                onChange={function(event) {
+                                  updateWarehouseFeeDraft(row.customer, "included", !!event.target.checked);
+                                }}
+                                aria-label={"Include warehouse invoicing row for " + row.customer}
+                              />
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="font-medium text-[rgb(var(--foreground))]">{row.customer}</div>
+                              <div className="mt-1 text-xs text-[rgb(var(--muted))]">
+                                {row.included ? "Included in draft worksheet" : "Hidden from draft worksheet"}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3">
+                              <Input
+                                value={row.inboundRate}
+                                onChange={function(event) { updateWarehouseFeeDraft(row.customer, "inboundRate", event.target.value); }}
+                                inputMode="decimal"
+                                className="h-8 min-w-[108px] text-right text-xs"
+                              />
+                            </td>
+                            <td className="px-4 py-3">
+                              <Input
+                                value={row.outboundRate}
+                                onChange={function(event) { updateWarehouseFeeDraft(row.customer, "outboundRate", event.target.value); }}
+                                inputMode="decimal"
+                                className="h-8 min-w-[108px] text-right text-xs"
+                              />
+                            </td>
+                            <td className="px-4 py-3">
+                              <Input
+                                value={row.storageRate}
+                                onChange={function(event) { updateWarehouseFeeDraft(row.customer, "storageRate", event.target.value); }}
+                                inputMode="decimal"
+                                className="h-8 min-w-[108px] text-right text-xs"
+                              />
+                            </td>
+                            <td className="px-4 py-3">
+                              <Input
+                                value={row.note}
+                                onChange={function(event) { updateWarehouseFeeDraft(row.customer, "note", event.target.value); }}
+                                placeholder="Optional note"
+                                className="h-8 min-w-[180px] text-xs"
+                              />
+                            </td>
+                          </tr>
+                        );
+                      }) : (
+                        <tr>
+                          <td colSpan={6} className="px-4 py-6 text-center text-sm text-[rgb(var(--muted))]">
+                            No customer names are available from the current invoicing dataset yet.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </TableShell>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="border-b border-[rgb(var(--border))] pb-3">
+              <div className="text-base font-semibold text-[rgb(var(--foreground))]">Next Data Layer</div>
+              <div className="mt-1 text-sm text-[rgb(var(--muted))]">
+                This tab is ready for the warehouse counts once we wire them into the invoicing APIs.
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3 px-4 py-4 text-sm text-[rgb(var(--muted))]">
+              <div className="rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-3">
+                Monthly worksheet rows should roll up by client instead of by PO, SKU, and lot.
+              </div>
+              <div className="rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-3">
+                Warehouse counts will eventually come from inbound transfers, outbound transfers, and pallet storage billing data.
+              </div>
+              <div className="rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-3">
+                The same month picker at the top will define the warehouse billing window once those source counts are available.
+              </div>
+              <div className="rounded-md border border-[rgb(var(--warning))]/25 bg-[color-mix(in_oklab,rgb(var(--warning))_7%,white)] p-3 text-xs">
+                Draft only: fee edits here are not persisted yet and do not create invoice lines or QuickBooks exports.
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
+      {invoiceModeSwitcher}
+
       <Card>
         <CardHeader className="flex flex-col gap-3 border-b border-[rgb(var(--border))] pb-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
@@ -2204,7 +2537,7 @@ export default function InvoicingView(props) {
               Review billable production for a billing period, surface lines that need cleanup, and export invoice-ready summaries or detail rows.
             </div>
             <div className="mt-2 max-w-3xl text-xs text-[rgb(var(--muted))]">
-              Candidates in this view are derived from production output. They do not yet reconcile against posted or open invoice records.
+              Candidates in this view are derived from production output. They do not yet reconcile against posted or open invoice records. Switch to `Warehousing` to stage monthly pallet fee logic by client.
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">

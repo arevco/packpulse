@@ -315,6 +315,7 @@ export default function ProductionReadiness() {
       end: String(qs.get("ops_end") || "")
     };
     var invoicing = {
+      mode: String(qs.get("iv_mode") || "production"),
       start: String(qs.get("iv_start") || ""),
       end: String(qs.get("iv_end") || ""),
       customer: String(qs.get("iv_customer") || "all"),
@@ -402,6 +403,7 @@ export default function ProductionReadiness() {
     setOrDelete("ops_start", ops.start || "", "");
     setOrDelete("ops_end", ops.end || "", "");
     var iv = Object.assign({}, ivState || {});
+    setOrDelete("iv_mode", iv.mode || "production", "production");
     setOrDelete("iv_start", iv.start || "", "");
     setOrDelete("iv_end", iv.end || "", "");
     setOrDelete("iv_customer", iv.customer || "all", "all");
