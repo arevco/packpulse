@@ -573,16 +573,19 @@ export default function ProductionReadiness() {
   var staleCount = Math.max(0, dataSourceStatus.length - freshCount);
   var setupNeedsBootstrap = !!(ds.cacheHydrated && !ds.mappingConfirmed);
   var autoSyncHydrated = sharedMeta.source !== "unknown";
-  var latestNulogySyncMs = freshestTimestampMs([
+  var latestFullNulogySyncMs = freshestTimestampMs([
     ds.invTimestamp,
     ds.woTimestamp,
-    ds.productionTimestamp,
     ds.laborTimestamp,
     ds.itemMasterTimestamp,
     ds.bomTimestamp,
+    ds.edrTimestamp,
   ]);
   var latestProductionSyncMs = freshestTimestampMs([ds.productionTimestamp]);
-  var nulogyAutoSyncFresh = !!latestNulogySyncMs && (Date.now() - latestNulogySyncMs) < FULL_AUTO_SYNC_FRESH_MS;
+  // Keep the full-report cadence separate from the fast production refresh path.
+  // Otherwise frequent production-only syncs can suppress labor and other
+  // deferred reports indefinitely by constantly refreshing production timestamps.
+  var fullNulogyAutoSyncFresh = !!latestFullNulogySyncMs && (Date.now() - latestFullNulogySyncMs) < FULL_AUTO_SYNC_FRESH_MS;
   var productionAutoSyncFresh = !!latestProductionSyncMs && (Date.now() - latestProductionSyncMs) < PRODUCTION_AUTO_SYNC_FRESH_MS;
   var hiddenSyncBusy = !!(nulogySyncState && (nulogySyncState.syncing || nulogySyncState.deferredSyncing));
   var pendingHiddenSyncFailureCooldown = !hiddenSyncBusy && hiddenSyncWasBusyRef.current && !!(nulogySyncState && nulogySyncState.errorCount > 0);
@@ -723,14 +726,14 @@ export default function ProductionReadiness() {
   useEffect(() => {
     if (!showAutoBootstrap || !autoSyncHydrated) return;
     if (pendingHiddenSyncFailureCooldown) return;
-    if (!nulogyAutoSyncFresh && Date.now() >= fullAutoRetryUntilMs) {
+    if (!fullNulogyAutoSyncFresh && Date.now() >= fullAutoRetryUntilMs) {
       triggerHiddenNulogySync("full", { origin: autoSyncOrigin });
       return;
     }
     if (!productionAutoSyncFresh && Date.now() >= productionAutoRetryUntilMs) {
       triggerHiddenNulogySync("production_only", { origin: "auto" });
     }
-  }, [showAutoBootstrap, autoSyncHydrated, pendingHiddenSyncFailureCooldown, nulogyAutoSyncFresh, productionAutoSyncFresh, fullAutoRetryUntilMs, productionAutoRetryUntilMs, autoSyncOrigin, triggerHiddenNulogySync]);
+  }, [showAutoBootstrap, autoSyncHydrated, pendingHiddenSyncFailureCooldown, fullNulogyAutoSyncFresh, productionAutoSyncFresh, fullAutoRetryUntilMs, productionAutoRetryUntilMs, autoSyncOrigin, triggerHiddenNulogySync]);
 
   useEffect(function() {
     if (!syncedInventoryLooksLegacy) return;
@@ -752,7 +755,7 @@ export default function ProductionReadiness() {
       if (!dockApiLoading && !dockAutoSyncFresh) fetchOpenDockApi({ origin: autoSyncOrigin });
       if (!evoconApiLoading && !evoconAutoSyncFresh) fetchEvoconApi({ origin: autoSyncOrigin });
       if (showAutoBootstrap && !hiddenSyncBusy && !pendingHiddenSyncFailureCooldown) {
-        if (!nulogyAutoSyncFresh && Date.now() >= fullAutoRetryUntilMs) {
+        if (!fullNulogyAutoSyncFresh && Date.now() >= fullAutoRetryUntilMs) {
           triggerHiddenNulogySync("full", { origin: autoSyncOrigin });
         } else if (!productionAutoSyncFresh && Date.now() >= productionAutoRetryUntilMs) {
           triggerHiddenNulogySync("production_only", { origin: "auto" });
@@ -760,7 +763,7 @@ export default function ProductionReadiness() {
       }
     }, AUTO_SYNC_MS);
     return function() { clearInterval(intervalId); };
-  }, [shouldRunIntervalSync, showAutoBootstrap, dockApiLoading, dockApiError, evoconApiLoading, evoconApiError, hiddenSyncBusy, pendingHiddenSyncFailureCooldown, fetchOpenDockApi, fetchEvoconApi, dockAutoSyncFresh, evoconAutoSyncFresh, nulogyAutoSyncFresh, productionAutoSyncFresh, fullAutoRetryUntilMs, productionAutoRetryUntilMs, autoSyncOrigin, triggerHiddenNulogySync]);
+  }, [shouldRunIntervalSync, showAutoBootstrap, dockApiLoading, dockApiError, evoconApiLoading, evoconApiError, hiddenSyncBusy, pendingHiddenSyncFailureCooldown, fetchOpenDockApi, fetchEvoconApi, dockAutoSyncFresh, evoconAutoSyncFresh, fullNulogyAutoSyncFresh, productionAutoSyncFresh, fullAutoRetryUntilMs, productionAutoRetryUntilMs, autoSyncOrigin, triggerHiddenNulogySync]);
 
   useEffect(() => {
     if (hiddenSyncBusy) {
