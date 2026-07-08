@@ -429,6 +429,24 @@ const COLUMN_MAPS = {
   }
 };
 
+const RETRYABLE_FETCH_STATUSES = {
+  408: true,
+  425: true,
+  429: true,
+  500: true,
+  502: true,
+  503: true,
+  504: true
+};
+const RETRYABLE_XML_ERROR_CODES = {
+  InternalError: true,
+  RequestTimeout: true,
+  ServiceUnavailable: true,
+  SlowDown: true
+};
+const FETCH_RETRY_ATTEMPTS = 3;
+const FETCH_RETRY_BASE_DELAY_MS = 750;
+
 export function parseCSV(text) {
   const lines = text.split("\n");
   if (lines.length < 2) return [];
@@ -448,6 +466,103 @@ export function parseCSV(text) {
     rows.push(row);
   }
   return rows;
+}
+
+function sleep(ms) {
+  return new Promise(resolve => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function summarizeErrorText(text) {
+  return String(text || "").replace(/\s+/g, " ").trim().slice(0, 180);
+}
+
+function extractXmlErrorCode(text) {
+  const match = String(text || "").match(/<Code>([^<]+)<\/Code>/i);
+  return match ? String(match[1] || "").trim() : "";
+}
+
+function hasXmlErrorPayload(text, contentType) {
+  const raw = String(text || "").trim();
+  const normalizedType = String(contentType || "").toLowerCase();
+  if (!raw) return false;
+  if (!normalizedType.includes("xml") && !raw.startsWith("<?xml")) return false;
+  return raw.includes("<Error>") && !!extractXmlErrorCode(raw);
+}
+
+function isRetryableXmlError(text, contentType) {
+  if (!hasXmlErrorPayload(text, contentType)) return false;
+  return !!RETRYABLE_XML_ERROR_CODES[extractXmlErrorCode(text)];
+}
+
+function isRetryableFetchError(error) {
+  const causeCode = String(error && error.cause && error.cause.code || "").toUpperCase();
+  if (
+    causeCode === "ECONNRESET" ||
+    causeCode === "ETIMEDOUT" ||
+    causeCode === "EAI_AGAIN" ||
+    causeCode === "UND_ERR_CONNECT_TIMEOUT" ||
+    causeCode === "UND_ERR_SOCKET"
+  ) {
+    return true;
+  }
+  const message = String(error && error.message || "").toLowerCase();
+  return (
+    message.includes("fetch failed") ||
+    message.includes("socket") ||
+    message.includes("timeout") ||
+    message.includes("econnreset")
+  );
+}
+
+async function fetchTextWithRetries(url, options, errorLabel) {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= FETCH_RETRY_ATTEMPTS; attempt++) {
+    try {
+      const response = await fetch(url, options);
+      const text = await response.text().catch(() => "");
+      const contentType = response.headers.get("content-type") || "";
+      const xmlErrorPayload = hasXmlErrorPayload(text, contentType);
+      const retryableXmlError = isRetryableXmlError(text, contentType);
+
+      if (!response.ok || xmlErrorPayload) {
+        const prefix = attempt > 1 ? `${errorLabel} after ${attempt} attempts` : errorLabel;
+        const error = new Error(`${prefix} (${response.status}): ${summarizeErrorText(text)}`);
+        error.statusCode = response.status;
+        error.retryable = !!RETRYABLE_FETCH_STATUSES[response.status] || retryableXmlError;
+        error.responseText = summarizeErrorText(text);
+        error.contentType = contentType;
+        lastError = error;
+        if (error.retryable && attempt < FETCH_RETRY_ATTEMPTS) {
+          await sleep(FETCH_RETRY_BASE_DELAY_MS * attempt);
+          continue;
+        }
+        throw error;
+      }
+
+      return {
+        text,
+        contentType
+      };
+    } catch (error) {
+      lastError = error;
+      const retryable = typeof (error && error.retryable) === "boolean"
+        ? error.retryable
+        : isRetryableFetchError(error);
+      if (error && typeof error.retryable !== "boolean") {
+        error.retryable = retryable;
+      }
+      if (retryable && attempt < FETCH_RETRY_ATTEMPTS) {
+        await sleep(FETCH_RETRY_BASE_DELAY_MS * attempt);
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw lastError || new Error(errorLabel + " failed.");
 }
 
 function parseCSVLine(line) {
@@ -551,15 +666,13 @@ export async function fetchAndTransformReport(downloadUrl, reportType, rawMode) 
     };
   }
   try {
-    const response = await fetch(downloadUrl);
-    if (!response.ok) {
-      return {
-        ok: false,
-        statusCode: response.status,
-        body: { error: `Failed to download report CSV (${response.status})` }
-      };
-    }
-    const csvText = await response.text();
+    const downloadResult = await fetchTextWithRetries(downloadUrl, {
+      method: "GET",
+      headers: {
+        "Accept": "text/csv,text/plain,application/xml,text/xml"
+      }
+    }, "Failed to download report CSV");
+    const csvText = downloadResult.text;
     const rows = parseCSV(csvText);
     const originalHeaders = rows.length > 0 ? Object.keys(rows[0]) : [];
     const transformed = rawMode ? rows : transformColumns(rows, reportType);
@@ -586,11 +699,16 @@ export async function fetchAndTransformReport(downloadUrl, reportType, rawMode) 
       }
     };
   } catch (err) {
-    Sentry.captureException(err);
+    const statusCode = Number(err && err.statusCode) || 500;
+    if (!(err && (err.statusCode || typeof err.retryable === "boolean"))) {
+      Sentry.captureException(err);
+    }
     return {
       ok: false,
-      statusCode: 500,
-      body: { error: `Failed to download report: ${err.message}` }
+      statusCode,
+      body: {
+        error: statusCode >= 400 ? `Failed to download report CSV (${statusCode})` : `Failed to download report: ${err.message}`
+      }
     };
   }
 }
