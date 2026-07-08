@@ -340,6 +340,7 @@ export async function fetchReceiveOrdersDirect() {
 
   const authHeader = buildAuthHeader(credentials.user, credentials.pass);
   const sourcePath = getReceiveOrdersPath();
+  let reportRunError = null;
 
   try {
     try {
@@ -351,8 +352,9 @@ export async function fetchReceiveOrdersDirect() {
           body: reportRunBody
         };
       }
-    } catch (reportRunError) {
-      Sentry.captureException(reportRunError);
+      reportRunError = new Error("Receive Orders report run returned no rows.");
+    } catch (caughtReportRunError) {
+      reportRunError = caughtReportRunError;
     }
 
     const initialPayload = await fetchText(sourcePath, authHeader);
@@ -369,7 +371,12 @@ export async function fetchReceiveOrdersDirect() {
     const originalHeaders = rawRows.length ? Object.keys(rawRows[0]) : (parsed.headers || []);
     const openRowCount = countOpenRows(transformed);
     if (!rawRows.length) {
-      throw new Error("Nulogy canned Receive Orders export returned no usable rows.");
+      const fallbackError = new Error("Nulogy canned Receive Orders export returned no usable rows.");
+      if (reportRunError && reportRunError.message) {
+        fallbackError.reportRunError = reportRunError;
+        fallbackError.message += " Report-run failure: " + reportRunError.message;
+      }
+      throw fallbackError;
     }
 
     return {
@@ -390,12 +397,23 @@ export async function fetchReceiveOrdersDirect() {
           parsedFormat: parsed.format || "",
           csvUrl: parsed.csvUrl || "",
           rawRowCount: rawRows.length,
-          openRowCount
+          openRowCount,
+          reportRunFallbackUsed: !!reportRunError
         }
       }
     };
   } catch (error) {
-    Sentry.captureException(error);
+    if (reportRunError && reportRunError !== error) {
+      Sentry.withScope(function(scope) {
+        scope.setContext("receiveOrdersReportRun", {
+          message: reportRunError && reportRunError.message ? reportRunError.message : "unknown",
+          name: reportRunError && reportRunError.name ? reportRunError.name : "Error"
+        });
+        Sentry.captureException(error);
+      });
+    } else {
+      Sentry.captureException(error);
+    }
     return {
       ok: false,
       statusCode: 500,
