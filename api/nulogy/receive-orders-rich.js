@@ -41,6 +41,8 @@ const RECEIVE_ORDER_COLUMNS = [
 const DEFAULT_RECEIVE_ORDERS_COMPLETED_REPORT_ID = String(
   process.env.NULOGY_RECEIVE_ORDERS_COMPLETED_REPORT_ID || "68542516"
 ).trim();
+const FALLBACK_FETCH_ATTEMPTS = 3;
+const FALLBACK_FETCH_BASE_DELAY_MS = 750;
 
 function normalizeKey(value) {
   return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -57,6 +59,12 @@ function countOpenRows(rows) {
   return (Array.isArray(rows) ? rows : []).reduce(function(sum, row) {
     return classifyReceivedValue(row && row.Received) === "yes" ? sum : (sum + 1);
   }, 0);
+}
+
+function sleep(ms) {
+  return new Promise(function(resolve) {
+    setTimeout(resolve, ms);
+  });
 }
 
 function buildDefaultReceiveOrdersPath() {
@@ -141,28 +149,72 @@ function parseHtmlTables(html) {
   }).filter(Boolean);
 }
 
+function scoreReceiveOrdersHeaders(headers) {
+  return (Array.isArray(headers) ? headers : []).reduce(function(sum, header) {
+    const key = normalizeKey(header);
+    if (key.includes("receiveordercode")) return sum + 8;
+    if (key.includes("receiveorder")) return sum + 6;
+    if (key.includes("itemcode")) return sum + 6;
+    if (key.includes("expecteddelivery")) return sum + 6;
+    if (key.includes("expectedquantity")) return sum + 5;
+    if (key.includes("received")) return sum + 4;
+    if (key.includes("reference")) return sum + 3;
+    return sum;
+  }, 0);
+}
+
 function chooseBestReceiveOrdersTable(tables) {
   let best = null;
   let bestScore = -1;
   (Array.isArray(tables) ? tables : []).forEach(function(table) {
     const headers = Array.isArray(table && table.headers) ? table.headers : [];
-    const score = headers.reduce(function(sum, header) {
-      const key = normalizeKey(header);
-      if (key.includes("receiveordercode")) sum += 8;
-      if (key.includes("receiveorder")) sum += 6;
-      if (key.includes("itemcode")) sum += 6;
-      if (key.includes("expecteddelivery")) sum += 6;
-      if (key.includes("expectedquantity")) sum += 5;
-      if (key.includes("received")) sum += 4;
-      if (key.includes("reference")) sum += 3;
-      return sum;
-    }, 0);
+    const score = scoreReceiveOrdersHeaders(headers);
     if (score > bestScore) {
       bestScore = score;
       best = table;
     }
   });
   return best;
+}
+
+function parseCsvLine(line) {
+  const result = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === "\"") {
+        if (i + 1 < line.length && line[i + 1] === "\"") {
+          current += "\"";
+          i += 1;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        current += ch;
+      }
+    } else if (ch === "\"") {
+      inQuotes = true;
+    } else if (ch === ",") {
+      result.push(current.trim());
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+
+  result.push(current.trim());
+  return result;
+}
+
+function extractCsvHeaders(text) {
+  const firstLine = String(text || "").split(/\r?\n/).find(function(line) {
+    return String(line || "").trim().length > 0;
+  });
+  if (!firstLine) return [];
+  return parseCsvLine(firstLine);
 }
 
 function looksLikeCsv(text, contentType) {
@@ -219,11 +271,14 @@ async function fetchText(url, authHeader) {
 
 function parseReceiveOrdersPayload(payload) {
   if (looksLikeCsv(payload && payload.text, payload && payload.contentType)) {
-    const rows = parseCSV(String(payload && payload.text || ""));
+    const csvText = String(payload && payload.text || "");
+    const rows = parseCSV(csvText);
+    const headers = extractCsvHeaders(csvText);
     return {
       rows,
       format: "csv",
-      csvUrl: payload && payload.finalUrl ? payload.finalUrl : payload && payload.url ? payload.url : ""
+      csvUrl: payload && payload.finalUrl ? payload.finalUrl : payload && payload.url ? payload.url : "",
+      headers
     };
   }
 
@@ -244,6 +299,80 @@ function parseReceiveOrdersPayload(payload) {
     csvUrl: "",
     headers: best && Array.isArray(best.headers) ? best.headers : []
   };
+}
+
+function summarizePayloadForError(parsed, payloadUsed) {
+  const headers = Array.isArray(parsed && parsed.headers) ? parsed.headers : [];
+  const payloadText = String(payloadUsed && payloadUsed.text || "");
+  return {
+    format: parsed && parsed.format ? parsed.format : "",
+    contentType: payloadUsed && payloadUsed.contentType ? payloadUsed.contentType : "",
+    csvUrl: parsed && parsed.csvUrl ? parsed.csvUrl : "",
+    headerCount: headers.length,
+    headerScore: scoreReceiveOrdersHeaders(headers),
+    sample: payloadText.replace(/\s+/g, " ").trim().slice(0, 180)
+  };
+}
+
+function createNoUsableRowsError(details) {
+  const info = details && typeof details === "object" ? details : {};
+  const error = new Error(
+    "Nulogy canned Receive Orders export returned no usable rows after " +
+    String(info.attempts || FALLBACK_FETCH_ATTEMPTS) +
+    " attempts."
+  );
+  error.details = info;
+  return error;
+}
+
+function isRecognizableEmptyReceiveOrdersPayload(parsed, payloadUsed) {
+  const headers = Array.isArray(parsed && parsed.headers) ? parsed.headers : [];
+  if (headers.length && scoreReceiveOrdersHeaders(headers) >= 6) return true;
+  return false;
+}
+
+async function fetchReceiveOrdersFallbackPayload(sourcePath, authHeader) {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= FALLBACK_FETCH_ATTEMPTS; attempt++) {
+    try {
+      const initialPayload = await fetchText(sourcePath, authHeader);
+      let parsed = parseReceiveOrdersPayload(initialPayload);
+      let payloadUsed = initialPayload;
+
+      if (parsed.csvUrl && !parsed.rows.length) {
+        payloadUsed = await fetchText(parsed.csvUrl, authHeader);
+        parsed = parseReceiveOrdersPayload(payloadUsed);
+      }
+
+      const rawRows = Array.isArray(parsed.rows) ? parsed.rows : [];
+      if (rawRows.length || isRecognizableEmptyReceiveOrdersPayload(parsed, payloadUsed)) {
+        return {
+          rawRows,
+          parsed,
+          payloadUsed,
+          attempt
+        };
+      }
+
+      lastError = createNoUsableRowsError({
+        attempts: attempt,
+        sourcePath,
+        ...summarizePayloadForError(parsed, payloadUsed)
+      });
+    } catch (error) {
+      lastError = error;
+    }
+
+    if (attempt < FALLBACK_FETCH_ATTEMPTS) {
+      await sleep(FALLBACK_FETCH_BASE_DELAY_MS * attempt);
+    }
+  }
+
+  if (lastError && lastError.details) {
+    lastError.details.attempts = FALLBACK_FETCH_ATTEMPTS;
+  }
+  throw lastError || createNoUsableRowsError({ attempts: FALLBACK_FETCH_ATTEMPTS, sourcePath });
 }
 
 async function fetchReceiveOrdersViaReportRun() {
@@ -357,27 +486,21 @@ export async function fetchReceiveOrdersDirect() {
       reportRunError = caughtReportRunError;
     }
 
-    const initialPayload = await fetchText(sourcePath, authHeader);
-    let parsed = parseReceiveOrdersPayload(initialPayload);
-    let payloadUsed = initialPayload;
-
-    if (parsed.csvUrl && !parsed.rows.length) {
-      payloadUsed = await fetchText(parsed.csvUrl, authHeader);
-      parsed = parseReceiveOrdersPayload(payloadUsed);
-    }
-
-    const rawRows = Array.isArray(parsed.rows) ? parsed.rows : [];
+    const fallbackPayload = await fetchReceiveOrdersFallbackPayload(sourcePath, authHeader);
+    const parsed = fallbackPayload.parsed;
+    const payloadUsed = fallbackPayload.payloadUsed;
+    const rawRows = Array.isArray(fallbackPayload.rawRows) ? fallbackPayload.rawRows : [];
     const transformed = transformColumns(rawRows, "receiveorders");
     const originalHeaders = rawRows.length ? Object.keys(rawRows[0]) : (parsed.headers || []);
+    const columns = transformed.length
+      ? Object.keys(transformed[0])
+      : (originalHeaders.length
+          ? Object.keys(transformColumns([originalHeaders.reduce(function(row, header) {
+              row[header] = "";
+              return row;
+            }, {})], "receiveorders")[0] || {})
+          : []);
     const openRowCount = countOpenRows(transformed);
-    if (!rawRows.length) {
-      const fallbackError = new Error("Nulogy canned Receive Orders export returned no usable rows.");
-      if (reportRunError && reportRunError.message) {
-        fallbackError.reportRunError = reportRunError;
-        fallbackError.message += " Report-run failure: " + reportRunError.message;
-      }
-      throw fallbackError;
-    }
 
     return {
       ok: true,
@@ -386,7 +509,7 @@ export async function fetchReceiveOrdersDirect() {
         data: transformed,
         rowCount: transformed.length,
         reportType: "receiveorders",
-        columns: transformed.length ? Object.keys(transformed[0]) : [],
+        columns,
         originalHeaders,
         diagnostics: {
           source: "canned_report",
@@ -398,20 +521,43 @@ export async function fetchReceiveOrdersDirect() {
           csvUrl: parsed.csvUrl || "",
           rawRowCount: rawRows.length,
           openRowCount,
-          reportRunFallbackUsed: !!reportRunError
+          reportRunFallbackUsed: !!reportRunError,
+          fallbackAttemptCount: Number(fallbackPayload.attempt) || 1
         }
       }
     };
   } catch (error) {
+    if (reportRunError && !error.reportRunError) {
+      error.reportRunError = reportRunError;
+      if (reportRunError.message && String(error.message || "").indexOf(reportRunError.message) === -1) {
+        error.message += " Report-run failure: " + reportRunError.message;
+      }
+    }
     if (reportRunError && reportRunError !== error) {
       Sentry.withScope(function(scope) {
         scope.setContext("receiveOrdersReportRun", {
           message: reportRunError && reportRunError.message ? reportRunError.message : "unknown",
           name: reportRunError && reportRunError.name ? reportRunError.name : "Error"
         });
+        if (error && error.details) {
+          scope.setContext("receiveOrdersFallback", error.details);
+        }
         Sentry.captureException(error);
       });
     } else {
+      if (error && error.details) {
+        Sentry.withScope(function(scope) {
+          scope.setContext("receiveOrdersFallback", error.details);
+          Sentry.captureException(error);
+        });
+        return {
+          ok: false,
+          statusCode: 500,
+          body: {
+            error: "Failed to fetch Receive Orders export: " + (error && error.message ? error.message : "unknown")
+          }
+        };
+      }
       Sentry.captureException(error);
     }
     return {
