@@ -179,6 +179,8 @@ function compactSharedSnapshotPayloadForApp(input) {
   }
 
   trimDataset("evoconData", 900);
+  trimDataset("productionData", 300);
+  trimDataset("laborData", 400);
   trimDataset("edrData", 1200);
   trimDataset("dockData", 800);
   trimDataset("boms", 2500);

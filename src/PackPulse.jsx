@@ -234,6 +234,225 @@ function pickLooseInventoryField(row, keys) {
   return "";
 }
 
+function pickLooseRowField(row, keys) {
+  if (!row || typeof row !== "object") return "";
+  var rowKeys = Object.keys(row);
+  for (var i = 0; i < keys.length; i++) {
+    var wanted = normalizeLooseKey(keys[i]);
+    for (var j = 0; j < rowKeys.length; j++) {
+      if (normalizeLooseKey(rowKeys[j]) === wanted) return row[rowKeys[j]];
+    }
+  }
+  return "";
+}
+
+function measureJsonBytes(value) {
+  var text = "";
+  try {
+    text = JSON.stringify(value || {});
+  } catch (_error) {
+    return 0;
+  }
+  if (typeof TextEncoder !== "undefined") {
+    return new TextEncoder().encode(text).length;
+  }
+  return unescape(encodeURIComponent(text)).length;
+}
+
+var LABOR_SYNC_MONTH_INDEX = {
+  jan: 1,
+  feb: 2,
+  mar: 3,
+  apr: 4,
+  may: 5,
+  jun: 6,
+  jul: 7,
+  aug: 8,
+  sep: 9,
+  oct: 10,
+  nov: 11,
+  dec: 12
+};
+
+function toEasternDateKey(date) {
+  if (!(date instanceof Date) || isNaN(date)) return "";
+  var parts = {};
+  new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(date).forEach(function(part) {
+    if (part.type !== "literal") parts[part.type] = part.value;
+  });
+  if (!parts.year || !parts.month || !parts.day) return "";
+  return parts.year + "-" + parts.month + "-" + parts.day;
+}
+
+function parseLooseDateKey(value) {
+  var raw = String(value || "").trim();
+  if (!raw) return "";
+
+  var isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T].*)?$/);
+  if (isoMatch) return isoMatch[1] + "-" + isoMatch[2] + "-" + isoMatch[3];
+
+  var namedMatch = raw.match(/^(\d{4})-([A-Za-z]{3})-(\d{1,2})(?:[ T].*)?$/);
+  if (namedMatch) {
+    var namedMonth = LABOR_SYNC_MONTH_INDEX[String(namedMatch[2] || "").toLowerCase()];
+    if (namedMonth) {
+      return namedMatch[1] + "-" + String(namedMonth).padStart(2, "0") + "-" + String(parseInt(namedMatch[3], 10)).padStart(2, "0");
+    }
+  }
+
+  var slashMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T].*)?$/);
+  if (slashMatch) {
+    return slashMatch[3] + "-" + String(parseInt(slashMatch[1], 10)).padStart(2, "0") + "-" + String(parseInt(slashMatch[2], 10)).padStart(2, "0");
+  }
+
+  var parsed = new Date(raw);
+  return isNaN(parsed) ? "" : toEasternDateKey(parsed);
+}
+
+function extractLaborSyncDateKey(row) {
+  var explicitDate = pickLooseRowField(row, [
+    "Worked Date ET",
+    "worked_date_et",
+    "Worked Date",
+    "worked_date",
+    "Work Date",
+    "work_date",
+    "Date",
+    "date"
+  ]);
+  var explicitKey = parseLooseDateKey(explicitDate);
+  if (explicitKey) return explicitKey;
+  return parseLooseDateKey(pickLooseRowField(row, [
+    "Clock In Time",
+    "clock_in_time",
+    "Clock In At",
+    "clock_in_at",
+    "Clocked In At",
+    "clocked_in_at",
+    "Started At",
+    "started_at",
+    "Clock Out Time",
+    "clock_out_time",
+    "Clock Out At",
+    "clock_out_at",
+    "Clocked Out At",
+    "clocked_out_at",
+    "Ended At",
+    "ended_at"
+  ]));
+}
+
+function buildLaborSyncBatches(rows) {
+  var grouped = {};
+  var undated = [];
+  var batches = [];
+  var maxRowsPerBatch = 450;
+  var maxDatesPerBatch = 7;
+  var maxRequestBytes = 350000;
+
+  (Array.isArray(rows) ? rows : []).forEach(function(row) {
+    var dateKey = extractLaborSyncDateKey(row);
+    if (!dateKey) {
+      undated.push(row);
+      return;
+    }
+    if (!grouped[dateKey]) grouped[dateKey] = [];
+    grouped[dateKey].push(row);
+  });
+
+  var dateKeys = Object.keys(grouped).sort();
+  var currentRows = [];
+  var currentDateCount = 0;
+
+  function flushCurrent() {
+    if (!currentRows.length) return;
+    batches.push(currentRows.slice());
+    currentRows = [];
+    currentDateCount = 0;
+  }
+
+  dateKeys.forEach(function(dateKey) {
+    var dateRows = grouped[dateKey] || [];
+    var nextRows = currentRows.concat(dateRows);
+    var nextBytes = measureJsonBytes({
+      rows: nextRows,
+      syncedAt: "2000-01-01T00:00:00.000Z",
+      refresh: false
+    });
+    var shouldFlushFirst = currentRows.length > 0 && (
+      nextRows.length > maxRowsPerBatch ||
+      (currentDateCount + 1) > maxDatesPerBatch ||
+      nextBytes > maxRequestBytes
+    );
+    if (shouldFlushFirst) flushCurrent();
+    currentRows = currentRows.concat(dateRows);
+    currentDateCount += 1;
+  });
+
+  if (undated.length) {
+    var undatedCandidate = currentRows.concat(undated);
+    var undatedBytes = measureJsonBytes({
+      rows: undatedCandidate,
+      syncedAt: "2000-01-01T00:00:00.000Z",
+      refresh: false
+    });
+    if (currentRows.length > 0 && (undatedCandidate.length > maxRowsPerBatch || undatedBytes > maxRequestBytes)) {
+      flushCurrent();
+    }
+    currentRows = currentRows.concat(undated);
+  }
+
+  flushCurrent();
+  return batches;
+}
+
+async function postJsonOrThrow(url, payload, label) {
+  var response = await fetch(url, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  var rawText = await response.text();
+  var body = null;
+  if (rawText) {
+    try {
+      body = JSON.parse(rawText);
+    } catch (_error) {
+      body = null;
+    }
+  }
+  if (!response.ok || (body && body.ok === false)) {
+    var detail = [
+      body && body.error,
+      body && body.details,
+      body && body.message,
+      body && body.laborStatus,
+      body && body.productionStatus
+    ].filter(Boolean).join(": ");
+    if (!detail && rawText) detail = rawText.slice(0, 220);
+    throw new Error(label + " failed (" + response.status + "): " + (detail || ("HTTP " + response.status)));
+  }
+  return body;
+}
+
+async function writeLaborRowsToCache(rows, syncedAt) {
+  var batches = buildLaborSyncBatches(rows);
+  var responses = [];
+  for (var i = 0; i < batches.length; i++) {
+    responses.push(await postJsonOrThrow("/api/cache/labor-events", {
+      rows: batches[i],
+      syncedAt: syncedAt,
+      refresh: i === (batches.length - 1)
+    }, "Labor event ingest batch " + (i + 1) + "/" + batches.length));
+  }
+  return responses;
+}
+
 const OperationsView = lazySafe(importOperationsView, "Operations");
 const ForecastView = lazySafe(importForecastView, "Forecast");
 const WorkOrdersView = lazySafe(function() { return import("./views/WorkOrdersView"); }, "Work Orders");
@@ -342,6 +561,7 @@ export default function ProductionReadiness() {
   const [operationsPermalinkState, setOperationsPermalinkState] = useState(function() { return parseInitialPermalink().operations || {}; });
   const [invoicingPermalinkState, setInvoicingPermalinkState] = useState(function() { return parseInitialPermalink().invoicing || {}; });
   const [operationsServerSyncVersion, setOperationsServerSyncVersion] = useState(0);
+  const [cacheWriteError, setCacheWriteError] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [showDataSetup, setShowDataSetup] = useState(false);
   const [showDataControlsPanel, setShowDataControlsPanel] = useState(false);
@@ -801,6 +1021,7 @@ export default function ProductionReadiness() {
 
   var handleNulogyData = useCallback(async function(results) {
     var ts = new Date();
+    var syncedAtIso = ts.toISOString();
     var serverWrites = [];
     var coreDataChanged = false;
     var getRows = function(payload) {
@@ -855,14 +1076,10 @@ export default function ProductionReadiness() {
         ds.setProductionFileName("Nulogy Sync");
         ds.setProductionTimestamp(ts);
       }
-      serverWrites.push(fetch("/api/cache/production-events", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows: productionRows, syncedAt: ts.toISOString() })
-      }).catch(function() {
-        // Non-blocking: shared snapshot repair can still recover production events.
-      }));
+      serverWrites.push(postJsonOrThrow("/api/cache/production-events", {
+        rows: productionRows,
+        syncedAt: syncedAtIso
+      }, "Production event ingest"));
     }
     if (results.labor) {
       var laborRows = getRows(results.labor);
@@ -871,14 +1088,7 @@ export default function ProductionReadiness() {
         ds.setLaborFileName("Nulogy Sync");
         ds.setLaborTimestamp(ts);
       }
-      serverWrites.push(fetch("/api/cache/labor-events", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows: laborRows, syncedAt: ts.toISOString() })
-      }).catch(function() {
-        // Non-blocking: shared snapshot repair can still recover labor events.
-      }));
+      serverWrites.push(writeLaborRowsToCache(laborRows, syncedAtIso));
     }
     if (results.bom) {
       var bomRows = getRows(results.bom);
@@ -922,7 +1132,22 @@ export default function ProductionReadiness() {
       }, 1500);
     }
     if (serverWrites.length) {
-      await Promise.allSettled(serverWrites);
+      var writeResults = await Promise.allSettled(serverWrites);
+      var rejectedWrites = writeResults.filter(function(result) { return result.status === "rejected"; });
+      if (rejectedWrites.length) {
+        rejectedWrites.forEach(function(result) {
+          console.error("[PackPulse] Server cache write failed:", result.reason);
+        });
+        setCacheWriteError(
+          rejectedWrites[0] &&
+          rejectedWrites[0].reason &&
+          rejectedWrites[0].reason.message
+            ? rejectedWrites[0].reason.message
+            : "Server cache write failed."
+        );
+      } else {
+        setCacheWriteError("");
+      }
       setOperationsServerSyncVersion(function(v) { return v + 1; });
     }
   }, [hiddenNulogySyncMode, hiddenNulogySyncOrigin, ds.inventory, ds.inventoryDetailData, ds.workOrders, ds.itemMaster, ds.productionData, ds.laborData, ds.boms, ds.edrData]);
@@ -1261,6 +1486,7 @@ export default function ProductionReadiness() {
   var visibleDockSyncInfo = !!(dockApiInfo && dockSyncOrigin !== "auto");
   var visibleDockSyncError = !!(dockApiError && dockSyncOrigin !== "auto");
   var visibleNulogySyncError = !!(nulogySyncState && nulogySyncState.errorCount > 0 && hiddenNulogySyncOrigin !== "auto");
+  var visibleCacheWriteError = !!cacheWriteError;
   var showSharedSnapshotWritingBadge = sharedWrite.status === "writing" && showDataControlsPanel;
   var nulogyControlLabel = visibleNulogySyncBusy
     ? "Syncing Nulogy..."
@@ -1272,14 +1498,15 @@ export default function ProductionReadiness() {
     visibleDockSyncBusy ||
     visibleNulogySyncBusy ||
     visibleDockSyncError ||
-    visibleNulogySyncError
+    visibleNulogySyncError ||
+    visibleCacheWriteError
   );
   var isActivelySyncing = showAutoBootstrap && (
     visibleDockSyncBusy ||
     visibleNulogySyncBusy
   );
   var hasAnySyncedData = !!(ds.invTimestamp || ds.woTimestamp || ds.productionTimestamp || ds.bomTimestamp || ds.edrTimestamp || ds.dockTimestamp);
-  var hasSyncErrors = visibleDockSyncError || visibleNulogySyncError;
+  var hasSyncErrors = visibleDockSyncError || visibleNulogySyncError || visibleCacheWriteError;
   var syncHealthy = showAutoBootstrap && hasAnySyncedData && !isActivelySyncing && !hasSyncErrors;
   var showSyncBannerContainer = showSyncBanner;
   var syncBarColor = isActivelySyncing ? C.accent : C.ok;
@@ -1395,6 +1622,7 @@ export default function ProductionReadiness() {
             {hiddenSyncBusy && <Badge variant="secondary">Loading Nulogy…</Badge>}
             {visibleDockSyncInfo && <Badge variant="success">{dockApiInfo}</Badge>}
             {visibleDockSyncError && <Badge variant="danger">OpenDock: {dockApiError}</Badge>}
+            {visibleCacheWriteError && <Badge variant="danger">Cache sync issue</Badge>}
             {!dockApiLoading && !hiddenSyncBusy && (
             <Button onClick={() => { setDockApiInfo(""); setDockApiError(""); triggerFullNulogySync(); fetchOpenDockApi(); fetchEvoconApi(); }} variant="outline" size="sm">
                 Retry Sync
@@ -1406,6 +1634,11 @@ export default function ProductionReadiness() {
             <Button onClick={() => { setAutoBootstrapEnabled(false); setShowDataSetup(true); }} variant="outline" size="sm">
               Switch to Manual Upload
             </Button>
+            {visibleCacheWriteError && (
+              <div className="basis-full text-xs text-[rgb(var(--danger))]">
+                {cacheWriteError}
+              </div>
+            )}
           </div>
         )}
         {(!showAutoBootstrap || showDataSetup) && <div className="mb-2 text-sm font-semibold tracking-[0.2px] text-[rgb(var(--muted))]">Data Setup</div>}

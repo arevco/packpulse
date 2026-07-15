@@ -28,6 +28,7 @@ export default async function handler(req, res) {
     if (!user) return res.status(401).json({ error: "Unauthorized" });
     const rows = req.body && Array.isArray(req.body.rows) ? req.body.rows : [];
     const syncedAt = req.body && req.body.syncedAt ? String(req.body.syncedAt) : new Date().toISOString();
+    const shouldRefresh = !(req.body && Object.prototype.hasOwnProperty.call(req.body, "refresh") && req.body.refresh === false);
     const events = buildLaborEvents(rows, CACHE_SITE_ID, syncedAt, user.email);
     if (!events.length) {
       return res.status(200).json({ ok: true, submitted: rows.length, written: 0, note: "no_positive_labor_rows" });
@@ -39,8 +40,8 @@ export default async function handler(req, res) {
         events: events,
         correctionDays: Number(process.env.LABOR_EVENT_CORRECTION_DAYS || process.env.NULOGY_EVENT_CORRECTION_DAYS || 60)
       });
-      var refreshResult = { status: "noop", details: null };
-      if (writeResult.written > 0) {
+      var refreshResult = { status: shouldRefresh ? "noop" : "deferred", details: null };
+      if (writeResult.written > 0 && shouldRefresh) {
         try {
           refreshResult = await refreshOpsPerformanceViews(supabase);
         } catch (refreshErr) {
@@ -59,6 +60,7 @@ export default async function handler(req, res) {
         writeMode: writeResult.writeMode,
         correctionStart: writeResult.correctionStart,
         written: writeResult.written,
+        refreshRequested: shouldRefresh,
         deletedWindowStart: writeResult.deletedWindowStart,
         deletedWindowEnd: writeResult.deletedWindowEnd,
         guardedDates: writeResult.guardedDates,
