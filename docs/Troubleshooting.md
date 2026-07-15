@@ -27,6 +27,23 @@
   2. Ensure correct Supabase project.
   3. Redeploy if env/schema changed.
 
+## Reporting says `Could not build reporting packet`
+- Likely causes:
+  - `docs/supabase-nulogy-artifacts.sql` was never applied in the active Supabase project
+  - PostgREST has not reloaded the new `nulogy_artifact_*` tables/views yet
+- Fix:
+  1. Run `docs/supabase-nulogy-artifacts.sql` in the active Supabase project.
+  2. Trigger a schema reload or redeploy.
+  3. Verify `/api/nulogy/artifact-runs` and `/api/nulogy/artifact-reports` return `200`.
+
+## Reporting loads but sections are empty
+- Cause:
+  - artifact schema exists, but no Nulogy artifact runs have been uploaded for the selected `site_id` / date window
+- Fix:
+  1. Verify `select count(*) from nulogy_artifact_runs;`
+  2. Upload at least one run with `scripts/nulogy/upload-artifacts-to-supabase.mjs`
+  3. Recheck the packet using an `As of date` that overlaps the uploaded run
+
 ## Vercel deploy healthy but behavior unchanged
 - Cause: stale deployment or wrong environment vars.
 - Fix:
@@ -46,4 +63,3 @@
   1. Sync data.
   2. Confirm snapshot/prod tables have rows.
   3. Add deterministic handler for repeated high-value prompt pattern.
-

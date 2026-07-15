@@ -16,19 +16,21 @@ Track SQL setup order and what each script provisions.
    - User login analytics table
 6. `/Users/aj/Documents/New project/supabase-sync-runs.sql`
    - Sync pipeline audit trail
-7. `/Users/aj/Documents/New project/docs/supabase-forecast-assumptions.sql`
+7. `/Users/aj/Documents/New project/docs/supabase-nulogy-artifacts.sql`
+   - Nulogy artifact runs, reports, files, latest-report views, and private artifact storage used by Reporting
+8. `/Users/aj/Documents/New project/docs/supabase-forecast-assumptions.sql`
    - Forecast assumptions table
-8. `/Users/aj/Documents/New project/docs/supabase-team-board.sql`
+9. `/Users/aj/Documents/New project/docs/supabase-team-board.sql`
    - Lightweight shared team board table
-9. `/Users/aj/Documents/New project/docs/supabase-forecast-versions.sql`
+10. `/Users/aj/Documents/New project/docs/supabase-forecast-versions.sql`
    - Forecast version snapshots
-10. `/Users/aj/Documents/New project/docs/supabase-ops-performance.sql`
+11. `/Users/aj/Documents/New project/docs/supabase-ops-performance.sql`
    - Covering production index + operations performance materialized views + refresh function
-11. `/Users/aj/Documents/New project/docs/supabase-query-performance.sql`
+12. `/Users/aj/Documents/New project/docs/supabase-query-performance.sql`
    - Query diagnostics extensions + latest artifact lookup index
-12. `/Users/aj/Documents/New project/docs/supabase-ai-trends-performance.sql`
+13. `/Users/aj/Documents/New project/docs/supabase-ai-trends-performance.sql`
    - AI/trends follow-up indexes + refresh function `ANALYZE` pass
-13. `/Users/aj/Documents/New project/docs/supabase-safety-osha.sql`
+14. `/Users/aj/Documents/New project/docs/supabase-safety-osha.sql`
    - OSHA / safety recordkeeping establishments, cases, annual summaries, and attachments
 
 ## Required Environment Variables
@@ -47,6 +49,11 @@ Track SQL setup order and what each script provisions.
   - `select count(*) from ops_shift_inputs;`
 - Login events loaded:
   - `select count(*) from user_login_events;`
+- Nulogy artifact store loaded:
+  - `select count(*) from nulogy_artifact_runs;`
+  - `select count(*) from nulogy_artifact_reports;`
+  - `select count(*) from nulogy_artifact_files;`
+  - `select report_code, generated_at from nulogy_artifact_latest_reports order by generated_at desc nulls last limit 10;`
 - Team board loaded:
   - `select count(*) from team_board_tasks;`
 - Safety tables loaded:
@@ -66,6 +73,10 @@ Track SQL setup order and what each script provisions.
 ## Common Issues
 - “Could not find table … in schema cache”
   - Run migration SQL in correct project/schema.
+- Reporting packet builds but all sections are empty.
+  - Confirm `docs/supabase-nulogy-artifacts.sql` was applied and that at least one artifact run was uploaded for the target `site_id`.
+- Reporting/artifact routes still fail after the migration ran.
+  - Trigger a PostgREST schema reload or redeploy so `nulogy_artifact_*` tables and latest-report views are queryable through Supabase REST.
 - Materialized views stay stale after sync writes.
   - Run `select public.refresh_ops_performance_views();` once, or let PackPulse refresh them automatically after future event syncs.
 - Env vars set at team scope but not attached to project.
