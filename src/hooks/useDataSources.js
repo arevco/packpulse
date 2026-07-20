@@ -66,13 +66,15 @@ function compactInventoryRowsForApp(rows) {
     var status = String(pickLooseInventoryValue(row, ["Inventory Status", "inventory_status", "Status", "status"]) || "").trim();
     var customer = String(pickLooseInventoryValue(row, ["Customer Name", "customer_name", "Customer", "customer"]) || "").trim();
     var baseUom = String(pickLooseInventoryValue(row, ["Base UOM", "base_uom", "Base unit of measure", "base_unit_of_measure", "UOM", "uom"]) || "").trim();
+    var itemCategory = String(pickLooseInventoryValue(row, ["Item Category", "item_category", "Item category name", "item_category_name"]) || "").trim();
     var source = String(pickLooseInventoryValue(row, ["Source", "source"]) || "").trim();
     if (!sku && !description && !(qty > 0) && !status && !customer) return;
     var key = [
       normalizeStr(sku),
       normalizeStr(status),
       normalizeStr(customer),
-      normalizeStr(baseUom)
+      normalizeStr(baseUom),
+      normalizeStr(itemCategory)
     ].join("|");
     if (!grouped[key]) {
       grouped[key] = {
@@ -82,6 +84,7 @@ function compactInventoryRowsForApp(rows) {
         "Inventory Status": status || "",
         "Customer Name": customer || "",
         "Base UOM": baseUom || "",
+        "Item Category": itemCategory || "",
         "Source": source || "compact_inventory"
       };
     }
@@ -89,6 +92,7 @@ function compactInventoryRowsForApp(rows) {
     if ((!grouped[key]["Description"] || grouped[key]["Description"] === "--") && description) {
       grouped[key]["Description"] = description;
     }
+    if (!grouped[key]["Item Category"] && itemCategory) grouped[key]["Item Category"] = itemCategory;
     if (!grouped[key]["Source"] && source) grouped[key]["Source"] = source;
     if (grouped[key]["Source"] && source && grouped[key]["Source"] !== source) {
       grouped[key]["Source"] = "report_compact_inventory";

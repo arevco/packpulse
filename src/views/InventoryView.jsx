@@ -139,6 +139,22 @@ function statusVariant(status) {
   return "info";
 }
 
+var ITEM_CATEGORY_FILTERS = [
+  { key: "wip", label: "WIP" },
+  { key: "fg", label: "FG" },
+  { key: "packaging", label: "Packaging" },
+  { key: "other", label: "Other" }
+];
+
+function classifyItemCategory(value) {
+  var normalized = normalizeKey(value);
+  if (!normalized) return "";
+  if (normalized === "wip" || normalized.indexOf("workinprogress") !== -1 || normalized.indexOf("workinprocess") !== -1) return "wip";
+  if (normalized === "fg" || normalized.indexOf("finishedgood") !== -1) return "fg";
+  if (normalized.indexOf("packaging") !== -1 || normalized.indexOf("packag") !== -1) return "packaging";
+  return "other";
+}
+
 function statusBucketRows(row) {
   var buckets = [
     { label: "Good", keys: ["Good", "good"] },
@@ -183,6 +199,7 @@ function matchesInventoryFilters(row, q, filters) {
   if (filters.statusFilter !== "all" && row.status !== filters.statusFilter) return false;
   if (filters.customerFilter !== "all" && row.customer !== filters.customerFilter) return false;
   if (filters.sourceFilter !== "all" && (row.source || "") !== filters.sourceFilter) return false;
+  if (filters.itemCategoryFilter !== "all" && row.itemCategoryBucket !== filters.itemCategoryFilter) return false;
   if (!matchesExpiryFilter(row.daysToExpiry, filters.expiryFilter)) return false;
   if (!q) return true;
   var haystack = [
@@ -196,6 +213,7 @@ function matchesInventoryFilters(row, q, filters) {
     row.status,
     row.source,
     row.itemCategory,
+    row.itemCategoryBucket,
     row.siteName,
     row.zone,
     row.lastPalletTransactionAt
@@ -273,6 +291,7 @@ export default function InventoryView({
   var [customerFilter, setCustomerFilter] = useState("all");
   var [expiryFilter, setExpiryFilter] = useState("all");
   var [sourceFilter, setSourceFilter] = useState("all");
+  var [itemCategoryFilter, setItemCategoryFilter] = useState("all");
   var [viewMode, setViewMode] = useState("grouped");
   var [positiveOnly, setPositiveOnly] = useState(true);
   var [sortField, setSortField] = useState("qtyOnHand");
@@ -346,6 +365,7 @@ export default function InventoryView({
       var source = String(pickLooseValue(row, ["Source", "source"]) || "").trim();
       var inventoryCategory = String(pickLooseValue(row, ["Inventory Category", "inventory_category"]) || "").trim();
       var itemCategory = String(pickLooseValue(row, ["Item Category", "item_category", "Item category name", "item_category_name"]) || "").trim();
+      var itemCategoryBucket = classifyItemCategory(itemCategory);
       var itemClass = String(pickLooseValue(row, ["Item Class", "item_class"]) || "").trim();
       var itemFamily = String(pickLooseValue(row, ["Item Family", "item_family", "Item family name", "item_family_name"]) || "").trim();
       var siteName = String(pickLooseValue(row, ["Site Name", "site_name"]) || "").trim();
@@ -378,6 +398,7 @@ export default function InventoryView({
           source: source || "",
           inventoryCategory: inventoryCategory || "",
           itemCategory: itemCategory || "",
+          itemCategoryBucket: itemCategoryBucket || "",
           itemClass: itemClass || "",
           itemFamily: itemFamily || "",
           siteName: siteName || "",
@@ -397,7 +418,7 @@ export default function InventoryView({
   var preparedRows = useMemo(function() {
     var grouped = {};
     rawRows.forEach(function(row) {
-      var key = [row.sku || "--", row.location || "", row.lotCode || "", row.expiryDate || "", row.palletNumber || "", row.status || "", row.customer || "", row.baseUom || ""].join("|");
+      var key = [row.sku || "--", row.itemCategoryBucket || row.itemCategory || "", row.location || "", row.lotCode || "", row.expiryDate || "", row.palletNumber || "", row.status || "", row.customer || "", row.baseUom || ""].join("|");
       if (!grouped[key]) {
         grouped[key] = Object.assign({}, row, { id: key, qtyOnHand: 0, sourceRows: 0 });
       }
@@ -407,6 +428,7 @@ export default function InventoryView({
       if (grouped[key].source && row.source && grouped[key].source !== row.source) grouped[key].source = "mixed";
       if (!grouped[key].inventoryCategory && row.inventoryCategory) grouped[key].inventoryCategory = row.inventoryCategory;
       if (!grouped[key].itemCategory && row.itemCategory) grouped[key].itemCategory = row.itemCategory;
+      if (!grouped[key].itemCategoryBucket && row.itemCategoryBucket) grouped[key].itemCategoryBucket = row.itemCategoryBucket;
       if (!grouped[key].itemClass && row.itemClass) grouped[key].itemClass = row.itemClass;
       if (!grouped[key].itemFamily && row.itemFamily) grouped[key].itemFamily = row.itemFamily;
       if (!grouped[key].siteName && row.siteName) grouped[key].siteName = row.siteName;
@@ -432,6 +454,19 @@ export default function InventoryView({
   var sourceOptions = useMemo(function() {
     return Array.from(new Set(rawRows.map(function(row) { return row.source; }).filter(Boolean))).sort(textCompare);
   }, [rawRows]);
+  var itemCategoryCounts = useMemo(function() {
+    return rawRows.reduce(function(counts, row) {
+      var bucket = row.itemCategoryBucket;
+      if (!bucket) return counts;
+      counts[bucket] = (counts[bucket] || 0) + 1;
+      return counts;
+    }, { wip: 0, fg: 0, packaging: 0, other: 0 });
+  }, [rawRows]);
+  var itemCategoryFilterOptions = useMemo(function() {
+    return ITEM_CATEGORY_FILTERS.filter(function(option) {
+      return (itemCategoryCounts[option.key] || 0) > 0;
+    });
+  }, [itemCategoryCounts]);
 
   var filterState = {
     positiveOnly: positiveOnly,
@@ -439,7 +474,8 @@ export default function InventoryView({
     statusFilter: statusFilter,
     customerFilter: customerFilter,
     sourceFilter: sourceFilter,
-    expiryFilter: expiryFilter
+    expiryFilter: expiryFilter,
+    itemCategoryFilter: itemCategoryFilter
   };
   var searchLower = String(deferredSearch || "").trim().toLowerCase();
 
@@ -447,12 +483,12 @@ export default function InventoryView({
     return preparedRows.filter(function(row) {
       return matchesInventoryFilters(row, searchLower, filterState);
     });
-  }, [preparedRows, searchLower, positiveOnly, locationFilter, statusFilter, customerFilter, sourceFilter, expiryFilter]);
+  }, [preparedRows, searchLower, positiveOnly, locationFilter, statusFilter, customerFilter, sourceFilter, expiryFilter, itemCategoryFilter]);
   var filteredRawRows = useMemo(function() {
     return rawRows.filter(function(row) {
       return matchesInventoryFilters(row, searchLower, filterState);
     });
-  }, [rawRows, searchLower, positiveOnly, locationFilter, statusFilter, customerFilter, sourceFilter, expiryFilter]);
+  }, [rawRows, searchLower, positiveOnly, locationFilter, statusFilter, customerFilter, sourceFilter, expiryFilter, itemCategoryFilter]);
 
   var sortedRows = useMemo(function() {
     return sortInventoryRows(filteredRows, sortField, sortDir);
@@ -480,8 +516,16 @@ export default function InventoryView({
   }, [sourceFilter, sourceOptions]);
 
   useEffect(function() {
+    if (itemCategoryFilter === "all") return;
+    var available = itemCategoryFilterOptions.some(function(option) {
+      return option.key === itemCategoryFilter;
+    });
+    if (!available) setItemCategoryFilter("all");
+  }, [itemCategoryFilter, itemCategoryFilterOptions]);
+
+  useEffect(function() {
     setPage(1);
-  }, [viewMode, searchLower, positiveOnly, locationFilter, statusFilter, customerFilter, sourceFilter, expiryFilter, sortField, sortDir, pageSize]);
+  }, [viewMode, searchLower, positiveOnly, locationFilter, statusFilter, customerFilter, sourceFilter, expiryFilter, itemCategoryFilter, sortField, sortDir, pageSize]);
 
   useEffect(function() {
     if (page > pageCount) setPage(pageCount);
@@ -676,6 +720,7 @@ export default function InventoryView({
     setCustomerFilter("all");
     setExpiryFilter("all");
     setSourceFilter("all");
+    setItemCategoryFilter("all");
     setViewMode("grouped");
     setPositiveOnly(true);
     setSortField("qtyOnHand");
@@ -687,13 +732,13 @@ export default function InventoryView({
     <div className="space-y-4">
       <div>
         <h2 className="text-2xl font-semibold tracking-[-0.02em] text-[rgb(var(--foreground))]">Inventory Lookup</h2>
-        <p className="mt-1 text-sm text-[rgb(var(--muted))]">Search inventory by SKU, customer, location, lot code, expiry date, pallet, last transaction timestamp, and report source.</p>
+        <p className="mt-1 text-sm text-[rgb(var(--muted))]">Search inventory by SKU, customer, item category, location, lot code, expiry date, pallet, last transaction timestamp, and report source.</p>
       </div>
 
       <div className="grid gap-2 xl:grid-cols-[minmax(0,1fr),repeat(5,minmax(0,190px))]">
         <Input
           type="text"
-          placeholder="Search SKU / description / customer / lot / pallet / last txn"
+          placeholder="Search SKU / description / customer / category / lot / pallet / last txn"
           value={searchTerm}
           onChange={function(event) { setSearchTerm(event.target.value); }}
           className="h-10 min-w-0 text-sm"
@@ -754,8 +799,31 @@ export default function InventoryView({
               return <option key={option} value={option}>{option}</option>;
             })}
           </select>
-        ) : null}
+          ) : null}
       </div>
+
+      {itemCategoryFilterOptions.length ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="secondary">Item Category</Badge>
+          <div className="inline-flex flex-wrap rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-1">
+            <Button variant={itemCategoryFilter === "all" ? "active" : "ghost"} size="sm" onClick={function() { setItemCategoryFilter("all"); }}>
+              All
+            </Button>
+            {itemCategoryFilterOptions.map(function(option) {
+              return (
+                <Button
+                  key={option.key}
+                  variant={itemCategoryFilter === option.key ? "active" : "ghost"}
+                  size="sm"
+                  onClick={function() { setItemCategoryFilter(option.key); }}
+                >
+                  {option.label}
+                </Button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
@@ -874,7 +942,7 @@ export default function InventoryView({
                 <th style={thC(sortField === "sku")}><SortHeaderButton onClick={function() { handleSort("sku"); }}>SKU</SortHeaderButton></th>
                 <th style={thC(sortField === "description")}><SortHeaderButton onClick={function() { handleSort("description"); }}>Description</SortHeaderButton></th>
                 {hasCustomerColumn ? <th style={thC(sortField === "customer")}><SortHeaderButton onClick={function() { handleSort("customer"); }}>Customer</SortHeaderButton></th> : null}
-                {viewMode === "raw" && hasItemCategoryColumn ? <th style={thC(sortField === "itemCategory")}><SortHeaderButton onClick={function() { handleSort("itemCategory"); }}>Item Category</SortHeaderButton></th> : null}
+                {hasItemCategoryColumn ? <th style={thC(sortField === "itemCategory")}><SortHeaderButton onClick={function() { handleSort("itemCategory"); }}>Item Category</SortHeaderButton></th> : null}
                 {hasLocationColumn ? <th style={thC(sortField === "location")}><SortHeaderButton onClick={function() { handleSort("location"); }}>Location</SortHeaderButton></th> : null}
                 {hasLotColumn ? <th style={thC(sortField === "lotCode")}><SortHeaderButton onClick={function() { handleSort("lotCode"); }}>Lot Code</SortHeaderButton></th> : null}
                 {hasExpiryColumn ? <th style={thC(sortField === "daysToExpiry")}><SortHeaderButton onClick={function() { handleSort("daysToExpiry"); }}>Expiry</SortHeaderButton></th> : null}
@@ -892,7 +960,7 @@ export default function InventoryView({
                     <td style={Object.assign({}, tdN, { fontWeight: 700 })}>{row.sku}</td>
                     <td style={Object.assign({}, tdN, truncate(320))} title={row.description}>{row.description}</td>
                     {hasCustomerColumn ? <td style={Object.assign({}, tdN, truncate(220))} title={row.customer}>{row.customer || "--"}</td> : null}
-                    {viewMode === "raw" && hasItemCategoryColumn ? <td style={Object.assign({}, tdN, truncate(180))} title={row.itemCategory}>{row.itemCategory || "--"}</td> : null}
+                    {hasItemCategoryColumn ? <td style={Object.assign({}, tdN, truncate(180))} title={row.itemCategory}>{row.itemCategory || "--"}</td> : null}
                     {hasLocationColumn ? <td style={Object.assign({}, tdN, { fontFamily: mono })}>{row.location || "--"}</td> : null}
                     {hasLotColumn ? <td style={Object.assign({}, tdN, { fontFamily: mono })}>{row.lotCode || "--"}</td> : null}
                     {hasExpiryColumn ? (
@@ -917,7 +985,7 @@ export default function InventoryView({
                 );
               }) : (
                 <tr>
-                  <td colSpan={2 + (hasCustomerColumn ? 1 : 0) + (viewMode === "raw" && hasItemCategoryColumn ? 1 : 0) + (hasLocationColumn ? 1 : 0) + (hasLotColumn ? 1 : 0) + (hasExpiryColumn ? 1 : 0) + (hasPalletColumn ? 1 : 0) + (hasLastPalletTransactionColumn ? 1 : 0) + (viewMode === "raw" && hasZoneColumn ? 1 : 0) + 2} style={Object.assign({}, tdN, { padding: "28px 16px", textAlign: "center", color: C.dim })}>
+                  <td colSpan={2 + (hasCustomerColumn ? 1 : 0) + (hasItemCategoryColumn ? 1 : 0) + (hasLocationColumn ? 1 : 0) + (hasLotColumn ? 1 : 0) + (hasExpiryColumn ? 1 : 0) + (hasPalletColumn ? 1 : 0) + (hasLastPalletTransactionColumn ? 1 : 0) + (viewMode === "raw" && hasZoneColumn ? 1 : 0) + 2} style={Object.assign({}, tdN, { padding: "28px 16px", textAlign: "center", color: C.dim })}>
                     No inventory rows match the current filters.
                   </td>
                 </tr>

@@ -75,6 +75,42 @@ function createDefaultCoverageAudit() {
   };
 }
 
+function createDefaultWarehousingReport() {
+  return {
+    report: "",
+    rowCount: 0,
+    distinctPallets: 0,
+    possibleTruncation: false,
+    rowsMissingCustomerName: 0,
+    rowsMissingPalletNumber: 0,
+    rowsMissingTransferredAt: 0,
+    rowsMissingBillingWindow: 0,
+    warnings: [],
+    statusHistory: []
+  };
+}
+
+function createDefaultWarehousingPayload() {
+  return {
+    querySource: "",
+    generatedAt: "",
+    assumptions: [],
+    summary: {
+      clientCount: 0,
+      activeClientCount: 0,
+      inboundPallets: 0,
+      outboundPallets: 0,
+      activeStoragePallets: 0
+    },
+    reports: {
+      inbound: createDefaultWarehousingReport(),
+      outbound: createDefaultWarehousingReport(),
+      storage: createDefaultWarehousingReport()
+    },
+    clientRows: []
+  };
+}
+
 function normalizeLooseKey(value) {
   return String(value || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
 }
@@ -605,6 +641,52 @@ function normalizeInvoicingProductionPayload(body) {
   };
 }
 
+function normalizeWarehousingReportPayload(body) {
+  var source = body && typeof body === "object" ? body : {};
+  return {
+    report: String(source.report || ""),
+    rowCount: Number(source.rowCount || 0),
+    distinctPallets: Number(source.distinctPallets || 0),
+    possibleTruncation: !!source.possibleTruncation,
+    rowsMissingCustomerName: Number(source.rowsMissingCustomerName || 0),
+    rowsMissingPalletNumber: Number(source.rowsMissingPalletNumber || 0),
+    rowsMissingTransferredAt: Number(source.rowsMissingTransferredAt || 0),
+    rowsMissingBillingWindow: Number(source.rowsMissingBillingWindow || 0),
+    warnings: Array.isArray(source.warnings) ? source.warnings : [],
+    statusHistory: Array.isArray(source.statusHistory) ? source.statusHistory : []
+  };
+}
+
+function normalizeInvoicingWarehousingPayload(body) {
+  var defaults = createDefaultWarehousingPayload();
+  var source = body && typeof body === "object" ? body : {};
+  return {
+    querySource: String(source.querySource || defaults.querySource),
+    generatedAt: String(source.generatedAt || defaults.generatedAt),
+    assumptions: Array.isArray(source.assumptions) ? source.assumptions : defaults.assumptions,
+    summary: {
+      clientCount: Number(source && source.summary && source.summary.clientCount || 0),
+      activeClientCount: Number(source && source.summary && source.summary.activeClientCount || 0),
+      inboundPallets: Number(source && source.summary && source.summary.inboundPallets || 0),
+      outboundPallets: Number(source && source.summary && source.summary.outboundPallets || 0),
+      activeStoragePallets: Number(source && source.summary && source.summary.activeStoragePallets || 0)
+    },
+    reports: {
+      inbound: normalizeWarehousingReportPayload(source && source.reports && source.reports.inbound),
+      outbound: normalizeWarehousingReportPayload(source && source.reports && source.reports.outbound),
+      storage: normalizeWarehousingReportPayload(source && source.reports && source.reports.storage)
+    },
+    clientRows: source && Array.isArray(source.clientRows) ? source.clientRows.map(function(row) {
+      return {
+        customer: String(row && row.customer || ""),
+        inboundPallets: Number(row && row.inboundPallets || 0),
+        outboundPallets: Number(row && row.outboundPallets || 0),
+        activeStoragePallets: Number(row && row.activeStoragePallets || 0)
+      };
+    }) : defaults.clientRows
+  };
+}
+
 async function fetchInvoicingProductionHistory(startDate, endDate) {
   var url = "/api/ops/invoicing-production?start=" + encodeURIComponent(startDate) + "&end=" + encodeURIComponent(endDate);
   var result = await fetchJsonWithCredentials(url);
@@ -612,6 +694,15 @@ async function fetchInvoicingProductionHistory(startDate, endDate) {
     throw new Error((result.body && (result.body.error || result.body.details)) || "Could not load invoicing production history");
   }
   return normalizeInvoicingProductionPayload(result.body);
+}
+
+async function fetchInvoicingWarehousingHistory(startDate, endDate) {
+  var url = "/api/ops/invoicing-warehousing?start=" + encodeURIComponent(startDate) + "&end=" + encodeURIComponent(endDate);
+  var result = await fetchJsonWithCredentials(url);
+  if (!result.response.ok) {
+    throw new Error((result.body && (result.body.error || result.body.details)) || "Could not load invoicing warehousing history");
+  }
+  return normalizeInvoicingWarehousingPayload(result.body);
 }
 
 async function fetchQuickBooksInvoicePreview(payload) {
@@ -1163,6 +1254,54 @@ function metricCard(label, value, helper, tone) {
   );
 }
 
+function summarizeWarehouseRows(rows) {
+  var includedCount = 0;
+  var zeroRateCount = 0;
+  var nonDefaultCount = 0;
+  var activeClientCount = 0;
+  var billableClientCount = 0;
+  var inboundPallets = 0;
+  var outboundPallets = 0;
+  var activeStoragePallets = 0;
+  var estimatedFees = 0;
+  (Array.isArray(rows) ? rows : []).forEach(function(row) {
+    var inboundRate = safeNum(row && row.inboundRate);
+    var outboundRate = safeNum(row && row.outboundRate);
+    var storageRate = safeNum(row && row.storageRate);
+    var inboundCount = safeNum(row && row.inboundPallets);
+    var outboundCount = safeNum(row && row.outboundPallets);
+    var storageCount = safeNum(row && row.activeStoragePallets);
+    var totalFee = safeNum(row && row.totalFee);
+    var isDefaultRate =
+      String(row && row.inboundRate || "") === DEFAULT_WAREHOUSE_RATE_DRAFT.inboundRate &&
+      String(row && row.outboundRate || "") === DEFAULT_WAREHOUSE_RATE_DRAFT.outboundRate &&
+      String(row && row.storageRate || "") === DEFAULT_WAREHOUSE_RATE_DRAFT.storageRate;
+    var hasActivity = inboundCount > 0 || outboundCount > 0 || storageCount > 0;
+    if (row && row.included) includedCount += 1;
+    if (hasActivity) activeClientCount += 1;
+    if (row && row.included && hasActivity) billableClientCount += 1;
+    if (!isDefaultRate || !(row && row.included) || String(row && row.note || "").trim()) nonDefaultCount += 1;
+    if (inboundRate <= 0 && outboundRate <= 0 && storageRate <= 0) zeroRateCount += 1;
+    inboundPallets += inboundCount;
+    outboundPallets += outboundCount;
+    activeStoragePallets += storageCount;
+    if (row && row.included) estimatedFees += totalFee;
+  });
+  return {
+    clientCount: Array.isArray(rows) ? rows.length : 0,
+    includedCount: includedCount,
+    excludedCount: Math.max(0, (Array.isArray(rows) ? rows.length : 0) - includedCount),
+    activeClientCount: activeClientCount,
+    billableClientCount: billableClientCount,
+    zeroRateCount: zeroRateCount,
+    nonDefaultCount: nonDefaultCount,
+    inboundPallets: inboundPallets,
+    outboundPallets: outboundPallets,
+    activeStoragePallets: activeStoragePallets,
+    estimatedFees: estimatedFees
+  };
+}
+
 export default function InvoicingView(props) {
   var productionData = Array.isArray(props.productionData) ? props.productionData : [];
   var workOrders = Array.isArray(props.workOrders) ? props.workOrders : [];
@@ -1241,6 +1380,14 @@ export default function InvoicingView(props) {
     enabled: hasValidDateRange,
     staleTime: 30 * 1000
   });
+  var warehousingHistoryQuery = useQuery({
+    queryKey: ["invoicing", "warehousing-history", startDate, endDate],
+    queryFn: function() {
+      return fetchInvoicingWarehousingHistory(startDate, endDate);
+    },
+    enabled: hasValidDateRange && invoiceMode === "warehousing",
+    staleTime: 30 * 1000
+  });
   var productionHistory = productionHistoryQuery.data || {
     rows: [],
     rowCount: 0,
@@ -1249,6 +1396,7 @@ export default function InvoicingView(props) {
     coverageAudit: createDefaultCoverageAudit(),
     availableDateRange: { min: "", max: "" }
   };
+  var warehousingHistory = warehousingHistoryQuery.data || createDefaultWarehousingPayload();
   var productionRows = Array.isArray(productionHistory.rows) ? productionHistory.rows : [];
   var coverageAudit = productionHistory.coverageAudit || createDefaultCoverageAudit();
   var productionSyncTimestamp = productionHistory.latestSyncedAt || (props.productionTimestamp ? new Date(props.productionTimestamp).toISOString() : "");
@@ -1758,37 +1906,87 @@ export default function InvoicingView(props) {
     });
   }, [revenueReadyRows, startDate, endDate]);
 
-  var customerOptions = useMemo(function() {
+  var productionCustomerTotals = useMemo(function() {
     var totals = {};
     customerPeriodRows.forEach(function(row) {
       totals[row.customer] = (totals[row.customer] || 0) + row.unitsProduced;
     });
-    return Object.keys(totals)
-      .sort(function(left, right) {
-        if (totals[right] !== totals[left]) return totals[right] - totals[left];
-        return left.localeCompare(right);
-      });
+    return totals;
   }, [customerPeriodRows]);
 
+  var customerOptions = useMemo(function() {
+    return Object.keys(productionCustomerTotals)
+      .sort(function(left, right) {
+        if (productionCustomerTotals[right] !== productionCustomerTotals[left]) return productionCustomerTotals[right] - productionCustomerTotals[left];
+        return left.localeCompare(right);
+      });
+  }, [productionCustomerTotals]);
+
+  var warehouseActivityByCustomer = useMemo(function() {
+    var out = {};
+    (warehousingHistory.clientRows || []).forEach(function(row) {
+      var customer = String(row && row.customer || "").trim();
+      if (!customer) return;
+      out[customer] = {
+        customer: customer,
+        inboundPallets: Number(row && row.inboundPallets || 0),
+        outboundPallets: Number(row && row.outboundPallets || 0),
+        activeStoragePallets: Number(row && row.activeStoragePallets || 0)
+      };
+    });
+    return out;
+  }, [warehousingHistory.clientRows]);
+
+  var warehouseClientOptions = useMemo(function() {
+    var seen = {};
+    var customers = [];
+    customerOptions.forEach(function(customer) {
+      if (seen[customer]) return;
+      seen[customer] = true;
+      customers.push(customer);
+    });
+    Object.keys(warehouseActivityByCustomer).forEach(function(customer) {
+      if (seen[customer]) return;
+      seen[customer] = true;
+      customers.push(customer);
+    });
+    customers.sort(function(left, right) {
+      var leftActivity = warehouseActivityByCustomer[left]
+        ? (warehouseActivityByCustomer[left].inboundPallets + warehouseActivityByCustomer[left].outboundPallets + warehouseActivityByCustomer[left].activeStoragePallets)
+        : 0;
+      var rightActivity = warehouseActivityByCustomer[right]
+        ? (warehouseActivityByCustomer[right].inboundPallets + warehouseActivityByCustomer[right].outboundPallets + warehouseActivityByCustomer[right].activeStoragePallets)
+        : 0;
+      if (rightActivity !== leftActivity) return rightActivity - leftActivity;
+      if ((productionCustomerTotals[right] || 0) !== (productionCustomerTotals[left] || 0)) {
+        return (productionCustomerTotals[right] || 0) - (productionCustomerTotals[left] || 0);
+      }
+      return left.localeCompare(right);
+    });
+    return customers;
+  }, [customerOptions, warehouseActivityByCustomer, productionCustomerTotals]);
+
   useEffect(function() {
-    if (!customerOptions.length) return;
+    if (!warehouseClientOptions.length) return;
     setWarehouseFeeDrafts(function(previous) {
       var next = Object.assign({}, previous || {});
       var changed = false;
-      customerOptions.forEach(function(customer) {
+      warehouseClientOptions.forEach(function(customer) {
         if (next[customer]) return;
         next[customer] = createDefaultWarehouseFeeDraft();
         changed = true;
       });
       return changed ? next : previous;
     });
-  }, [customerOptions]);
+  }, [warehouseClientOptions]);
+
+  var activeCustomerOptions = invoiceMode === "warehousing" ? warehouseClientOptions : customerOptions;
 
   useEffect(function() {
     if (customerFilter === "all") return;
-    if (customerOptions.indexOf(customerFilter) !== -1) return;
+    if (activeCustomerOptions.indexOf(customerFilter) !== -1) return;
     setCustomerFilter("all");
-  }, [customerFilter, customerOptions]);
+  }, [customerFilter, activeCustomerOptions]);
 
   function applyCurrentMonth() {
     var range = defaultInvoicingRange();
@@ -1834,7 +2032,7 @@ export default function InvoicingView(props) {
   function resetWarehouseFeeDrafts() {
     setWarehouseFeeDrafts(function() {
       var next = {};
-      customerOptions.forEach(function(customer) {
+      warehouseClientOptions.forEach(function(customer) {
         next[customer] = createDefaultWarehouseFeeDraft();
       });
       return next;
@@ -2133,35 +2331,69 @@ export default function InvoicingView(props) {
   }
 
   var warehouseClientRows = useMemo(function() {
-    return customerOptions.map(function(customer) {
-      return Object.assign({ customer: customer }, createDefaultWarehouseFeeDraft(warehouseFeeDrafts[customer]));
+    return warehouseClientOptions.map(function(customer) {
+      var draft = createDefaultWarehouseFeeDraft(warehouseFeeDrafts[customer]);
+      var activity = warehouseActivityByCustomer[customer] || {
+        inboundPallets: 0,
+        outboundPallets: 0,
+        activeStoragePallets: 0
+      };
+      var inboundPallets = Number(activity.inboundPallets || 0);
+      var outboundPallets = Number(activity.outboundPallets || 0);
+      var activeStoragePallets = Number(activity.activeStoragePallets || 0);
+      var inboundAmount = inboundPallets * safeNum(draft.inboundRate);
+      var outboundAmount = outboundPallets * safeNum(draft.outboundRate);
+      var storageAmount = activeStoragePallets * safeNum(draft.storageRate);
+      return Object.assign({
+        customer: customer,
+        inboundPallets: inboundPallets,
+        outboundPallets: outboundPallets,
+        activeStoragePallets: activeStoragePallets,
+        inboundAmount: inboundAmount,
+        outboundAmount: outboundAmount,
+        storageAmount: storageAmount,
+        totalFee: inboundAmount + outboundAmount + storageAmount,
+        hasActivity: inboundPallets > 0 || outboundPallets > 0 || activeStoragePallets > 0
+      }, draft);
     });
-  }, [customerOptions, warehouseFeeDrafts]);
+  }, [warehouseClientOptions, warehouseFeeDrafts, warehouseActivityByCustomer]);
+
+  var visibleWarehouseClientRows = useMemo(function() {
+    return warehouseClientRows.filter(function(row) {
+      if (customerFilter !== "all" && row.customer !== customerFilter) return false;
+      if (!searchNeedle) return true;
+      return [row.customer, row.note].join(" ").toLowerCase().indexOf(searchNeedle) >= 0;
+    });
+  }, [warehouseClientRows, customerFilter, searchNeedle]);
 
   var warehouseSummary = useMemo(function() {
-    var includedCount = 0;
-    var zeroRateCount = 0;
-    var nonDefaultCount = 0;
-    warehouseClientRows.forEach(function(row) {
-      if (row.included) includedCount += 1;
-      var inboundRate = safeNum(row.inboundRate);
-      var outboundRate = safeNum(row.outboundRate);
-      var storageRate = safeNum(row.storageRate);
-      var isDefaultRate =
-        row.inboundRate === DEFAULT_WAREHOUSE_RATE_DRAFT.inboundRate &&
-        row.outboundRate === DEFAULT_WAREHOUSE_RATE_DRAFT.outboundRate &&
-        row.storageRate === DEFAULT_WAREHOUSE_RATE_DRAFT.storageRate;
-      if (!isDefaultRate || !row.included || String(row.note || "").trim()) nonDefaultCount += 1;
-      if (inboundRate <= 0 && outboundRate <= 0 && storageRate <= 0) zeroRateCount += 1;
-    });
-    return {
-      clientCount: warehouseClientRows.length,
-      includedCount: includedCount,
-      excludedCount: Math.max(0, warehouseClientRows.length - includedCount),
-      zeroRateCount: zeroRateCount,
-      nonDefaultCount: nonDefaultCount
-    };
+    return summarizeWarehouseRows(warehouseClientRows);
   }, [warehouseClientRows]);
+
+  var warehouseVisibleSummary = useMemo(function() {
+    return summarizeWarehouseRows(visibleWarehouseClientRows);
+  }, [visibleWarehouseClientRows]);
+
+  var warehouseReportWarnings = useMemo(function() {
+    var warnings = [];
+    ["inbound", "outbound", "storage"].forEach(function(key) {
+      var report = warehousingHistory && warehousingHistory.reports ? warehousingHistory.reports[key] : null;
+      (report && Array.isArray(report.warnings) ? report.warnings : []).forEach(function(warning) {
+        if (warnings.indexOf(warning) === -1) warnings.push(warning);
+      });
+    });
+    return warnings;
+  }, [warehousingHistory]);
+
+  var hasWarehousingTruncationRisk = !!(
+    warehousingHistory &&
+    warehousingHistory.reports &&
+    (
+      warehousingHistory.reports.inbound && warehousingHistory.reports.inbound.possibleTruncation ||
+      warehousingHistory.reports.outbound && warehousingHistory.reports.outbound.possibleTruncation ||
+      warehousingHistory.reports.storage && warehousingHistory.reports.storage.possibleTruncation
+    )
+  );
 
   var invoiceModeTabs = useMemo(function() {
     return [
@@ -2210,7 +2442,7 @@ export default function InvoicingView(props) {
     );
   }
 
-  if (productionHistoryQuery.isLoading) {
+  if (invoiceMode !== "warehousing" && productionHistoryQuery.isLoading) {
     return (
       <Card className="mt-3">
         <CardHeader className="border-b border-[rgb(var(--border))] pb-4">
@@ -2228,7 +2460,7 @@ export default function InvoicingView(props) {
     );
   }
 
-  if (productionHistoryQuery.isError) {
+  if (invoiceMode !== "warehousing" && productionHistoryQuery.isError) {
     return (
       <Card className="mt-3">
         <CardHeader className="border-b border-[rgb(var(--border))] pb-4">
@@ -2251,7 +2483,7 @@ export default function InvoicingView(props) {
     );
   }
 
-  if (!normalizedRows.length) {
+  if (invoiceMode !== "warehousing" && !normalizedRows.length) {
     var missingHistoryTable = productionHistory.querySource === "missing_production_events_table";
     var hasAvailableHistory = !!(availableDateRange.min || availableDateRange.max);
     var emptyStateTitle = missingHistoryTable
@@ -2328,7 +2560,7 @@ export default function InvoicingView(props) {
             <div className="mt-1 max-w-3xl text-sm text-[rgb(var(--muted))]">
               {invoiceMode === "production"
                 ? "Use the existing PO, SKU, lot, and rate workflow for finished-good billing."
-                : "Set up client-level pallet fees first, then layer monthly inbound, outbound, and storage charges onto the same invoicing workspace."}
+                : "Review live Nulogy pallet activity by client, then tune inbound, outbound, and storage fees in the same invoicing workspace."}
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -2360,19 +2592,99 @@ export default function InvoicingView(props) {
             <div>
               <div className="text-lg font-semibold text-[rgb(var(--foreground))]">Warehousing Billing Workspace</div>
               <div className="mt-1 max-w-3xl text-sm text-[rgb(var(--muted))]">
-                Monthly warehouse billing should summarize by client instead of by PO line. This first pass keeps every client visible and gives us a place to tune inbound, outbound, and storage pallet fees before the source counts are wired in.
+                Monthly warehouse billing now pulls live inbound, outbound, and pallet storage counts from Nulogy, then applies the per-client fee profile directly in this worksheet.
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="warning">UI first pass</Badge>
+              <Badge variant="info">{visibleWarehouseClientRows.length.toLocaleString()} clients visible</Badge>
               <Badge variant="secondary">
                 Billing window {formatDateLabel(startDate)} to {formatDateLabel(endDate)}
               </Badge>
+              {warehousingHistoryQuery.isError ? (
+                <Badge variant="danger">Warehouse feed unavailable</Badge>
+              ) : warehousingHistoryQuery.isLoading && !warehousingHistory.generatedAt ? (
+                <Badge variant="secondary">Loading Nulogy warehouse feed</Badge>
+              ) : warehousingHistoryQuery.isFetching ? (
+                <Badge variant="secondary">Refreshing Nulogy feed</Badge>
+              ) : warehousingHistory.generatedAt ? (
+                <Badge variant="secondary">Feed built {formatDateTimeLabel(warehousingHistory.generatedAt)}</Badge>
+              ) : null}
+              {hasWarehousingTruncationRisk ? (
+                <Badge variant="warning">Truncation risk</Badge>
+              ) : null}
             </div>
           </CardHeader>
           <CardContent className="space-y-4 px-4 py-4">
+            <div className="grid gap-3 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <div className="space-y-1">
+                  <div className="text-xs font-medium uppercase tracking-[0.12em] text-[rgb(var(--muted))]">Start Date</div>
+                  <DatePicker value={startDate} onChange={setStartDate} placeholder="Start date" className="w-full" />
+                </div>
+                <div className="space-y-1">
+                  <div className="text-xs font-medium uppercase tracking-[0.12em] text-[rgb(var(--muted))]">End Date</div>
+                  <DatePicker value={endDate} onChange={setEndDate} placeholder="End date" className="w-full" />
+                </div>
+                <div className="space-y-1">
+                  <div className="text-xs font-medium uppercase tracking-[0.12em] text-[rgb(var(--muted))]">Client</div>
+                  <select
+                    value={customerFilter}
+                    onChange={function(event) {
+                      setCustomerFilter(event.target.value);
+                    }}
+                    className="flex h-9 w-full rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))] shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--accent))] focus-visible:ring-offset-1"
+                  >
+                    <option value="all">All clients</option>
+                    {warehouseClientOptions.map(function(customer) {
+                      return (
+                        <option key={customer} value={customer}>{customer}</option>
+                      );
+                    })}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <div className="text-xs font-medium uppercase tracking-[0.12em] text-[rgb(var(--muted))]">Search</div>
+                  <Input
+                    value={searchTerm}
+                    onChange={function(event) {
+                      setSearchTerm(event.target.value);
+                    }}
+                    placeholder="Client name or note..."
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-3">
+                <div className="text-xs font-medium uppercase tracking-[0.12em] text-[rgb(var(--muted))]">Quick Periods</div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Button onClick={applyCurrentMonth} variant="outline" size="sm">Current Month</Button>
+                  <Button onClick={applyPreviousMonth} variant="outline" size="sm">Previous Month</Button>
+                  <Button onClick={clearFilters} variant="ghost" size="sm">
+                    <FilterX className="h-4 w-4" />
+                    Reset
+                  </Button>
+                </div>
+                <div className="mt-3 text-sm text-[rgb(var(--muted))]">
+                  {warehousingHistory.generatedAt
+                    ? "Warehouse feed generated from Nulogy inbound, outbound, and pallet storage reports."
+                    : "Select a billing window to build the warehouse feed from Nulogy."}
+                </div>
+              </div>
+            </div>
+
+            {warehousingHistoryQuery.isError ? (
+              <div className="rounded-md border border-[rgb(var(--danger))]/20 bg-[color-mix(in_oklab,rgb(var(--danger))_6%,white)] p-4">
+                <div className="text-sm font-medium text-[rgb(var(--foreground))]">Warehouse billing data could not be loaded</div>
+                <div className="mt-2 max-w-3xl text-sm text-[rgb(var(--muted))]">
+                  {warehousingHistoryQuery.error && warehousingHistoryQuery.error.message
+                    ? warehousingHistoryQuery.error.message
+                    : "The warehousing feed request failed."}
+                </div>
+              </div>
+            ) : null}
+
             <div className="rounded-md border border-[rgb(var(--accent))]/20 bg-[color-mix(in_oklab,rgb(var(--accent))_6%,white)] p-4">
-              <div className="text-sm font-medium text-[rgb(var(--foreground))]">Planned monthly formula</div>
+              <div className="text-sm font-medium text-[rgb(var(--foreground))]">Monthly warehouse formula</div>
               <div className="mt-2 grid gap-3 md:grid-cols-3">
                 <div className="rounded-lg border border-[rgb(var(--border))] bg-white px-3 py-3">
                   <div className="text-xs uppercase tracking-[0.12em] text-[rgb(var(--muted))]">Inbound</div>
@@ -2389,12 +2701,14 @@ export default function InvoicingView(props) {
               </div>
             </div>
 
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
               {[
-                metricCard("Clients In Scope", warehouseSummary.clientCount.toLocaleString(), "All currently visible customers stay on the warehouse worksheet for now.", "default"),
-                metricCard("Included", warehouseSummary.includedCount.toLocaleString(), warehouseSummary.excludedCount ? (warehouseSummary.excludedCount.toLocaleString() + " hidden from the worksheet draft.") : "Every client remains included in the draft.", warehouseSummary.excludedCount ? "warning" : "success"),
-                metricCard("Custom Fee Rows", warehouseSummary.nonDefaultCount.toLocaleString(), warehouseSummary.nonDefaultCount ? "Rows with non-default fees, notes, or inclusion changes." : "All rows still use the default fee profile.", warehouseSummary.nonDefaultCount ? "info" : "default"),
-                metricCard("Zero-Rate Rows", warehouseSummary.zeroRateCount.toLocaleString(), warehouseSummary.zeroRateCount ? "Useful for non-paying clients that should remain visible." : "No clients have all warehouse fees zeroed out.", warehouseSummary.zeroRateCount ? "warning" : "default")
+                metricCard("Clients In Scope", warehouseSummary.clientCount.toLocaleString(), "Every visible production or warehouse client stays on the worksheet for now.", "default"),
+                metricCard("Clients With Activity", warehouseVisibleSummary.activeClientCount.toLocaleString(), warehouseVisibleSummary.billableClientCount.toLocaleString() + " included rows currently billable in this window.", warehouseVisibleSummary.activeClientCount ? "success" : "default"),
+                metricCard("Inbound Pallets", formatUnits(warehouseVisibleSummary.inboundPallets), "Distinct inbound pallet moves in the selected period.", warehouseVisibleSummary.inboundPallets ? "info" : "default"),
+                metricCard("Outbound Pallets", formatUnits(warehouseVisibleSummary.outboundPallets), "Distinct outbound pallet moves in the selected period.", warehouseVisibleSummary.outboundPallets ? "info" : "default"),
+                metricCard("Storage Pallets", formatUnits(warehouseVisibleSummary.activeStoragePallets), "Distinct pallets whose billed window overlaps this billing window.", warehouseVisibleSummary.activeStoragePallets ? "info" : "default"),
+                metricCard("Est. Warehouse Revenue", formatMoney(warehouseVisibleSummary.estimatedFees), warehouseSummary.nonDefaultCount ? (warehouseSummary.nonDefaultCount.toLocaleString() + " rows use custom fees or notes.") : "All rows are still using the default fee profile.", warehouseVisibleSummary.estimatedFees > 0 ? "success" : "default")
               ]}
             </div>
           </CardContent>
@@ -2406,11 +2720,14 @@ export default function InvoicingView(props) {
               <div>
                 <div className="text-base font-semibold text-[rgb(var(--foreground))]">Fee Structure By Client</div>
                 <div className="mt-1 text-sm text-[rgb(var(--muted))]">
-                  Default every client to $7.50 inbound per pallet, $7.50 outbound per pallet, and $9.00 monthly storage per pallet. This draft is local UI state only for now.
+                  Default every client to $7.50 inbound per pallet, $7.50 outbound per pallet, and $9.00 monthly storage per pallet. Edits recalculate the worksheet totals immediately, but they are still local UI state for now.
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="secondary">{warehouseClientRows.length.toLocaleString()} clients</Badge>
+                <Badge variant="secondary">{visibleWarehouseClientRows.length.toLocaleString()} visible / {warehouseClientRows.length.toLocaleString()} total</Badge>
+                <Badge variant={warehouseSummary.zeroRateCount ? "warning" : "secondary"}>
+                  {warehouseSummary.zeroRateCount.toLocaleString()} zero-rate rows
+                </Badge>
                 <Button onClick={resetWarehouseFeeDrafts} variant="outline" size="sm" disabled={!warehouseClientRows.length}>
                   Reset To Defaults
                 </Button>
@@ -2424,14 +2741,18 @@ export default function InvoicingView(props) {
                       <tr className="border-b border-[rgb(var(--border))]">
                         <th className="px-4 py-3 text-center font-medium">Include</th>
                         <th className="px-4 py-3 text-left font-medium">Client</th>
+                        <th className="px-4 py-3 text-right font-medium">Inbound Pallets</th>
+                        <th className="px-4 py-3 text-right font-medium">Outbound Pallets</th>
+                        <th className="px-4 py-3 text-right font-medium">Storage Pallets</th>
                         <th className="px-4 py-3 text-right font-medium">Inbound / Pallet</th>
                         <th className="px-4 py-3 text-right font-medium">Outbound / Pallet</th>
                         <th className="px-4 py-3 text-right font-medium">Storage / Pallet / Mo</th>
+                        <th className="px-4 py-3 text-right font-medium">Est. Total</th>
                         <th className="px-4 py-3 text-left font-medium">Notes</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {warehouseClientRows.length ? warehouseClientRows.map(function(row) {
+                      {visibleWarehouseClientRows.length ? visibleWarehouseClientRows.map(function(row) {
                         return (
                           <tr key={"warehouse-fee-" + row.customer} className="border-t border-[rgb(var(--border))] align-top odd:bg-[color-mix(in_oklab,rgb(var(--surface))_40%,white)]">
                             <td className="px-4 py-3 text-center">
@@ -2447,9 +2768,14 @@ export default function InvoicingView(props) {
                             <td className="px-4 py-3">
                               <div className="font-medium text-[rgb(var(--foreground))]">{row.customer}</div>
                               <div className="mt-1 text-xs text-[rgb(var(--muted))]">
-                                {row.included ? "Included in draft worksheet" : "Hidden from draft worksheet"}
+                                {row.hasActivity
+                                  ? (formatUnits(row.inboundPallets) + " inbound / " + formatUnits(row.outboundPallets) + " outbound / " + formatUnits(row.activeStoragePallets) + " storage")
+                                  : "No warehouse activity in this billing window"}
                               </div>
                             </td>
+                            <td className="px-4 py-3 text-right font-medium text-[rgb(var(--foreground))]">{formatUnits(row.inboundPallets)}</td>
+                            <td className="px-4 py-3 text-right font-medium text-[rgb(var(--foreground))]">{formatUnits(row.outboundPallets)}</td>
+                            <td className="px-4 py-3 text-right font-medium text-[rgb(var(--foreground))]">{formatUnits(row.activeStoragePallets)}</td>
                             <td className="px-4 py-3">
                               <Input
                                 value={row.inboundRate}
@@ -2474,6 +2800,7 @@ export default function InvoicingView(props) {
                                 className="h-8 min-w-[108px] text-right text-xs"
                               />
                             </td>
+                            <td className="px-4 py-3 text-right font-semibold text-[rgb(var(--foreground))]">{formatMoney(row.totalFee)}</td>
                             <td className="px-4 py-3">
                               <Input
                                 value={row.note}
@@ -2486,8 +2813,10 @@ export default function InvoicingView(props) {
                         );
                       }) : (
                         <tr>
-                          <td colSpan={6} className="px-4 py-6 text-center text-sm text-[rgb(var(--muted))]">
-                            No customer names are available from the current invoicing dataset yet.
+                          <td colSpan={10} className="px-4 py-6 text-center text-sm text-[rgb(var(--muted))]">
+                            {warehouseClientRows.length
+                              ? "No clients match the current warehouse filters."
+                              : "No customer names are available from the current production or warehouse datasets yet."}
                           </td>
                         </tr>
                       )}
@@ -2500,23 +2829,66 @@ export default function InvoicingView(props) {
 
           <Card>
             <CardHeader className="border-b border-[rgb(var(--border))] pb-3">
-              <div className="text-base font-semibold text-[rgb(var(--foreground))]">Next Data Layer</div>
+              <div className="text-base font-semibold text-[rgb(var(--foreground))]">Nulogy Feed Diagnostics</div>
               <div className="mt-1 text-sm text-[rgb(var(--muted))]">
-                This tab is ready for the warehouse counts once we wire them into the invoicing APIs.
+                Review what the warehouse worksheet is counting and the assumptions behind the current storage calculation.
               </div>
             </CardHeader>
             <CardContent className="space-y-3 px-4 py-4 text-sm text-[rgb(var(--muted))]">
-              <div className="rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-3">
-                Monthly worksheet rows should roll up by client instead of by PO, SKU, and lot.
-              </div>
-              <div className="rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-3">
-                Warehouse counts will eventually come from inbound transfers, outbound transfers, and pallet storage billing data.
-              </div>
-              <div className="rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-3">
-                The same month picker at the top will define the warehouse billing window once those source counts are available.
-              </div>
+              {[
+                {
+                  key: "inbound",
+                  label: "Inbound Transfers",
+                  helper: "Distinct pallet moves counted inside the transferred date window."
+                },
+                {
+                  key: "outbound",
+                  label: "Outbound Transfers",
+                  helper: "Distinct pallet moves counted inside the transferred date window."
+                },
+                {
+                  key: "storage",
+                  label: "Pallet Storage",
+                  helper: "Distinct customer and pallet rows with an overlapping billed window."
+                }
+              ].map(function(section) {
+                var report = warehousingHistory && warehousingHistory.reports ? warehousingHistory.reports[section.key] : createDefaultWarehousingReport();
+                return (
+                  <div key={section.key} className="rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-3">
+                    <div className="text-sm font-medium text-[rgb(var(--foreground))]">{section.label}</div>
+                    <div className="mt-1 text-xs text-[rgb(var(--muted))]">{section.helper}</div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <Badge variant="secondary">{report.rowCount.toLocaleString()} raw rows</Badge>
+                      <Badge variant="info">{report.distinctPallets.toLocaleString()} counted pallets</Badge>
+                      {report.possibleTruncation ? (
+                        <Badge variant="warning">Possible truncation</Badge>
+                      ) : null}
+                    </div>
+                    {(report.warnings || []).length ? (
+                      <div className="mt-2 text-xs text-[rgb(var(--warning))]">
+                        {report.warnings.join(" | ")}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+              {warehousingHistory.assumptions.length ? (
+                <div className="rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-3">
+                  <div className="text-sm font-medium text-[rgb(var(--foreground))]">Current Assumptions</div>
+                  <div className="mt-2 space-y-2 text-xs text-[rgb(var(--muted))]">
+                    {warehousingHistory.assumptions.map(function(assumption, index) {
+                      return <div key={"warehouse-assumption-" + index}>{assumption}</div>;
+                    })}
+                  </div>
+                </div>
+              ) : null}
+              {warehouseReportWarnings.length ? (
+                <div className="rounded-md border border-[rgb(var(--warning))]/25 bg-[color-mix(in_oklab,rgb(var(--warning))_7%,white)] p-3 text-xs">
+                  {warehouseReportWarnings.join(" | ")}
+                </div>
+              ) : null}
               <div className="rounded-md border border-[rgb(var(--warning))]/25 bg-[color-mix(in_oklab,rgb(var(--warning))_7%,white)] p-3 text-xs">
-                Draft only: fee edits here are not persisted yet and do not create invoice lines or QuickBooks exports.
+                Fee edits here are still local UI state only. This pass computes live warehouse counts and estimated fees, but it does not persist client fee overrides or create warehouse invoice exports yet.
               </div>
             </CardContent>
           </Card>
