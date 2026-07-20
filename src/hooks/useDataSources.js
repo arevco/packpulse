@@ -262,7 +262,13 @@ export function useDataSources() {
     productionWriteMode: "",
     laborWriteMode: "",
     productionCorrectionStart: "",
-    laborCorrectionStart: ""
+    laborCorrectionStart: "",
+    productionPayloadRows: 0,
+    productionClientRows: 0,
+    productionPayloadTruncated: false,
+    laborPayloadRows: 0,
+    laborClientRows: 0,
+    laborPayloadTruncated: false
   });
   const hydrateDoneRef = useRef(false);
 
@@ -601,7 +607,13 @@ export function useDataSources() {
           productionWriteMode: prev.productionWriteMode || "",
           laborWriteMode: prev.laborWriteMode || "",
           productionCorrectionStart: prev.productionCorrectionStart || "",
-          laborCorrectionStart: prev.laborCorrectionStart || ""
+          laborCorrectionStart: prev.laborCorrectionStart || "",
+          productionPayloadRows: Number(prev.productionPayloadRows || 0),
+          productionClientRows: Number(prev.productionClientRows || 0),
+          productionPayloadTruncated: !!prev.productionPayloadTruncated,
+          laborPayloadRows: Number(prev.laborPayloadRows || 0),
+          laborClientRows: Number(prev.laborClientRows || 0),
+          laborPayloadTruncated: !!prev.laborPayloadTruncated
         };
       });
       fetch("/api/cache/snapshot", {
@@ -639,7 +651,13 @@ export function useDataSources() {
               productionWriteMode: prev.productionWriteMode || "",
               laborWriteMode: prev.laborWriteMode || "",
               productionCorrectionStart: prev.productionCorrectionStart || "",
-              laborCorrectionStart: prev.laborCorrectionStart || ""
+              laborCorrectionStart: prev.laborCorrectionStart || "",
+              productionPayloadRows: Number(prev.productionPayloadRows || 0),
+              productionClientRows: Number(prev.productionClientRows || 0),
+              productionPayloadTruncated: !!prev.productionPayloadTruncated,
+              laborPayloadRows: Number(prev.laborPayloadRows || 0),
+              laborClientRows: Number(prev.laborClientRows || 0),
+              laborPayloadTruncated: !!prev.laborPayloadTruncated
             };
           });
           return;
@@ -658,7 +676,13 @@ export function useDataSources() {
           productionWriteMode: String(body.productionWriteMode || ""),
           laborWriteMode: String(body.laborWriteMode || ""),
           productionCorrectionStart: String(body.productionCorrectionStart || ""),
-          laborCorrectionStart: String(body.laborCorrectionStart || "")
+          laborCorrectionStart: String(body.laborCorrectionStart || ""),
+          productionPayloadRows: Number(body.productionPayloadRows || 0),
+          productionClientRows: Number(body.productionClientRows || 0),
+          productionPayloadTruncated: !!body.productionPayloadTruncated,
+          laborPayloadRows: Number(body.laborPayloadRows || 0),
+          laborClientRows: Number(body.laborClientRows || 0),
+          laborPayloadTruncated: !!body.laborPayloadTruncated
         });
       }).catch(function(err) {
         // Local cache still works; shared cache sync is best effort.
@@ -672,7 +696,13 @@ export function useDataSources() {
             productionWriteMode: prev.productionWriteMode || "",
             laborWriteMode: prev.laborWriteMode || "",
             productionCorrectionStart: prev.productionCorrectionStart || "",
-            laborCorrectionStart: prev.laborCorrectionStart || ""
+            laborCorrectionStart: prev.laborCorrectionStart || "",
+            productionPayloadRows: Number(prev.productionPayloadRows || 0),
+            productionClientRows: Number(prev.productionClientRows || 0),
+            productionPayloadTruncated: !!prev.productionPayloadTruncated,
+            laborPayloadRows: Number(prev.laborPayloadRows || 0),
+            laborClientRows: Number(prev.laborClientRows || 0),
+            laborPayloadTruncated: !!prev.laborPayloadTruncated
           };
         });
       });

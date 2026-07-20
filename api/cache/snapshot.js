@@ -232,6 +232,49 @@ function rowCountsFromPayload(payload) {
   };
 }
 
+function uniqueStringValues(values) {
+  var seen = {};
+  var out = [];
+  (Array.isArray(values) ? values : []).forEach(function(value) {
+    var key = String(value || "").trim();
+    if (!key || seen[key]) return;
+    seen[key] = true;
+    out.push(key);
+  });
+  return out;
+}
+
+function payloadMeta(payload) {
+  return payload && payload.meta && typeof payload.meta === "object"
+    ? payload.meta
+    : {};
+}
+
+function clientReportedRowCounts(payload) {
+  var meta = payloadMeta(payload);
+  return meta.clientRowCounts && typeof meta.clientRowCounts === "object"
+    ? meta.clientRowCounts
+    : {};
+}
+
+function payloadDatasetState(payload, key) {
+  var meta = payloadMeta(payload);
+  var rows = Array.isArray(payload && payload[key]) ? payload[key] : [];
+  var clientCounts = clientReportedRowCounts(payload);
+  var clientCount = Number(clientCounts && clientCounts[key]);
+  var trimmed = uniqueStringValues(meta.clientTrimmedDatasets).indexOf(key) !== -1;
+  var dropped = uniqueStringValues(meta.clientDroppedDatasets).indexOf(key) !== -1;
+  var truncated = trimmed || dropped || (Number.isFinite(clientCount) && clientCount > rows.length);
+  return {
+    rows: rows,
+    rowCount: rows.length,
+    clientCount: Number.isFinite(clientCount) ? clientCount : rows.length,
+    trimmed: trimmed,
+    dropped: dropped,
+    truncated: truncated
+  };
+}
+
 function toNum(v) {
   if (typeof v === "number") return Number.isFinite(v) ? v : 0;
   if (v == null || v === "") return 0;
@@ -467,10 +510,16 @@ export default async function handler(req, res) {
           historyStatus = "history_insert_failed";
         }
       }
-      // Build canonical production events from the full incoming dataset, not the compacted
-      // shared-cache payload. The cache payload may trim production rows for size limits.
-      var productionEvents = buildProductionEvents(incomingPayload, CACHE_SITE_ID, syncedAt, user.email);
-      var laborEvents = buildLaborEvents(incomingPayload && incomingPayload.laborData, CACHE_SITE_ID, syncedAt, user.email);
+      // Shared snapshot POSTs may contain intentionally compacted production/labor datasets.
+      // Never rewrite canonical event tables unless this request still carries the full dataset.
+      var productionState = payloadDatasetState(incomingPayload, "productionData");
+      var laborState = payloadDatasetState(incomingPayload, "laborData");
+      var productionEvents = productionState.truncated
+        ? []
+        : buildProductionEvents(incomingPayload, CACHE_SITE_ID, syncedAt, user.email);
+      var laborEvents = laborState.truncated
+        ? []
+        : buildLaborEvents(laborState.rows, CACHE_SITE_ID, syncedAt, user.email);
       var productionStatus = "ok";
       var productionWritten = 0;
       var productionWriteMode = "noop";
@@ -487,7 +536,16 @@ export default async function handler(req, res) {
       var laborGuardedDateKeys = [];
       var performanceViewRefreshStatus = "noop";
       var performanceViewRefreshDetails = null;
-      if (productionEvents.length > 0) {
+      if (productionState.truncated) {
+        productionStatus = "skipped_truncated_snapshot_production";
+        productionWriteMode = "skipped_truncated_snapshot";
+        console.warn("[cache/snapshot] Skipping production_events rewrite from compacted shared snapshot.", {
+          payloadRows: productionState.rowCount,
+          clientRows: productionState.clientCount,
+          trimmed: productionState.trimmed,
+          dropped: productionState.dropped
+        });
+      } else if (productionEvents.length > 0) {
         // Keep one extra calendar day in the correction window so the next business-day
         // refresh can still repair a partial Friday write after a quiet weekend.
         var productionCorrectionDays = Number(process.env.PRODUCTION_EVENT_CORRECTION_DAYS || process.env.NULOGY_EVENT_CORRECTION_DAYS || 4);
@@ -512,7 +570,16 @@ export default async function handler(req, res) {
           }
         }
       }
-      if (laborEvents.length > 0) {
+      if (laborState.truncated) {
+        laborStatus = "skipped_truncated_snapshot_labor";
+        laborWriteMode = "skipped_truncated_snapshot";
+        console.warn("[cache/snapshot] Skipping labor_events rewrite from compacted shared snapshot.", {
+          payloadRows: laborState.rowCount,
+          clientRows: laborState.clientCount,
+          trimmed: laborState.trimmed,
+          dropped: laborState.dropped
+        });
+      } else if (laborEvents.length > 0) {
         try {
           var laborWrite = await writeLaborEventsSafely(supabase, {
             siteId: CACHE_SITE_ID,
@@ -561,6 +628,9 @@ export default async function handler(req, res) {
           historyStatus: historyStatus,
           productionStatus: productionStatus,
           productionRowsSubmitted: productionEvents.length,
+          productionPayloadRows: productionState.rowCount,
+          productionClientRows: productionState.clientCount,
+          productionPayloadTruncated: productionState.truncated,
           productionRowsWritten: productionWritten,
           productionWriteMode: productionWriteMode,
           productionCorrectionStart: productionCorrectionStart,
@@ -569,6 +639,9 @@ export default async function handler(req, res) {
           productionGuardedDateKeys: productionGuardedDateKeys,
           laborStatus: laborStatus,
           laborRowsSubmitted: laborEvents.length,
+          laborPayloadRows: laborState.rowCount,
+          laborClientRows: laborState.clientCount,
+          laborPayloadTruncated: laborState.truncated,
           laborRowsWritten: laborWritten,
           laborWriteMode: laborWriteMode,
           laborCorrectionStart: laborCorrectionStart,
@@ -593,6 +666,9 @@ export default async function handler(req, res) {
         historyStatus: historyStatus,
         productionStatus: productionStatus,
         productionRowsSubmitted: productionEvents.length,
+        productionPayloadRows: productionState.rowCount,
+        productionClientRows: productionState.clientCount,
+        productionPayloadTruncated: productionState.truncated,
         productionRowsWritten: productionWritten,
         productionWriteMode: productionWriteMode,
         productionCorrectionStart: productionCorrectionStart,
@@ -601,6 +677,9 @@ export default async function handler(req, res) {
         productionGuardedDateKeys: productionGuardedDateKeys,
         laborStatus: laborStatus,
         laborRowsSubmitted: laborEvents.length,
+        laborPayloadRows: laborState.rowCount,
+        laborClientRows: laborState.clientCount,
+        laborPayloadTruncated: laborState.truncated,
         laborRowsWritten: laborWritten,
         laborWriteMode: laborWriteMode,
         laborCorrectionStart: laborCorrectionStart,

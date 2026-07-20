@@ -790,7 +790,13 @@ export default function ProductionReadiness() {
     productionWriteMode:"",
     laborWriteMode:"",
     productionCorrectionStart:"",
-    laborCorrectionStart:""
+    laborCorrectionStart:"",
+    productionPayloadRows:0,
+    productionClientRows:0,
+    productionPayloadTruncated:false,
+    laborPayloadRows:0,
+    laborClientRows:0,
+    laborPayloadTruncated:false
   };
   var sharedSourceLabel = sharedMeta.source === "shared" ? "Shared cache" : sharedMeta.source === "local" ? "Local cache" : sharedMeta.source === "empty" ? "Shared cache empty" : "Shared cache unavailable";
   var sharedStamp = sharedMeta.syncedAt ? fmtTs(sharedMeta.syncedAt) : "--";
@@ -798,11 +804,37 @@ export default function ProductionReadiness() {
   var sharedSeemsStale = !!(sharedAgeMins != null && sharedAgeMins > 30 && freshCount >= 3);
   var productionWriteLabel = sharedWrite.productionWriteMode ? String(sharedWrite.productionWriteMode).replace(/_/g, " ") : "";
   var laborWriteLabel = sharedWrite.laborWriteMode ? String(sharedWrite.laborWriteMode).replace(/_/g, " ") : "";
+  var productionSnapshotSafeguardActive = !!(
+    sharedWrite.productionWriteMode === "skipped_truncated_snapshot" &&
+    sharedWrite.productionPayloadTruncated
+  );
+  var laborSnapshotSafeguardActive = !!(
+    sharedWrite.laborWriteMode === "skipped_truncated_snapshot" &&
+    sharedWrite.laborPayloadTruncated
+  );
+  var snapshotSafeguardActive = productionSnapshotSafeguardActive || laborSnapshotSafeguardActive;
+  var snapshotSafeguardText = [
+    productionSnapshotSafeguardActive
+      ? ("Production shared snapshot was compacted (" +
+        Number(sharedWrite.productionPayloadRows || 0).toLocaleString() +
+        " of " +
+        Number(sharedWrite.productionClientRows || 0).toLocaleString() +
+        " rows), so canonical production history was left unchanged.")
+      : "",
+    laborSnapshotSafeguardActive
+      ? ("Labor shared snapshot was compacted (" +
+        Number(sharedWrite.laborPayloadRows || 0).toLocaleString() +
+        " of " +
+        Number(sharedWrite.laborClientRows || 0).toLocaleString() +
+        " rows), so canonical labor history was left unchanged.")
+      : ""
+  ].filter(Boolean).join(" ");
   var hasSnapshotWriteDiagnostics = !!(
     sharedWrite.productionWriteMode ||
     sharedWrite.laborWriteMode ||
     sharedWrite.snapshotVersion ||
     sharedWrite.succeededAt ||
+    snapshotSafeguardActive ||
     sharedWrite.error
   );
   var staleCount = Math.max(0, dataSourceStatus.length - freshCount);
@@ -1731,6 +1763,7 @@ export default function ProductionReadiness() {
               </span>
               {showSharedSnapshotWritingBadge && <Badge variant="secondary">Saving shared snapshot…</Badge>}
               {sharedWrite.status === "error" && <Badge variant="danger">Shared snapshot save failed</Badge>}
+              {snapshotSafeguardActive && <Badge variant="warning">Shared snapshot compacted</Badge>}
               {sharedWrite.productionWriteMode && <Badge variant="outline">Prod write: {productionWriteLabel}</Badge>}
               {sharedWrite.laborWriteMode && <Badge variant="outline">Labor write: {laborWriteLabel}</Badge>}
             </div>
@@ -1747,6 +1780,7 @@ export default function ProductionReadiness() {
           </span>
           {showSharedSnapshotWritingBadge && <Badge variant="secondary">Saving shared snapshot…</Badge>}
           {sharedWrite.status === "error" && <Badge variant="danger">Shared snapshot save failed</Badge>}
+          {snapshotSafeguardActive && <Badge variant="warning">Shared snapshot compacted</Badge>}
           {sharedWrite.productionWriteMode && <Badge variant="outline">Prod write: {productionWriteLabel}</Badge>}
           {sharedWrite.laborWriteMode && <Badge variant="outline">Labor write: {laborWriteLabel}</Badge>}
         </div>
@@ -1858,6 +1892,9 @@ export default function ProductionReadiness() {
                     </span>
                   )}
                 </div>
+                {snapshotSafeguardText && (
+                  <div className="mt-1 text-[rgb(var(--warning))]">{snapshotSafeguardText}</div>
+                )}
                 {sharedWrite.error && (
                   <div className="mt-1 text-[rgb(var(--danger))]">{sharedWrite.error}</div>
                 )}
