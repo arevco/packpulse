@@ -346,14 +346,14 @@ const REPORT_CONFIGS = {
     columnSets: [
       ["worked_date", "work_date", "shift_label", "shift",
        "clock_in_time", "clock_out_time", "clock_in_at", "clock_out_at", "clocked_in_at", "clocked_out_at", "started_at", "ended_at",
-       "duration", "badge_type_name", "badge_type_prefix", "badge_type_rate",
+       "duration", "badge_code", "badge_type_name", "badge_type_prefix", "badge_type_rate",
        "job_id", "project_code", "work_order_id", "item_code", "item_description", "item_family_name",
        "line_name", "line_leader_name", "payable_hours", "productive_hours", "availability", "performance", "line_efficiency"],
       ["worked_date", "work_date", "shift_label", "shift",
        "clock_in_time", "clock_out_time", "clock_in_at", "clock_out_at", "clocked_in_at", "clocked_out_at", "started_at", "ended_at",
-       "badge_type_name", "badge_type_rate", "job_id", "project_code",
+       "badge_code", "badge_type_name", "badge_type_rate", "job_id", "project_code",
        "item_code", "item_description", "line_name", "payable_hours", "productive_hours", "availability", "performance"],
-      ["worked_date", "shift_label", "line_name", "job_id", "project_code", "item_code", "item_description", "badge_type_name", "badge_type_rate", "payable_hours", "productive_hours"]
+      ["worked_date", "shift_label", "line_name", "job_id", "project_code", "item_code", "item_description", "badge_code", "badge_type_name", "badge_type_rate", "payable_hours", "productive_hours"]
     ]
   }
 };

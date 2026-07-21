@@ -448,6 +448,20 @@ function avgPct(sum, weight) {
   return weight > 0 ? (sum / weight) : 0;
 }
 
+function pickLaborBadgeCode(laborRow) {
+  if (!laborRow || typeof laborRow !== "object") return "";
+  var direct = textKey(laborRow.badge_code);
+  if (direct) return direct.toUpperCase();
+  var raw = laborRow.raw && typeof laborRow.raw === "object" ? laborRow.raw : null;
+  var badge = textKey(raw && pickFieldLoose(raw, [
+    "Badge",
+    "badge",
+    "Badge Code",
+    "badge_code"
+  ]));
+  return badge ? badge.toUpperCase() : "";
+}
+
 function makeMetricRow(base) {
   return Object.assign({
     payable_hours: 0,
@@ -463,7 +477,8 @@ function makeMetricRow(base) {
     performance_sum: 0,
     performance_weight: 0,
     line_efficiency_sum: 0,
-    line_efficiency_weight: 0
+    line_efficiency_weight: 0,
+    badge_keys: {}
   }, base || {});
 }
 
@@ -488,10 +503,12 @@ function addLaborToRow(target, laborRow) {
   var productive = toNum(laborRow.productive_hours);
   var hourlyRate = toNum(laborRow.hourly_rate);
   var laborCost = payable * hourlyRate;
+  var badgeCode = pickLaborBadgeCode(laborRow);
   target.payable_hours += payable;
   target.productive_hours += productive;
   target.labor_cost += laborCost;
   target.rows += 1;
+  if (badgeCode) target.badge_keys[badgeCode] = true;
   if (laborRow && laborRow.has_trusted_shift) target.trusted_shift_rows += 1;
   else if (isSpecificShiftLabel(laborRow && laborRow.shift_label)) target.low_confidence_shift_rows += 1;
   if (laborRow && laborRow.is_finalized) target.finalized_rows += 1;
@@ -502,6 +519,9 @@ function addLaborToRow(target, laborRow) {
 
 function finalizeMetricRow(row, casesProduced) {
   var cases = toNum(casesProduced);
+  var actualHeadcount = row && row.badge_keys && typeof row.badge_keys === "object"
+    ? Object.keys(row.badge_keys).filter(Boolean).length
+    : 0;
   var out = Object.assign({}, row, {
     cases_produced: cases,
     cases_per_payable_hour: row.payable_hours > 0 ? (cases / row.payable_hours) : 0,
@@ -510,6 +530,7 @@ function finalizeMetricRow(row, casesProduced) {
     availability_pct: avgPct(row.availability_sum, row.availability_weight),
     performance_pct: avgPct(row.performance_sum, row.performance_weight),
     line_efficiency_pct: avgPct(row.line_efficiency_sum, row.line_efficiency_weight),
+    actual_headcount: actualHeadcount > 0 ? actualHeadcount : null,
     labor_status: deriveLaborStatus(toNum(row.finalized_rows), toNum(row.provisional_rows)),
     can_direct_match_shift: toNum(row.trusted_shift_rows) > 0,
     shift_match_confidence: toNum(row.trusted_shift_rows) > 0 ? "trusted" : (toNum(row.low_confidence_shift_rows) > 0 ? "low" : "aggregate")
@@ -520,6 +541,7 @@ function finalizeMetricRow(row, casesProduced) {
   delete out.performance_weight;
   delete out.line_efficiency_sum;
   delete out.line_efficiency_weight;
+  delete out.badge_keys;
   return out;
 }
 

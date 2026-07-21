@@ -837,6 +837,9 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         allocationMethod = "unmatched";
         matchLevel = "unmatched";
       }
+      var actualHeadcount = payableHours > 0 && allocationMethod === "direct_match"
+        ? safeNum(labor && labor.actual_headcount)
+        : 0;
       var unitsProduced = safeNum(r.unitsProduced);
       var revenueMatch = typeof resolveRevenueForRow === "function" ? resolveRevenueForRow(r.itemCode, r.date) : null;
       var revenuePerCase = safeNum(revenueMatch && revenueMatch.value);
@@ -869,6 +872,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         laborCostPerCase: unitsProduced > 0 ? (laborCost / unitsProduced) : 0,
         hasLabor: payableHours > 0,
         hasRevenue: revenue > 0,
+        actualHeadcount: actualHeadcount > 0 ? actualHeadcount : null,
         laborStatus: laborStatus,
         laborIsProvisional: payableHours > 0 && isProvisionalLabor(laborStatus),
         shiftMatchConfidence: shiftMatchConfidence,
@@ -899,6 +903,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         casesPerPayableHour: 0,
         laborCostPerCase: 0,
         hasLabor: false,
+        actualHeadcount: null,
         laborStatus: "unknown",
         laborIsProvisional: false,
         shiftMatchConfidence: "",
@@ -1004,6 +1009,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
           revenueCoveredUnits: 0,
           laborMargin: 0,
           productionMinutes: 0,
+          actualHeadcountMax: 0,
           shifts: {},
           shiftSlots: {},
           missingRevenueUnits: 0,
@@ -1019,6 +1025,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
       map[key].revenueCoveredUnits += safeNum(r.revenueCoveredUnits);
       map[key].laborMargin += safeNum(r.laborMargin);
       map[key].productionMinutes += safeNum(r.productionMinutes);
+      map[key].actualHeadcountMax = Math.max(safeNum(map[key].actualHeadcountMax), safeNum(r.actualHeadcount));
       map[key].missingRevenueUnits += safeNum(r.missingRevenueUnits);
       if (r.missingRevenue) map[key].missingRevenueSkuKeys[r.missingRevenueSkuKey] = r.itemCode || "Unknown SKU";
       map[key].shifts[String(r.shift || "Unassigned")] = true;
@@ -1036,6 +1043,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         casesPerMinute: productionMinutes > 0 ? (r.unitsProduced / productionMinutes) : 0,
         casesPerPayableHour: r.laborPayableHours > 0 ? (r.unitsProduced / r.laborPayableHours) : 0,
         laborCostPerCase: r.unitsProduced > 0 ? (r.laborCost / r.unitsProduced) : 0,
+        actualHeadcount: r.actualHeadcountMax > 0 ? r.actualHeadcountMax : null,
         revenueCoveragePct: r.unitsProduced > 0 ? Math.round((r.revenueCoveredUnits / r.unitsProduced) * 100) : 0,
         missingRevenueSkuCount: Object.keys(r.missingRevenueSkuKeys).length,
         pricePerUnit: r.revenueCoveredUnits > 0 ? (r.revenue / r.revenueCoveredUnits) : null,
@@ -1323,6 +1331,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
       "revenue_covered_units",
       "revenue_coverage_pct",
       "labor_payable_hours",
+      "actual_headcount",
       "labor_productive_hours",
       "labor_cost",
       "labor_cost_per_case",
@@ -1360,6 +1369,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
         csvNumber(row.revenueCoveredUnits, 0),
         csvNumber(row.revenueCoveragePct, 1),
         csvNumber(row.laborPayableHours, 2),
+        csvNumber(row.actualHeadcount, 0),
         csvNumber(row.laborProductiveHours, 2),
         csvNumber(row.laborCost, 2),
         csvNumber(row.laborCostPerCase, 2),
@@ -1541,7 +1551,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
             </div>
           </div>
           <TableShell className="overflow-x-auto overflow-y-hidden">
-            <table style={{ width:"100%", minWidth:1300, borderCollapse:"collapse" }}>
+            <table style={{ width:"100%", minWidth:1380, borderCollapse:"collapse" }}>
               <thead>
                 <tr style={{ background:C.raised }}>
                   <th style={thS}>Line / Job / Shift</th>
@@ -1566,6 +1576,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
                       Labor Hrs{detailSortField === "laborPayableHours" ? (detailSortDir === "asc" ? " ↑" : " ↓") : ""}
                     </SortHeaderButton>
                   </th>
+                  <th style={thS}>Headcount</th>
                   <th style={thS}>
                     <SortHeaderButton onClick={function() { handleDetailSort("laborCost"); }}>
                       Labor{detailSortField === "laborCost" ? (detailSortDir === "asc" ? " ↑" : " ↓") : ""}
@@ -1623,6 +1634,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
                       <td style={tdM}>{r.revenue > 0 ? fmtMoneyWhole(r.revenue) : "--"}</td>
                       <td style={tdM}>{r.pricePerUnit != null ? fmtMoney(r.pricePerUnit) : "--"}</td>
                       <td style={tdM}>{r.laborPayableHours > 0 ? r.laborPayableHours.toFixed(1) : "--"}</td>
+                      <td style={tdM}>--</td>
                       <td style={tdM}>{r.laborCost > 0 ? fmtMoneyWhole(r.laborCost) : "--"}</td>
                       <td style={tdM}>{r.revenue > 0 ? fmtMoneyWhole(r.laborMargin) : "--"}</td>
                       <td style={tdM}>{r.revenue > 0 ? fmtPct(r.laborMarginPct) : "--"}</td>
@@ -1661,6 +1673,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
                           </td>
                           <td style={tdM}>{job.pricePerUnit != null ? fmtMoney(job.pricePerUnit) : "--"}</td>
                           <td style={tdM}>{job.laborPayableHours > 0 ? job.laborPayableHours.toFixed(1) : "--"}</td>
+                          <td style={tdM}>{job.actualHeadcount != null ? Math.round(job.actualHeadcount).toLocaleString() : "--"}</td>
                           <td style={tdM}>{job.laborCost > 0 ? fmtMoneyWhole(job.laborCost) : "--"}</td>
                           <td style={tdM}>{job.revenue > 0 ? fmtMoneyWhole(job.laborMargin) : "--"}</td>
                           <td style={tdM}>{job.revenue > 0 ? fmtPct(job.laborMarginPct) : "--"}</td>
@@ -1694,6 +1707,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
                                 <div>{detail.laborPayableHours > 0 ? detail.laborPayableHours.toFixed(1) : "--"}</div>
                                 {detail.hasLabor && detail.laborStatus !== "finalized" ? <div style={{ fontSize:11, color:C.warn }}>{laborStatusLabel(detail.laborStatus)}</div> : null}
                               </td>
+                              <td style={tdM}>{detail.actualHeadcount != null ? Math.round(detail.actualHeadcount).toLocaleString() : "--"}</td>
                               <td style={tdM}>
                                 <div>{detail.laborCost > 0 ? fmtMoneyWhole(detail.laborCost) : "--"}</div>
                                 {detail.hasLabor && detail.laborStatus !== "finalized" ? <div style={{ fontSize:11, color:C.warn }}>provisional</div> : null}
@@ -1708,7 +1722,7 @@ export default function ProductionView({ productionSegments, laborActuals, labor
                     }) : null
                   ];
                 })}
-                {!lineExecution.length && <tr><td colSpan={10} style={{ padding:20, textAlign:"center", color:C.dim }}>No jobs match the current metric filters.</td></tr>}
+                {!lineExecution.length && <tr><td colSpan={11} style={{ padding:20, textAlign:"center", color:C.dim }}>No jobs match the current metric filters.</td></tr>}
               </tbody>
             </table>
           </TableShell>

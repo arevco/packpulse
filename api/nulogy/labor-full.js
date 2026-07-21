@@ -39,7 +39,7 @@ function getColumnSets() {
   return [
     [],
     [
-      "availability", "badge", "badge_type_name", "badge_type_prefix", "badge_type_rate",
+      "availability", "badge_code", "badge_type_name", "badge_type_prefix", "badge_type_rate",
       "clock_in_time", "clock_out_time", "duration",
       "item_alternate_code_1", "item_alternate_code_2", "item_category_name",
       "item_code", "item_customer_name", "item_description", "item_family_name",
@@ -51,13 +51,13 @@ function getColumnSets() {
       "work_order_reference_4", "work_order_reference_5"
     ],
     [
-      "clock_in_time", "clock_out_time", "badge_type_name", "badge_type_rate",
+      "clock_in_time", "clock_out_time", "badge_code", "badge_type_name", "badge_type_rate",
       "job_id", "line_name", "payable_hours", "productive_hours", "performance",
       "line_efficiency", "project_code", "item_code", "item_description"
     ],
     [
       "line_name", "job_id", "project_code", "item_code", "item_description",
-      "badge_type_name", "badge_type_rate", "payable_hours", "productive_hours"
+      "badge_code", "badge_type_name", "badge_type_rate", "payable_hours", "productive_hours"
     ]
   ];
 }
