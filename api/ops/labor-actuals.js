@@ -462,6 +462,35 @@ function pickLaborBadgeCode(laborRow) {
   return badge ? badge.toUpperCase() : "";
 }
 
+function isGeneratedBadgeCode(value) {
+  return textKey(value).toUpperCase() === "GENERATED";
+}
+
+function makeHeadcountWindowKey(laborRow) {
+  if (!laborRow || typeof laborRow !== "object") return "";
+  var dateKey = textKey(laborRow.worked_date_et);
+  var shiftLabel = textKey(laborRow.shift_label, "Unassigned");
+  var lineName = textKey(laborRow.line_name, "Unknown");
+  var clockInKey = textKey(laborRow.clock_in_at_utc || laborRow.worked_at_utc);
+  var clockOutKey = textKey(laborRow.clock_out_at_utc);
+  var parts = [dateKey, shiftLabel, lineName, clockInKey, clockOutKey];
+  return parts.some(Boolean) ? parts.join("|") : "";
+}
+
+function getHeadcountWindow(target, windowKey) {
+  if (!target || !windowKey) return null;
+  if (!target.headcount_windows || typeof target.headcount_windows !== "object") {
+    target.headcount_windows = {};
+  }
+  if (!target.headcount_windows[windowKey]) {
+    target.headcount_windows[windowKey] = {
+      badge_keys: {},
+      generated_count: 0
+    };
+  }
+  return target.headcount_windows[windowKey];
+}
+
 function makeMetricRow(base) {
   return Object.assign({
     payable_hours: 0,
@@ -478,7 +507,9 @@ function makeMetricRow(base) {
     performance_weight: 0,
     line_efficiency_sum: 0,
     line_efficiency_weight: 0,
-    badge_keys: {}
+    badge_keys: {},
+    headcount_windows: {},
+    generated_headcount_total: 0
   }, base || {});
 }
 
@@ -504,11 +535,21 @@ function addLaborToRow(target, laborRow) {
   var hourlyRate = toNum(laborRow.hourly_rate);
   var laborCost = payable * hourlyRate;
   var badgeCode = pickLaborBadgeCode(laborRow);
+  var headcountWindow = getHeadcountWindow(target, makeHeadcountWindowKey(laborRow));
   target.payable_hours += payable;
   target.productive_hours += productive;
   target.labor_cost += laborCost;
   target.rows += 1;
-  if (badgeCode) target.badge_keys[badgeCode] = true;
+  if (badgeCode && !isGeneratedBadgeCode(badgeCode)) {
+    target.badge_keys[badgeCode] = true;
+    if (headcountWindow) headcountWindow.badge_keys[badgeCode] = true;
+  } else if (headcountWindow) {
+    // Some Nulogy labor exports collapse the employee badge to "Generated" but
+    // still emit one row per crew slot. Count those rows per time window so we
+    // surface crew size instead of a misleading constant "1".
+    headcountWindow.generated_count += 1;
+    target.generated_headcount_total += 1;
+  }
   if (laborRow && laborRow.has_trusted_shift) target.trusted_shift_rows += 1;
   else if (isSpecificShiftLabel(laborRow && laborRow.shift_label)) target.low_confidence_shift_rows += 1;
   if (laborRow && laborRow.is_finalized) target.finalized_rows += 1;
@@ -519,9 +560,24 @@ function addLaborToRow(target, laborRow) {
 
 function finalizeMetricRow(row, casesProduced) {
   var cases = toNum(casesProduced);
-  var actualHeadcount = row && row.badge_keys && typeof row.badge_keys === "object"
-    ? Object.keys(row.badge_keys).filter(Boolean).length
-    : 0;
+  var actualHeadcount = 0;
+  var windows = row && row.headcount_windows && typeof row.headcount_windows === "object"
+    ? Object.keys(row.headcount_windows)
+    : [];
+  windows.forEach(function(key) {
+    var bucket = row.headcount_windows[key];
+    var badgeCount = bucket && bucket.badge_keys && typeof bucket.badge_keys === "object"
+      ? Object.keys(bucket.badge_keys).filter(Boolean).length
+      : 0;
+    var generatedCount = toNum(bucket && bucket.generated_count);
+    actualHeadcount = Math.max(actualHeadcount, badgeCount + generatedCount);
+  });
+  actualHeadcount = Math.max(actualHeadcount, toNum(row && row.generated_headcount_total));
+  if (!(actualHeadcount > 0)) {
+    actualHeadcount = row && row.badge_keys && typeof row.badge_keys === "object"
+      ? Object.keys(row.badge_keys).filter(Boolean).length
+      : 0;
+  }
   var out = Object.assign({}, row, {
     cases_produced: cases,
     cases_per_payable_hour: row.payable_hours > 0 ? (cases / row.payable_hours) : 0,
@@ -542,6 +598,8 @@ function finalizeMetricRow(row, casesProduced) {
   delete out.line_efficiency_sum;
   delete out.line_efficiency_weight;
   delete out.badge_keys;
+  delete out.headcount_windows;
+  delete out.generated_headcount_total;
   return out;
 }
 
