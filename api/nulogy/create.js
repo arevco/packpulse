@@ -180,6 +180,47 @@ export function buildReceiveOrderFilters(options) {
   return filters;
 }
 
+export function buildLaborFilters(options) {
+  var explicitStartDate = sanitizeIsoDate(options && options.startDate);
+  var explicitEndDate = sanitizeIsoDate(options && options.endDate);
+  if (explicitStartDate && explicitEndDate && explicitEndDate >= explicitStartDate) {
+    var explicitEndExclusive = shiftIsoDateKey(explicitEndDate, 1) || explicitEndDate;
+    return [
+      {
+        column: "clock_in_at",
+        operator: "between",
+        from_threshold: formatNulogyBoundaryDateTime(explicitStartDate),
+        to_threshold: formatNulogyBoundaryDateTime(explicitEndExclusive)
+      }
+    ];
+  }
+
+  var syncProfile = String(options && options.syncProfile || "full");
+  if (syncProfile !== "recent_production") return undefined;
+
+  var recentLaborLookbackDays = Number(
+    process.env.NULOGY_RECENT_LABOR_LOOKBACK_DAYS ||
+    process.env.NULOGY_RECENT_PRODUCTION_LOOKBACK_DAYS ||
+    3
+  );
+  var recentWindowDays = Math.max(2, Math.round(recentLaborLookbackDays) + 1);
+  var todayEt = todayEtDateKey();
+  var recentStartDate = todayEt ? shiftIsoDateKey(todayEt, -(recentWindowDays - 1)) : "";
+  var recentEndExclusive = todayEt ? shiftIsoDateKey(todayEt, 1) : "";
+  if (!recentStartDate || !recentEndExclusive) return undefined;
+
+  return [
+    {
+      // Keep the fast Operations refresh focused on the same ET day window used
+      // for recent production so headcount can refresh without a full labor pull.
+      column: "clock_in_at",
+      operator: "between",
+      from_threshold: formatNulogyBoundaryDateTime(recentStartDate),
+      to_threshold: formatNulogyBoundaryDateTime(recentEndExclusive)
+    }
+  ];
+}
+
 // Column codes verified against actual REV Copack Nulogy instance
 // CRITICAL: item_code is a FIXED FIELD on inventory_snapshot — always auto-included
 // Do NOT pass it in the columns array or the API will reject the request
@@ -354,7 +395,8 @@ const REPORT_CONFIGS = {
        "badge_code", "badge_type_name", "badge_type_rate", "job_id", "project_code",
        "item_code", "item_description", "line_name", "payable_hours", "productive_hours", "availability", "performance"],
       ["worked_date", "shift_label", "line_name", "job_id", "project_code", "item_code", "item_description", "badge_code", "badge_type_name", "badge_type_rate", "payable_hours", "productive_hours"]
-    ]
+    ],
+    filters: buildLaborFilters
   }
 };
 

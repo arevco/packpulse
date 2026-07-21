@@ -849,11 +849,15 @@ export default function ProductionReadiness() {
     ds.edrTimestamp,
   ]);
   var latestProductionSyncMs = freshestTimestampMs([ds.productionTimestamp]);
-  // Keep the full-report cadence separate from the fast production refresh path.
-  // Otherwise frequent production-only syncs can suppress labor and other
-  // deferred reports indefinitely by constantly refreshing production timestamps.
+  var latestLaborSyncMs = freshestTimestampMs([ds.laborTimestamp]);
+  // Keep the full-report cadence separate from the fast Operations refresh path.
+  // Otherwise frequent recent production/labor syncs can suppress inventory and
+  // other deferred reports indefinitely.
   var fullNulogyAutoSyncFresh = !!latestFullNulogySyncMs && (Date.now() - latestFullNulogySyncMs) < FULL_AUTO_SYNC_FRESH_MS;
-  var productionAutoSyncFresh = !!latestProductionSyncMs && (Date.now() - latestProductionSyncMs) < PRODUCTION_AUTO_SYNC_FRESH_MS;
+  var productionAutoSyncFresh = !!latestProductionSyncMs &&
+    !!latestLaborSyncMs &&
+    (Date.now() - latestProductionSyncMs) < PRODUCTION_AUTO_SYNC_FRESH_MS &&
+    (Date.now() - latestLaborSyncMs) < PRODUCTION_AUTO_SYNC_FRESH_MS;
   var hiddenSyncBusy = !!(nulogySyncState && (nulogySyncState.syncing || nulogySyncState.deferredSyncing));
   var pendingHiddenSyncFailureCooldown = !hiddenSyncBusy && hiddenSyncWasBusyRef.current && !!(nulogySyncState && nulogySyncState.errorCount > 0);
   var syncedInventoryLooksLegacy = !!(Array.isArray(ds.inventory) && ds.inventory.length && /nulogy/i.test(String(ds.invFileName || "")) && (function() {
@@ -1472,7 +1476,8 @@ export default function ProductionReadiness() {
     var reportStates = nulogySyncState && nulogySyncState.reportStates ? nulogySyncState.reportStates : null;
     var nulogySteps = hiddenNulogySyncMode === "production_only"
       ? [
-          { key:"production", label:"Production" }
+          { key:"production", label:"Production" },
+          { key:"labor", label:"Labor" }
         ]
       : [
           { key:"inventory", label:"Inventory" },
@@ -1624,7 +1629,7 @@ export default function ProductionReadiness() {
           hideToggle
           silent
           onSyncStateChange={setNulogySyncState}
-          defaultSyncTypes={hiddenNulogySyncMode === "production_only" ? ["production"] : undefined}
+          defaultSyncTypes={hiddenNulogySyncMode === "production_only" ? ["production", "labor"] : undefined}
           syncProfile={hiddenNulogySyncMode === "production_only" ? "recent_production" : "full"}
         />
       )}
