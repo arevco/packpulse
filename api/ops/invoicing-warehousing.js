@@ -487,7 +487,6 @@ export default async function handler(req, res) {
       maxPolls: 60
     });
     var storageResult = await fetchReportCsv(STORAGE_REPORT, STORAGE_COLUMNS, {
-      sortBy: [{ column: "customer_name", direction: "asc" }],
       maxPolls: 90
     });
 
