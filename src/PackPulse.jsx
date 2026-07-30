@@ -51,6 +51,7 @@ var reportingViewImportPromise = null;
 var onboardingViewImportPromise = null;
 var calendarViewImportPromise = null;
 var safetyViewImportPromise = null;
+var purchaseOrdersViewImportPromise = null;
 
 function importOperationsView() {
   if (!operationsViewImportPromise) operationsViewImportPromise = import("./views/OperationsView");
@@ -97,6 +98,11 @@ function importSafetyView() {
   return safetyViewImportPromise;
 }
 
+function importPurchaseOrdersView() {
+  if (!purchaseOrdersViewImportPromise) purchaseOrdersViewImportPromise = import("./views/PurchaseOrdersView");
+  return purchaseOrdersViewImportPromise;
+}
+
 function prefetchOperationsView() {
   return Promise.all([
     importOperationsView(),
@@ -132,6 +138,10 @@ function prefetchSafetyView() {
   return importSafetyView().catch(function() {});
 }
 
+function prefetchPurchaseOrdersView() {
+  return importPurchaseOrdersView().catch(function() {});
+}
+
 function prefetchLikelyNextViews(activeView) {
   var prefetchers = [];
   if (activeView !== "operations") prefetchers.push(prefetchOperationsView);
@@ -142,6 +152,7 @@ function prefetchLikelyNextViews(activeView) {
   if (activeView !== "onboarding") prefetchers.push(prefetchOnboardingView);
   if (activeView !== "calendar") prefetchers.push(prefetchCalendarView);
   if (activeView !== "safety") prefetchers.push(prefetchSafetyView);
+  if (activeView !== "purchaseorders") prefetchers.push(prefetchPurchaseOrdersView);
   return prefetchers.reduce(function(chain, prefetch) {
     return chain.then(function() {
       return prefetch();
@@ -462,6 +473,7 @@ const ReportingView = lazySafe(importReportingView, "Reporting");
 const OnboardingView = lazySafe(importOnboardingView, "Onboarding");
 const CalendarView = lazySafe(importCalendarView, "Calendar");
 const SafetyView = lazySafe(importSafetyView, "Safety");
+const PurchaseOrdersView = lazySafe(importPurchaseOrdersView, "Purchase Orders");
 const SupplyRiskView = lazySafe(function() { return import("./views/SupplyRiskView"); }, "Supply Risk");
 const ItemMasterView = lazySafe(function() { return import("./views/ItemMasterView"); }, "Item Master");
 const FlagsView = lazySafe(function() { return import("./views/FlagsView"); }, "Data Flags");
@@ -488,7 +500,7 @@ export default function ProductionReadiness() {
   var parseInitialPermalink = function() {
     if (typeof window === "undefined") return { view: "workorders", wo: {}, forecast: {}, operations: {}, invoicing: {} };
     var qs = new URLSearchParams(window.location.search || "");
-    var allowedViews = { aicopilot:true, operations:true, safety:true, invoicing:true, reporting:true, forecast:true, workorders:true, inventory:true, onboarding:true, calendar:true, supplyrisk:true, flags:true, itemmaster:true };
+    var allowedViews = { aicopilot:true, operations:true, safety:true, invoicing:true, reporting:true, forecast:true, workorders:true, purchaseorders:true, inventory:true, onboarding:true, calendar:true, supplyrisk:true, flags:true, itemmaster:true };
     var rawView = String(qs.get("view") || "workorders");
     if (rawView === "overview") rawView = "workorders";
     var view = allowedViews[rawView] ? rawView : "workorders";
@@ -588,6 +600,7 @@ export default function ProductionReadiness() {
   const [userActivityError, setUserActivityError] = useState("");
   const [userActivityRows, setUserActivityRows] = useState([]);
   const [showAskAi, setShowAskAi] = useState(false);
+  const [openPurchaseOrderCount, setOpenPurchaseOrderCount] = useState(null);
   const lastHiddenSyncModeRef = useRef("full");
   const hiddenSyncWasBusyRef = useRef(false);
   const legacyInventoryRefreshRef = useRef(false);
@@ -685,9 +698,10 @@ export default function ProductionReadiness() {
     forecast: prefetchForecastView,
     onboarding: prefetchOnboardingView,
     calendar: prefetchCalendarView,
+    purchaseorders: prefetchPurchaseOrdersView,
   };
 
-  var navItems = [{key:"workorders",label:"Work Orders",count:null},{key:"inventory",label:"Inventory",count:null},{key:"reporting",label:"Reporting",count:null},{key:"onboarding",label:"Onboarding",count:null,alert:false},{key:"operations",label:"Operations",count:null,alert:false},{key:"safety",label:"Safety",count:null,alert:false},{key:"invoicing",label:"Invoicing",count:null,alert:false},{key:"supplyrisk",label:"Supply Risk",count:null,alert:false},{key:"forecast",label:"Forecast",count:null,alert:false},{key:"calendar",label:"Calendar",count:null,alert:false},{key:"aicopilot",label:"AI Copilot",count:null,alert:false}]
+  var navItems = [{key:"workorders",label:"Work Orders",count:null},{key:"purchaseorders",label:"Purchase Orders",count:openPurchaseOrderCount},{key:"inventory",label:"Inventory",count:null},{key:"reporting",label:"Reporting",count:null},{key:"onboarding",label:"Onboarding",count:null,alert:false},{key:"operations",label:"Operations",count:null,alert:false},{key:"safety",label:"Safety",count:null,alert:false},{key:"invoicing",label:"Invoicing",count:null,alert:false},{key:"supplyrisk",label:"Supply Risk",count:null,alert:false},{key:"forecast",label:"Forecast",count:null,alert:false},{key:"calendar",label:"Calendar",count:null,alert:false},{key:"aicopilot",label:"AI Copilot",count:null,alert:false}]
     .map(function(item) {
       return Object.assign({}, item, {
         href: buildPermalinkUrl(item.key, workOrdersPermalinkState, forecastPermalinkState, operationsPermalinkState, invoicingPermalinkState),
@@ -1949,6 +1963,7 @@ export default function ProductionReadiness() {
           {activeView === "reporting" && <ReportingView />}
           {activeView === "forecast" && <ForecastView workOrders={ds.workOrders || []} itemMaster={ds.itemMaster || []} productionData={ds.productionData || []} laborData={ds.laborData || []} initialFilters={forecastPermalinkState} onPermalinkChange={handleForecastPermalinkChange} />}
           {activeView === "workorders" && <WorkOrdersView analysis={analysisForUI} woStatuses={woStatusesForUI} woCustomers={woCustomersForUI} recommendations={recommendationsForUI} dispatchQueue={dispatchQueue || []} inboundCoverage={inboundCoverage} initialFilters={workOrdersPermalinkState} onPermalinkChange={handleWorkOrdersPermalinkChange} />}
+          {activeView === "purchaseorders" && <PurchaseOrdersView onOpenCountChange={setOpenPurchaseOrderCount} />}
           {activeView === "inventory" && (
             <InventoryView
               inventory={ds.inventory || []}
