@@ -1,5 +1,6 @@
 import Papa from "papaparse";
 import { CACHE_SITE_ID, getAuthenticatedUser, getSupabaseAdmin, withCors } from "../ops/_common.js";
+import { canonicalizeCustomerName, customerNamesMatch } from "../ops/_customer-aliases.js";
 import { loadWarehouseTransferEventsForWindow } from "../ops/_warehouse-transfers.js";
 
 const SECTION_ORDER = ["inventory", "inbounds", "outbounds", "production", "consumption"];
@@ -197,23 +198,23 @@ function matchesDateWindow(dateKey, startDate, endDate) {
 
 function deriveSectionCustomer(sectionKey, row) {
   if (sectionKey === "inventory") {
-    return compactText(pickLooseValue(row, ["customer_name", "Customer name"]));
+    return canonicalizeCustomerName(pickLooseValue(row, ["customer_name", "Customer name"]));
   }
   if (sectionKey === "inbounds") {
-    return compactText(pickLooseValue(row, ["item_customer_name", "receipt_customer_name", "receive_order_customer_name", "customer_name", "Customer name"]));
+    return canonicalizeCustomerName(pickLooseValue(row, ["item_customer_name", "receipt_customer_name", "receive_order_customer_name", "customer_name", "Customer name"]));
   }
   if (sectionKey === "outbounds") {
-    return compactText(pickLooseValue(row, ["shipment_customer_name", "ship_order_customer_name", "item_customer_name", "customer_name", "Customer name"]));
+    return canonicalizeCustomerName(pickLooseValue(row, ["shipment_customer_name", "ship_order_customer_name", "item_customer_name", "customer_name", "Customer name"]));
   }
   if (sectionKey === "production") {
-    return compactText(pickLooseValue(row, ["customer_name", "Customer name"]));
+    return canonicalizeCustomerName(pickLooseValue(row, ["customer_name", "Customer name"]));
   }
-  return compactText(pickLooseValue(row, ["customer", "Customer", "customer_name", "Customer name"]));
+  return canonicalizeCustomerName(pickLooseValue(row, ["customer", "Customer", "customer_name", "Customer name"]));
 }
 
 function matchesCustomerName(customerName, selectedCustomer) {
   if (!selectedCustomer || selectedCustomer === "all") return true;
-  return normalizeKey(customerName) === normalizeKey(selectedCustomer);
+  return customerNamesMatch(customerName, selectedCustomer);
 }
 
 function compareText(left, right) {
@@ -401,10 +402,10 @@ function buildTransferSectionMeta(reportCode, transferLoad) {
 function mapInboundTransferEventsToRows(events) {
   return (Array.isArray(events) ? events : []).map(function(event) {
     return {
-      customer_name: compactText(event && event.customer_name),
-      item_customer_name: compactText(event && event.customer_name),
-      receipt_customer_name: compactText(event && event.customer_name),
-      receive_order_customer_name: compactText(event && event.customer_name),
+      customer_name: canonicalizeCustomerName(event && event.customer_name),
+      item_customer_name: canonicalizeCustomerName(event && event.customer_name),
+      receipt_customer_name: canonicalizeCustomerName(event && event.customer_name),
+      receive_order_customer_name: canonicalizeCustomerName(event && event.customer_name),
       received_at: compactText(event && event.transfer_date_et),
       receive_order_code: compactText(event && (event.order_code || event.reference_code)),
       receive_order_reference: compactText(event && event.reference_code),
@@ -425,10 +426,10 @@ function mapInboundTransferEventsToRows(events) {
 function mapOutboundTransferEventsToRows(events) {
   return (Array.isArray(events) ? events : []).map(function(event) {
     return {
-      customer_name: compactText(event && event.customer_name),
-      item_customer_name: compactText(event && event.customer_name),
-      shipment_customer_name: compactText(event && event.customer_name),
-      ship_order_customer_name: compactText(event && event.customer_name),
+      customer_name: canonicalizeCustomerName(event && event.customer_name),
+      item_customer_name: canonicalizeCustomerName(event && event.customer_name),
+      shipment_customer_name: canonicalizeCustomerName(event && event.customer_name),
+      ship_order_customer_name: canonicalizeCustomerName(event && event.customer_name),
       actual_ship_at: compactText(event && event.transfer_date_et),
       shipment_expected_ship_at: compactText(event && event.transfer_date_et),
       ship_order_code: compactText(event && (event.order_code || event.reference_code)),
@@ -934,7 +935,9 @@ export default async function handler(req, res) {
       : todayEtIso();
     const windowDays = clampInt(req.query && req.query.windowDays, 7, 1, 31);
     const windowStart = shiftIsoDate(asOfDate, -(windowDays - 1));
-    const selectedCustomer = compactText(req.query && req.query.customer) || "all";
+    const selectedCustomer = compactText(req.query && req.query.customer) === "all"
+      ? "all"
+      : (canonicalizeCustomerName(req.query && req.query.customer) || "all");
     const supabase = getSupabaseAdmin();
 
     const rawRowsBySection = {};
@@ -1023,7 +1026,7 @@ export default async function handler(req, res) {
 
     const notes = [];
     if (selectedCustomer !== "all" && availableCustomers.length && !availableCustomers.some(function(customer) {
-      return normalizeKey(customer) === normalizeKey(selectedCustomer);
+      return customerNamesMatch(customer, selectedCustomer);
     })) {
       notes.push("The selected customer does not match any customer name found in the available artifacts.");
     }

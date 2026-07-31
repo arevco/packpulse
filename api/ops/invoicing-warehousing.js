@@ -2,6 +2,7 @@ import Sentry from "../_sentry.js";
 import { CACHE_SITE_ID, getAuthenticatedUser, getSupabaseAdmin, withCors } from "./_common.js";
 import { NULOGY_URL, buildAuthHeader, executeReportRun, getNulogyCredentials, pollReportRun } from "../nulogy/_runner.js";
 import { parseCSV } from "../nulogy/_csv.js";
+import { canonicalizeCustomerName } from "./_customer-aliases.js";
 import {
   INBOUND_TRANSFER_COLUMNS as SHARED_INBOUND_TRANSFER_COLUMNS,
   OUTBOUND_TRANSFER_COLUMNS as SHARED_OUTBOUND_TRANSFER_COLUMNS,
@@ -168,8 +169,7 @@ function pickFieldLoose(row, keys) {
 }
 
 function normalizeCustomerName(value) {
-  var text = String(value || "").trim().replace(/\s+/g, " ");
-  return text || "Unassigned customer";
+  return canonicalizeCustomerName(value, "Unassigned customer") || "Unassigned customer";
 }
 
 function resolveDateKey(value) {
@@ -881,13 +881,32 @@ async function writeWarehouseSnapshotToHistory(supabase, mode, startDate, endDat
 function decorateCachedSnapshotPayload(payload) {
   var source = payload && typeof payload === "object" ? payload : {};
   var assumptions = Array.isArray(source.assumptions) ? source.assumptions.slice() : [];
+  var canonicalClientMap = {};
+  (Array.isArray(source.clientRows) ? source.clientRows : []).forEach(function(row) {
+    var customer = normalizeCustomerName(row && row.customer);
+    if (!customer) return;
+    if (!canonicalClientMap[customer]) {
+      canonicalClientMap[customer] = {
+        customer: customer,
+        inboundPallets: 0,
+        outboundPallets: 0,
+        activeStoragePallets: 0
+      };
+    }
+    canonicalClientMap[customer].inboundPallets += Number(row && row.inboundPallets || 0);
+    canonicalClientMap[customer].outboundPallets += Number(row && row.outboundPallets || 0);
+    canonicalClientMap[customer].activeStoragePallets += Number(row && row.activeStoragePallets || 0);
+  });
+  var canonicalClientRows = buildClientRowsFromMap(canonicalClientMap);
   addUniqueAssumption(
     assumptions,
     "This warehouse result was served from the Supabase snapshot cache for the selected billing window. Add ?refresh=1 to the request to bypass the cache."
   );
   return Object.assign({}, source, {
     querySource: [String(source.querySource || ""), "supabase_snapshot_cache"].filter(Boolean).join("+"),
-    assumptions: assumptions
+    assumptions: assumptions,
+    summary: buildSummaryFromClientRows(canonicalClientRows),
+    clientRows: canonicalClientRows
   });
 }
 

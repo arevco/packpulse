@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { executeReportRun } from "../nulogy/_runner.js";
 import { parseCSV } from "../nulogy/_csv.js";
+import { canonicalizeCustomerName } from "./_customer-aliases.js";
 
 export const WAREHOUSE_TRANSFER_EVENT_TABLE = "warehouse_transfer_events";
 export const INBOUND_TRANSFER_REPORT = "receipt_item";
@@ -37,7 +38,6 @@ export const OUTBOUND_TRANSFER_COLUMNS = [
   "lot_code",
   "pallet_number",
   "ship_order_code",
-  "shipment_id",
   "shipment_item_purchase_order_number",
   "project_purchase_order_number",
   "actual_ship_at",
@@ -47,7 +47,6 @@ export const OUTBOUND_TRANSFER_COLUMNS = [
   "case_quantity",
   "default_unit_of_measure",
   "base_unit_of_measure",
-  "case_unit_of_measure",
 ];
 
 const REPORT_ROW_LIMITS = {
@@ -405,7 +404,7 @@ export function pickFieldLoose(row, keys) {
 }
 
 export function normalizeCustomerName(value) {
-  return compactText(value) || "Unassigned customer";
+  return canonicalizeCustomerName(value, "Unassigned customer") || "Unassigned customer";
 }
 
 export function resolveDateKey(value) {
