@@ -103,6 +103,18 @@ function sourceBadgeLabel(sourceMode) {
   return "Unknown";
 }
 
+function sectionSummaryNote(section, packet) {
+  if (!section || typeof section !== "object") return "";
+  if (section.sourceMode === "stale_window") {
+    if (packet && packet.windowStart && packet.windowEnd) {
+      return "No matching activity between " + formatDateLabel(packet.windowStart) + " and " + formatDateLabel(packet.windowEnd) + ".";
+    }
+    return "No matching activity in the selected window.";
+  }
+  if (Array.isArray(section.notes) && section.notes.length) return String(section.notes[0] || "");
+  return "";
+}
+
 function safeSheetName(value) {
   const cleaned = String(value || "").replace(/[\\/?*\[\]:]/g, " ").replace(/\s+/g, " ").trim();
   return cleaned ? cleaned.slice(0, 31) : "Sheet";
@@ -408,6 +420,9 @@ export default function ReportingView() {
               <div className="mt-3 text-xs text-[rgb(var(--muted))]">
                 {section.generatedAtLabel ? ("Generated " + section.generatedAtLabel) : "No artifact run available"}
               </div>
+              {sectionSummaryNote(section, packet) ? (
+                <div className="mt-2 text-xs text-[rgb(var(--muted))]">{sectionSummaryNote(section, packet)}</div>
+              ) : null}
             </Card>
           );
         })}
@@ -473,6 +488,10 @@ export default function ReportingView() {
 
             {!activeColumns.length ? (
               <Card className="px-4 py-4 text-sm text-[rgb(var(--muted))]">No columns available for this section yet.</Card>
+            ) : activeSectionData.sourceMode === "stale_window" ? (
+              <Card className="px-4 py-4 text-sm text-[rgb(var(--muted))]">
+                {sectionSummaryNote(activeSectionData, packet) || "No matching activity in the selected window."}
+              </Card>
             ) : !filteredRows.length ? (
               <Card className="px-4 py-4 text-sm text-[rgb(var(--muted))]">No rows match the current filters.</Card>
             ) : (
