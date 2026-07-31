@@ -48,6 +48,19 @@
 - Purpose:
   - compare latest and prior snapshots
 
+## `/api/ops/invoicing-warehousing`
+- Method: `GET`
+- Query:
+  - `start: YYYY-MM-DD`
+  - `end: YYYY-MM-DD`
+  - `mode?: "storage" | "transfers"`
+  - `refresh?: boolean-like`
+- Purpose:
+  - read warehouse invoicing counts from Supabase-backed snapshots when available
+  - prefer the dedicated `warehouse_invoicing_snapshots` table when it exists
+  - otherwise fall back to `cache_snapshot_history` so monthly warehouse billing can still reuse prior runs without waiting on Nulogy every time
+  - fall back to live Nulogy storage, receipt, and shipment reports when a snapshot is missing or refreshed
+
 ## `/api/ops/config`
 - Methods: `GET`, `POST`
 - Purpose:

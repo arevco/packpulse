@@ -1,5 +1,5 @@
 import Sentry from "../_sentry.js";
-import { getAuthenticatedUser, withCors } from "./_common.js";
+import { CACHE_SITE_ID, getAuthenticatedUser, getSupabaseAdmin, withCors } from "./_common.js";
 import { NULOGY_URL, buildAuthHeader, executeReportRun, getNulogyCredentials, pollReportRun } from "../nulogy/_runner.js";
 import { parseCSV } from "../nulogy/_csv.js";
 
@@ -7,6 +7,9 @@ var INBOUND_REPORT = "receipt_item";
 var OUTBOUND_REPORT = "shipment_item";
 var STORAGE_REPORT = "pallet_storage";
 var STORAGE_FALLBACK_REPORT = "pallet_aging";
+var WAREHOUSE_SNAPSHOT_TABLE = "warehouse_invoicing_snapshots";
+var WAREHOUSE_SNAPSHOT_HISTORY_TABLE = "cache_snapshot_history";
+var WAREHOUSE_SNAPSHOT_FEATURE = "warehouse_invoicing";
 
 var INBOUND_COLUMNS = [
   "item_customer_name",
@@ -68,10 +71,77 @@ function sanitizeIsoDate(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : "";
 }
 
+function sanitizeBooleanFlag(value) {
+  var text = String(value || "").trim().toLowerCase();
+  return text === "1" || text === "true" || text === "yes" || text === "on";
+}
+
 function sanitizeMode(value) {
   var mode = String(value || "").trim().toLowerCase();
   if (mode === "storage" || mode === "transfers") return mode;
   return "combined";
+}
+
+function describeError(error) {
+  return String(
+    (error && (error.message || error.details || error.hint || error.error_description || error.code)) ||
+    error ||
+    ""
+  ).trim();
+}
+
+function summarizeDbError(error, maxLen) {
+  var limit = Math.max(40, Number(maxLen || 220));
+  var message = describeError(error).replace(/\s+/g, " ").trim();
+  if (!message) return "unknown";
+  return message.length > limit ? message.slice(0, limit - 3) + "..." : message;
+}
+
+function isMissingOptionalTableError(table, error) {
+  var msg = describeError(error).toLowerCase();
+  var tableName = String(table || "").toLowerCase();
+  if (!tableName) return false;
+  return msg.includes(tableName) && (
+    msg.includes("schema cache") ||
+    msg.includes("could not find the table") ||
+    msg.includes("relation") ||
+    msg.includes("does not exist")
+  );
+}
+
+function isTransientSnapshotError(error) {
+  var msg = describeError(error).toLowerCase();
+  var status = Number(error && (error.status || error.statusCode || error.code));
+  if (Number.isFinite(status) && status >= 500) return true;
+  return (
+    msg.includes("timeout") ||
+    msg.includes("timed out") ||
+    msg.includes("gateway") ||
+    msg.includes("connection") ||
+    msg.includes("econnreset") ||
+    msg.includes("fetch failed") ||
+    msg.includes("service unavailable")
+  );
+}
+
+async function bestEffortSnapshotOperation(operation) {
+  var attempts = 0;
+  var lastError = null;
+  while (attempts < 2) {
+    attempts += 1;
+    try {
+      var result = await operation();
+      if (!result || !result.error) {
+        return { ok: true, data: result && result.data ? result.data : null, attempts: attempts };
+      }
+      lastError = result.error;
+    } catch (error) {
+      lastError = error;
+    }
+    if (attempts >= 2 || !isTransientSnapshotError(lastError)) break;
+    await sleep(150 * attempts);
+  }
+  return { ok: false, error: lastError, attempts: attempts };
 }
 
 function normalizeLooseKey(value) {
@@ -540,7 +610,11 @@ async function resolvePendingTransferReport(taskId, report, authHeader, options)
     maxPolls: Number(options && options.maxPolls) > 0 ? Number(options.maxPolls) : 2
   });
   if (!polled.ok) {
-    throw new Error(summarizePollFailure(polled, report));
+    var errorText = summarizePollFailure(polled, report);
+    if (shouldRestartPendingReport(errorText)) {
+      return createPendingReportRun(report, options.columns, options);
+    }
+    throw new Error(errorText);
   }
   if (!polled.completed) {
     return {
@@ -637,6 +711,277 @@ function buildSummaryFromClientRows(clientRows) {
   });
 }
 
+function addUniqueAssumption(list, message) {
+  if (!message) return list;
+  var next = String(message || "").trim();
+  if (!next) return list;
+  var target = Array.isArray(list) ? list : [];
+  if (target.indexOf(next) === -1) target.push(next);
+  return target;
+}
+
+function buildStoragePayload(mode, startDate, endDate, assumptions, storageResult, storageDiagnostics, storageClientRows) {
+  return {
+    querySource: "nulogy_reports_api_storage",
+    mode: mode,
+    startDate: startDate,
+    endDate: endDate,
+    generatedAt: new Date().toISOString(),
+    pending: false,
+    assumptions: (Array.isArray(assumptions) ? assumptions.slice() : []).concat([
+      storageResult.report === STORAGE_REPORT
+        ? "Storage counts use distinct customer and pallet rows whose billed or stored window overlaps the selected billing window."
+        : "Storage fallback counts use distinct active pallets from pallet_aging whose stored_since date is on or before the selected billing window end."
+    ]),
+    summary: buildSummaryFromClientRows(storageClientRows),
+    reports: {
+      inbound: buildReportDiagnostics(null, {}),
+      outbound: buildReportDiagnostics(null, {}),
+      storage: buildReportDiagnostics(storageResult, storageDiagnostics)
+    },
+    clientRows: storageClientRows
+  };
+}
+
+function buildTransferPayload(mode, startDate, endDate, assumptions, inboundResult, outboundResult, transferClientRows, inboundDiagnostics, outboundDiagnostics) {
+  return {
+    querySource: "nulogy_reports_api_transfers",
+    mode: mode,
+    startDate: startDate,
+    endDate: endDate,
+    generatedAt: new Date().toISOString(),
+    pending: !!(inboundResult.pending || outboundResult.pending),
+    assumptions: Array.isArray(assumptions) ? assumptions.slice() : [],
+    summary: buildSummaryFromClientRows(transferClientRows),
+    reports: {
+      inbound: buildReportDiagnostics(inboundResult, inboundDiagnostics),
+      outbound: buildReportDiagnostics(outboundResult, outboundDiagnostics),
+      storage: buildReportDiagnostics(null, {})
+    },
+    clientRows: transferClientRows
+  };
+}
+
+function buildCombinedPayload(mode, startDate, endDate, assumptions, inboundResult, outboundResult, storageResult, inboundDiagnostics, outboundDiagnostics, storageDiagnostics, clientRows) {
+  return {
+    querySource: "nulogy_reports_api",
+    mode: mode,
+    startDate: startDate,
+    endDate: endDate,
+    generatedAt: new Date().toISOString(),
+    pending: false,
+    assumptions: (Array.isArray(assumptions) ? assumptions.slice() : []).concat([
+      storageResult.report === STORAGE_REPORT
+        ? "Storage counts use distinct customer and pallet rows whose billed or stored window overlaps the selected billing window."
+        : "Storage fallback counts use distinct active pallets from pallet_aging whose stored_since date is on or before the selected billing window end."
+    ]),
+    summary: buildSummaryFromClientRows(clientRows),
+    reports: {
+      inbound: buildReportDiagnostics(inboundResult, inboundDiagnostics),
+      outbound: buildReportDiagnostics(outboundResult, outboundDiagnostics),
+      storage: buildReportDiagnostics(storageResult, storageDiagnostics)
+    },
+    clientRows: clientRows
+  };
+}
+
+function buildHistorySnapshotCounts(payload) {
+  var summary = payload && payload.summary && typeof payload.summary === "object" ? payload.summary : {};
+  return {
+    warehouse_invoicing_clients: Number(summary.clientCount || 0),
+    warehouse_invoicing_active_clients: Number(summary.activeClientCount || 0),
+    warehouse_invoicing_inbound_pallets: Number(summary.inboundPallets || 0),
+    warehouse_invoicing_outbound_pallets: Number(summary.outboundPallets || 0),
+    warehouse_invoicing_storage_pallets: Number(summary.activeStoragePallets || 0)
+  };
+}
+
+function extractWarehouseSnapshotHistoryRow(row) {
+  var metrics = row && row.derived_metrics && typeof row.derived_metrics === "object"
+    ? row.derived_metrics
+    : {};
+  var payload = metrics.payload && typeof metrics.payload === "object"
+    ? metrics.payload
+    : null;
+  if (!payload) return null;
+  return {
+    site_id: row && row.site_id ? row.site_id : CACHE_SITE_ID,
+    snapshot_mode: String(metrics.snapshotMode || payload.mode || "").trim(),
+    start_date: String(metrics.startDate || payload.startDate || "").trim(),
+    end_date: String(metrics.endDate || payload.endDate || "").trim(),
+    payload: payload,
+    pending: !!(metrics.pending || payload.pending),
+    generated_at: String(metrics.generatedAt || payload.generatedAt || row && row.captured_at || "").trim() || null,
+    updated_by: row && row.updated_by ? row.updated_by : null,
+    updated_at: String(row && (row.created_at || row.captured_at) || "").trim() || null
+  };
+}
+
+async function readWarehouseSnapshotFromHistory(supabase, mode, startDate, endDate) {
+  if (!supabase) return { ok: false, status: "cache_disabled", row: null };
+  try {
+    var query = await supabase
+      .from(WAREHOUSE_SNAPSHOT_HISTORY_TABLE)
+      .select("site_id,derived_metrics,captured_at,updated_by,created_at")
+      .eq("site_id", CACHE_SITE_ID)
+      .contains("derived_metrics", {
+        cacheFeature: WAREHOUSE_SNAPSHOT_FEATURE,
+        snapshotMode: mode,
+        startDate: startDate,
+        endDate: endDate
+      })
+      .order("captured_at", { ascending: false })
+      .limit(1);
+    if (query.error) {
+      if (isMissingOptionalTableError(WAREHOUSE_SNAPSHOT_HISTORY_TABLE, query.error)) {
+        return { ok: false, status: "missing_snapshot_history_table", row: null };
+      }
+      throw query.error;
+    }
+    var historyRow = Array.isArray(query.data) && query.data.length
+      ? extractWarehouseSnapshotHistoryRow(query.data[0])
+      : null;
+    return { ok: true, status: historyRow ? "hit" : "miss", row: historyRow };
+  } catch (error) {
+    if (isTransientSnapshotError(error)) {
+      console.warn("[invoicing-warehousing] Warehouse snapshot history read unavailable: " + summarizeDbError(error));
+      return { ok: false, status: "snapshot_history_read_unavailable", row: null };
+    }
+    Sentry.captureException(error);
+    return { ok: false, status: "snapshot_history_read_failed", row: null };
+  }
+}
+
+async function writeWarehouseSnapshotToHistory(supabase, mode, startDate, endDate, payload, updatedBy) {
+  if (!supabase) return { ok: false, status: "cache_disabled" };
+  var source = payload && typeof payload === "object" ? payload : {};
+  var generatedAt = String(source.generatedAt || new Date().toISOString());
+  var writeResult = await bestEffortSnapshotOperation(function() {
+    return supabase
+      .from(WAREHOUSE_SNAPSHOT_HISTORY_TABLE)
+      .insert({
+        site_id: CACHE_SITE_ID,
+        row_counts: buildHistorySnapshotCounts(source),
+        derived_metrics: {
+          cacheFeature: WAREHOUSE_SNAPSHOT_FEATURE,
+          snapshotMode: mode,
+          startDate: startDate,
+          endDate: endDate,
+          pending: !!source.pending,
+          generatedAt: generatedAt,
+          payload: source
+        },
+        captured_at: generatedAt,
+        updated_by: updatedBy || null
+      });
+  });
+  if (writeResult.ok) {
+    return { ok: true, status: "ok", attempts: writeResult.attempts };
+  }
+  if (isMissingOptionalTableError(WAREHOUSE_SNAPSHOT_HISTORY_TABLE, writeResult.error)) {
+    return { ok: false, status: "missing_snapshot_history_table", attempts: writeResult.attempts };
+  }
+  if (isTransientSnapshotError(writeResult.error)) {
+    console.warn("[invoicing-warehousing] Warehouse snapshot history write unavailable after " + writeResult.attempts + " attempts: " + summarizeDbError(writeResult.error));
+    return { ok: false, status: "snapshot_history_write_unavailable", attempts: writeResult.attempts };
+  }
+  Sentry.captureException(writeResult.error);
+  return { ok: false, status: "snapshot_history_write_failed", attempts: writeResult.attempts };
+}
+
+function decorateCachedSnapshotPayload(payload) {
+  var source = payload && typeof payload === "object" ? payload : {};
+  var assumptions = Array.isArray(source.assumptions) ? source.assumptions.slice() : [];
+  addUniqueAssumption(
+    assumptions,
+    "This warehouse result was served from the Supabase snapshot cache for the selected billing window. Add ?refresh=1 to the request to bypass the cache."
+  );
+  return Object.assign({}, source, {
+    querySource: [String(source.querySource || ""), "supabase_snapshot_cache"].filter(Boolean).join("+"),
+    assumptions: assumptions
+  });
+}
+
+function getSnapshotTaskId(payload, key) {
+  return normalizeTaskId(
+    payload &&
+    payload.reports &&
+    payload.reports[key] &&
+    payload.reports[key].taskId
+  );
+}
+
+async function readWarehouseSnapshot(supabase, mode, startDate, endDate) {
+  if (!supabase) return { ok: false, status: "cache_disabled", row: null };
+  try {
+    var query = await supabase
+      .from(WAREHOUSE_SNAPSHOT_TABLE)
+      .select("site_id,snapshot_mode,start_date,end_date,payload,pending,generated_at,updated_by,updated_at")
+      .eq("site_id", CACHE_SITE_ID)
+      .eq("snapshot_mode", mode)
+      .eq("start_date", startDate)
+      .eq("end_date", endDate)
+      .maybeSingle();
+    if (query.error) {
+      if (isMissingOptionalTableError(WAREHOUSE_SNAPSHOT_TABLE, query.error)) {
+        return readWarehouseSnapshotFromHistory(supabase, mode, startDate, endDate);
+      }
+      throw query.error;
+    }
+    if (query.data) {
+      return { ok: true, status: "hit", row: query.data };
+    }
+    return readWarehouseSnapshotFromHistory(supabase, mode, startDate, endDate);
+  } catch (error) {
+    if (isTransientSnapshotError(error)) {
+      console.warn("[invoicing-warehousing] Warehouse snapshot read unavailable: " + summarizeDbError(error));
+      return { ok: false, status: "snapshot_read_unavailable", row: null };
+    }
+    Sentry.captureException(error);
+    return { ok: false, status: "snapshot_read_failed", row: null };
+  }
+}
+
+async function writeWarehouseSnapshot(supabase, mode, startDate, endDate, payload, updatedBy) {
+  if (!supabase) return { ok: false, status: "cache_disabled" };
+  var source = payload && typeof payload === "object" ? payload : {};
+  var writeResult = await bestEffortSnapshotOperation(function() {
+    return supabase
+      .from(WAREHOUSE_SNAPSHOT_TABLE)
+      .upsert({
+        site_id: CACHE_SITE_ID,
+        snapshot_mode: mode,
+        start_date: startDate,
+        end_date: endDate,
+        payload: source,
+        pending: !!source.pending,
+        generated_at: String(source.generatedAt || new Date().toISOString()),
+        updated_by: updatedBy || null
+      }, { onConflict: "site_id,snapshot_mode,start_date,end_date" });
+  });
+  if (writeResult.ok) {
+    return { ok: true, status: "ok", attempts: writeResult.attempts };
+  }
+  if (isMissingOptionalTableError(WAREHOUSE_SNAPSHOT_TABLE, writeResult.error)) {
+    return writeWarehouseSnapshotToHistory(supabase, mode, startDate, endDate, source, updatedBy);
+  }
+  if (isTransientSnapshotError(writeResult.error)) {
+    console.warn("[invoicing-warehousing] Warehouse snapshot write unavailable after " + writeResult.attempts + " attempts: " + summarizeDbError(writeResult.error));
+    return { ok: false, status: "snapshot_write_unavailable", attempts: writeResult.attempts };
+  }
+  Sentry.captureException(writeResult.error);
+  return { ok: false, status: "snapshot_write_failed", attempts: writeResult.attempts };
+}
+
+function shouldRestartPendingReport(errorText) {
+  var message = String(errorText || "").toLowerCase();
+  return (
+    message.includes("status error (404)") ||
+    message.includes("status error (410)") ||
+    message.includes("unsafe or invalid")
+  );
+}
+
 export default async function handler(req, res) {
   withCors(req, res, ["GET", "OPTIONS"]);
   if (req.method === "OPTIONS") return res.status(200).end();
@@ -645,12 +990,33 @@ export default async function handler(req, res) {
   try {
     var user = getAuthenticatedUser(req);
     if (!user) return res.status(401).json({ error: "Unauthorized" });
+    var supabase = null;
+    try {
+      supabase = getSupabaseAdmin();
+    } catch (cacheError) {
+      supabase = null;
+    }
 
     var startDate = sanitizeIsoDate(req.query && req.query.start);
     var endDate = sanitizeIsoDate(req.query && req.query.end);
     var mode = sanitizeMode(req.query && req.query.mode);
+    var refreshCache = sanitizeBooleanFlag(req.query && req.query.refresh);
     if (!startDate || !endDate || endDate < startDate) {
       return res.status(400).json({ error: "Invalid start/end date range" });
+    }
+
+    var cachedSnapshotRow = null;
+    if (!refreshCache) {
+      var cachedSnapshot = await readWarehouseSnapshot(supabase, mode, startDate, endDate);
+      cachedSnapshotRow = cachedSnapshot && cachedSnapshot.row ? cachedSnapshot.row : null;
+      if (
+        cachedSnapshotRow &&
+        cachedSnapshotRow.payload &&
+        typeof cachedSnapshotRow.payload === "object" &&
+        cachedSnapshotRow.payload.pending !== true
+      ) {
+        return res.status(200).json(decorateCachedSnapshotPayload(cachedSnapshotRow.payload));
+      }
     }
 
     if (mode === "storage") {
@@ -659,26 +1025,17 @@ export default async function handler(req, res) {
       var storageClientMapOnly = {};
       var storageDiagnosticsOnly = countActiveStoragePallets(storageResultOnly.rows, startDate, endDate, storageClientMapOnly);
       var storageClientRowsOnly = buildClientRowsFromMap(storageClientMapOnly);
-      return res.status(200).json({
-        querySource: "nulogy_reports_api_storage",
-        mode: mode,
-        startDate: startDate,
-        endDate: endDate,
-        generatedAt: new Date().toISOString(),
-        pending: false,
-        assumptions: storageAssumptions.concat([
-          storageResultOnly.report === STORAGE_REPORT
-            ? "Storage counts use distinct customer and pallet rows whose billed or stored window overlaps the selected billing window."
-            : "Storage fallback counts use distinct active pallets from pallet_aging whose stored_since date is on or before the selected billing window end."
-        ]),
-        summary: buildSummaryFromClientRows(storageClientRowsOnly),
-        reports: {
-          inbound: buildReportDiagnostics(null, {}),
-          outbound: buildReportDiagnostics(null, {}),
-          storage: buildReportDiagnostics(storageResultOnly, storageDiagnosticsOnly)
-        },
-        clientRows: storageClientRowsOnly
-      });
+      var storagePayload = buildStoragePayload(
+        mode,
+        startDate,
+        endDate,
+        storageAssumptions,
+        storageResultOnly,
+        storageDiagnosticsOnly,
+        storageClientRowsOnly
+      );
+      await writeWarehouseSnapshot(supabase, mode, startDate, endDate, storagePayload, user.email);
+      return res.status(200).json(storagePayload);
     }
 
     var inboundFilters = [
@@ -699,6 +1056,10 @@ export default async function handler(req, res) {
     ];
     var inboundTaskId = normalizeTaskId(req.query && req.query.inboundTaskId);
     var outboundTaskId = normalizeTaskId(req.query && req.query.outboundTaskId);
+    if (cachedSnapshotRow && cachedSnapshotRow.payload && typeof cachedSnapshotRow.payload === "object") {
+      if (!inboundTaskId) inboundTaskId = getSnapshotTaskId(cachedSnapshotRow.payload, "inbound");
+      if (!outboundTaskId) outboundTaskId = getSnapshotTaskId(cachedSnapshotRow.payload, "outbound");
+    }
     var credentials = getNulogyCredentials();
     var authHeader = buildAuthHeader(credentials.user, credentials.pass);
     var pendingAssumptions = [
@@ -708,6 +1069,8 @@ export default async function handler(req, res) {
     if (mode === "transfers") {
       var inboundTransferResult = inboundTaskId
         ? await resolvePendingTransferReport(inboundTaskId, INBOUND_REPORT, authHeader, {
+          columns: ["item_customer_name", "receipt_customer_name", "pallet_number", "receive_order_code", "received_at"],
+          filters: inboundFilters,
           maxPolls: 2
         })
         : await createPendingReportRun(INBOUND_REPORT, ["item_customer_name", "receipt_customer_name", "pallet_number", "receive_order_code", "received_at"], {
@@ -715,6 +1078,8 @@ export default async function handler(req, res) {
         });
       var outboundTransferResult = outboundTaskId
         ? await resolvePendingTransferReport(outboundTaskId, OUTBOUND_REPORT, authHeader, {
+          columns: ["item_customer_name", "shipment_customer_name", "pallet_number", "ship_order_code", "actual_ship_at"],
+          filters: outboundFilters,
           maxPolls: 2
         })
         : await createPendingReportRun(OUTBOUND_REPORT, ["item_customer_name", "shipment_customer_name", "pallet_number", "ship_order_code", "actual_ship_at"], {
@@ -729,22 +1094,19 @@ export default async function handler(req, res) {
       var inboundTransferDiagnostics = countInboundPallets(inboundTransferResult.rows, startDate, endDate, transferClientMap);
       var outboundTransferDiagnostics = countOutboundPallets(outboundTransferResult.rows, startDate, endDate, transferClientMap);
       var transferClientRows = buildClientRowsFromMap(transferClientMap);
-      return res.status(200).json({
-        querySource: "nulogy_reports_api_transfers",
-        mode: mode,
-        startDate: startDate,
-        endDate: endDate,
-        generatedAt: new Date().toISOString(),
-        pending: !!(inboundTransferResult.pending || outboundTransferResult.pending),
-        assumptions: pendingAssumptions,
-        summary: buildSummaryFromClientRows(transferClientRows),
-        reports: {
-          inbound: buildReportDiagnostics(inboundTransferResult, inboundTransferDiagnostics),
-          outbound: buildReportDiagnostics(outboundTransferResult, outboundTransferDiagnostics),
-          storage: buildReportDiagnostics(null, {})
-        },
-        clientRows: transferClientRows
-      });
+      var transferPayload = buildTransferPayload(
+        mode,
+        startDate,
+        endDate,
+        pendingAssumptions,
+        inboundTransferResult,
+        outboundTransferResult,
+        transferClientRows,
+        inboundTransferDiagnostics,
+        outboundTransferDiagnostics
+      );
+      await writeWarehouseSnapshot(supabase, mode, startDate, endDate, transferPayload, user.email);
+      return res.status(200).json(transferPayload);
     }
 
     var assumptions = pendingAssumptions.slice();
@@ -767,28 +1129,21 @@ export default async function handler(req, res) {
     var storageDiagnostics = countActiveStoragePallets(storageResult.rows, startDate, endDate, clientMap);
 
     var clientRows = buildClientRowsFromMap(clientMap);
-    var summary = buildSummaryFromClientRows(clientRows);
-
-    return res.status(200).json({
-      querySource: "nulogy_reports_api",
-      mode: mode,
-      startDate: startDate,
-      endDate: endDate,
-      generatedAt: new Date().toISOString(),
-      pending: false,
-      assumptions: assumptions.concat([
-        storageResult.report === STORAGE_REPORT
-          ? "Storage counts use distinct customer and pallet rows whose billed or stored window overlaps the selected billing window."
-          : "Storage fallback counts use distinct active pallets from pallet_aging whose stored_since date is on or before the selected billing window end."
-      ]),
-      summary: summary,
-      reports: {
-        inbound: buildReportDiagnostics(inboundResult, inboundDiagnostics),
-        outbound: buildReportDiagnostics(outboundResult, outboundDiagnostics),
-        storage: buildReportDiagnostics(storageResult, storageDiagnostics)
-      },
-      clientRows: clientRows
-    });
+    var combinedPayload = buildCombinedPayload(
+      mode,
+      startDate,
+      endDate,
+      assumptions,
+      inboundResult,
+      outboundResult,
+      storageResult,
+      inboundDiagnostics,
+      outboundDiagnostics,
+      storageDiagnostics,
+      clientRows
+    );
+    await writeWarehouseSnapshot(supabase, mode, startDate, endDate, combinedPayload, user.email);
+    return res.status(200).json(combinedPayload);
   } catch (err) {
     Sentry.captureException(err);
     return res.status(500).json({
