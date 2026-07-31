@@ -1,6 +1,6 @@
 import Sentry from "../_sentry.js";
 import { getAuthenticatedUser, withCors } from "./_common.js";
-import { executeReportRun } from "../nulogy/_runner.js";
+import { NULOGY_URL, buildAuthHeader, executeReportRun, getNulogyCredentials, pollReportRun } from "../nulogy/_runner.js";
 import { parseCSV } from "../nulogy/_csv.js";
 
 var INBOUND_REPORT = "inbound_stock_transfer";
@@ -64,12 +64,23 @@ function sanitizeIsoDate(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : "";
 }
 
+function sanitizeMode(value) {
+  var mode = String(value || "").trim().toLowerCase();
+  if (mode === "storage" || mode === "transfers") return mode;
+  return "combined";
+}
+
 function normalizeLooseKey(value) {
   return String(value || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
 }
 
 function normalizeLookupKey(value) {
   return String(value || "").trim().replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+
+function normalizeTaskId(value) {
+  var text = String(value || "").trim();
+  return /^\d+$/.test(text) ? text : "";
 }
 
 function pickFieldLoose(row, keys) {
@@ -450,6 +461,8 @@ function buildReportDiagnostics(result, diagnostics) {
     rowCount: Number(diagnostics && diagnostics.rowCount || 0),
     distinctPallets: Number(diagnostics && diagnostics.distinctPallets || 0),
     possibleTruncation: !!(result && result.possibleTruncation),
+    pending: !!(result && result.pending),
+    taskId: String(result && result.taskId || ""),
     rowsMissingCustomerName: Number(diagnostics && diagnostics.rowsMissingCustomerName || 0),
     rowsMissingPalletNumber: Number(diagnostics && diagnostics.rowsMissingPalletNumber || 0),
     rowsMissingTransferredAt: Number(diagnostics && diagnostics.rowsMissingTransferredAt || 0),
@@ -466,6 +479,89 @@ function shouldFallbackStorageReport(error) {
     message.includes("Reports::PalletStorage::Base#build_query") ||
     message.includes("pallet_storage/base.rb")
   );
+}
+
+function buildStatusUrlFromTaskId(taskId) {
+  var normalized = normalizeTaskId(taskId);
+  return normalized ? (NULOGY_URL + "/api/reports/report_runs/" + normalized) : "";
+}
+
+function summarizePollFailure(polled, report) {
+  var message = String(polled && polled.error || "").trim();
+  if (!message) return "Failed to poll " + report + ".";
+  return message;
+}
+
+async function createPendingReportRun(report, columns, options) {
+  var created = await executeReportRun({
+    report: report,
+    columns: columns,
+    filters: Array.isArray(options && options.filters) ? options.filters : undefined,
+    sort_by: options && options.sortBy ? options.sortBy : undefined,
+    waitForCompletion: false
+  });
+  if (!created.ok) {
+    throw new Error(summarizeReportFailure(created, report));
+  }
+  var body = created.body || {};
+  var taskId = normalizeTaskId(body.taskId);
+  if (!taskId) {
+    throw new Error("Started " + report + " run did not return a task ID.");
+  }
+  return {
+    report: report,
+    pending: true,
+    taskId: taskId,
+    rows: [],
+    warnings: Array.isArray(body.warnings) ? body.warnings : [],
+    statusHistory: [],
+    possibleTruncation: false
+  };
+}
+
+async function resolvePendingTransferReport(taskId, report, authHeader, options) {
+  var normalizedTaskId = normalizeTaskId(taskId);
+  if (!normalizedTaskId) {
+    return createPendingReportRun(report, options.columns, options);
+  }
+  var statusUrl = buildStatusUrlFromTaskId(normalizedTaskId);
+  var polled = await pollReportRun(statusUrl, authHeader, {
+    pollIntervalMs: Number(options && options.pollIntervalMs) > 0 ? Number(options.pollIntervalMs) : 2500,
+    maxPolls: Number(options && options.maxPolls) > 0 ? Number(options.maxPolls) : 2
+  });
+  if (!polled.ok) {
+    throw new Error(summarizePollFailure(polled, report));
+  }
+  if (!polled.completed) {
+    return {
+      report: report,
+      pending: true,
+      taskId: normalizedTaskId,
+      rows: [],
+      warnings: [],
+      statusHistory: Array.isArray(polled.statusHistory) ? polled.statusHistory : [],
+      possibleTruncation: false
+    };
+  }
+  if (!polled.downloadUrl) {
+    throw new Error("Completed " + report + " run did not return a download URL.");
+  }
+  var downloaded = await fetchTextWithRetries(polled.downloadUrl, {
+    method: "GET",
+    headers: {
+      "Accept": "text/csv,text/plain,application/xml,text/xml"
+    }
+  }, "Failed to download " + report + " CSV");
+  var rows = parseCSV(downloaded.text);
+  return {
+    report: report,
+    pending: false,
+    taskId: normalizedTaskId,
+    rows: rows,
+    warnings: [],
+    statusHistory: Array.isArray(polled.statusHistory) ? polled.statusHistory : [],
+    possibleTruncation: Number(REPORT_ROW_LIMITS[report] || 0) > 0 && rows.length >= Number(REPORT_ROW_LIMITS[report] || 0)
+  };
 }
 
 async function fetchStorageReportWithFallback(startDate, endDate, assumptions) {
@@ -502,6 +598,35 @@ async function fetchStorageReportWithFallback(startDate, endDate, assumptions) {
   }
 }
 
+function buildClientRowsFromMap(clientMap) {
+  return Object.values(clientMap).sort(function(left, right) {
+    var rightTotal = Number(right.inboundPallets || 0) + Number(right.outboundPallets || 0) + Number(right.activeStoragePallets || 0);
+    var leftTotal = Number(left.inboundPallets || 0) + Number(left.outboundPallets || 0) + Number(left.activeStoragePallets || 0);
+    if (rightTotal !== leftTotal) return rightTotal - leftTotal;
+    return String(left.customer || "").localeCompare(String(right.customer || ""));
+  });
+}
+
+function buildSummaryFromClientRows(clientRows) {
+  return (Array.isArray(clientRows) ? clientRows : []).reduce(function(acc, row) {
+    var inbound = Number(row && row.inboundPallets || 0);
+    var outbound = Number(row && row.outboundPallets || 0);
+    var storage = Number(row && row.activeStoragePallets || 0);
+    acc.clientCount += 1;
+    if (inbound > 0 || outbound > 0 || storage > 0) acc.activeClientCount += 1;
+    acc.inboundPallets += inbound;
+    acc.outboundPallets += outbound;
+    acc.activeStoragePallets += storage;
+    return acc;
+  }, {
+    clientCount: 0,
+    activeClientCount: 0,
+    inboundPallets: 0,
+    outboundPallets: 0,
+    activeStoragePallets: 0
+  });
+}
+
 export default async function handler(req, res) {
   withCors(req, res, ["GET", "OPTIONS"]);
   if (req.method === "OPTIONS") return res.status(200).end();
@@ -513,8 +638,37 @@ export default async function handler(req, res) {
 
     var startDate = sanitizeIsoDate(req.query && req.query.start);
     var endDate = sanitizeIsoDate(req.query && req.query.end);
+    var mode = sanitizeMode(req.query && req.query.mode);
     if (!startDate || !endDate || endDate < startDate) {
       return res.status(400).json({ error: "Invalid start/end date range" });
+    }
+
+    if (mode === "storage") {
+      var storageAssumptions = [];
+      var storageResultOnly = await fetchStorageReportWithFallback(startDate, endDate, storageAssumptions);
+      var storageClientMapOnly = {};
+      var storageDiagnosticsOnly = countActiveStoragePallets(storageResultOnly.rows, startDate, endDate, storageClientMapOnly);
+      var storageClientRowsOnly = buildClientRowsFromMap(storageClientMapOnly);
+      return res.status(200).json({
+        querySource: "nulogy_reports_api_storage",
+        mode: mode,
+        startDate: startDate,
+        endDate: endDate,
+        generatedAt: new Date().toISOString(),
+        pending: false,
+        assumptions: storageAssumptions.concat([
+          storageResultOnly.report === STORAGE_REPORT
+            ? "Storage counts use distinct customer and pallet rows whose billed or stored window overlaps the selected billing window."
+            : "Storage fallback counts use distinct active pallets from pallet_aging whose stored_since date is on or before the selected billing window end."
+        ]),
+        summary: buildSummaryFromClientRows(storageClientRowsOnly),
+        reports: {
+          inbound: buildReportDiagnostics(null, {}),
+          outbound: buildReportDiagnostics(null, {}),
+          storage: buildReportDiagnostics(storageResultOnly, storageDiagnosticsOnly)
+        },
+        clientRows: storageClientRowsOnly
+      });
     }
 
     var transferFilters = [
@@ -525,10 +679,57 @@ export default async function handler(req, res) {
         to_threshold: formatNulogyDateTime(endDate, true)
       }
     ];
-
-    var assumptions = [
+    var inboundTaskId = normalizeTaskId(req.query && req.query.inboundTaskId);
+    var outboundTaskId = normalizeTaskId(req.query && req.query.outboundTaskId);
+    var credentials = getNulogyCredentials();
+    var authHeader = buildAuthHeader(credentials.user, credentials.pass);
+    var pendingAssumptions = [
       "Inbound and outbound counts use distinct pallet moves inside the selected transferred date window."
     ];
+
+    if (mode === "transfers") {
+      var inboundTransferResult = inboundTaskId
+        ? await resolvePendingTransferReport(inboundTaskId, INBOUND_REPORT, authHeader, {
+          maxPolls: 2
+        })
+        : await createPendingReportRun(INBOUND_REPORT, ["item_customer_name", "pallet_number", "transferred_at"], {
+          filters: transferFilters
+        });
+      var outboundTransferResult = outboundTaskId
+        ? await resolvePendingTransferReport(outboundTaskId, OUTBOUND_REPORT, authHeader, {
+          maxPolls: 2
+        })
+        : await createPendingReportRun(OUTBOUND_REPORT, ["item_customer_name", "pallet_number", "transferred_at"], {
+          filters: transferFilters
+        });
+
+      if (inboundTransferResult.pending || outboundTransferResult.pending) {
+        pendingAssumptions.push("Transfer counts are still loading from Nulogy and will populate after the current report runs complete.");
+      }
+
+      var transferClientMap = {};
+      var inboundTransferDiagnostics = countInboundPallets(inboundTransferResult.rows, startDate, endDate, transferClientMap);
+      var outboundTransferDiagnostics = countOutboundPallets(outboundTransferResult.rows, startDate, endDate, transferClientMap);
+      var transferClientRows = buildClientRowsFromMap(transferClientMap);
+      return res.status(200).json({
+        querySource: "nulogy_reports_api_transfers",
+        mode: mode,
+        startDate: startDate,
+        endDate: endDate,
+        generatedAt: new Date().toISOString(),
+        pending: !!(inboundTransferResult.pending || outboundTransferResult.pending),
+        assumptions: pendingAssumptions,
+        summary: buildSummaryFromClientRows(transferClientRows),
+        reports: {
+          inbound: buildReportDiagnostics(inboundTransferResult, inboundTransferDiagnostics),
+          outbound: buildReportDiagnostics(outboundTransferResult, outboundTransferDiagnostics),
+          storage: buildReportDiagnostics(null, {})
+        },
+        clientRows: transferClientRows
+      });
+    }
+
+    var assumptions = pendingAssumptions.slice();
 
     var inboundResult = await fetchReportCsv(INBOUND_REPORT, INBOUND_COLUMNS, {
       filters: transferFilters,
@@ -547,36 +748,16 @@ export default async function handler(req, res) {
     var outboundDiagnostics = countOutboundPallets(outboundResult.rows, startDate, endDate, clientMap);
     var storageDiagnostics = countActiveStoragePallets(storageResult.rows, startDate, endDate, clientMap);
 
-    var clientRows = Object.values(clientMap).sort(function(left, right) {
-      var rightTotal = Number(right.inboundPallets || 0) + Number(right.outboundPallets || 0) + Number(right.activeStoragePallets || 0);
-      var leftTotal = Number(left.inboundPallets || 0) + Number(left.outboundPallets || 0) + Number(left.activeStoragePallets || 0);
-      if (rightTotal !== leftTotal) return rightTotal - leftTotal;
-      return String(left.customer || "").localeCompare(String(right.customer || ""));
-    });
-
-    var summary = clientRows.reduce(function(acc, row) {
-      var inbound = Number(row.inboundPallets || 0);
-      var outbound = Number(row.outboundPallets || 0);
-      var storage = Number(row.activeStoragePallets || 0);
-      acc.clientCount += 1;
-      if (inbound > 0 || outbound > 0 || storage > 0) acc.activeClientCount += 1;
-      acc.inboundPallets += inbound;
-      acc.outboundPallets += outbound;
-      acc.activeStoragePallets += storage;
-      return acc;
-    }, {
-      clientCount: 0,
-      activeClientCount: 0,
-      inboundPallets: 0,
-      outboundPallets: 0,
-      activeStoragePallets: 0
-    });
+    var clientRows = buildClientRowsFromMap(clientMap);
+    var summary = buildSummaryFromClientRows(clientRows);
 
     return res.status(200).json({
       querySource: "nulogy_reports_api",
+      mode: mode,
       startDate: startDate,
       endDate: endDate,
       generatedAt: new Date().toISOString(),
+      pending: false,
       assumptions: assumptions.concat([
         storageResult.report === STORAGE_REPORT
           ? "Storage counts use distinct customer and pallet rows whose billed or stored window overlaps the selected billing window."

@@ -81,6 +81,8 @@ function createDefaultWarehousingReport() {
     rowCount: 0,
     distinctPallets: 0,
     possibleTruncation: false,
+    pending: false,
+    taskId: "",
     rowsMissingCustomerName: 0,
     rowsMissingPalletNumber: 0,
     rowsMissingTransferredAt: 0,
@@ -94,6 +96,7 @@ function createDefaultWarehousingPayload() {
   return {
     querySource: "",
     generatedAt: "",
+    pending: false,
     assumptions: [],
     summary: {
       clientCount: 0,
@@ -108,6 +111,75 @@ function createDefaultWarehousingPayload() {
       storage: createDefaultWarehousingReport()
     },
     clientRows: []
+  };
+}
+
+function mergeWarehousingPayloads(storagePayload, transferPayload) {
+  var storage = storagePayload && typeof storagePayload === "object" ? storagePayload : createDefaultWarehousingPayload();
+  var transfers = transferPayload && typeof transferPayload === "object" ? transferPayload : createDefaultWarehousingPayload();
+  var assumptions = [];
+  [storage, transfers].forEach(function(payload) {
+    (Array.isArray(payload.assumptions) ? payload.assumptions : []).forEach(function(assumption) {
+      if (assumption && assumptions.indexOf(assumption) === -1) assumptions.push(assumption);
+    });
+  });
+
+  var clientMap = {};
+  [storage, transfers].forEach(function(payload) {
+    (Array.isArray(payload.clientRows) ? payload.clientRows : []).forEach(function(row) {
+      var customer = String(row && row.customer || "").trim();
+      if (!customer) return;
+      if (!clientMap[customer]) {
+        clientMap[customer] = {
+          customer: customer,
+          inboundPallets: 0,
+          outboundPallets: 0,
+          activeStoragePallets: 0
+        };
+      }
+      clientMap[customer].inboundPallets += Number(row && row.inboundPallets || 0);
+      clientMap[customer].outboundPallets += Number(row && row.outboundPallets || 0);
+      clientMap[customer].activeStoragePallets += Number(row && row.activeStoragePallets || 0);
+    });
+  });
+
+  var clientRows = Object.values(clientMap).sort(function(left, right) {
+    var rightTotal = Number(right.inboundPallets || 0) + Number(right.outboundPallets || 0) + Number(right.activeStoragePallets || 0);
+    var leftTotal = Number(left.inboundPallets || 0) + Number(left.outboundPallets || 0) + Number(left.activeStoragePallets || 0);
+    if (rightTotal !== leftTotal) return rightTotal - leftTotal;
+    return String(left.customer || "").localeCompare(String(right.customer || ""));
+  });
+
+  var summary = clientRows.reduce(function(acc, row) {
+    var inbound = Number(row && row.inboundPallets || 0);
+    var outbound = Number(row && row.outboundPallets || 0);
+    var storageCount = Number(row && row.activeStoragePallets || 0);
+    acc.clientCount += 1;
+    if (inbound > 0 || outbound > 0 || storageCount > 0) acc.activeClientCount += 1;
+    acc.inboundPallets += inbound;
+    acc.outboundPallets += outbound;
+    acc.activeStoragePallets += storageCount;
+    return acc;
+  }, {
+    clientCount: 0,
+    activeClientCount: 0,
+    inboundPallets: 0,
+    outboundPallets: 0,
+    activeStoragePallets: 0
+  });
+
+  return {
+    querySource: [storage.querySource, transfers.querySource].filter(Boolean).join("+"),
+    generatedAt: transfers.generatedAt || storage.generatedAt || "",
+    pending: !!(storage.pending || transfers.pending),
+    assumptions: assumptions,
+    summary: summary,
+    reports: {
+      inbound: transfers.reports && transfers.reports.inbound ? transfers.reports.inbound : createDefaultWarehousingReport(),
+      outbound: transfers.reports && transfers.reports.outbound ? transfers.reports.outbound : createDefaultWarehousingReport(),
+      storage: storage.reports && storage.reports.storage ? storage.reports.storage : createDefaultWarehousingReport()
+    },
+    clientRows: clientRows
   };
 }
 
@@ -648,6 +720,8 @@ function normalizeWarehousingReportPayload(body) {
     rowCount: Number(source.rowCount || 0),
     distinctPallets: Number(source.distinctPallets || 0),
     possibleTruncation: !!source.possibleTruncation,
+    pending: !!source.pending,
+    taskId: String(source.taskId || ""),
     rowsMissingCustomerName: Number(source.rowsMissingCustomerName || 0),
     rowsMissingPalletNumber: Number(source.rowsMissingPalletNumber || 0),
     rowsMissingTransferredAt: Number(source.rowsMissingTransferredAt || 0),
@@ -663,6 +737,7 @@ function normalizeInvoicingWarehousingPayload(body) {
   return {
     querySource: String(source.querySource || defaults.querySource),
     generatedAt: String(source.generatedAt || defaults.generatedAt),
+    pending: !!source.pending,
     assumptions: Array.isArray(source.assumptions) ? source.assumptions : defaults.assumptions,
     summary: {
       clientCount: Number(source && source.summary && source.summary.clientCount || 0),
@@ -696,11 +771,29 @@ async function fetchInvoicingProductionHistory(startDate, endDate) {
   return normalizeInvoicingProductionPayload(result.body);
 }
 
-async function fetchInvoicingWarehousingHistory(startDate, endDate) {
-  var url = "/api/ops/invoicing-warehousing?start=" + encodeURIComponent(startDate) + "&end=" + encodeURIComponent(endDate);
+async function fetchInvoicingWarehousingStorageHistory(startDate, endDate) {
+  var url = "/api/ops/invoicing-warehousing?mode=storage&start=" + encodeURIComponent(startDate) + "&end=" + encodeURIComponent(endDate);
   var result = await fetchJsonWithCredentials(url);
   if (!result.response.ok) {
     throw new Error((result.body && (result.body.details || result.body.error)) || "Could not load invoicing warehousing history");
+  }
+  return normalizeInvoicingWarehousingPayload(result.body);
+}
+
+async function fetchInvoicingWarehousingTransferHistory(startDate, endDate, tasks) {
+  var query = [
+    "mode=transfers",
+    "start=" + encodeURIComponent(startDate),
+    "end=" + encodeURIComponent(endDate)
+  ];
+  var inboundTaskId = String(tasks && tasks.inboundTaskId || "").trim();
+  var outboundTaskId = String(tasks && tasks.outboundTaskId || "").trim();
+  if (inboundTaskId) query.push("inboundTaskId=" + encodeURIComponent(inboundTaskId));
+  if (outboundTaskId) query.push("outboundTaskId=" + encodeURIComponent(outboundTaskId));
+  var url = "/api/ops/invoicing-warehousing?" + query.join("&");
+  var result = await fetchJsonWithCredentials(url);
+  if (!result.response.ok) {
+    throw new Error((result.body && (result.body.details || result.body.error)) || "Could not load invoicing warehousing transfers");
   }
   return normalizeInvoicingWarehousingPayload(result.body);
 }
@@ -1254,6 +1347,16 @@ function metricCard(label, value, helper, tone) {
   );
 }
 
+function formatWarehouseCountForDisplay(value, ready, pendingLabel) {
+  if (!ready) return pendingLabel || "Loading...";
+  return formatUnits(value);
+}
+
+function formatWarehouseMoneyForDisplay(value, ready, pendingLabel) {
+  if (!ready) return pendingLabel || "Loading...";
+  return formatMoney(value);
+}
+
 function summarizeWarehouseRows(rows) {
   var includedCount = 0;
   var zeroRateCount = 0;
@@ -1318,6 +1421,17 @@ export default function InvoicingView(props) {
   var [customerFilter, setCustomerFilter] = useState(String(initialFilters.customer || "all"));
   var [statusFilter, setStatusFilter] = useState(String(initialFilters.status || "all"));
   var [searchTerm, setSearchTerm] = useState(String(initialFilters.q || ""));
+  var [warehouseTransferTasks, setWarehouseTransferTasks] = useState(function() {
+    return {
+      startDate: initialBillingWindow.start || "",
+      endDate: initialBillingWindow.end || "",
+      inboundTaskId: "",
+      outboundTaskId: ""
+    };
+  });
+  var [warehouseTransferSnapshot, setWarehouseTransferSnapshot] = useState(function() {
+    return createDefaultWarehousingPayload();
+  });
   var [warehouseFeeDrafts, setWarehouseFeeDrafts] = useState(function() {
     return {};
   });
@@ -1380,14 +1494,89 @@ export default function InvoicingView(props) {
     enabled: hasValidDateRange,
     staleTime: 30 * 1000
   });
-  var warehousingHistoryQuery = useQuery({
-    queryKey: ["invoicing", "warehousing-history", startDate, endDate],
+
+  useEffect(function() {
+    setWarehouseTransferTasks({
+      startDate: startDate || "",
+      endDate: endDate || "",
+      inboundTaskId: "",
+      outboundTaskId: ""
+    });
+    setWarehouseTransferSnapshot(createDefaultWarehousingPayload());
+  }, [invoiceMode, startDate, endDate]);
+
+  var activeWarehouseTransferTasks = useMemo(function() {
+    if (
+      String(warehouseTransferTasks && warehouseTransferTasks.startDate || "") !== String(startDate || "") ||
+      String(warehouseTransferTasks && warehouseTransferTasks.endDate || "") !== String(endDate || "")
+    ) {
+      return { inboundTaskId: "", outboundTaskId: "" };
+    }
+    return {
+      inboundTaskId: String(warehouseTransferTasks && warehouseTransferTasks.inboundTaskId || ""),
+      outboundTaskId: String(warehouseTransferTasks && warehouseTransferTasks.outboundTaskId || "")
+    };
+  }, [warehouseTransferTasks, startDate, endDate]);
+
+  var warehousingStorageQuery = useQuery({
+    queryKey: ["invoicing", "warehousing-history", "storage", startDate, endDate],
     queryFn: function() {
-      return fetchInvoicingWarehousingHistory(startDate, endDate);
+      return fetchInvoicingWarehousingStorageHistory(startDate, endDate);
     },
     enabled: hasValidDateRange && invoiceMode === "warehousing",
     staleTime: 30 * 1000
   });
+  var warehousingTransferQuery = useQuery({
+    queryKey: [
+      "invoicing",
+      "warehousing-history",
+      "transfers",
+      startDate,
+      endDate,
+      activeWarehouseTransferTasks.inboundTaskId,
+      activeWarehouseTransferTasks.outboundTaskId
+    ],
+    queryFn: function() {
+      return fetchInvoicingWarehousingTransferHistory(startDate, endDate, activeWarehouseTransferTasks);
+    },
+    enabled: hasValidDateRange && invoiceMode === "warehousing",
+    staleTime: 0,
+    refetchInterval: function(query) {
+      return query && query.state && query.state.data && query.state.data.pending ? 3000 : false;
+    }
+  });
+
+  useEffect(function() {
+    if (!warehousingTransferQuery.data) return;
+    setWarehouseTransferSnapshot(warehousingTransferQuery.data);
+  }, [warehousingTransferQuery.data]);
+
+  useEffect(function() {
+    var data = warehousingTransferQuery.data;
+    if (!data || !data.reports) return;
+    var inboundTaskId = String(data.reports.inbound && data.reports.inbound.taskId || "").trim();
+    var outboundTaskId = String(data.reports.outbound && data.reports.outbound.taskId || "").trim();
+    if (!inboundTaskId && !outboundTaskId) return;
+    setWarehouseTransferTasks(function(previous) {
+      var nextInbound = inboundTaskId || String(previous && previous.inboundTaskId || "").trim();
+      var nextOutbound = outboundTaskId || String(previous && previous.outboundTaskId || "").trim();
+      if (
+        nextInbound === String(previous && previous.inboundTaskId || "").trim() &&
+        nextOutbound === String(previous && previous.outboundTaskId || "").trim() &&
+        String(previous && previous.startDate || "") === String(startDate || "") &&
+        String(previous && previous.endDate || "") === String(endDate || "")
+      ) {
+        return previous;
+      }
+      return {
+        startDate: startDate || "",
+        endDate: endDate || "",
+        inboundTaskId: nextInbound,
+        outboundTaskId: nextOutbound
+      };
+    });
+  }, [warehousingTransferQuery.data, startDate, endDate]);
+
   var productionHistory = productionHistoryQuery.data || {
     rows: [],
     rowCount: 0,
@@ -1396,10 +1585,45 @@ export default function InvoicingView(props) {
     coverageAudit: createDefaultCoverageAudit(),
     availableDateRange: { min: "", max: "" }
   };
-  var warehousingHistory = warehousingHistoryQuery.data || createDefaultWarehousingPayload();
+  var warehousingStorageHistory = warehousingStorageQuery.data || createDefaultWarehousingPayload();
+  var warehousingTransferHistory = warehousingTransferQuery.data || warehouseTransferSnapshot || createDefaultWarehousingPayload();
+  var warehousingHistory = useMemo(function() {
+    return mergeWarehousingPayloads(warehousingStorageHistory, warehousingTransferHistory);
+  }, [warehousingStorageHistory, warehousingTransferHistory]);
   var productionRows = Array.isArray(productionHistory.rows) ? productionHistory.rows : [];
   var coverageAudit = productionHistory.coverageAudit || createDefaultCoverageAudit();
   var productionSyncTimestamp = productionHistory.latestSyncedAt || (props.productionTimestamp ? new Date(props.productionTimestamp).toISOString() : "");
+  var warehousingFeedError = warehousingStorageQuery.error || warehousingTransferQuery.error || null;
+  var warehousingStorageReady = !!warehousingStorageHistory.generatedAt;
+  var warehouseTransfersPending = !!(
+    warehousingTransferHistory.pending ||
+    (warehousingTransferQuery.isLoading && !warehousingTransferHistory.generatedAt)
+  );
+  var warehouseTransferCountsReady = !!(
+    warehousingTransferHistory.generatedAt &&
+    !warehousingTransferHistory.pending &&
+    !warehousingTransferQuery.isError
+  );
+  var warehouseStorageCountsReady = !!(warehousingStorageReady && !warehousingStorageQuery.isError);
+  var warehouseTotalsReady = !!(warehouseStorageCountsReady && warehouseTransferCountsReady);
+  var warehousingFeedInitialLoading = !!(
+    invoiceMode === "warehousing" &&
+    hasValidDateRange &&
+    !warehousingStorageReady &&
+    (warehousingStorageQuery.isLoading || warehousingStorageQuery.isFetching)
+  );
+  var warehousingFeedRefreshing = !!(
+    invoiceMode === "warehousing" &&
+    hasValidDateRange &&
+    !warehouseTransfersPending &&
+    !warehousingFeedInitialLoading &&
+    (warehousingStorageQuery.isFetching || warehousingTransferQuery.isFetching)
+  );
+  var warehousingFeedStarted = !!(
+    warehousingHistory.generatedAt ||
+    warehousingStorageReady ||
+    warehousingTransferHistory.generatedAt
+  );
 
   var fieldFallbacks = useMemo(function() {
     var workOrderFallbacks = buildWorkOrderFallbacks(workOrders);
@@ -2399,6 +2623,17 @@ export default function InvoicingView(props) {
   var warehouseStorageMetricHelper = warehouseStorageUsesFallback
     ? "Current active pallets from the pallet_aging snapshot. Prior months may undercount pallets already shipped after that window."
     : "Distinct pallets whose billed window overlaps this billing window.";
+  var warehouseFeedBadge = warehousingFeedError
+    ? { variant: "danger", label: warehousingStorageQuery.isError ? "Warehouse storage feed unavailable" : "Warehouse transfer feed unavailable" }
+    : warehousingFeedInitialLoading
+      ? { variant: "secondary", label: "Loading Nulogy storage feed" }
+      : warehouseTransfersPending
+        ? { variant: "secondary", label: "Loading Nulogy transfer counts" }
+        : warehousingFeedRefreshing
+          ? { variant: "secondary", label: "Refreshing Nulogy feed" }
+          : warehousingFeedStarted && warehousingHistory.generatedAt
+            ? { variant: "secondary", label: "Feed built " + formatDateTimeLabel(warehousingHistory.generatedAt) }
+            : null;
 
   var invoiceModeTabs = useMemo(function() {
     return [
@@ -2605,15 +2840,7 @@ export default function InvoicingView(props) {
               <Badge variant="secondary">
                 Billing window {formatDateLabel(startDate)} to {formatDateLabel(endDate)}
               </Badge>
-              {warehousingHistoryQuery.isError ? (
-                <Badge variant="danger">Warehouse feed unavailable</Badge>
-              ) : warehousingHistoryQuery.isLoading && !warehousingHistory.generatedAt ? (
-                <Badge variant="secondary">Loading Nulogy warehouse feed</Badge>
-              ) : warehousingHistoryQuery.isFetching ? (
-                <Badge variant="secondary">Refreshing Nulogy feed</Badge>
-              ) : warehousingHistory.generatedAt ? (
-                <Badge variant="secondary">Feed built {formatDateTimeLabel(warehousingHistory.generatedAt)}</Badge>
-              ) : null}
+              {warehouseFeedBadge ? <Badge variant={warehouseFeedBadge.variant}>{warehouseFeedBadge.label}</Badge> : null}
               {hasWarehousingTruncationRisk ? (
                 <Badge variant="warning">Truncation risk</Badge>
               ) : null}
@@ -2670,20 +2897,32 @@ export default function InvoicingView(props) {
                   </Button>
                 </div>
                 <div className="mt-3 text-sm text-[rgb(var(--muted))]">
-                  {warehousingHistory.generatedAt
-                    ? "Warehouse feed generated from Nulogy inbound, outbound, and pallet storage reports."
-                    : "Select a billing window to build the warehouse feed from Nulogy."}
+                  {warehouseTransfersPending && warehouseStorageCountsReady
+                    ? "Storage pallets are loaded. Inbound and outbound transfer counts are still running in Nulogy and will fill in automatically."
+                    : warehousingHistory.generatedAt
+                      ? "Warehouse feed generated from Nulogy inbound, outbound, and pallet storage reports."
+                      : warehousingFeedInitialLoading
+                        ? "Building the warehousing feed from live Nulogy storage and transfer reports."
+                        : "Select a billing window to build the warehouse feed from Nulogy."}
                 </div>
               </div>
             </div>
 
-            {warehousingHistoryQuery.isError ? (
+            {warehousingFeedError ? (
               <div className="rounded-md border border-[rgb(var(--danger))]/20 bg-[color-mix(in_oklab,rgb(var(--danger))_6%,white)] p-4">
                 <div className="text-sm font-medium text-[rgb(var(--foreground))]">Warehouse billing data could not be loaded</div>
                 <div className="mt-2 max-w-3xl text-sm text-[rgb(var(--muted))]">
-                  {warehousingHistoryQuery.error && warehousingHistoryQuery.error.message
-                    ? warehousingHistoryQuery.error.message
+                  {warehousingFeedError && warehousingFeedError.message
+                    ? warehousingFeedError.message
                     : "The warehousing feed request failed."}
+                </div>
+              </div>
+            ) : null}
+            {warehouseTransfersPending && warehouseStorageCountsReady ? (
+              <div className="rounded-md border border-[rgb(var(--accent))]/20 bg-[color-mix(in_oklab,rgb(var(--accent))_5%,white)] p-4">
+                <div className="text-sm font-medium text-[rgb(var(--foreground))]">Transfer counts are still loading</div>
+                <div className="mt-2 max-w-3xl text-sm text-[rgb(var(--muted))]">
+                  Storage pallets are already populated for this billing window. Inbound and outbound pallet counts, active-client activity totals, and revenue totals will update automatically after the current Nulogy transfer reports finish.
                 </div>
               </div>
             ) : null}
@@ -2709,11 +2948,46 @@ export default function InvoicingView(props) {
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
               {[
                 metricCard("Clients In Scope", warehouseSummary.clientCount.toLocaleString(), "Every visible production or warehouse client stays on the worksheet for now.", "default"),
-                metricCard("Clients With Activity", warehouseVisibleSummary.activeClientCount.toLocaleString(), warehouseVisibleSummary.billableClientCount.toLocaleString() + " included rows currently billable in this window.", warehouseVisibleSummary.activeClientCount ? "success" : "default"),
-                metricCard("Inbound Pallets", formatUnits(warehouseVisibleSummary.inboundPallets), "Distinct inbound pallet moves in the selected period.", warehouseVisibleSummary.inboundPallets ? "info" : "default"),
-                metricCard("Outbound Pallets", formatUnits(warehouseVisibleSummary.outboundPallets), "Distinct outbound pallet moves in the selected period.", warehouseVisibleSummary.outboundPallets ? "info" : "default"),
-                metricCard("Storage Pallets", formatUnits(warehouseVisibleSummary.activeStoragePallets), warehouseStorageMetricHelper, warehouseVisibleSummary.activeStoragePallets ? "info" : "default"),
-                metricCard("Est. Warehouse Revenue", formatMoney(warehouseVisibleSummary.estimatedFees), warehouseSummary.nonDefaultCount ? (warehouseSummary.nonDefaultCount.toLocaleString() + " rows use custom fees or notes.") : "All rows are still using the default fee profile.", warehouseVisibleSummary.estimatedFees > 0 ? "success" : "default")
+                metricCard(
+                  "Clients With Activity",
+                  warehouseTransferCountsReady ? warehouseVisibleSummary.activeClientCount.toLocaleString() : "Loading...",
+                  warehouseTransferCountsReady
+                    ? (warehouseVisibleSummary.billableClientCount.toLocaleString() + " included rows currently billable in this window.")
+                    : "Activity totals will finish after inbound and outbound transfer reports complete.",
+                  warehouseTransferCountsReady && warehouseVisibleSummary.activeClientCount ? "success" : "default"
+                ),
+                metricCard(
+                  "Inbound Pallets",
+                  formatWarehouseCountForDisplay(warehouseVisibleSummary.inboundPallets, warehouseTransferCountsReady),
+                  warehouseTransferCountsReady
+                    ? "Distinct inbound pallet moves in the selected period."
+                    : "Waiting on the live Nulogy inbound transfer report.",
+                  warehouseTransferCountsReady && warehouseVisibleSummary.inboundPallets ? "info" : "default"
+                ),
+                metricCard(
+                  "Outbound Pallets",
+                  formatWarehouseCountForDisplay(warehouseVisibleSummary.outboundPallets, warehouseTransferCountsReady),
+                  warehouseTransferCountsReady
+                    ? "Distinct outbound pallet moves in the selected period."
+                    : "Waiting on the live Nulogy outbound transfer report.",
+                  warehouseTransferCountsReady && warehouseVisibleSummary.outboundPallets ? "info" : "default"
+                ),
+                metricCard(
+                  "Storage Pallets",
+                  formatWarehouseCountForDisplay(warehouseVisibleSummary.activeStoragePallets, warehouseStorageCountsReady),
+                  warehouseStorageCountsReady ? warehouseStorageMetricHelper : "Waiting on the live Nulogy storage feed.",
+                  warehouseStorageCountsReady && warehouseVisibleSummary.activeStoragePallets ? "info" : "default"
+                ),
+                metricCard(
+                  "Est. Warehouse Revenue",
+                  formatWarehouseMoneyForDisplay(warehouseVisibleSummary.estimatedFees, warehouseTotalsReady),
+                  warehouseTotalsReady
+                    ? (warehouseSummary.nonDefaultCount
+                      ? (warehouseSummary.nonDefaultCount.toLocaleString() + " rows use custom fees or notes.")
+                      : "All rows are still using the default fee profile.")
+                    : "Revenue totals will finish after both transfer reports complete.",
+                  warehouseTotalsReady && warehouseVisibleSummary.estimatedFees > 0 ? "success" : "default"
+                )
               ]}
             </div>
           </CardContent>
@@ -2773,14 +3047,24 @@ export default function InvoicingView(props) {
                             <td className="px-4 py-3">
                               <div className="font-medium text-[rgb(var(--foreground))]">{row.customer}</div>
                               <div className="mt-1 text-xs text-[rgb(var(--muted))]">
-                                {row.hasActivity
-                                  ? (formatUnits(row.inboundPallets) + " inbound / " + formatUnits(row.outboundPallets) + " outbound / " + formatUnits(row.activeStoragePallets) + " storage")
-                                  : "No warehouse activity in this billing window"}
+                                {warehouseTransfersPending
+                                  ? (row.activeStoragePallets > 0
+                                    ? ("Transfer counts loading / " + formatUnits(row.activeStoragePallets) + " storage pallets confirmed")
+                                    : "Transfer counts still loading from Nulogy")
+                                  : row.hasActivity
+                                    ? (formatUnits(row.inboundPallets) + " inbound / " + formatUnits(row.outboundPallets) + " outbound / " + formatUnits(row.activeStoragePallets) + " storage")
+                                    : "No warehouse activity in this billing window"}
                               </div>
                             </td>
-                            <td className="px-4 py-3 text-right font-medium text-[rgb(var(--foreground))]">{formatUnits(row.inboundPallets)}</td>
-                            <td className="px-4 py-3 text-right font-medium text-[rgb(var(--foreground))]">{formatUnits(row.outboundPallets)}</td>
-                            <td className="px-4 py-3 text-right font-medium text-[rgb(var(--foreground))]">{formatUnits(row.activeStoragePallets)}</td>
+                            <td className="px-4 py-3 text-right font-medium text-[rgb(var(--foreground))]">
+                              {warehouseTransferCountsReady ? formatUnits(row.inboundPallets) : "--"}
+                            </td>
+                            <td className="px-4 py-3 text-right font-medium text-[rgb(var(--foreground))]">
+                              {warehouseTransferCountsReady ? formatUnits(row.outboundPallets) : "--"}
+                            </td>
+                            <td className="px-4 py-3 text-right font-medium text-[rgb(var(--foreground))]">
+                              {warehouseStorageCountsReady ? formatUnits(row.activeStoragePallets) : "--"}
+                            </td>
                             <td className="px-4 py-3">
                               <Input
                                 value={row.inboundRate}
@@ -2805,7 +3089,9 @@ export default function InvoicingView(props) {
                                 className="h-8 min-w-[108px] text-right text-xs"
                               />
                             </td>
-                            <td className="px-4 py-3 text-right font-semibold text-[rgb(var(--foreground))]">{formatMoney(row.totalFee)}</td>
+                            <td className="px-4 py-3 text-right font-semibold text-[rgb(var(--foreground))]">
+                              {warehouseTotalsReady ? formatMoney(row.totalFee) : "Pending"}
+                            </td>
                             <td className="px-4 py-3">
                               <Input
                                 value={row.note}
@@ -2865,12 +3151,26 @@ export default function InvoicingView(props) {
                     <div className="text-sm font-medium text-[rgb(var(--foreground))]">{section.label}</div>
                     <div className="mt-1 text-xs text-[rgb(var(--muted))]">{section.helper}</div>
                     <div className="mt-2 flex flex-wrap gap-2">
-                      <Badge variant="secondary">{report.rowCount.toLocaleString()} raw rows</Badge>
-                      <Badge variant="info">{report.distinctPallets.toLocaleString()} counted pallets</Badge>
+                      {report.pending ? (
+                        <>
+                          <Badge variant="secondary">Nulogy run in progress</Badge>
+                          {report.taskId ? <Badge variant="secondary">Task {report.taskId}</Badge> : null}
+                        </>
+                      ) : (
+                        <>
+                          <Badge variant="secondary">{report.rowCount.toLocaleString()} raw rows</Badge>
+                          <Badge variant="info">{report.distinctPallets.toLocaleString()} counted pallets</Badge>
+                        </>
+                      )}
                       {report.possibleTruncation ? (
                         <Badge variant="warning">Possible truncation</Badge>
                       ) : null}
                     </div>
+                    {report.pending ? (
+                      <div className="mt-2 text-xs text-[rgb(var(--muted))]">
+                        This report is still running in Nulogy, so pallet counts will populate after the next refresh.
+                      </div>
+                    ) : null}
                     {(report.warnings || []).length ? (
                       <div className="mt-2 text-xs text-[rgb(var(--warning))]">
                         {report.warnings.join(" | ")}
