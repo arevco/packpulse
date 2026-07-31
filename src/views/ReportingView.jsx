@@ -91,6 +91,8 @@ function sourceBadgeVariant(sourceMode) {
   if (sourceMode === "raw_csv") return "success";
   if (sourceMode === "warehouse_transfer_events") return "info";
   if (sourceMode === "live_transfer_sync") return "info";
+  if (sourceMode === "production_events") return "info";
+  if (sourceMode === "live_consumption_sync") return "info";
   if (sourceMode === "preview_json") return "warning";
   if (sourceMode === "stale_window") return "warning";
   if (sourceMode === "missing") return "danger";
@@ -101,6 +103,8 @@ function sourceBadgeLabel(sourceMode) {
   if (sourceMode === "raw_csv") return "Raw CSV";
   if (sourceMode === "warehouse_transfer_events") return "Transfer Cache";
   if (sourceMode === "live_transfer_sync") return "Live Sync";
+  if (sourceMode === "production_events") return "Production Cache";
+  if (sourceMode === "live_consumption_sync") return "Live Sync";
   if (sourceMode === "preview_json") return "Preview only";
   if (sourceMode === "stale_window") return "Outside window";
   if (sourceMode === "missing") return "Missing";

@@ -1,6 +1,9 @@
 import Papa from "papaparse";
+import { isMissingTableError } from "../_event-window.js";
+import { parseCSV } from "../nulogy/_csv.js";
+import { executeReportRun } from "../nulogy/_runner.js";
 import { CACHE_SITE_ID, getAuthenticatedUser, getSupabaseAdmin, withCors } from "../ops/_common.js";
-import { canonicalizeCustomerName, customerNamesMatch } from "../ops/_customer-aliases.js";
+import { canonicalizeCustomerName, customerNamesMatch, preferredNulogyCustomerFilterValue } from "../ops/_customer-aliases.js";
 import { loadWarehouseTransferEventsForWindow } from "../ops/_warehouse-transfers.js";
 
 const SECTION_ORDER = ["inventory", "inbounds", "outbounds", "production", "consumption"];
@@ -11,6 +14,38 @@ const SECTION_CONFIG = {
   outbounds: { label: "Outbounds", reportCode: "shipment_item" },
   production: { label: "Production", reportCode: "production" },
   consumption: { label: "Consumption", reportCode: "consumption_by_lot" },
+};
+
+const CONSUMPTION_LIVE_COLUMNS = [
+  "actual_job_end",
+  "actual_job_start",
+  "consumed_at",
+  "consumed_date",
+  "customer",
+  "finished_good_expiry_date",
+  "finished_good_lot_code",
+  "job_id",
+  "job_reconciliation_status",
+  "job_reference",
+  "line",
+  "project_code",
+  "project_id",
+  "project_reference_1",
+  "project_reference_2",
+  "project_reference_3",
+  "project_reference_4",
+  "project_reference_5",
+  "subcomponent_consumption_pallet",
+  "subcomponent_expiry_date",
+  "subcomponent_item_category",
+  "subcomponent_item_family",
+  "subcomponent_item_type",
+  "subcomponent_item_vendor",
+  "subcomponent_lot_code",
+];
+
+const REPORT_ROW_LIMITS = {
+  consumption_by_lot: 60000,
 };
 
 const MONTH_INDEX = {
@@ -396,6 +431,191 @@ function buildTransferSectionMeta(reportCode, transferLoad) {
       : null,
     sourceMode: compactText(transferLoad && transferLoad.sourceMode) || "live_transfer_sync",
     notes: Array.isArray(transferLoad && transferLoad.notes) ? transferLoad.notes.slice() : [],
+  };
+}
+
+function formatNulogyDateTime(dateIso, endOfDay) {
+  const match = String(dateIso || "").trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return "";
+  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const monthIndex = Number(match[2]) - 1;
+  if (!Number.isFinite(monthIndex) || monthIndex < 0 || monthIndex > 11) return "";
+  return match[1] + "-" + monthNames[monthIndex] + "-" + match[3] + (endOfDay ? " 11:59 PM" : " 12:00 AM");
+}
+
+function summarizeReportFailure(result, report) {
+  const body = result && result.body ? result.body : {};
+  const messages = Array.isArray(body.failureMessages) ? body.failureMessages.filter(Boolean) : [];
+  if (messages.length) return messages.join(" | ");
+  if (body.error) return String(body.error);
+  return "Failed to run " + report + ".";
+}
+
+function normalizeRawObject(value) {
+  if (!value) return {};
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch (_error) {
+      return {};
+    }
+  }
+  return typeof value === "object" ? value : {};
+}
+
+async function fetchLatestProductionSnapshotAt(supabase, siteId) {
+  const result = await supabase
+    .from("production_events")
+    .select("source_snapshot_at")
+    .eq("site_id", siteId)
+    .not("source_snapshot_at", "is", null)
+    .order("source_snapshot_at", { ascending: false })
+    .limit(1);
+  if (result.error) throw result.error;
+  return Array.isArray(result.data) && result.data[0]
+    ? compactText(result.data[0].source_snapshot_at)
+    : "";
+}
+
+async function fetchProductionEventRows(supabase, siteId, startDate, endDate) {
+  const pageSize = 1000;
+  let from = 0;
+  let out = [];
+  while (true) {
+    const to = from + pageSize - 1;
+    const query = await supabase
+      .from("production_events")
+      .select("produced_date_et,produced_at_utc,item_code,units_produced,line,work_order_code,source_snapshot_at,raw")
+      .eq("site_id", siteId)
+      .gte("produced_date_et", startDate)
+      .lte("produced_date_et", endDate)
+      .order("produced_date_et", { ascending: false })
+      .range(from, to);
+    if (query.error) throw query.error;
+    const rows = Array.isArray(query.data) ? query.data : [];
+    out = out.concat(rows);
+    if (rows.length < pageSize) break;
+    from += pageSize;
+    if (from > 500000) break;
+  }
+  return out;
+}
+
+async function loadProductionEventsForWindow(supabase, siteId, startDate, endDate) {
+  const results = await Promise.all([
+    fetchProductionEventRows(supabase, siteId, startDate, endDate),
+    fetchLatestProductionSnapshotAt(supabase, siteId),
+  ]);
+  return {
+    events: results[0],
+    generatedAt: results[1],
+    possibleTruncation: false,
+    notes: ["Using normalized production events synced from live Nulogy production history."],
+    sourceMode: "production_events",
+  };
+}
+
+function buildProductionSectionMeta(reportCode, load) {
+  const generatedAt = compactText(load && load.generatedAt);
+  return {
+    report: generatedAt
+      ? {
+        generated_at: generatedAt,
+        possible_truncation: !!(load && load.possibleTruncation),
+        report_code: reportCode,
+      }
+      : null,
+    sourceMode: compactText(load && load.sourceMode) || "production_events",
+    notes: Array.isArray(load && load.notes) ? load.notes.slice() : [],
+  };
+}
+
+function mapProductionEventsToRows(events) {
+  return (Array.isArray(events) ? events : []).map(function(event) {
+    const raw = normalizeRawObject(event && event.raw);
+    const itemCode = compactText(pickLooseValue(raw, ["item_code", "Item code"])) || compactText(event && event.item_code);
+    return {
+      customer_name: canonicalizeCustomerName(pickLooseValue(raw, ["customer_name", "Customer name", "Customer Name", "customer"])),
+      produced_at: compactText(
+        pickLooseValue(raw, ["produced_at", "Produced at", "Produced At", "Produced date"]) ||
+        event && (event.produced_at_utc || event.produced_date_et)
+      ),
+      purchase_order_number: compactText(pickLooseValue(raw, ["purchase_order_number", "Purchase Order number", "Purchase Order Number"])),
+      project_code: compactText(pickLooseValue(raw, ["project_code", "Work Order code", "Work Order Code"])) || compactText(event && event.work_order_code),
+      line: compactText(pickLooseValue(raw, ["line", "Line", "line_name", "Line Name"])) || compactText(event && event.line),
+      item_code: itemCode,
+      item_description: compactText(pickLooseValue(raw, ["item_description", "Item description", "Item Description", "description", "Description"])),
+      lot_code: compactText(pickLooseValue(raw, ["lot_code", "Lot code", "Lot Code"])),
+      units_produced: safeNum(pickLooseValue(raw, ["units_produced", "Units produced", "Units Produced"])) || safeNum(event && event.units_produced),
+    };
+  });
+}
+
+function buildLiveConsumptionFilters(startDate, endDate, selectedCustomer) {
+  const filters = [
+    {
+      column: "consumed_at",
+      operator: "between",
+      from_threshold: formatNulogyDateTime(startDate, false),
+      to_threshold: formatNulogyDateTime(endDate, true),
+    },
+  ];
+  const customerFilter = preferredNulogyCustomerFilterValue(selectedCustomer);
+  if (customerFilter && selectedCustomer && selectedCustomer !== "all") {
+    filters.push({
+      column: "customer",
+      operator: "=",
+      threshold: customerFilter,
+    });
+  }
+  return filters;
+}
+
+async function fetchLiveConsumptionRows(windowStart, windowEnd, selectedCustomer) {
+  const report = SECTION_CONFIG.consumption.reportCode;
+  const executed = await executeReportRun({
+    report: report,
+    columns: CONSUMPTION_LIVE_COLUMNS,
+    filters: buildLiveConsumptionFilters(windowStart, windowEnd, selectedCustomer),
+    waitForCompletion: true,
+    pollIntervalMs: 2500,
+    maxPolls: 60,
+  });
+  if (!executed.ok) throw new Error(summarizeReportFailure(executed, report));
+  const body = executed.body || {};
+  if (!body.downloadUrl) throw new Error("Completed " + report + " run did not return a download URL.");
+  const response = await fetch(body.downloadUrl, {
+    method: "GET",
+    headers: {
+      Accept: "text/csv,text/plain,application/xml,text/xml",
+    },
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error("Failed to download " + report + " CSV (" + response.status + ").");
+  }
+  const rows = parseCSV(text);
+  return {
+    rows: rows,
+    generatedAt: new Date().toISOString(),
+    possibleTruncation: Number(REPORT_ROW_LIMITS[report] || 0) > 0 && rows.length >= Number(REPORT_ROW_LIMITS[report] || 0),
+    notes: ["Using a live consumption pull because the stored consumption artifact window is stale."],
+    sourceMode: "live_consumption_sync",
+  };
+}
+
+function buildLiveConsumptionMeta(reportCode, load) {
+  const generatedAt = compactText(load && load.generatedAt);
+  return {
+    report: generatedAt
+      ? {
+        generated_at: generatedAt,
+        possible_truncation: !!(load && load.possibleTruncation),
+        report_code: reportCode,
+      }
+      : null,
+    sourceMode: compactText(load && load.sourceMode) || "live_consumption_sync",
+    notes: Array.isArray(load && load.notes) ? load.notes.slice() : [],
   };
 }
 
@@ -969,12 +1189,40 @@ export default async function handler(req, res) {
         }
       }
 
+      if (sectionKey === "production") {
+        try {
+          const productionLoad = await loadProductionEventsForWindow(supabase, siteId, windowStart, asOfDate);
+          rawRowsBySection[sectionKey] = mapProductionEventsToRows(productionLoad.events);
+          metaBySection[sectionKey] = buildProductionSectionMeta(config.reportCode, productionLoad);
+          return;
+        } catch (productionError) {
+          if (!isMissingTableError("production_events", productionError)) {
+            notes.push("Production event cache failed, so this section fell back to historical reporting artifacts: " + compactText(productionError && productionError.message));
+          }
+        }
+      }
+
       const reports = await fetchRecentReportsForCode(supabase, siteId, config.reportCode);
       const chosen = chooseHistoricalReport(reports, asOfDate);
 
+      if (sectionKey === "consumption" && (!chosen.report || isReportOutsideWindow(sectionKey, chosen.report, windowStart))) {
+        try {
+          const consumptionLoad = await fetchLiveConsumptionRows(windowStart, asOfDate, selectedCustomer);
+          rawRowsBySection[sectionKey] = Array.isArray(consumptionLoad.rows) ? consumptionLoad.rows : [];
+          metaBySection[sectionKey] = buildLiveConsumptionMeta(config.reportCode, consumptionLoad);
+          return;
+        } catch (consumptionError) {
+          notes.push("Live consumption sync failed, so this section fell back to historical reporting artifacts: " + compactText(consumptionError && consumptionError.message));
+        }
+      }
+
       if (!chosen.report) {
         rawRowsBySection[sectionKey] = [];
-        metaBySection[sectionKey] = { report: null, sourceMode: "missing", notes: ["No successful artifact report found."] };
+        metaBySection[sectionKey] = {
+          report: null,
+          sourceMode: "missing",
+          notes: notes.length ? notes.concat(["No successful artifact report found."]) : ["No successful artifact report found."],
+        };
         return;
       }
 
