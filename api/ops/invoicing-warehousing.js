@@ -2,6 +2,13 @@ import Sentry from "../_sentry.js";
 import { CACHE_SITE_ID, getAuthenticatedUser, getSupabaseAdmin, withCors } from "./_common.js";
 import { NULOGY_URL, buildAuthHeader, executeReportRun, getNulogyCredentials, pollReportRun } from "../nulogy/_runner.js";
 import { parseCSV } from "../nulogy/_csv.js";
+import {
+  INBOUND_TRANSFER_COLUMNS as SHARED_INBOUND_TRANSFER_COLUMNS,
+  OUTBOUND_TRANSFER_COLUMNS as SHARED_OUTBOUND_TRANSFER_COLUMNS,
+  normalizeWarehouseTransferRows,
+  applyWarehouseTransferEventsToClientMap,
+  writeWarehouseTransferEvents,
+} from "./_warehouse-transfers.js";
 
 var INBOUND_REPORT = "receipt_item";
 var OUTBOUND_REPORT = "shipment_item";
@@ -11,26 +18,8 @@ var WAREHOUSE_SNAPSHOT_TABLE = "warehouse_invoicing_snapshots";
 var WAREHOUSE_SNAPSHOT_HISTORY_TABLE = "cache_snapshot_history";
 var WAREHOUSE_SNAPSHOT_FEATURE = "warehouse_invoicing";
 
-var INBOUND_COLUMNS = [
-  "item_customer_name",
-  "receipt_customer_name",
-  "receive_order_customer_name",
-  "item_code",
-  "lot_code",
-  "pallet_number",
-  "receive_order_code",
-  "received_at"
-];
-var OUTBOUND_COLUMNS = [
-  "item_customer_name",
-  "shipment_customer_name",
-  "ship_order_customer_name",
-  "item_code",
-  "lot_code",
-  "pallet_number",
-  "ship_order_code",
-  "actual_ship_at"
-];
+var INBOUND_COLUMNS = SHARED_INBOUND_TRANSFER_COLUMNS;
+var OUTBOUND_COLUMNS = SHARED_OUTBOUND_TRANSFER_COLUMNS;
 var STORAGE_COLUMNS = [
   "customer_name",
   "billed_since",
@@ -1069,20 +1058,20 @@ export default async function handler(req, res) {
     if (mode === "transfers") {
       var inboundTransferResult = inboundTaskId
         ? await resolvePendingTransferReport(inboundTaskId, INBOUND_REPORT, authHeader, {
-          columns: ["item_customer_name", "receipt_customer_name", "pallet_number", "receive_order_code", "received_at"],
+          columns: INBOUND_COLUMNS,
           filters: inboundFilters,
           maxPolls: 2
         })
-        : await createPendingReportRun(INBOUND_REPORT, ["item_customer_name", "receipt_customer_name", "pallet_number", "receive_order_code", "received_at"], {
+        : await createPendingReportRun(INBOUND_REPORT, INBOUND_COLUMNS, {
           filters: inboundFilters
         });
       var outboundTransferResult = outboundTaskId
         ? await resolvePendingTransferReport(outboundTaskId, OUTBOUND_REPORT, authHeader, {
-          columns: ["item_customer_name", "shipment_customer_name", "pallet_number", "ship_order_code", "actual_ship_at"],
+          columns: OUTBOUND_COLUMNS,
           filters: outboundFilters,
           maxPolls: 2
         })
-        : await createPendingReportRun(OUTBOUND_REPORT, ["item_customer_name", "shipment_customer_name", "pallet_number", "ship_order_code", "actual_ship_at"], {
+        : await createPendingReportRun(OUTBOUND_REPORT, OUTBOUND_COLUMNS, {
           filters: outboundFilters
         });
 
@@ -1090,9 +1079,64 @@ export default async function handler(req, res) {
         pendingAssumptions.push("Inbound and outbound pallet counts are still loading from Nulogy and will populate after the current report runs complete.");
       }
 
+      var transferSyncedAt = new Date().toISOString();
       var transferClientMap = {};
-      var inboundTransferDiagnostics = countInboundPallets(inboundTransferResult.rows, startDate, endDate, transferClientMap);
-      var outboundTransferDiagnostics = countOutboundPallets(outboundTransferResult.rows, startDate, endDate, transferClientMap);
+      var inboundTransferDiagnostics = {
+        rowCount: 0,
+        distinctPallets: 0,
+        rowsMissingCustomerName: 0,
+        rowsMissingPalletNumber: 0,
+        rowsMissingTransferredAt: 0
+      };
+      if (!inboundTransferResult.pending) {
+        var inboundTransferNormalized = normalizeWarehouseTransferRows(
+          "inbound",
+          inboundTransferResult.rows,
+          siteId,
+          transferSyncedAt,
+          user.email
+        );
+        inboundTransferDiagnostics = inboundTransferNormalized.diagnostics;
+        applyWarehouseTransferEventsToClientMap(inboundTransferNormalized.events, transferClientMap, {
+          startDate: startDate,
+          endDate: endDate
+        });
+        await writeWarehouseTransferEvents(supabase, {
+          siteId: siteId,
+          direction: "inbound",
+          startDate: startDate,
+          endDate: endDate,
+          events: inboundTransferNormalized.events
+        });
+      }
+      var outboundTransferDiagnostics = {
+        rowCount: 0,
+        distinctPallets: 0,
+        rowsMissingCustomerName: 0,
+        rowsMissingPalletNumber: 0,
+        rowsMissingTransferredAt: 0
+      };
+      if (!outboundTransferResult.pending) {
+        var outboundTransferNormalized = normalizeWarehouseTransferRows(
+          "outbound",
+          outboundTransferResult.rows,
+          siteId,
+          transferSyncedAt,
+          user.email
+        );
+        outboundTransferDiagnostics = outboundTransferNormalized.diagnostics;
+        applyWarehouseTransferEventsToClientMap(outboundTransferNormalized.events, transferClientMap, {
+          startDate: startDate,
+          endDate: endDate
+        });
+        await writeWarehouseTransferEvents(supabase, {
+          siteId: siteId,
+          direction: "outbound",
+          startDate: startDate,
+          endDate: endDate,
+          events: outboundTransferNormalized.events
+        });
+      }
       var transferClientRows = buildClientRowsFromMap(transferClientMap);
       var transferPayload = buildTransferPayload(
         mode,
@@ -1123,9 +1167,46 @@ export default async function handler(req, res) {
     });
     var storageResult = await fetchStorageReportWithFallback(startDate, endDate, assumptions);
 
+    var normalizedTransferSnapshotAt = new Date().toISOString();
+    var inboundNormalized = normalizeWarehouseTransferRows(
+      "inbound",
+      inboundResult.rows,
+      siteId,
+      normalizedTransferSnapshotAt,
+      user.email
+    );
+    var outboundNormalized = normalizeWarehouseTransferRows(
+      "outbound",
+      outboundResult.rows,
+      siteId,
+      normalizedTransferSnapshotAt,
+      user.email
+    );
     var clientMap = {};
-    var inboundDiagnostics = countInboundPallets(inboundResult.rows, startDate, endDate, clientMap);
-    var outboundDiagnostics = countOutboundPallets(outboundResult.rows, startDate, endDate, clientMap);
+    var inboundDiagnostics = inboundNormalized.diagnostics;
+    var outboundDiagnostics = outboundNormalized.diagnostics;
+    applyWarehouseTransferEventsToClientMap(inboundNormalized.events, clientMap, {
+      startDate: startDate,
+      endDate: endDate
+    });
+    applyWarehouseTransferEventsToClientMap(outboundNormalized.events, clientMap, {
+      startDate: startDate,
+      endDate: endDate
+    });
+    await writeWarehouseTransferEvents(supabase, {
+      siteId: siteId,
+      direction: "inbound",
+      startDate: startDate,
+      endDate: endDate,
+      events: inboundNormalized.events
+    });
+    await writeWarehouseTransferEvents(supabase, {
+      siteId: siteId,
+      direction: "outbound",
+      startDate: startDate,
+      endDate: endDate,
+      events: outboundNormalized.events
+    });
     var storageDiagnostics = countActiveStoragePallets(storageResult.rows, startDate, endDate, clientMap);
 
     var clientRows = buildClientRowsFromMap(clientMap);

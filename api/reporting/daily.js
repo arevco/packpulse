@@ -1,5 +1,6 @@
 import Papa from "papaparse";
 import { CACHE_SITE_ID, getAuthenticatedUser, getSupabaseAdmin, withCors } from "../ops/_common.js";
+import { loadWarehouseTransferEventsForWindow } from "../ops/_warehouse-transfers.js";
 
 const SECTION_ORDER = ["inventory", "inbounds", "outbounds", "production", "consumption"];
 
@@ -199,10 +200,10 @@ function deriveSectionCustomer(sectionKey, row) {
     return compactText(pickLooseValue(row, ["customer_name", "Customer name"]));
   }
   if (sectionKey === "inbounds") {
-    return compactText(pickLooseValue(row, ["item_customer_name", "receipt_customer_name", "receive_order_customer_name", "Customer name"]));
+    return compactText(pickLooseValue(row, ["item_customer_name", "receipt_customer_name", "receive_order_customer_name", "customer_name", "Customer name"]));
   }
   if (sectionKey === "outbounds") {
-    return compactText(pickLooseValue(row, ["shipment_customer_name", "ship_order_customer_name", "item_customer_name", "Customer name"]));
+    return compactText(pickLooseValue(row, ["shipment_customer_name", "ship_order_customer_name", "item_customer_name", "customer_name", "Customer name"]));
   }
   if (sectionKey === "production") {
     return compactText(pickLooseValue(row, ["customer_name", "Customer name"]));
@@ -380,6 +381,70 @@ function buildItemDescriptionMap(rawBySection) {
   seedDescriptionMap(map, rawBySection.outbounds, ["item_code", "Item code"], ["item_description", "Item description"]);
   seedDescriptionMap(map, rawBySection.production, ["item_code", "Item code"], ["item_description", "Item description"]);
   return map;
+}
+
+function buildTransferSectionMeta(reportCode, transferLoad) {
+  const generatedAt = compactText(transferLoad && transferLoad.generatedAt);
+  return {
+    report: generatedAt
+      ? {
+        generated_at: generatedAt,
+        possible_truncation: !!(transferLoad && transferLoad.possibleTruncation),
+        report_code: reportCode,
+      }
+      : null,
+    sourceMode: compactText(transferLoad && transferLoad.sourceMode) || "live_transfer_sync",
+    notes: Array.isArray(transferLoad && transferLoad.notes) ? transferLoad.notes.slice() : [],
+  };
+}
+
+function mapInboundTransferEventsToRows(events) {
+  return (Array.isArray(events) ? events : []).map(function(event) {
+    return {
+      customer_name: compactText(event && event.customer_name),
+      item_customer_name: compactText(event && event.customer_name),
+      receipt_customer_name: compactText(event && event.customer_name),
+      receive_order_customer_name: compactText(event && event.customer_name),
+      received_at: compactText(event && event.transfer_date_et),
+      receive_order_code: compactText(event && (event.order_code || event.reference_code)),
+      receive_order_reference: compactText(event && event.reference_code),
+      planned_receipt_id: compactText(event && event.reference_code),
+      item_code: compactText(event && event.item_code),
+      original_item_code: compactText(event && event.item_code),
+      item_description: compactText(event && event.item_description),
+      lot_code: compactText(event && event.lot_code),
+      pallet_number: compactText(event && event.pallet_number),
+      receiving_quantity: safeNum(event && event.quantity),
+      base_quantity: safeNum(event && event.quantity),
+      default_quantity: safeNum(event && event.quantity),
+      default_unit_of_measure: compactText(event && event.unit_of_measure),
+    };
+  });
+}
+
+function mapOutboundTransferEventsToRows(events) {
+  return (Array.isArray(events) ? events : []).map(function(event) {
+    return {
+      customer_name: compactText(event && event.customer_name),
+      item_customer_name: compactText(event && event.customer_name),
+      shipment_customer_name: compactText(event && event.customer_name),
+      ship_order_customer_name: compactText(event && event.customer_name),
+      actual_ship_at: compactText(event && event.transfer_date_et),
+      shipment_expected_ship_at: compactText(event && event.transfer_date_et),
+      ship_order_code: compactText(event && (event.order_code || event.reference_code)),
+      shipment_id: compactText(event && event.reference_code),
+      shipment_item_purchase_order_number: compactText(event && event.purchase_order_number),
+      project_purchase_order_number: compactText(event && event.purchase_order_number),
+      item_code: compactText(event && event.item_code),
+      item_description: compactText(event && event.item_description),
+      lot_code: compactText(event && event.lot_code),
+      pallet_number: compactText(event && event.pallet_number),
+      default_quantity: safeNum(event && event.quantity),
+      base_quantity: safeNum(event && event.quantity),
+      case_quantity: safeNum(event && event.quantity),
+      default_unit_of_measure: compactText(event && event.unit_of_measure),
+    };
+  });
 }
 
 function buildInventorySection(rawRows, selectedCustomer, meta, itemDescriptions) {
@@ -859,7 +924,8 @@ export default async function handler(req, res) {
   withCors(req, res, ["GET", "OPTIONS"]);
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
-  if (!requireReportingUser(req, res)) return;
+  const user = requireReportingUser(req, res);
+  if (!user) return;
 
   try {
     const siteId = compactText((req.query && req.query.siteId) || CACHE_SITE_ID || "default") || "default";
@@ -876,9 +942,32 @@ export default async function handler(req, res) {
 
     await Promise.all(SECTION_ORDER.map(async function(sectionKey) {
       const config = SECTION_CONFIG[sectionKey];
+      const notes = [];
+
+      if (sectionKey === "inbounds" || sectionKey === "outbounds") {
+        const direction = sectionKey === "inbounds" ? "inbound" : "outbound";
+        try {
+          const transferLoad = await loadWarehouseTransferEventsForWindow({
+            supabase: supabase,
+            siteId: siteId,
+            direction: direction,
+            startDate: windowStart,
+            endDate: asOfDate,
+            updatedBy: user && user.email ? user.email : "",
+            maxPolls: 60,
+          });
+          rawRowsBySection[sectionKey] = direction === "inbound"
+            ? mapInboundTransferEventsToRows(transferLoad.events)
+            : mapOutboundTransferEventsToRows(transferLoad.events);
+          metaBySection[sectionKey] = buildTransferSectionMeta(config.reportCode, transferLoad);
+          return;
+        } catch (transferError) {
+          notes.push("Live warehouse transfer sync failed, so this section fell back to historical reporting artifacts: " + compactText(transferError && transferError.message));
+        }
+      }
+
       const reports = await fetchRecentReportsForCode(supabase, siteId, config.reportCode);
       const chosen = chooseHistoricalReport(reports, asOfDate);
-      const notes = [];
 
       if (!chosen.report) {
         rawRowsBySection[sectionKey] = [];
