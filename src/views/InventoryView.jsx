@@ -542,6 +542,7 @@ export default function InventoryView({
     var totalQty = activeRows.reduce(function(sum, row) { return sum + safeNum(row.qtyOnHand); }, 0);
     var uniqueLocations = new Set(activeRows.map(function(row) { return row.location; }).filter(Boolean)).size;
     var uniqueLots = new Set(activeRows.map(function(row) { return row.lotCode; }).filter(function(value) { return value && value !== "--"; })).size;
+    var uniquePallets = new Set(activeRows.map(function(row) { return row.palletNumber; }).filter(function(value) { return value && value !== "--"; })).size;
     var uniqueSkus = new Set(activeRows.map(function(row) { return row.sku; }).filter(function(value) { return value && value !== "--"; })).size;
     var expiringSoonRows = activeRows.filter(function(row) { return row.daysToExpiry != null && row.daysToExpiry >= 0 && row.daysToExpiry <= 30; });
     var expiredRows = activeRows.filter(function(row) { return row.daysToExpiry != null && row.daysToExpiry < 0; });
@@ -549,6 +550,7 @@ export default function InventoryView({
       totalQty: totalQty,
       uniqueLocations: uniqueLocations,
       uniqueLots: uniqueLots,
+      uniquePallets: uniquePallets,
       uniqueSkus: uniqueSkus,
       expiringSoonQty: expiringSoonRows.reduce(function(sum, row) { return sum + safeNum(row.qtyOnHand); }, 0),
       expiringSoonLots: new Set(expiringSoonRows.map(function(row) { return row.lotCode; }).filter(Boolean)).size,
@@ -586,6 +588,12 @@ export default function InventoryView({
         label: "Lot Codes",
         value: summary.uniqueLots.toLocaleString(),
         note: "Distinct lots in view"
+      },
+      {
+        key: "pallets",
+        label: "Pallets",
+        value: summary.uniquePallets.toLocaleString(),
+        note: "Distinct pallets in view"
       },
       {
         key: "expiring_soon",
@@ -846,7 +854,7 @@ export default function InventoryView({
         </div>
       </div>
 
-      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-6">
         {summaryCards.map(function(card) {
           return (
             <Card key={card.key} className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-2.5">
