@@ -793,7 +793,7 @@ async function fetchInvoicingWarehousingTransferHistory(startDate, endDate, task
   var url = "/api/ops/invoicing-warehousing?" + query.join("&");
   var result = await fetchJsonWithCredentials(url);
   if (!result.response.ok) {
-    throw new Error((result.body && (result.body.details || result.body.error)) || "Could not load invoicing warehousing transfers");
+    throw new Error((result.body && (result.body.details || result.body.error)) || "Could not load invoicing warehousing inbound/outbound history");
   }
   return normalizeInvoicingWarehousingPayload(result.body);
 }
@@ -2624,11 +2624,11 @@ export default function InvoicingView(props) {
     ? "Current active pallets from the pallet_aging snapshot. Prior months may undercount pallets already shipped after that window."
     : "Distinct pallets whose billed window overlaps this billing window.";
   var warehouseFeedBadge = warehousingFeedError
-    ? { variant: "danger", label: warehousingStorageQuery.isError ? "Warehouse storage feed unavailable" : "Warehouse transfer feed unavailable" }
+    ? { variant: "danger", label: warehousingStorageQuery.isError ? "Warehouse storage feed unavailable" : "Warehouse inbound/outbound feed unavailable" }
     : warehousingFeedInitialLoading
       ? { variant: "secondary", label: "Loading Nulogy storage feed" }
       : warehouseTransfersPending
-        ? { variant: "secondary", label: "Loading Nulogy transfer counts" }
+        ? { variant: "secondary", label: "Loading Nulogy inbound/outbound counts" }
         : warehousingFeedRefreshing
           ? { variant: "secondary", label: "Refreshing Nulogy feed" }
           : warehousingFeedStarted && warehousingHistory.generatedAt
@@ -2898,11 +2898,11 @@ export default function InvoicingView(props) {
                 </div>
                 <div className="mt-3 text-sm text-[rgb(var(--muted))]">
                   {warehouseTransfersPending && warehouseStorageCountsReady
-                    ? "Storage pallets are loaded. Inbound and outbound transfer counts are still running in Nulogy and will fill in automatically."
+                    ? "Storage pallets are loaded. Inbound receipt and outbound shipment counts are still running in Nulogy and will fill in automatically."
                     : warehousingHistory.generatedAt
-                      ? "Warehouse feed generated from Nulogy inbound, outbound, and pallet storage reports."
+                      ? "Warehouse feed generated from Nulogy receipt, shipment, and pallet storage reports."
                       : warehousingFeedInitialLoading
-                        ? "Building the warehousing feed from live Nulogy storage and transfer reports."
+                        ? "Building the warehousing feed from live Nulogy storage, receipt, and shipment reports."
                         : "Select a billing window to build the warehouse feed from Nulogy."}
                 </div>
               </div>
@@ -2920,9 +2920,9 @@ export default function InvoicingView(props) {
             ) : null}
             {warehouseTransfersPending && warehouseStorageCountsReady ? (
               <div className="rounded-md border border-[rgb(var(--accent))]/20 bg-[color-mix(in_oklab,rgb(var(--accent))_5%,white)] p-4">
-                <div className="text-sm font-medium text-[rgb(var(--foreground))]">Transfer counts are still loading</div>
+                <div className="text-sm font-medium text-[rgb(var(--foreground))]">Inbound and outbound counts are still loading</div>
                 <div className="mt-2 max-w-3xl text-sm text-[rgb(var(--muted))]">
-                  Storage pallets are already populated for this billing window. Inbound and outbound pallet counts, active-client activity totals, and revenue totals will update automatically after the current Nulogy transfer reports finish.
+                  Storage pallets are already populated for this billing window. Inbound receipt counts, outbound shipment counts, active-client activity totals, and revenue totals will update automatically after the current Nulogy report runs finish.
                 </div>
               </div>
             ) : null}
@@ -2953,23 +2953,23 @@ export default function InvoicingView(props) {
                   warehouseTransferCountsReady ? warehouseVisibleSummary.activeClientCount.toLocaleString() : "Loading...",
                   warehouseTransferCountsReady
                     ? (warehouseVisibleSummary.billableClientCount.toLocaleString() + " included rows currently billable in this window.")
-                    : "Activity totals will finish after inbound and outbound transfer reports complete.",
+                    : "Activity totals will finish after inbound receipt and outbound shipment reports complete.",
                   warehouseTransferCountsReady && warehouseVisibleSummary.activeClientCount ? "success" : "default"
                 ),
                 metricCard(
                   "Inbound Pallets",
                   formatWarehouseCountForDisplay(warehouseVisibleSummary.inboundPallets, warehouseTransferCountsReady),
                   warehouseTransferCountsReady
-                    ? "Distinct inbound pallet moves in the selected period."
-                    : "Waiting on the live Nulogy inbound transfer report.",
+                    ? "Distinct received pallets in the selected period."
+                    : "Waiting on the live Nulogy receipt item report.",
                   warehouseTransferCountsReady && warehouseVisibleSummary.inboundPallets ? "info" : "default"
                 ),
                 metricCard(
                   "Outbound Pallets",
                   formatWarehouseCountForDisplay(warehouseVisibleSummary.outboundPallets, warehouseTransferCountsReady),
                   warehouseTransferCountsReady
-                    ? "Distinct outbound pallet moves in the selected period."
-                    : "Waiting on the live Nulogy outbound transfer report.",
+                    ? "Distinct shipped pallets in the selected period."
+                    : "Waiting on the live Nulogy shipment item report.",
                   warehouseTransferCountsReady && warehouseVisibleSummary.outboundPallets ? "info" : "default"
                 ),
                 metricCard(
@@ -2985,7 +2985,7 @@ export default function InvoicingView(props) {
                     ? (warehouseSummary.nonDefaultCount
                       ? (warehouseSummary.nonDefaultCount.toLocaleString() + " rows use custom fees or notes.")
                       : "All rows are still using the default fee profile.")
-                    : "Revenue totals will finish after both transfer reports complete.",
+                    : "Revenue totals will finish after both inbound and outbound report runs complete.",
                   warehouseTotalsReady && warehouseVisibleSummary.estimatedFees > 0 ? "success" : "default"
                 )
               ]}
@@ -3049,8 +3049,8 @@ export default function InvoicingView(props) {
                               <div className="mt-1 text-xs text-[rgb(var(--muted))]">
                                 {warehouseTransfersPending
                                   ? (row.activeStoragePallets > 0
-                                    ? ("Transfer counts loading / " + formatUnits(row.activeStoragePallets) + " storage pallets confirmed")
-                                    : "Transfer counts still loading from Nulogy")
+                                    ? ("Inbound/outbound counts loading / " + formatUnits(row.activeStoragePallets) + " storage pallets confirmed")
+                                    : "Inbound/outbound counts still loading from Nulogy")
                                   : row.hasActivity
                                     ? (formatUnits(row.inboundPallets) + " inbound / " + formatUnits(row.outboundPallets) + " outbound / " + formatUnits(row.activeStoragePallets) + " storage")
                                     : "No warehouse activity in this billing window"}
@@ -3129,13 +3129,13 @@ export default function InvoicingView(props) {
               {[
                 {
                   key: "inbound",
-                  label: "Inbound Transfers",
-                  helper: "Distinct pallet moves counted inside the transferred date window."
+                  label: "Inbound Receipts",
+                  helper: "Distinct received pallets counted inside the selected received date window."
                 },
                 {
                   key: "outbound",
-                  label: "Outbound Transfers",
-                  helper: "Distinct pallet moves counted inside the transferred date window."
+                  label: "Outbound Shipments",
+                  helper: "Distinct shipped pallets counted inside the selected actual ship date window."
                 },
                 {
                   key: "storage",

@@ -3,26 +3,30 @@ import { getAuthenticatedUser, withCors } from "./_common.js";
 import { NULOGY_URL, buildAuthHeader, executeReportRun, getNulogyCredentials, pollReportRun } from "../nulogy/_runner.js";
 import { parseCSV } from "../nulogy/_csv.js";
 
-var INBOUND_REPORT = "inbound_stock_transfer";
-var OUTBOUND_REPORT = "outbound_stock_transfer";
+var INBOUND_REPORT = "receipt_item";
+var OUTBOUND_REPORT = "shipment_item";
 var STORAGE_REPORT = "pallet_storage";
 var STORAGE_FALLBACK_REPORT = "pallet_aging";
 
 var INBOUND_COLUMNS = [
   "item_customer_name",
+  "receipt_customer_name",
+  "receive_order_customer_name",
   "item_code",
   "lot_code",
   "pallet_number",
-  "transfer_status",
-  "transferred_at"
+  "receive_order_code",
+  "received_at"
 ];
 var OUTBOUND_COLUMNS = [
   "item_customer_name",
+  "shipment_customer_name",
+  "ship_order_customer_name",
   "item_code",
   "lot_code",
   "pallet_number",
-  "transfer_status",
-  "transferred_at"
+  "ship_order_code",
+  "actual_ship_at"
 ];
 var STORAGE_COLUMNS = [
   "customer_name",
@@ -37,8 +41,8 @@ var STORAGE_FALLBACK_COLUMNS = [
 ];
 
 var REPORT_ROW_LIMITS = {
-  inbound_stock_transfer: 60000,
-  outbound_stock_transfer: 60000,
+  receipt_item: 60000,
+  shipment_item: 60000,
   pallet_storage: 250000,
   pallet_aging: 60000
 };
@@ -311,25 +315,28 @@ function countInboundPallets(rows, startDate, endDate, clientMap) {
   (Array.isArray(rows) ? rows : []).forEach(function(row, index) {
     var customer = normalizeCustomerName(pickFieldLoose(row, [
       "Item Customer name", "Item Customer Name", "item_customer_name",
+      "Receipt Customer name", "Receipt Customer Name", "receipt_customer_name",
+      "Receive Order Customer name", "Receive Order Customer Name", "receive_order_customer_name",
       "Item Customer", "item_customer",
       "Customer Name", "customer_name"
     ]));
     var palletNumber = String(pickFieldLoose(row, [
       "Pallet number", "Pallet Number", "pallet_number", "Pallet", "pallet"
     ]) || "").trim();
-    var transferredRaw = pickFieldLoose(row, [
-      "Transferred date", "Transferred Date", "transferred_at", "Transferred At"
+    var receivedRaw = pickFieldLoose(row, [
+      "Received at", "Received At", "received_at", "Received date", "Received Date"
     ]);
-    var transferredDate = resolveDateKey(transferredRaw);
-    if (!transferredDate) {
+    var receivedDate = resolveDateKey(receivedRaw);
+    if (!receivedDate) {
       diagnostics.rowsMissingTransferredAt += 1;
       return;
     }
-    if (transferredDate < startDate || transferredDate > endDate) return;
+    if (receivedDate < startDate || receivedDate > endDate) return;
     if (!palletNumber) diagnostics.rowsMissingPalletNumber += 1;
     if (customer === "Unassigned customer") diagnostics.rowsMissingCustomerName += 1;
 
     var fallbackToken = [
+      String(pickFieldLoose(row, ["Receive Order code", "Receive Order Code", "receive_order_code", "Receive Order", "receive_order"]) || "").trim(),
       String(pickFieldLoose(row, ["Item code", "Item Code", "item_code"]) || "").trim(),
       String(pickFieldLoose(row, ["Lot code", "Lot Code", "lot_code"]) || "").trim(),
       String(index)
@@ -337,7 +344,7 @@ function countInboundPallets(rows, startDate, endDate, clientMap) {
     var distinctKey = [
       normalizeLookupKey(customer),
       normalizeLookupKey(palletNumber) || normalizeLookupKey(fallbackToken),
-      normalizeLookupKey(String(transferredRaw || transferredDate)),
+      normalizeLookupKey(String(receivedRaw || receivedDate)),
       "inbound"
     ].join("|");
     if (seen[distinctKey]) return;
@@ -362,25 +369,28 @@ function countOutboundPallets(rows, startDate, endDate, clientMap) {
   (Array.isArray(rows) ? rows : []).forEach(function(row, index) {
     var customer = normalizeCustomerName(pickFieldLoose(row, [
       "Item Customer name", "Item Customer Name", "item_customer_name",
+      "Shipment Customer name", "Shipment Customer Name", "shipment_customer_name",
+      "Ship Order Customer name", "Ship Order Customer Name", "ship_order_customer_name",
       "Item Customer", "item_customer",
       "Customer Name", "customer_name"
     ]));
     var palletNumber = String(pickFieldLoose(row, [
       "Pallet number", "Pallet Number", "pallet_number", "Pallet", "pallet"
     ]) || "").trim();
-    var transferredRaw = pickFieldLoose(row, [
-      "Transferred date", "Transferred Date", "transferred_at", "Transferred At"
+    var shippedRaw = pickFieldLoose(row, [
+      "Actual ship date", "Actual Ship Date", "actual_ship_at", "Actual Ship At"
     ]);
-    var transferredDate = resolveDateKey(transferredRaw);
-    if (!transferredDate) {
+    var shippedDate = resolveDateKey(shippedRaw);
+    if (!shippedDate) {
       diagnostics.rowsMissingTransferredAt += 1;
       return;
     }
-    if (transferredDate < startDate || transferredDate > endDate) return;
+    if (shippedDate < startDate || shippedDate > endDate) return;
     if (!palletNumber) diagnostics.rowsMissingPalletNumber += 1;
     if (customer === "Unassigned customer") diagnostics.rowsMissingCustomerName += 1;
 
     var fallbackToken = [
+      String(pickFieldLoose(row, ["Ship Order code", "Ship Order Code", "ship_order_code", "Shipment ID", "shipment_id"]) || "").trim(),
       String(pickFieldLoose(row, ["Item code", "Item Code", "item_code"]) || "").trim(),
       String(pickFieldLoose(row, ["Lot code", "Lot Code", "lot_code"]) || "").trim(),
       String(index)
@@ -388,7 +398,7 @@ function countOutboundPallets(rows, startDate, endDate, clientMap) {
     var distinctKey = [
       normalizeLookupKey(customer),
       normalizeLookupKey(palletNumber) || normalizeLookupKey(fallbackToken),
-      normalizeLookupKey(String(transferredRaw || transferredDate)),
+      normalizeLookupKey(String(shippedRaw || shippedDate)),
       "outbound"
     ].join("|");
     if (seen[distinctKey]) return;
@@ -671,9 +681,17 @@ export default async function handler(req, res) {
       });
     }
 
-    var transferFilters = [
+    var inboundFilters = [
       {
-        column: "transferred_at",
+        column: "received_at",
+        operator: "between",
+        from_threshold: formatNulogyDateTime(startDate, false),
+        to_threshold: formatNulogyDateTime(endDate, true)
+      }
+    ];
+    var outboundFilters = [
+      {
+        column: "actual_ship_at",
         operator: "between",
         from_threshold: formatNulogyDateTime(startDate, false),
         to_threshold: formatNulogyDateTime(endDate, true)
@@ -684,7 +702,7 @@ export default async function handler(req, res) {
     var credentials = getNulogyCredentials();
     var authHeader = buildAuthHeader(credentials.user, credentials.pass);
     var pendingAssumptions = [
-      "Inbound and outbound counts use distinct pallet moves inside the selected transferred date window."
+      "Inbound counts use distinct received pallets inside the selected received date window, and outbound counts use distinct shipped pallets inside the selected actual ship date window."
     ];
 
     if (mode === "transfers") {
@@ -692,19 +710,19 @@ export default async function handler(req, res) {
         ? await resolvePendingTransferReport(inboundTaskId, INBOUND_REPORT, authHeader, {
           maxPolls: 2
         })
-        : await createPendingReportRun(INBOUND_REPORT, ["item_customer_name", "pallet_number", "transferred_at"], {
-          filters: transferFilters
+        : await createPendingReportRun(INBOUND_REPORT, ["item_customer_name", "receipt_customer_name", "pallet_number", "receive_order_code", "received_at"], {
+          filters: inboundFilters
         });
       var outboundTransferResult = outboundTaskId
         ? await resolvePendingTransferReport(outboundTaskId, OUTBOUND_REPORT, authHeader, {
           maxPolls: 2
         })
-        : await createPendingReportRun(OUTBOUND_REPORT, ["item_customer_name", "pallet_number", "transferred_at"], {
-          filters: transferFilters
+        : await createPendingReportRun(OUTBOUND_REPORT, ["item_customer_name", "shipment_customer_name", "pallet_number", "ship_order_code", "actual_ship_at"], {
+          filters: outboundFilters
         });
 
       if (inboundTransferResult.pending || outboundTransferResult.pending) {
-        pendingAssumptions.push("Transfer counts are still loading from Nulogy and will populate after the current report runs complete.");
+        pendingAssumptions.push("Inbound and outbound pallet counts are still loading from Nulogy and will populate after the current report runs complete.");
       }
 
       var transferClientMap = {};
@@ -732,13 +750,13 @@ export default async function handler(req, res) {
     var assumptions = pendingAssumptions.slice();
 
     var inboundResult = await fetchReportCsv(INBOUND_REPORT, INBOUND_COLUMNS, {
-      filters: transferFilters,
-      sortBy: [{ column: "transferred_at", direction: "asc" }],
+      filters: inboundFilters,
+      sortBy: [{ column: "received_at", direction: "asc" }],
       maxPolls: 60
     });
     var outboundResult = await fetchReportCsv(OUTBOUND_REPORT, OUTBOUND_COLUMNS, {
-      filters: transferFilters,
-      sortBy: [{ column: "transferred_at", direction: "asc" }],
+      filters: outboundFilters,
+      sortBy: [{ column: "actual_ship_at", direction: "asc" }],
       maxPolls: 60
     });
     var storageResult = await fetchStorageReportWithFallback(startDate, endDate, assumptions);
