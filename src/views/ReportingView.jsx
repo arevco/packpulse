@@ -31,7 +31,7 @@ async function fetchReportingPacket(asOfDate, windowDays, customer) {
   if (customer && customer !== "all") params.set("customer", customer);
   const result = await fetchJsonWithCredentials("/api/reporting/daily?" + params.toString());
   if (!result.response.ok) {
-    throw new Error((result.body && (result.body.error || result.body.details)) || "Could not load reporting packet");
+    throw new Error((result.body && (result.body.details || result.body.error)) || "Could not load reporting packet");
   }
   return result.body && typeof result.body === "object" ? result.body : {};
 }
@@ -90,6 +90,7 @@ function compareValues(left, right, column) {
 function sourceBadgeVariant(sourceMode) {
   if (sourceMode === "raw_csv") return "success";
   if (sourceMode === "preview_json") return "warning";
+  if (sourceMode === "stale_window") return "warning";
   if (sourceMode === "missing") return "danger";
   return "secondary";
 }
@@ -97,6 +98,7 @@ function sourceBadgeVariant(sourceMode) {
 function sourceBadgeLabel(sourceMode) {
   if (sourceMode === "raw_csv") return "Raw CSV";
   if (sourceMode === "preview_json") return "Preview only";
+  if (sourceMode === "stale_window") return "Outside window";
   if (sourceMode === "missing") return "Missing";
   return "Unknown";
 }
@@ -164,11 +166,15 @@ export default function ReportingView() {
     queryFn: function() {
       return fetchReportingPacket(asOfDate, Number(windowDays || 7), customer);
     },
+    placeholderData: function(previousData) {
+      return previousData;
+    },
     staleTime: 5 * 60 * 1000,
   });
 
   const packet = reportingQuery.data && typeof reportingQuery.data === "object" ? reportingQuery.data : null;
   const sections = packet && packet.sections && typeof packet.sections === "object" ? packet.sections : {};
+  const isRefreshing = reportingQuery.isFetching && !!packet;
 
   useEffect(function() {
     if (customer !== "all") return;
@@ -295,7 +301,7 @@ export default function ReportingView() {
     XLSX.writeFile(workbook, packetFileBase + "_eod.xlsx", { bookType: "xlsx" });
   };
 
-  if (reportingQuery.isLoading) {
+  if (!packet && reportingQuery.isLoading) {
     return <Card className="px-4 py-4 text-sm text-[rgb(var(--muted))]">Loading reporting packet...</Card>;
   }
 
@@ -311,6 +317,7 @@ export default function ReportingView() {
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-xl font-semibold text-[rgb(var(--foreground))]">Reporting</h2>
               <Badge variant="info">Customer Packet</Badge>
+              {isRefreshing ? <Badge variant="secondary">Refreshing…</Badge> : null}
             </div>
             <p className="max-w-3xl text-sm text-[rgb(var(--muted))]">
               Recreate the customer-facing EOD packet inside PackPulse using stored Nulogy artifacts. Inventory is treated as an as-of snapshot, and activity tabs use a rolling window.

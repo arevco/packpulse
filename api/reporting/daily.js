@@ -271,7 +271,7 @@ function chooseHistoricalReport(reports, asOfDate) {
   let usedLatestFallback = false;
   for (let i = 0; i < reports.length; i += 1) {
     const report = reports[i];
-    const reportDate = formatDateParts(new Date(report.generated_at), "America/New_York");
+    const reportDate = reportGeneratedEtDate(report);
     if (reportDate && reportDate <= asOfDate) {
       matched = report;
       break;
@@ -285,6 +285,21 @@ function chooseHistoricalReport(reports, asOfDate) {
     report: matched,
     usedLatestFallback: usedLatestFallback,
   };
+}
+
+function reportGeneratedEtDate(report) {
+  if (!report || !report.generated_at) return "";
+  return formatDateParts(new Date(report.generated_at), "America/New_York");
+}
+
+function isRollingWindowSection(sectionKey) {
+  return sectionKey !== "inventory";
+}
+
+function isReportOutsideWindow(sectionKey, report, windowStart) {
+  if (!isRollingWindowSection(sectionKey) || !windowStart) return false;
+  const reportDate = reportGeneratedEtDate(report);
+  return !!reportDate && reportDate < windowStart;
 }
 
 function extractPreviewRows(previewJson) {
@@ -873,6 +888,17 @@ export default async function handler(req, res) {
 
       if (chosen.usedLatestFallback) {
         notes.push("Using the most recent artifact run because none were generated on or before the selected date.");
+      }
+
+      if (isReportOutsideWindow(sectionKey, chosen.report, windowStart)) {
+        notes.push("The selected artifact run predates the selected activity window, so this section has no matching activity to load.");
+        rawRowsBySection[sectionKey] = [];
+        metaBySection[sectionKey] = {
+          report: chosen.report,
+          sourceMode: "stale_window",
+          notes: notes,
+        };
+        return;
       }
 
       const artifact = await fetchArtifactRows(supabase, siteId, chosen.report);
