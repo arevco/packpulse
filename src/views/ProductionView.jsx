@@ -93,6 +93,25 @@ function fmtPct(value) {
   return (safeNum(value) * 100).toFixed(1) + "%";
 }
 
+function formatProductionJobTimestamp(value, fallbackDate) {
+  var raw = String(value || "").trim();
+  if (raw) {
+    var parsed = new Date(raw);
+    if (!Number.isNaN(parsed.getTime())) {
+      return new Intl.DateTimeFormat("en-US", {
+        timeZone: "America/New_York",
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        timeZoneName: "short"
+      }).format(parsed);
+    }
+  }
+  return String(fallbackDate || "").trim();
+}
+
 function productionSpanSourceLabel(source) {
   if (source === "actual_job_window") return "Actual Job Window";
   if (source === "observed_fg_output_span") return "Observed FG Output Span";
@@ -1009,6 +1028,8 @@ export default function ProductionView({ productionSegments, laborActuals, labor
           revenueCoveredUnits: 0,
           laborMargin: 0,
           productionMinutes: 0,
+          jobStartedAtUtc: "",
+          firstProductionDate: "",
           actualHeadcountMax: 0,
           shifts: {},
           shiftSlots: {},
@@ -1025,6 +1046,14 @@ export default function ProductionView({ productionSegments, laborActuals, labor
       map[key].revenueCoveredUnits += safeNum(r.revenueCoveredUnits);
       map[key].laborMargin += safeNum(r.laborMargin);
       map[key].productionMinutes += safeNum(r.productionMinutes);
+      var jobStartedAtUtc = String(r.jobStartAtUtc || r.firstProducedAtUtc || "").trim();
+      if (jobStartedAtUtc && (!map[key].jobStartedAtUtc || jobStartedAtUtc < map[key].jobStartedAtUtc)) {
+        map[key].jobStartedAtUtc = jobStartedAtUtc;
+      }
+      var productionDate = String(r.date || "").trim();
+      if (productionDate && (!map[key].firstProductionDate || productionDate < map[key].firstProductionDate)) {
+        map[key].firstProductionDate = productionDate;
+      }
       map[key].actualHeadcountMax = Math.max(safeNum(map[key].actualHeadcountMax), safeNum(r.actualHeadcount));
       map[key].missingRevenueUnits += safeNum(r.missingRevenueUnits);
       if (r.missingRevenue) map[key].missingRevenueSkuKeys[r.missingRevenueSkuKey] = r.itemCode || "Unknown SKU";
@@ -1654,6 +1683,9 @@ export default function ProductionView({ productionSegments, laborActuals, labor
                               <span style={{ fontWeight:600, color:C.bright }}>{job.jobId}</span>
                             </button>
                             <div style={{ fontSize:11, color:C.dim, paddingLeft:"20px" }}>{job.itemCode}</div>
+                            <div style={{ fontSize:11, color:C.dim, paddingLeft:"20px", whiteSpace:"nowrap" }}>
+                              {formatProductionJobTimestamp(job.jobStartedAtUtc, job.firstProductionDate)}
+                            </div>
                           </td>
                           <td style={tdM}>
                             <div>{job.workOrder}</div>
