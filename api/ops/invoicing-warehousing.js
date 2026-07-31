@@ -6,6 +6,7 @@ import { parseCSV } from "../nulogy/_csv.js";
 var INBOUND_REPORT = "inbound_stock_transfer";
 var OUTBOUND_REPORT = "outbound_stock_transfer";
 var STORAGE_REPORT = "pallet_storage";
+var STORAGE_FALLBACK_REPORT = "pallet_aging";
 
 var INBOUND_COLUMNS = [
   "item_customer_name",
@@ -29,11 +30,17 @@ var STORAGE_COLUMNS = [
   "billed_until",
   "stored_since"
 ];
+var STORAGE_FALLBACK_COLUMNS = [
+  "customer_name",
+  "pallet_number",
+  "stored_since"
+];
 
 var REPORT_ROW_LIMITS = {
   inbound_stock_transfer: 60000,
   outbound_stock_transfer: 60000,
-  pallet_storage: 250000
+  pallet_storage: 250000,
+  pallet_aging: 60000
 };
 
 var RETRYABLE_FETCH_STATUSES = {
@@ -264,7 +271,7 @@ async function fetchReportCsv(report, columns, options) {
     rows: rows,
     warnings: Array.isArray(body.warnings) ? body.warnings : [],
     statusHistory: Array.isArray(body.statusHistory) ? body.statusHistory : [],
-    possibleTruncation: rows.length >= Number(REPORT_ROW_LIMITS[report] || 0)
+    possibleTruncation: Number(REPORT_ROW_LIMITS[report] || 0) > 0 && rows.length >= Number(REPORT_ROW_LIMITS[report] || 0)
   };
 }
 
@@ -452,6 +459,49 @@ function buildReportDiagnostics(result, diagnostics) {
   };
 }
 
+function shouldFallbackStorageReport(error) {
+  var message = String(error && error.message || "");
+  return (
+    message.includes("undefined method 'from_threshold' for nil") ||
+    message.includes("Reports::PalletStorage::Base#build_query") ||
+    message.includes("pallet_storage/base.rb")
+  );
+}
+
+async function fetchStorageReportWithFallback(startDate, endDate, assumptions) {
+  try {
+    return await fetchReportCsv(STORAGE_REPORT, STORAGE_COLUMNS, {
+      maxPolls: 90
+    });
+  } catch (error) {
+    if (!shouldFallbackStorageReport(error)) throw error;
+
+    var fallback = await fetchReportCsv(STORAGE_FALLBACK_REPORT, STORAGE_FALLBACK_COLUMNS, {
+      filters: [
+        {
+          column: "stored_since",
+          operator: "between",
+          from_threshold: formatNulogyDateTime("2000-01-01", false),
+          to_threshold: formatNulogyDateTime(endDate, true)
+        }
+      ],
+      maxPolls: 90
+    });
+    fallback.warnings = (Array.isArray(fallback.warnings) ? fallback.warnings.slice() : []).concat([
+      "Nulogy pallet_storage failed for this tenant, so storage counts are using the current pallet_aging snapshot fallback."
+    ]);
+    if (Array.isArray(assumptions)) {
+      assumptions.push(
+        "Storage counts are currently sourced from the live pallet_aging snapshot because the tenant's pallet_storage report is failing in Nulogy."
+      );
+      assumptions.push(
+        "When the billing window ends before the feed run time, storage fallback counts may understate historical pallets that have already shipped since that month."
+      );
+    }
+    return fallback;
+  }
+}
+
 export default async function handler(req, res) {
   withCors(req, res, ["GET", "OPTIONS"]);
   if (req.method === "OPTIONS") return res.status(200).end();
@@ -476,6 +526,10 @@ export default async function handler(req, res) {
       }
     ];
 
+    var assumptions = [
+      "Inbound and outbound counts use distinct pallet moves inside the selected transferred date window."
+    ];
+
     var inboundResult = await fetchReportCsv(INBOUND_REPORT, INBOUND_COLUMNS, {
       filters: transferFilters,
       sortBy: [{ column: "transferred_at", direction: "asc" }],
@@ -486,9 +540,7 @@ export default async function handler(req, res) {
       sortBy: [{ column: "transferred_at", direction: "asc" }],
       maxPolls: 60
     });
-    var storageResult = await fetchReportCsv(STORAGE_REPORT, STORAGE_COLUMNS, {
-      maxPolls: 90
-    });
+    var storageResult = await fetchStorageReportWithFallback(startDate, endDate, assumptions);
 
     var clientMap = {};
     var inboundDiagnostics = countInboundPallets(inboundResult.rows, startDate, endDate, clientMap);
@@ -525,10 +577,11 @@ export default async function handler(req, res) {
       startDate: startDate,
       endDate: endDate,
       generatedAt: new Date().toISOString(),
-      assumptions: [
-        "Inbound and outbound counts use distinct pallet moves inside the selected transferred date window.",
-        "Storage counts use distinct customer and pallet rows whose billed or stored window overlaps the selected billing window."
-      ],
+      assumptions: assumptions.concat([
+        storageResult.report === STORAGE_REPORT
+          ? "Storage counts use distinct customer and pallet rows whose billed or stored window overlaps the selected billing window."
+          : "Storage fallback counts use distinct active pallets from pallet_aging whose stored_since date is on or before the selected billing window end."
+      ]),
       summary: summary,
       reports: {
         inbound: buildReportDiagnostics(inboundResult, inboundDiagnostics),

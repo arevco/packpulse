@@ -700,7 +700,7 @@ async function fetchInvoicingWarehousingHistory(startDate, endDate) {
   var url = "/api/ops/invoicing-warehousing?start=" + encodeURIComponent(startDate) + "&end=" + encodeURIComponent(endDate);
   var result = await fetchJsonWithCredentials(url);
   if (!result.response.ok) {
-    throw new Error((result.body && (result.body.error || result.body.details)) || "Could not load invoicing warehousing history");
+    throw new Error((result.body && (result.body.details || result.body.error)) || "Could not load invoicing warehousing history");
   }
   return normalizeInvoicingWarehousingPayload(result.body);
 }
@@ -2394,6 +2394,11 @@ export default function InvoicingView(props) {
       warehousingHistory.reports.storage && warehousingHistory.reports.storage.possibleTruncation
     )
   );
+  var warehouseStorageReportCode = String(warehousingHistory && warehousingHistory.reports && warehousingHistory.reports.storage && warehousingHistory.reports.storage.report || "");
+  var warehouseStorageUsesFallback = warehouseStorageReportCode === "pallet_aging";
+  var warehouseStorageMetricHelper = warehouseStorageUsesFallback
+    ? "Current active pallets from the pallet_aging snapshot. Prior months may undercount pallets already shipped after that window."
+    : "Distinct pallets whose billed window overlaps this billing window.";
 
   var invoiceModeTabs = useMemo(function() {
     return [
@@ -2707,7 +2712,7 @@ export default function InvoicingView(props) {
                 metricCard("Clients With Activity", warehouseVisibleSummary.activeClientCount.toLocaleString(), warehouseVisibleSummary.billableClientCount.toLocaleString() + " included rows currently billable in this window.", warehouseVisibleSummary.activeClientCount ? "success" : "default"),
                 metricCard("Inbound Pallets", formatUnits(warehouseVisibleSummary.inboundPallets), "Distinct inbound pallet moves in the selected period.", warehouseVisibleSummary.inboundPallets ? "info" : "default"),
                 metricCard("Outbound Pallets", formatUnits(warehouseVisibleSummary.outboundPallets), "Distinct outbound pallet moves in the selected period.", warehouseVisibleSummary.outboundPallets ? "info" : "default"),
-                metricCard("Storage Pallets", formatUnits(warehouseVisibleSummary.activeStoragePallets), "Distinct pallets whose billed window overlaps this billing window.", warehouseVisibleSummary.activeStoragePallets ? "info" : "default"),
+                metricCard("Storage Pallets", formatUnits(warehouseVisibleSummary.activeStoragePallets), warehouseStorageMetricHelper, warehouseVisibleSummary.activeStoragePallets ? "info" : "default"),
                 metricCard("Est. Warehouse Revenue", formatMoney(warehouseVisibleSummary.estimatedFees), warehouseSummary.nonDefaultCount ? (warehouseSummary.nonDefaultCount.toLocaleString() + " rows use custom fees or notes.") : "All rows are still using the default fee profile.", warehouseVisibleSummary.estimatedFees > 0 ? "success" : "default")
               ]}
             </div>
@@ -2848,8 +2853,10 @@ export default function InvoicingView(props) {
                 },
                 {
                   key: "storage",
-                  label: "Pallet Storage",
-                  helper: "Distinct customer and pallet rows with an overlapping billed window."
+                  label: warehouseStorageUsesFallback ? "Pallet Aging Fallback" : "Pallet Storage",
+                  helper: warehouseStorageUsesFallback
+                    ? "Current active pallets from the pallet_aging report because pallet_storage is failing for this tenant."
+                    : "Distinct customer and pallet rows with an overlapping billed window."
                 }
               ].map(function(section) {
                 var report = warehousingHistory && warehousingHistory.reports ? warehousingHistory.reports[section.key] : createDefaultWarehousingReport();
