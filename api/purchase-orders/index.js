@@ -25,7 +25,7 @@ export default async function handler(req, res) {
     if (!sortable[sort]) sort = "updated_at";
     var offset = (page - 1) * pageSize;
     var query = supabase.from("purchase_orders")
-      .select("*,purchase_order_lines(id,quantity,produced_quantity,remaining_quantity,match_status,active)", { count: "exact" })
+      .select("*,purchase_order_lines(id,line_number,sku,description,quantity,produced_quantity,remaining_quantity,match_status,active)", { count: "exact" })
       .eq("site_id", CACHE_SITE_ID)
       .order(sort, { ascending: direction, nullsFirst: false })
       .range(offset, offset + pageSize - 1);
@@ -46,10 +46,19 @@ export default async function handler(req, res) {
       if (row.status === "open" && row.suggested_status === "closed") counts.suggested_closed += 1;
     });
     var rows = (result.data || []).map(function(row) {
-      var activeLines = (row.purchase_order_lines || []).filter(function(line) { return line.active; });
+      var activeLines = (row.purchase_order_lines || []).filter(function(line) { return line.active; }).sort(function(left, right) {
+        return Number(left.line_number || 0) - Number(right.line_number || 0);
+      });
       row.ordered_quantity = activeLines.reduce(function(sum, line) { return sum + Number(line.quantity || 0); }, 0);
       row.produced_quantity = activeLines.reduce(function(sum, line) { return sum + Number(line.produced_quantity || 0); }, 0);
       row.remaining_quantity = activeLines.reduce(function(sum, line) { return sum + Number(line.remaining_quantity || 0); }, 0);
+      row.sku_items = activeLines.map(function(line) {
+        return {
+          lineNumber: Number(line.line_number || 0),
+          sku: text(line.sku, 160),
+          description: text(line.description, 1000)
+        };
+      });
       delete row.purchase_order_lines;
       return row;
     });

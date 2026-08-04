@@ -453,14 +453,18 @@ export default function PurchaseOrdersView({ onOpenCountChange }) {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-left text-xs uppercase text-[rgb(var(--muted))]"><tr>
-              <th className="px-4 py-3"><SortLabel field="po_number">PO / Customer</SortLabel></th><th className="px-4 py-3"><SortLabel field="po_date">Dates</SortLabel></th><th className="px-4 py-3 text-right">Ordered</th>
+              <th className="px-4 py-3"><SortLabel field="po_number">PO / Customer</SortLabel></th><th className="px-4 py-3">SKU / Description</th><th className="px-4 py-3"><SortLabel field="po_date">Dates</SortLabel></th><th className="px-4 py-3 text-right">Ordered</th>
               <th className="px-4 py-3 text-right">Produced</th><th className="px-4 py-3 text-right">Remaining</th><th className="px-4 py-3 text-right">Value</th>
               <th className="px-4 py-3"><SortLabel field="status">Status</SortLabel></th><th className="px-4 py-3"><SortLabel field="updated_at">Updated</SortLabel></th>
             </tr></thead>
-            <tbody>{listQuery.isLoading ? <tr><td colSpan="8" className="p-10 text-center"><Loader2 className="mx-auto h-6 w-6 animate-spin" /></td></tr> :
-              rows.length === 0 ? <tr><td colSpan="8" className="p-10 text-center text-[rgb(var(--muted))]">No purchase orders in this view.</td></tr> :
+            <tbody>{listQuery.isLoading ? <tr><td colSpan="9" className="p-10 text-center"><Loader2 className="mx-auto h-6 w-6 animate-spin" /></td></tr> :
+              rows.length === 0 ? <tr><td colSpan="9" className="p-10 text-center text-[rgb(var(--muted))]">No purchase orders in this view.</td></tr> :
               rows.map(function(row) { return <tr key={row.id} onClick={function() { setSelectedId(row.id); }} className="cursor-pointer border-t border-[rgb(var(--border))] hover:bg-slate-50">
                 <td className="px-4 py-3"><div className="font-semibold">{row.po_number}</div><div className="text-xs text-[rgb(var(--muted))]">{row.customer_name} · Rev {row.revision_number}</div></td>
+                <td className="min-w-64 max-w-96 px-4 py-3">{row.sku_items && row.sku_items.length ? <div className="space-y-1.5">{row.sku_items.map(function(item, index) { return <div key={(item.lineNumber || index) + ":" + item.sku}>
+                  <div className="font-medium">{item.sku || "No SKU number"}</div>
+                  <div className="line-clamp-2 text-xs text-[rgb(var(--muted))]" title={item.description || ""}>{item.description || "No description"}</div>
+                </div>; })}</div> : <span className="text-xs text-[rgb(var(--muted))]">No SKU details</span>}</td>
                 <td className="px-4 py-3"><div>{row.po_date || "—"}</div><div className="text-xs text-[rgb(var(--muted))]">Due {row.expected_date || "—"}</div></td>
                 <td className="px-4 py-3 text-right">{formatNumber(row.ordered_quantity)}</td><td className="px-4 py-3 text-right">{formatNumber(row.produced_quantity)}</td>
                 <td className="px-4 py-3 text-right">{formatNumber(row.remaining_quantity)}</td><td className="px-4 py-3 text-right font-medium">{formatMoney(row.total, row.currency)}</td>
