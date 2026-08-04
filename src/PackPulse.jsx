@@ -688,7 +688,7 @@ export default function ProductionReadiness() {
     purchaseorders: prefetchPurchaseOrdersView,
   };
 
-  var navItems = [{key:"workorders",label:"Work Orders",count:null},{key:"purchaseorders",label:"POs",count:openPurchaseOrderCount},{key:"inventory",label:"Inventory",count:null},{key:"reporting",label:"Reporting",count:null},{key:"onboarding",label:"Onboarding",count:null,alert:false},{key:"operations",label:"Operations",count:null,alert:false},{key:"invoicing",label:"Invoicing",count:null,alert:false},{key:"supplyrisk",label:"Supply Risk",count:null,alert:false},{key:"forecast",label:"Forecast",count:null,alert:false},{key:"calendar",label:"Calendar",count:null,alert:false},{key:"aicopilot",label:"AI Copilot",count:null,alert:false}]
+  var navItems = [{key:"purchaseorders",label:"POs",count:openPurchaseOrderCount},{key:"workorders",label:"Work Orders",count:null},{key:"operations",label:"Operations",count:null,alert:false},{key:"inventory",label:"Inventory",count:null},{key:"reporting",label:"Reporting",count:null},{key:"onboarding",label:"Onboarding",count:null,alert:false},{key:"invoicing",label:"Invoicing",count:null,alert:false},{key:"supplyrisk",label:"Supply Risk",count:null,alert:false},{key:"forecast",label:"Forecast",count:null,alert:false},{key:"calendar",label:"Calendar",count:null,alert:false},{key:"aicopilot",label:"AI Copilot",count:null,alert:false}]
     .map(function(item) {
       return Object.assign({}, item, {
         href: buildPermalinkUrl(item.key, workOrdersPermalinkState, forecastPermalinkState, operationsPermalinkState, invoicingPermalinkState),
