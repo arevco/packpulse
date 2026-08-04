@@ -2,7 +2,7 @@ import { useCallback, useDeferredValue, useEffect, useRef, useState } from "reac
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle, Check, ChevronLeft, ChevronRight, FileSpreadsheet, FileText,
-  Loader2, Plus, RefreshCw, Search, Upload, X
+  Loader2, Paperclip, Plus, RefreshCw, Search, Upload, X
 } from "lucide-react";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -206,6 +206,7 @@ function Field({ label, value, onChange, type, disabled }) {
 
 function Detail({ id, onClose, onChanged, onRevisionStaged }) {
   const revisionInputRef = useRef(null);
+  const onboardingInputRef = useRef(null);
   const query = useQuery({ queryKey: ["purchase-order", id], queryFn: function() { return api("/api/purchase-orders/" + id); } });
   const action = useMutation({
     mutationFn: function(input) {
@@ -228,6 +229,17 @@ function Detail({ id, onClose, onChanged, onRevisionStaged }) {
       });
     },
     onSuccess: function(result) { onRevisionStaged(result); }
+  });
+  const onboardingUpload = useMutation({
+    mutationFn: async function(file) {
+      if (file.type !== "application/pdf" && !/\.pdf$/i.test(file.name)) throw new Error("Onboarding documents must be PDF files.");
+      if (file.size > 3 * 1024 * 1024) throw new Error(file.name + " is larger than 3 MB.");
+      return api("/api/purchase-orders/" + id + "/onboarding-documents", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileName: file.name, contentType: "application/pdf", base64: await base64File(file) })
+      });
+    },
+    onSuccess: function() { query.refetch(); onChanged(); }
   });
   var data = query.data;
   return (
@@ -269,7 +281,43 @@ function Detail({ id, onClose, onChanged, onRevisionStaged }) {
                 e.target.value = "";
               }} />
             </div>
-            {(action.error || reconcile.error || revisionUpload.error) && <div className="text-sm text-red-600">{(action.error || reconcile.error || revisionUpload.error).message}</div>}
+            {(action.error || reconcile.error || revisionUpload.error || onboardingUpload.error) && <div className="text-sm text-red-600">{(action.error || reconcile.error || revisionUpload.error || onboardingUpload.error).message}</div>}
+            <section>
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="text-sm font-semibold">Onboarding documents</div>
+                  <div className="text-xs text-[rgb(var(--muted))]">Private customer onboarding forms attached to this purchase order.</div>
+                </div>
+                <Button variant="outline" size="sm" disabled={onboardingUpload.isPending || data.onboardingDocumentsStatus === "missing_table"} onClick={function() {
+                  onboardingInputRef.current && onboardingInputRef.current.click();
+                }}>
+                  {onboardingUpload.isPending ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Paperclip className="mr-1 h-3.5 w-3.5" />}
+                  Attach onboarding PDF
+                </Button>
+                <input ref={onboardingInputRef} type="file" className="hidden" accept="application/pdf,.pdf" onChange={function(e) {
+                  if (e.target.files && e.target.files[0]) onboardingUpload.mutate(e.target.files[0]);
+                  e.target.value = "";
+                }} />
+              </div>
+              {data.onboardingDocumentsStatus === "missing_table" ? (
+                <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                  Database setup required. Run <code>docs/supabase-purchase-order-onboarding-documents.sql</code> in Supabase.
+                </div>
+              ) : data.onboardingDocuments && data.onboardingDocuments.length ? (
+                <div className="space-y-2">{data.onboardingDocuments.map(function(document) { return (
+                  <div key={document.id} className="flex flex-wrap items-center gap-3 rounded-md border border-[rgb(var(--border))] px-3 py-2 text-sm">
+                    <FileText className="h-4 w-4 shrink-0 text-[rgb(var(--muted))]" />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate font-medium">{document.original_file_name}</div>
+                      <div className="text-xs text-[rgb(var(--muted))]">Uploaded by {document.uploaded_by || "Unknown"} · {new Date(document.created_at).toLocaleString()}</div>
+                    </div>
+                    {document.url && <Button variant="outline" size="sm" asChild><a href={document.url} target="_blank" rel="noreferrer">Open PDF</a></Button>}
+                  </div>
+                ); })}</div>
+              ) : (
+                <div className="rounded-md border border-dashed border-[rgb(var(--border))] p-4 text-center text-sm text-[rgb(var(--muted))]">No onboarding document attached yet.</div>
+              )}
+            </section>
             <section>
               <div className="mb-2 text-sm font-semibold">Line fulfillment</div>
               <TableShell>
