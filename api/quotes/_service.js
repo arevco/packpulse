@@ -1,8 +1,8 @@
 import crypto from "crypto";
 import { CACHE_SITE_ID, getSupabaseAdmin } from "../ops/_common.js";
-import { ALLOWED_TYPES, BUCKET, extractFile, key, signedDocumentUrl, text, validateConfirmed, validateUpload } from "../purchase-orders/_service.js";
+import { ALLOWED_TYPES, BUCKET, date, extractFile, key, signedDocumentUrl, text, validateConfirmed, validateUpload } from "../purchase-orders/_service.js";
 
-export { key, signedDocumentUrl, text, validateConfirmed };
+export { date, key, signedDocumentUrl, text, validateConfirmed };
 
 export function missingQuotesTable(error) {
   var message = String(error && error.message || "").toLowerCase();

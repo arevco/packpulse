@@ -1,6 +1,6 @@
 import Sentry from "../_sentry.js";
 import { CACHE_SITE_ID, getAuthenticatedUser, getSupabaseAdmin, withCors } from "../ops/_common.js";
-import { addQuoteEvent, key, signedDocumentUrl, text, validateConfirmed } from "./_service.js";
+import { addQuoteEvent, date, key, signedDocumentUrl, text, validateConfirmed } from "./_service.js";
 
 export default async function handler(req, res) {
   withCors(req, res, ["GET", "PATCH", "OPTIONS"]);
@@ -16,6 +16,8 @@ export default async function handler(req, res) {
     if (req.method === "PATCH") {
       var status = text(req.body && req.body.status, 30).toLowerCase();
       var editedData = req.body && req.body.data ? validateConfirmed(req.body.data) : null;
+      var hasOutcome = Object.prototype.hasOwnProperty.call(req.body || {}, "outcome");
+      var hasTargetCloseDate = Object.prototype.hasOwnProperty.call(req.body || {}, "targetCloseDate");
       if (status && ["draft","sent","accepted","declined","expired"].indexOf(status) === -1) return res.status(400).json({ error: "Invalid quote status" });
       if (editedData) {
         var customerKey = key(editedData.customerName);
@@ -63,8 +65,30 @@ export default async function handler(req, res) {
         });
         found.data = quoteUpdate.data;
       }
+      if (hasOutcome || hasTargetCloseDate) {
+        var outcome = hasOutcome ? text(req.body.outcome, 20).toLowerCase() : found.data.outcome || "open";
+        if (["open","won","lost"].indexOf(outcome) === -1) return res.status(400).json({ error: "Invalid quote outcome" });
+        var rawTargetCloseDate = hasTargetCloseDate ? text(req.body.targetCloseDate, 40) : found.data.target_close_date;
+        var targetCloseDate = rawTargetCloseDate ? date(rawTargetCloseDate) : null;
+        if (rawTargetCloseDate && !targetCloseDate) return res.status(400).json({ error: "Invalid target close date" });
+        var commercialUpdate = { outcome: outcome, target_close_date: targetCloseDate, updated_by: user.email };
+        if (hasOutcome && outcome === "won") commercialUpdate.status = "accepted";
+        if (hasOutcome && outcome === "lost") commercialUpdate.status = "declined";
+        if (hasOutcome && outcome === "open" && ["accepted","declined"].indexOf(found.data.status) !== -1) commercialUpdate.status = "draft";
+        var commercialChanged = await supabase.from("quotes").update(commercialUpdate).eq("site_id", CACHE_SITE_ID).eq("id", id).select("*").single();
+        if (commercialChanged.error) throw commercialChanged.error;
+        await addQuoteEvent(supabase, id, found.data.current_revision_id, hasOutcome ? "outcome_changed" : "target_close_date_changed", user, {
+          fromOutcome: found.data.outcome || "open", toOutcome: commercialChanged.data.outcome,
+          fromTargetCloseDate: found.data.target_close_date || null, toTargetCloseDate: commercialChanged.data.target_close_date || null
+        });
+        found.data = commercialChanged.data;
+      }
       if (status) {
-        var changed = await supabase.from("quotes").update({ status: status, updated_by: user.email }).eq("site_id", CACHE_SITE_ID).eq("id", id).select("*").single();
+        var statusUpdate = { status: status, updated_by: user.email };
+        if (status === "accepted") statusUpdate.outcome = "won";
+        else if (status === "declined") statusUpdate.outcome = "lost";
+        else if (["accepted","declined"].indexOf(found.data.status) !== -1) statusUpdate.outcome = "open";
+        var changed = await supabase.from("quotes").update(statusUpdate).eq("site_id", CACHE_SITE_ID).eq("id", id).select("*").single();
         if (changed.error) throw changed.error;
         await addQuoteEvent(supabase, id, found.data.current_revision_id, "status_changed", user, { fromStatus: found.data.status, toStatus: status });
         found.data = changed.data;

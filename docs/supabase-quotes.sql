@@ -25,6 +25,12 @@ create table if not exists public.quotes (
   unique (site_id, customer_key, quote_number_key)
 );
 
+alter table public.quotes
+  add column if not exists outcome text not null default 'open'
+    check (outcome in ('open','won','lost'));
+alter table public.quotes
+  add column if not exists target_close_date date;
+
 create table if not exists public.quote_revisions (
   id uuid primary key default gen_random_uuid(),
   site_id text not null,
@@ -105,6 +111,7 @@ for each row execute function public.set_quote_updated_at();
 
 create index if not exists idx_quotes_site_status_date on public.quotes(site_id, status, quote_date desc);
 create index if not exists idx_quotes_site_expiration on public.quotes(site_id, expiration_date);
+create index if not exists idx_quotes_site_outcome_target_close on public.quotes(site_id, outcome, target_close_date);
 create index if not exists idx_quote_lines_site_quote on public.quote_lines(site_id, quote_id, active);
 create index if not exists idx_quote_links_po on public.purchase_order_quote_links(site_id, purchase_order_id);
 create index if not exists idx_quote_events_quote_created on public.quote_events(quote_id, created_at desc);
