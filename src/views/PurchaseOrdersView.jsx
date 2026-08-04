@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import TableShell from "../components/ui/table-shell";
 import { cn } from "../lib/utils";
+import QuotesPanel from "./QuotesPanel";
 
 var ACCEPT = ".pdf,.jpg,.jpeg,.png,.csv,.xls,.xlsx";
 var ONBOARDING_ACCEPT = ".pdf,.doc,.docx,.xls,.xlsx,.csv,.jpg,.jpeg,.png";
@@ -453,7 +454,7 @@ function Metric({ label, value }) {
   return <div><div className="text-xs text-[rgb(var(--muted))]">{label}</div><div className="mt-1 font-semibold">{value}</div></div>;
 }
 
-export default function PurchaseOrdersView({ onOpenCountChange }) {
+function PurchaseOrdersRegister({ onOpenCountChange }) {
   const queryClient = useQueryClient();
   const inputRef = useRef(null);
   const [tab, setTab] = useState("open");
@@ -578,4 +579,15 @@ export default function PurchaseOrdersView({ onOpenCountChange }) {
       }} />}
     </div>
   );
+}
+
+export default function PurchaseOrdersView({ onOpenCountChange }) {
+  const [section, setSection] = useState("purchase-orders");
+  return <div className="space-y-4">
+    <div className="inline-flex gap-1 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--background))] p-1">
+      <button className={cn("rounded px-4 py-2 text-sm font-medium", section === "purchase-orders" ? "bg-slate-900 text-white" : "text-[rgb(var(--muted))] hover:bg-slate-100")} onClick={function() { setSection("purchase-orders"); }}>Purchase Orders</button>
+      <button className={cn("rounded px-4 py-2 text-sm font-medium", section === "quotes" ? "bg-slate-900 text-white" : "text-[rgb(var(--muted))] hover:bg-slate-100")} onClick={function() { setSection("quotes"); }}>Quotes</button>
+    </div>
+    {section === "purchase-orders" ? <PurchaseOrdersRegister onOpenCountChange={onOpenCountChange} /> : <QuotesPanel />}
+  </div>;
 }

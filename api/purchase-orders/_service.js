@@ -113,7 +113,7 @@ export function normalizeExtracted(input) {
   };
 }
 
-function spreadsheetExtraction(buffer) {
+function spreadsheetExtraction(buffer, documentKind) {
   var workbook = XLSX.read(buffer, { type: "buffer", cellFormula: false, cellHTML: false });
   var first = workbook.Sheets[workbook.SheetNames[0]];
   var rows = XLSX.utils.sheet_to_json(first, { defval: "", raw: false });
@@ -121,9 +121,9 @@ function spreadsheetExtraction(buffer) {
   var firstRow = rows[0] || {};
   return normalizeExtracted({
     customerName: pick(firstRow, ["customer", "customer name", "client"]),
-    poNumber: pick(firstRow, ["po number", "purchase order", "purchase order number", "po"]),
-    poDate: pick(firstRow, ["po date", "purchase order date", "date"]),
-    expectedDate: pick(firstRow, ["expected date", "arrival date", "receive by", "due date"]),
+    poNumber: pick(firstRow, documentKind === "quote" ? ["quote number", "quote no", "estimate number", "quote"] : ["po number", "purchase order", "purchase order number", "po"]),
+    poDate: pick(firstRow, documentKind === "quote" ? ["quote date", "estimate date", "date"] : ["po date", "purchase order date", "date"]),
+    expectedDate: pick(firstRow, documentKind === "quote" ? ["expiration date", "expiry date", "valid until", "expires"] : ["expected date", "arrival date", "receive by", "due date"]),
     currency: pick(firstRow, ["currency"]),
     taxTotal: pick(firstRow, ["tax total", "tax"]),
     total: pick(firstRow, ["total", "order total"]),
@@ -182,12 +182,14 @@ const EXTRACTION_SCHEMA = {
   required: ["customerName","poNumber","poDate","expectedDate","vendor","billTo","shipTo","memo","terms","fob","shippingMethod","currency","subtotal","taxTotal","total","lines"]
 };
 
-async function modelExtraction(buffer, contentType) {
+async function modelExtraction(buffer, contentType, documentKind) {
   var apiKey = process.env.OPENAI_API_KEY || "";
   if (!apiKey) throw new Error("OPENAI_API_KEY is not configured.");
   var model = process.env.OPENAI_MODEL || "gpt-5-mini";
   var dataUrl = "data:" + contentType + ";base64," + buffer.toString("base64");
-  var content = [{ type: "input_text", text: "Extract this client purchase order. Preserve printed values and use ISO YYYY-MM-DD dates. Use null when a field is absent. Do not infer SKU from a description." }];
+  var quoteInstructions = "Extract this customer quote. Put the quote number in poNumber, the quote date in poDate, and the expiration/valid-until date in expectedDate.";
+  var poInstructions = "Extract this client purchase order.";
+  var content = [{ type: "input_text", text: (documentKind === "quote" ? quoteInstructions : poInstructions) + " Preserve printed values and use ISO YYYY-MM-DD dates. Use null when a field is absent. Do not infer SKU from a description." }];
   if (contentType.indexOf("image/") === 0) content.push({ type: "input_image", image_url: dataUrl });
   else content.push({ type: "input_file", filename: "purchase-order.pdf", file_data: dataUrl });
   var response = await fetch("https://api.openai.com/v1/responses", {
@@ -196,7 +198,7 @@ async function modelExtraction(buffer, contentType) {
     body: JSON.stringify({
       model: model,
       input: [{ role: "user", content: content }],
-      text: { format: { type: "json_schema", name: "purchase_order", strict: true, schema: EXTRACTION_SCHEMA } }
+      text: { format: { type: "json_schema", name: documentKind === "quote" ? "customer_quote" : "purchase_order", strict: true, schema: EXTRACTION_SCHEMA } }
     })
   });
   var body = await response.json().catch(function() { return {}; });
@@ -214,12 +216,12 @@ async function modelExtraction(buffer, contentType) {
   return { data: normalizeExtracted(JSON.parse(outputText)), model: model };
 }
 
-export async function extractFile(buffer, contentType) {
+export async function extractFile(buffer, contentType, documentKind) {
   var ext = ALLOWED_TYPES[contentType];
   if (ext === "csv" || ext === "xls" || ext === "xlsx") {
-    return { data: spreadsheetExtraction(buffer), model: "deterministic-spreadsheet-parser-v1" };
+    return { data: spreadsheetExtraction(buffer, documentKind), model: "deterministic-spreadsheet-parser-v1" };
   }
-  return modelExtraction(buffer, contentType);
+  return modelExtraction(buffer, contentType, documentKind);
 }
 
 export function validateUpload(body) {
