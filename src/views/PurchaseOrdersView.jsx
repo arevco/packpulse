@@ -2,7 +2,7 @@ import { useCallback, useDeferredValue, useEffect, useRef, useState } from "reac
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle, Check, ChevronLeft, ChevronRight, FileSpreadsheet, FileText,
-  Loader2, Paperclip, Plus, RefreshCw, Search, Upload, X
+  Loader2, Paperclip, Pencil, Plus, RefreshCw, Search, Upload, X
 } from "lucide-react";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -204,9 +204,61 @@ function Field({ label, value, onChange, type, disabled }) {
   );
 }
 
+function EditPurchaseOrder({ data, onCancel, onSave, saving, error }) {
+  const [draft, setDraft] = useState(function() {
+    var initial = normalizeDraft({
+      customerName: data.purchaseOrder.customer_name, poNumber: data.purchaseOrder.po_number,
+      poDate: data.purchaseOrder.po_date, expectedDate: data.purchaseOrder.expected_date,
+      currency: data.purchaseOrder.currency, taxTotal: Number(data.purchaseOrder.tax_total || 0),
+      lines: data.lines.filter(function(line) { return line.active; }).map(function(line) { return {
+        id: line.id, sku: line.sku || "", description: line.description || "", quantity: Number(line.quantity || 0),
+        uom: line.uom || "", unitRate: Number(line.unit_rate || 0), taxAmount: Number(line.tax_amount || 0),
+        lineAmount: Number(line.line_amount || 0), expectedDate: line.expected_date || ""
+      }; })
+    });
+    initial.subtotal = initial.lines.reduce(function(sum, line) { return sum + Number(line.quantity || 0) * Number(line.unitRate || 0); }, 0);
+    initial.total = initial.subtotal + Number(initial.taxTotal || 0);
+    return initial;
+  });
+  var recalculate = function(lines, tax) {
+    var subtotal = lines.reduce(function(sum, line) { return sum + Number(line.quantity || 0) * Number(line.unitRate || 0); }, 0);
+    return { lines: lines.map(function(line) { return Object.assign({}, line, { lineAmount: Number(line.quantity || 0) * Number(line.unitRate || 0) }); }), subtotal: subtotal, taxTotal: tax, total: subtotal + tax };
+  };
+  var update = function(field, value) { setDraft(function(old) { return Object.assign({}, old, { [field]: value }); }); };
+  var updateLine = function(index, field, value) { setDraft(function(old) {
+    var lines = old.lines.slice();
+    lines[index] = Object.assign({}, lines[index], { [field]: value });
+    return Object.assign({}, old, recalculate(lines, Number(old.taxTotal || 0)));
+  }); };
+  var missing = !draft.customerName || !draft.poNumber || !draft.poDate || !draft.lines.length || draft.lines.some(function(line) {
+    return !line.description || !(Number(line.quantity) > 0) || !line.uom;
+  });
+  return <section className="space-y-4 rounded-md border border-blue-200 bg-blue-50/40 p-4">
+    <div><div className="font-semibold">Edit purchase order</div><div className="text-xs text-[rgb(var(--muted))]">Changes update the register and are recorded in audit history. The original document is preserved.</div></div>
+    <div className="grid gap-3 sm:grid-cols-2">
+      <Field label="Customer *" value={draft.customerName} onChange={function(v) { update("customerName", v); }} />
+      <Field label="PO number *" value={draft.poNumber} onChange={function(v) { update("poNumber", v); }} />
+      <Field label="PO date *" type="date" value={draft.poDate} onChange={function(v) { update("poDate", v); }} />
+      <Field label="Expected / receive-by" type="date" value={draft.expectedDate} onChange={function(v) { update("expectedDate", v); }} />
+      <Field label="Currency" value={draft.currency} onChange={function(v) { update("currency", v.toUpperCase().slice(0, 3)); }} />
+      <Field label="Tax" type="number" value={draft.taxTotal} onChange={function(v) { var tax = Number(v); setDraft(function(old) { return Object.assign({}, old, recalculate(old.lines, tax)); }); }} />
+    </div>
+    <div className="space-y-3">
+      <div className="flex items-center justify-between"><div className="text-sm font-semibold">Line items</div><Button variant="outline" size="sm" onClick={function() { setDraft(function(old) { return Object.assign({}, old, recalculate(old.lines.concat([blankLine()]), Number(old.taxTotal || 0))); }); }}><Plus className="mr-1 h-3.5 w-3.5" />Add line</Button></div>
+      {draft.lines.map(function(line, index) { return <div key={line.id || "new-" + index} className="rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--background))] p-3">
+        <div className="mb-2 flex justify-between text-xs font-semibold text-[rgb(var(--muted))]"><span>LINE {index + 1}</span>{draft.lines.length > 1 && <button type="button" onClick={function() { setDraft(function(old) { return Object.assign({}, old, recalculate(old.lines.filter(function(_, i) { return i !== index; }), Number(old.taxTotal || 0))); }); }}><X className="h-4 w-4" /></button>}</div>
+        <div className="grid gap-2 sm:grid-cols-6"><div className="sm:col-span-2"><Field label="Description *" value={line.description} onChange={function(v) { updateLine(index, "description", v); }} /></div><Field label="SKU" value={line.sku} onChange={function(v) { updateLine(index, "sku", v); }} /><Field label="Quantity *" type="number" value={line.quantity} onChange={function(v) { updateLine(index, "quantity", Number(v)); }} /><Field label="UOM *" value={line.uom} onChange={function(v) { updateLine(index, "uom", v); }} /><Field label="Unit rate" type="number" value={line.unitRate} onChange={function(v) { updateLine(index, "unitRate", Number(v)); }} /></div>
+      </div>; })}
+    </div>
+    <div className="flex items-center justify-between"><div className="text-sm"><span className="text-[rgb(var(--muted))]">Calculated total: </span><strong>{formatMoney(draft.total, draft.currency)}</strong></div><div className="flex gap-2"><Button variant="outline" onClick={onCancel}>Cancel</Button><Button disabled={missing || saving} onClick={function() { onSave(draft); }}>{saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save changes</Button></div></div>
+    {error && <div className="text-sm text-red-600">{error.message}</div>}
+  </section>;
+}
+
 function Detail({ id, onClose, onChanged, onRevisionStaged }) {
   const revisionInputRef = useRef(null);
   const onboardingInputRef = useRef(null);
+  const [editing, setEditing] = useState(false);
   const query = useQuery({ queryKey: ["purchase-order", id], queryFn: function() { return api("/api/purchase-orders/" + id); } });
   const action = useMutation({
     mutationFn: function(input) {
@@ -214,7 +266,7 @@ function Detail({ id, onClose, onChanged, onRevisionStaged }) {
         method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input)
       });
     },
-    onSuccess: function() { query.refetch(); onChanged(); }
+    onSuccess: function() { setEditing(false); query.refetch(); onChanged(); }
   });
   const reconcile = useMutation({
     mutationFn: function() { return api("/api/purchase-orders/" + id + "/reconcile", { method: "POST" }); },
@@ -263,6 +315,7 @@ function Detail({ id, onClose, onChanged, onRevisionStaged }) {
               <Metric label="Remaining" value={formatNumber(data.lines.reduce(function(s,l) { return s + Number(l.remaining_quantity || 0); }, 0))} />
             </div>
             <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={function() { setEditing(true); }}><Pencil className="mr-2 h-4 w-4" />Edit details</Button>
               <Button variant="outline" disabled={reconcile.isPending} onClick={function() { reconcile.mutate(); }}>
                 <RefreshCw className={cn("mr-2 h-4 w-4", reconcile.isPending && "animate-spin")} />Reconcile production
               </Button>
@@ -281,7 +334,8 @@ function Detail({ id, onClose, onChanged, onRevisionStaged }) {
                 e.target.value = "";
               }} />
             </div>
-            {(action.error || reconcile.error || revisionUpload.error || onboardingUpload.error) && <div className="text-sm text-red-600">{(action.error || reconcile.error || revisionUpload.error || onboardingUpload.error).message}</div>}
+            {editing && <EditPurchaseOrder data={data} saving={action.isPending} error={action.error} onCancel={function() { setEditing(false); }} onSave={function(draft) { action.mutate({ data: draft, note: "Purchase order details edited by user." }); }} />}
+            {(!editing && action.error || reconcile.error || revisionUpload.error || onboardingUpload.error) && <div className="text-sm text-red-600">{(!editing && action.error || reconcile.error || revisionUpload.error || onboardingUpload.error).message}</div>}
             <section>
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <div>
