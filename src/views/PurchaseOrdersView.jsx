@@ -12,6 +12,7 @@ import TableShell from "../components/ui/table-shell";
 import { cn } from "../lib/utils";
 
 var ACCEPT = ".pdf,.jpg,.jpeg,.png,.csv,.xls,.xlsx";
+var ONBOARDING_ACCEPT = ".pdf,.doc,.docx,.xls,.xlsx,.csv,.jpg,.jpeg,.png";
 var TABS = [
   { key: "open", label: "Open" },
   { key: "suggested_closed", label: "Suggested closed" },
@@ -319,11 +320,11 @@ function Detail({ id, onClose, onChanged, onRevisionStaged }) {
   });
   const onboardingUpload = useMutation({
     mutationFn: async function(file) {
-      if (file.type !== "application/pdf" && !/\.pdf$/i.test(file.name)) throw new Error("Onboarding documents must be PDF files.");
+      if (!/\.(pdf|doc|docx|xls|xlsx|csv|jpe?g|png)$/i.test(file.name)) throw new Error("Use a PDF, Word, Excel, CSV, JPG, or PNG file.");
       if (file.size > 3 * 1024 * 1024) throw new Error(file.name + " is larger than 3 MB.");
       return api("/api/purchase-orders/" + id + "/onboarding-documents", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fileName: file.name, contentType: "application/pdf", base64: await base64File(file) })
+        body: JSON.stringify({ fileName: file.name, contentType: file.type || "application/octet-stream", base64: await base64File(file) })
       });
     },
     onSuccess: function() { query.refetch(); onChanged(); }
@@ -383,9 +384,9 @@ function Detail({ id, onClose, onChanged, onRevisionStaged }) {
                   onboardingInputRef.current && onboardingInputRef.current.click();
                 }}>
                   {onboardingUpload.isPending ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Paperclip className="mr-1 h-3.5 w-3.5" />}
-                  Attach onboarding PDF
+                  Attach onboarding file
                 </Button>
-                <input ref={onboardingInputRef} type="file" className="hidden" accept="application/pdf,.pdf" onChange={function(e) {
+                <input ref={onboardingInputRef} type="file" className="hidden" accept={ONBOARDING_ACCEPT} onChange={function(e) {
                   if (e.target.files && e.target.files[0]) onboardingUpload.mutate(e.target.files[0]);
                   e.target.value = "";
                 }} />
@@ -402,7 +403,7 @@ function Detail({ id, onClose, onChanged, onRevisionStaged }) {
                       <div className="truncate font-medium">{document.original_file_name}</div>
                       <div className="text-xs text-[rgb(var(--muted))]">Uploaded by {document.uploaded_by || "Unknown"} · {new Date(document.created_at).toLocaleString()}</div>
                     </div>
-                    {document.url && <Button variant="outline" size="sm" asChild><a href={document.url} target="_blank" rel="noreferrer">Open PDF</a></Button>}
+                    {document.url && <Button variant="outline" size="sm" asChild><a href={document.url} target="_blank" rel="noreferrer">Open file</a></Button>}
                   </div>
                 ); })}</div>
               ) : (
