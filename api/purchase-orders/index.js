@@ -7,6 +7,12 @@ function missingTable(error) {
   return message.indexOf("purchase_orders") !== -1 && (message.indexOf("schema cache") !== -1 || message.indexOf("relation") !== -1);
 }
 
+function missingOnboardingDocumentsTable(error) {
+  var message = String(error && error.message || "").toLowerCase();
+  return message.indexOf("purchase_order_onboarding_documents") !== -1 &&
+    (message.indexOf("schema cache") !== -1 || message.indexOf("relation") !== -1);
+}
+
 export default async function handler(req, res) {
   withCors(req, res, ["GET", "OPTIONS"]);
   if (req.method === "OPTIONS") return res.status(200).end();
@@ -37,8 +43,19 @@ export default async function handler(req, res) {
       if (missingTable(result.error)) return res.status(200).json({ rows: [], counts: {}, total: 0, status: "missing_table" });
       throw result.error;
     }
-    var countsResult = await supabase.from("purchase_orders").select("status,suggested_status").eq("site_id", CACHE_SITE_ID);
+    var purchaseOrderIds = (result.data || []).map(function(row) { return row.id; });
+    var related = await Promise.all([
+      supabase.from("purchase_orders").select("status,suggested_status").eq("site_id", CACHE_SITE_ID),
+      purchaseOrderIds.length
+        ? supabase.from("purchase_order_onboarding_documents").select("purchase_order_id").eq("site_id", CACHE_SITE_ID).in("purchase_order_id", purchaseOrderIds)
+        : Promise.resolve({ data: [], error: null })
+    ]);
+    var countsResult = related[0];
+    var onboardingResult = related[1];
     if (countsResult.error) throw countsResult.error;
+    if (onboardingResult.error && !missingOnboardingDocumentsTable(onboardingResult.error)) throw onboardingResult.error;
+    var onboardingByPurchaseOrder = {};
+    (onboardingResult.data || []).forEach(function(document) { onboardingByPurchaseOrder[document.purchase_order_id] = true; });
     var counts = { all: 0, open: 0, suggested_closed: 0, closed: 0, cancelled: 0, draft: 0 };
     (countsResult.data || []).forEach(function(row) {
       counts.all += 1;
@@ -52,6 +69,7 @@ export default async function handler(req, res) {
       row.ordered_quantity = activeLines.reduce(function(sum, line) { return sum + Number(line.quantity || 0); }, 0);
       row.produced_quantity = activeLines.reduce(function(sum, line) { return sum + Number(line.produced_quantity || 0); }, 0);
       row.remaining_quantity = activeLines.reduce(function(sum, line) { return sum + Number(line.remaining_quantity || 0); }, 0);
+      row.has_onboarding_document = onboardingResult.error ? null : Boolean(onboardingByPurchaseOrder[row.id]);
       row.sku_items = activeLines.map(function(line) {
         return {
           lineNumber: Number(line.line_number || 0),

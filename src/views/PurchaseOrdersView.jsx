@@ -514,7 +514,9 @@ export default function PurchaseOrdersView({ onOpenCountChange }) {
             <tbody>{listQuery.isLoading ? <tr><td colSpan="9" className="p-10 text-center"><Loader2 className="mx-auto h-6 w-6 animate-spin" /></td></tr> :
               rows.length === 0 ? <tr><td colSpan="9" className="p-10 text-center text-[rgb(var(--muted))]">No purchase orders in this view.</td></tr> :
               rows.map(function(row) { return <tr key={row.id} onClick={function() { setSelectedId(row.id); }} className="cursor-pointer border-t border-[rgb(var(--border))] hover:bg-slate-50">
-                <td className="px-4 py-3"><div className="font-semibold">{row.po_number}</div><div className="text-xs text-[rgb(var(--muted))]">{row.customer_name} · Rev {row.revision_number}</div></td>
+                <td className="px-4 py-3"><div className="font-semibold">{row.po_number}</div><div className="text-xs text-[rgb(var(--muted))]">{row.customer_name} · Rev {row.revision_number}</div>
+                  {row.has_onboarding_document === false && <div className="mt-1.5 inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800" title="Open this purchase order to attach an onboarding document."><AlertTriangle className="h-3 w-3" />Onboarding needed</div>}
+                </td>
                 <td className="min-w-64 max-w-96 px-4 py-3">{row.sku_items && row.sku_items.length ? <div className="space-y-1.5">{row.sku_items.map(function(item, index) { return <div key={(item.lineNumber || index) + ":" + item.sku}>
                   <div className="font-medium">{item.sku || "No SKU number"}</div>
                   <div className="line-clamp-2 text-xs text-[rgb(var(--muted))]" title={item.description || ""}>{item.description || "No description"}</div>
