@@ -319,15 +319,16 @@ export function validateConfirmed(input) {
   return normalized;
 }
 
-export async function reconcilePurchaseOrder(supabase, po) {
-  var linesResult = await supabase.from("purchase_order_lines").select("*")
-    .eq("site_id", CACHE_SITE_ID).eq("purchase_order_id", po.id).eq("revision_id", po.current_revision_id).eq("active", true);
-  if (linesResult.error) throw linesResult.error;
-  var lines = linesResult.data || [];
+function productionPoNumber(row) {
+  return pick(row && row.raw || {}, ["Purchase Order Number","Purchase Order number","purchase_order_number","PO Number","PO"]);
+}
+
+async function productionForPurchaseOrder(supabase, poNumber) {
   var production = [];
   var from = 0;
   while (from < 50000) {
-    var batch = await supabase.from("production_events").select("item_code,units_produced,raw")
+    var batch = await supabase.from("production_events")
+      .select("job_id,work_order_code,item_code,units_produced,produced_date_et,produced_at_utc,line,raw")
       .eq("site_id", CACHE_SITE_ID).range(from, from + 999);
     if (batch.error) {
       if (String(batch.error.message || "").toLowerCase().indexOf("relation") !== -1) break;
@@ -337,11 +338,74 @@ export async function reconcilePurchaseOrder(supabase, po) {
     if (!batch.data || batch.data.length < 1000) break;
     from += 1000;
   }
-  var poKey = key(po.po_number);
-  var matchingEvents = production.filter(function(event) {
-    var raw = event.raw || {};
-    return key(pick(raw, ["Purchase Order Number","Purchase Order number","purchase_order_number","PO Number","PO"])) === poKey;
+  var poKey = key(poNumber);
+  return production.filter(function(event) { return key(productionPoNumber(event)) === poKey; });
+}
+
+export async function previewPurchaseOrderReconciliation(supabase, po) {
+  var results = await Promise.all([
+    supabase.from("purchase_order_lines").select("*").eq("site_id", CACHE_SITE_ID)
+      .eq("purchase_order_id", po.id).eq("revision_id", po.current_revision_id).eq("active", true).order("line_number"),
+    supabase.from("purchase_order_item_mappings").select("*").eq("site_id", CACHE_SITE_ID).eq("purchase_order_id", po.id),
+    productionForPurchaseOrder(supabase, po.po_number)
+  ]);
+  if (results[0].error) throw results[0].error;
+  if (results[1].error) throw results[1].error;
+  var production = results[2] || [];
+  var mappingByLine = {};
+  (results[1].data || []).forEach(function(row) { mappingByLine[row.line_id] = row.production_item_code; });
+  var candidatesByKey = {};
+  production.forEach(function(event) {
+    var itemCode = text(event.item_code, 160);
+    var itemKey = key(itemCode);
+    if (!itemKey) return;
+    if (!candidatesByKey[itemKey]) candidatesByKey[itemKey] = { itemCode: itemCode, itemKey: itemKey, produced: 0, jobs: {} };
+    var candidate = candidatesByKey[itemKey];
+    var units = toNum(event.units_produced);
+    candidate.produced += units;
+    var jobId = text(event.job_id || pick(event.raw || {}, ["Job ID","Job","job_id"]), 160) || "Unknown job";
+    var jobKey = key(jobId + "|" + (event.work_order_code || "")) || jobId;
+    if (!candidate.jobs[jobKey]) candidate.jobs[jobKey] = {
+      jobId: jobId, workOrderCode: text(event.work_order_code, 160), line: text(event.line, 120),
+      produced: 0, firstProducedDate: event.produced_date_et || null
+    };
+    candidate.jobs[jobKey].produced += units;
+    if (event.produced_date_et && (!candidate.jobs[jobKey].firstProducedDate || event.produced_date_et < candidate.jobs[jobKey].firstProducedDate)) {
+      candidate.jobs[jobKey].firstProducedDate = event.produced_date_et;
+    }
   });
+  var candidates = Object.keys(candidatesByKey).map(function(itemKey) {
+    var candidate = candidatesByKey[itemKey];
+    candidate.jobs = Object.keys(candidate.jobs).map(function(jobKey) { return candidate.jobs[jobKey]; })
+      .sort(function(a, b) { return String(a.jobId).localeCompare(String(b.jobId)); });
+    candidate.jobCount = candidate.jobs.length;
+    return candidate;
+  }).sort(function(a, b) { return String(a.itemCode).localeCompare(String(b.itemCode)); });
+  var lines = (results[0].data || []).map(function(line) {
+    var reviewedCode = mappingByLine[line.id] || "";
+    var exact = candidates.find(function(candidate) { return candidate.itemKey === key(line.sku); });
+    var selectedItemCode = reviewedCode || exact && exact.itemCode || "";
+    return {
+      id: line.id, lineNumber: line.line_number, sku: line.sku || "", description: line.description,
+      ordered: toNum(line.quantity), currentProduced: toNum(line.produced_quantity),
+      selectedItemCode: selectedItemCode, selectionSource: reviewedCode ? "reviewed" : exact ? "exact_sku" : "unmatched",
+      candidates: candidates.map(function(candidate) { return Object.assign({}, candidate, { exactSku: candidate.itemKey === key(line.sku) }); })
+    };
+  });
+  return {
+    poNumber: po.po_number, productionRowCount: production.length, candidateItemCount: candidates.length,
+    jobCount: candidates.reduce(function(sum, candidate) { return sum + candidate.jobCount; }, 0),
+    lines: lines, candidates: candidates,
+    message: !production.length ? "No Nulogy production records were found for PO " + po.po_number + "." : null
+  };
+}
+
+export async function reconcilePurchaseOrder(supabase, po) {
+  var linesResult = await supabase.from("purchase_order_lines").select("*")
+    .eq("site_id", CACHE_SITE_ID).eq("purchase_order_id", po.id).eq("revision_id", po.current_revision_id).eq("active", true);
+  if (linesResult.error) throw linesResult.error;
+  var lines = linesResult.data || [];
+  var matchingEvents = await productionForPurchaseOrder(supabase, po.po_number);
   var mappingsResult = await supabase.from("purchase_order_item_mappings").select("*").eq("site_id", CACHE_SITE_ID).eq("purchase_order_id", po.id);
   if (mappingsResult.error) throw mappingsResult.error;
   var mappingByLine = {};

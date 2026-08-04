@@ -255,10 +255,41 @@ function EditPurchaseOrder({ data, onCancel, onSave, saving, error }) {
   </section>;
 }
 
+function ReconciliationReview({ preview, onCancel, onApply, saving, error }) {
+  const [selections, setSelections] = useState(function() {
+    var initial = {};
+    (preview.lines || []).forEach(function(line) { initial[line.id] = line.selectedItemCode || ""; });
+    return initial;
+  });
+  var selectedCandidate = function(line) {
+    return (line.candidates || []).find(function(candidate) { return candidate.itemCode === selections[line.id]; });
+  };
+  return <section className="space-y-4 rounded-md border border-blue-200 bg-blue-50/40 p-4">
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div><div className="font-semibold">Review production matches</div><div className="text-xs text-[rgb(var(--muted))]">Only Nulogy records with exact PO number {preview.poNumber} are included.</div></div>
+      <div className="flex gap-2 text-xs"><Badge variant="outline">{preview.jobCount} jobs</Badge><Badge variant="outline">{preview.candidateItemCount} items</Badge></div>
+    </div>
+    {preview.message ? <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">{preview.message}</div> : <div className="space-y-3">
+      {preview.lines.map(function(line) {
+        var selected = selectedCandidate(line);
+        return <div key={line.id} className="rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--background))] p-3">
+          <div className="flex flex-wrap justify-between gap-2"><div><div className="font-medium">{line.sku || "No SKU"} · {line.description}</div><div className="text-xs text-[rgb(var(--muted))]">Ordered {formatNumber(line.ordered)}</div></div>{line.selectionSource === "exact_sku" && <Badge variant="success">Exact SKU suggested</Badge>}{line.selectionSource === "reviewed" && <Badge variant="outline">Reviewed mapping</Badge>}</div>
+          <label className="mt-3 block"><span className="mb-1 block text-xs font-medium text-[rgb(var(--muted))]">Production item</span><select className="h-10 w-full rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm" value={selections[line.id] || ""} onChange={function(event) { var value = event.target.value; setSelections(function(old) { return Object.assign({}, old, { [line.id]: value }); }); }}><option value="">Leave unmatched</option>{line.candidates.map(function(candidate) { return <option key={candidate.itemKey} value={candidate.itemCode}>{candidate.itemCode} · {formatNumber(candidate.produced)} produced · {candidate.jobCount} job{candidate.jobCount === 1 ? "" : "s"}</option>; })}</select></label>
+          {selected && <div className="mt-3 overflow-hidden rounded border border-[rgb(var(--border))]"><div className="bg-slate-50 px-3 py-2 text-xs font-semibold uppercase text-[rgb(var(--muted))]">Included jobs</div>{selected.jobs.map(function(job) { return <div key={job.jobId + ":" + job.workOrderCode} className="flex flex-wrap justify-between gap-2 border-t border-[rgb(var(--border))] px-3 py-2 text-xs"><span><strong>Job {job.jobId}</strong>{job.workOrderCode ? " · WO " + job.workOrderCode : ""}{job.line ? " · " + job.line : ""}</span><span>{formatNumber(job.produced)} produced{job.firstProducedDate ? " · " + job.firstProducedDate : ""}</span></div>; })}</div>}
+        </div>;
+      })}
+    </div>}
+    {error && <div className="text-sm text-red-600">{error.message}</div>}
+    <div className="flex justify-end gap-2"><Button variant="outline" onClick={onCancel}>Cancel</Button><Button disabled={saving || !preview.productionRowCount} onClick={function() { onApply(Object.keys(selections).map(function(lineId) { return { lineId: lineId, productionItemCode: selections[lineId] || "" }; })); }}>{saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Apply matches</Button></div>
+  </section>;
+}
+
 function Detail({ id, onClose, onChanged, onRevisionStaged }) {
   const revisionInputRef = useRef(null);
   const onboardingInputRef = useRef(null);
   const [editing, setEditing] = useState(false);
+  const [reconciliationOpen, setReconciliationOpen] = useState(false);
+  const [reconciliationResult, setReconciliationResult] = useState(null);
   const query = useQuery({ queryKey: ["purchase-order", id], queryFn: function() { return api("/api/purchase-orders/" + id); } });
   const action = useMutation({
     mutationFn: function(input) {
@@ -269,8 +300,12 @@ function Detail({ id, onClose, onChanged, onRevisionStaged }) {
     onSuccess: function() { setEditing(false); query.refetch(); onChanged(); }
   });
   const reconcile = useMutation({
-    mutationFn: function() { return api("/api/purchase-orders/" + id + "/reconcile", { method: "POST" }); },
-    onSuccess: function() { query.refetch(); onChanged(); }
+    mutationFn: function() { return api("/api/purchase-orders/" + id + "/reconcile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "preview" }) }); },
+    onSuccess: function() { setReconciliationResult(null); setReconciliationOpen(true); }
+  });
+  const applyReconciliation = useMutation({
+    mutationFn: function(mappings) { return api("/api/purchase-orders/" + id + "/reconcile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "apply", mappings: mappings }) }); },
+    onSuccess: function(result) { setReconciliationOpen(false); setReconciliationResult(result); query.refetch(); onChanged(); }
   });
   const revisionUpload = useMutation({
     mutationFn: async function(file) {
@@ -317,7 +352,7 @@ function Detail({ id, onClose, onChanged, onRevisionStaged }) {
             <div className="flex flex-wrap gap-2">
               <Button variant="outline" onClick={function() { setEditing(true); }}><Pencil className="mr-2 h-4 w-4" />Edit details</Button>
               <Button variant="outline" disabled={reconcile.isPending} onClick={function() { reconcile.mutate(); }}>
-                <RefreshCw className={cn("mr-2 h-4 w-4", reconcile.isPending && "animate-spin")} />Reconcile production
+                <RefreshCw className={cn("mr-2 h-4 w-4", reconcile.isPending && "animate-spin")} />{reconcile.isPending ? "Finding matches…" : "Reconcile production"}
               </Button>
               {data.purchaseOrder.status === "open" && data.purchaseOrder.suggested_status === "closed" &&
                 <Button onClick={function() { action.mutate({ status: "closed", note: "Accepted production-based closure suggestion." }); }}>Accept closure</Button>}
@@ -335,6 +370,8 @@ function Detail({ id, onClose, onChanged, onRevisionStaged }) {
               }} />
             </div>
             {editing && <EditPurchaseOrder data={data} saving={action.isPending} error={action.error} onCancel={function() { setEditing(false); }} onSave={function(draft) { action.mutate({ data: draft, note: "Purchase order details edited by user." }); }} />}
+            {reconciliationOpen && reconcile.data && <ReconciliationReview preview={reconcile.data} saving={applyReconciliation.isPending} error={applyReconciliation.error} onCancel={function() { setReconciliationOpen(false); }} onApply={function(mappings) { applyReconciliation.mutate(mappings); }} />}
+            {reconciliationResult && <div className="rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-800"><div className="font-semibold">Reconciliation complete</div><div>{reconciliationResult.message}{reconciliationResult.suggestedStatus === "closed" ? " All active lines are fulfilled; closure can now be accepted." : ""}</div></div>}
             {(!editing && action.error || reconcile.error || revisionUpload.error || onboardingUpload.error) && <div className="text-sm text-red-600">{(!editing && action.error || reconcile.error || revisionUpload.error || onboardingUpload.error).message}</div>}
             <section>
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
