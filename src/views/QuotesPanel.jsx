@@ -6,6 +6,7 @@ import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import TableShell from "../components/ui/table-shell";
+import { cn } from "../lib/utils";
 
 const ACCEPT = ".pdf,.jpg,.jpeg,.png,.csv,.xls,.xlsx";
 
@@ -113,17 +114,45 @@ export default function QuotesPanel() {
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
   const [status, setStatus] = useState("all");
-  const [staged, setStaged] = useState(null);
+  const [dragging, setDragging] = useState(false);
+  const [uploading, setUploading] = useState([]);
+  const [reviewQueue, setReviewQueue] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [error, setError] = useState("");
   const list = useQuery({ queryKey: ["quotes", status, deferredSearch], queryFn: function() { return api("/api/quotes?status=" + status + "&q=" + encodeURIComponent(deferredSearch) + "&page=1&pageSize=50"); } });
-  const upload = useMutation({ mutationFn: async function(file) { if (file.size > 3 * 1024 * 1024) throw new Error(file.name + " is larger than 3 MB."); return api("/api/quotes/uploads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileName: file.name, contentType: file.type || "application/octet-stream", base64: await base64File(file) }) }); }, onSuccess: function(result) { if (result.error) setError(result.error); else setStaged(result); }, onError: function(uploadError) { setError(uploadError.message); } });
+  var handleFiles = async function(fileList) {
+    var files = Array.from(fileList || []);
+    if (!files.length) return;
+    setError("");
+    for (var fileIndex = 0; fileIndex < files.length; fileIndex++) {
+      var file = files[fileIndex];
+      var token = file.name + ":" + file.size + ":" + fileIndex + ":" + Date.now();
+      setUploading(function(old) { return old.concat([{ token: token, name: file.name, status: "uploading" }]); });
+      try {
+        if (file.size > 3 * 1024 * 1024) throw new Error(file.name + " is larger than 3 MB.");
+        var result = await api("/api/quotes/uploads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileName: file.name, contentType: file.type || "application/octet-stream", base64: await base64File(file) }) });
+        if (result.error) throw new Error(result.error);
+        setUploading(function(old) { return old.map(function(row) { return row.token === token ? Object.assign({}, row, { status: "ready" }) : row; }); });
+        setReviewQueue(function(old) { return old.some(function(item) { return item.revision.id === result.revision.id; }) ? old : old.concat([result]); });
+      } catch (uploadError) {
+        setUploading(function(old) { return old.map(function(row) { return row.token === token ? Object.assign({}, row, { status: "failed", error: uploadError.message }) : row; }); });
+        setError(uploadError.message);
+      }
+    }
+  };
   var refresh = function() { queryClient.invalidateQueries({ queryKey: ["quotes"] }); };
   var rows = list.data && list.data.rows || [];
-  return <div className="space-y-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><h1 className="text-2xl font-semibold tracking-tight">Quotes</h1><p className="mt-1 text-sm text-[rgb(var(--muted))]">Upload customer quotes, review pricing, and link accepted quotes to purchase orders.</p></div><Button disabled={upload.isPending} onClick={function() { inputRef.current && inputRef.current.click(); }}>{upload.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}Upload quote</Button><input ref={inputRef} className="hidden" type="file" accept={ACCEPT} onChange={function(e) { if (e.target.files && e.target.files[0]) upload.mutate(e.target.files[0]); e.target.value = ""; }} /></div>
+  var staged = reviewQueue.length ? reviewQueue[0] : null;
+  return <div className="space-y-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><h1 className="text-2xl font-semibold tracking-tight">Quotes</h1><p className="mt-1 text-sm text-[rgb(var(--muted))]">Upload customer quotes, review pricing, and link accepted quotes to purchase orders.</p></div><Button onClick={function() { inputRef.current && inputRef.current.click(); }}><Upload className="mr-2 h-4 w-4" />Upload quotes</Button><input ref={inputRef} className="hidden" type="file" multiple accept={ACCEPT} onChange={function(e) { handleFiles(e.target.files); e.target.value = ""; }} /></div>
+    <Card className={cn("border-dashed transition-colors", dragging && "border-blue-500 bg-blue-50")}>
+      <div className="flex min-h-28 items-center justify-center p-5 text-center" onDragOver={function(e) { e.preventDefault(); setDragging(true); }} onDragLeave={function() { setDragging(false); }} onDrop={function(e) { e.preventDefault(); setDragging(false); handleFiles(e.dataTransfer.files); }}>
+        <div><Upload className="mx-auto h-7 w-7 text-[rgb(var(--muted))]" /><div className="mt-2 text-sm font-medium">Drop PDF, image, CSV, or Excel quotes here</div><div className="mt-1 text-xs text-[rgb(var(--muted))]">Multiple files supported · 3 MB per file · review required before saving</div></div>
+      </div>
+      {uploading.length > 0 && <div className="border-t border-[rgb(var(--border))] px-4 py-2">{uploading.slice(-5).map(function(row) { return <div key={row.token} className="flex items-center gap-2 py-1 text-xs">{row.status === "uploading" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : row.status === "ready" ? <Check className="h-3.5 w-3.5 text-green-600" /> : <AlertTriangle className="h-3.5 w-3.5 text-red-600" />}<span>{row.name}</span>{row.error && <span className="text-red-600">{row.error}</span>}</div>; })}</div>}
+    </Card>
     {(error || list.error) && <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error || list.error.message}</div>}{list.data && list.data.status === "missing_table" && <div className="rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"><strong>Database setup required.</strong> Run <code>docs/supabase-quotes.sql</code> in Supabase, then refresh.</div>}
     <div className="flex flex-wrap items-center gap-2"><div className="flex gap-1 rounded-md border border-[rgb(var(--border))] p-1">{["all","draft","sent","accepted","declined","expired"].map(function(item) { return <button key={item} onClick={function() { setStatus(item); }} className={"rounded px-3 py-1.5 text-sm " + (status === item ? "bg-slate-900 text-white" : "text-[rgb(var(--muted))] hover:bg-slate-100")}>{item === "all" ? "All" : item[0].toUpperCase() + item.slice(1)}</button>; })}</div><div className="relative ml-auto w-full sm:w-72"><Search className="absolute left-3 top-2.5 h-4 w-4 text-[rgb(var(--muted))]" /><Input className="pl-9" placeholder="Search customer or quote" value={search} onChange={function(e) { setSearch(e.target.value); }} /></div></div>
     <TableShell><div className="overflow-x-auto"><table className="w-full text-sm"><thead className="bg-slate-50 text-left text-xs uppercase text-[rgb(var(--muted))]"><tr><th className="px-4 py-3">Quote / Customer</th><th className="px-4 py-3">SKU / Description</th><th className="px-4 py-3">Dates</th><th className="px-4 py-3 text-right">Quantity</th><th className="px-4 py-3 text-right">Value</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Linked PO</th></tr></thead><tbody>{list.isLoading ? <tr><td colSpan="7" className="p-10 text-center"><Loader2 className="mx-auto h-6 w-6 animate-spin" /></td></tr> : !rows.length ? <tr><td colSpan="7" className="p-10 text-center text-[rgb(var(--muted))]">No quotes in this view.</td></tr> : rows.map(function(row) { return <tr key={row.id} className="cursor-pointer border-t border-[rgb(var(--border))] hover:bg-slate-50" onClick={function() { setSelectedId(row.id); }}><td className="px-4 py-3"><div className="font-semibold">{row.quote_number}</div><div className="text-xs text-[rgb(var(--muted))]">{row.customer_name} · Rev {row.revision_number}</div></td><td className="min-w-64 px-4 py-3"><div className="space-y-1">{row.items.map(function(item, index) { return <div key={index}><div className="font-medium">{item.sku || "No SKU"}</div><div className="line-clamp-1 text-xs text-[rgb(var(--muted))]">{item.description}</div></div>; })}</div></td><td className="px-4 py-3"><div>{row.quote_date}</div><div className="text-xs text-[rgb(var(--muted))]">Expires {row.expiration_date || "—"}</div></td><td className="px-4 py-3 text-right">{number(row.quantity)}</td><td className="px-4 py-3 text-right font-medium">{money(row.total, row.currency)}</td><td className="px-4 py-3">{statusBadge(row.status)}</td><td className="px-4 py-3 text-xs">{row.linkedPurchaseOrders.length ? row.linkedPurchaseOrders.map(function(po) { return po.poNumber; }).join(", ") : <span className="text-[rgb(var(--muted))]">Not linked</span>}</td></tr>; })}</tbody></table></div><div className="border-t border-[rgb(var(--border))] px-4 py-3 text-sm text-[rgb(var(--muted))]">{list.data && list.data.total || 0} quotes</div></TableShell>
-    {staged && <QuoteReview staged={staged} onClose={function() { setStaged(null); }} onConfirmed={function(result) { setStaged(null); refresh(); setSelectedId(result.quote.id); }} />}{selectedId && <QuoteDetail id={selectedId} onClose={function() { setSelectedId(null); }} onChanged={refresh} />}
+    {staged && <QuoteReview staged={staged} onClose={function() { setReviewQueue(function(old) { return old.slice(1); }); }} onConfirmed={function(result) { setReviewQueue(function(old) { return old.slice(1); }); refresh(); setSelectedId(result.quote.id); }} />}{selectedId && <QuoteDetail id={selectedId} onClose={function() { setSelectedId(null); }} onChanged={refresh} />}
   </div>;
 }
