@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useDeferredValue, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle, Check, ChevronLeft, ChevronRight, FileSpreadsheet, FileText,
@@ -454,6 +454,22 @@ function Metric({ label, value }) {
   return <div><div className="text-xs text-[rgb(var(--muted))]">{label}</div><div className="mt-1 font-semibold">{value}</div></div>;
 }
 
+function PurchaseOrderRegisterRow({ row, expanded, onToggle, onOpen }) {
+  var items = Array.isArray(row.sku_items) ? row.sku_items : [];
+  var firstItem = items[0];
+  return <Fragment>
+    <tr onClick={onToggle} className={cn("cursor-pointer border-t border-[rgb(var(--border))] transition-colors hover:bg-slate-50", expanded && "bg-slate-50/70")}>
+      <td className="px-4 py-3 align-top"><div className="flex items-start gap-2"><button type="button" className="mt-0.5 rounded p-0.5 text-[rgb(var(--muted))] hover:bg-slate-200 hover:text-slate-900" aria-label={(expanded ? "Collapse " : "Expand ") + row.po_number} aria-expanded={expanded} onClick={function(event) { event.stopPropagation(); onToggle(); }}><ChevronRight className={cn("h-4 w-4 transition-transform", expanded && "rotate-90")} /></button><div><div className="font-semibold">{row.po_number}</div><div className="text-xs text-[rgb(var(--muted))]">{row.customer_name} · Rev {row.revision_number}</div><div className="mt-1 text-[11px] text-[rgb(var(--muted))]">{expanded ? "Hide line items" : "View " + items.length + " line item" + (items.length === 1 ? "" : "s")}</div>{row.has_onboarding_document === false && <div className="mt-1.5 inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800" title="Open this purchase order to attach an onboarding document."><AlertTriangle className="h-3 w-3" />Onboarding needed</div>}</div></div></td>
+      <td className="min-w-64 max-w-96 px-4 py-3 align-top">{firstItem ? <div><div className="font-medium">{firstItem.sku || "No SKU number"}</div><div className="line-clamp-2 text-xs text-[rgb(var(--muted))]" title={firstItem.description || ""}>{firstItem.description || "No description"}</div>{items.length > 1 && <div className="mt-1.5 inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700">+{items.length - 1} more</div>}</div> : <span className="text-xs text-[rgb(var(--muted))]">No SKU details</span>}</td>
+      <td className="px-4 py-3 align-top"><div>{row.po_date || "—"}</div><div className="text-xs text-[rgb(var(--muted))]">Due {row.expected_date || "—"}</div></td>
+      <td className="px-4 py-3 text-right align-top">{formatNumber(row.ordered_quantity)}</td><td className="px-4 py-3 text-right align-top">{formatNumber(row.produced_quantity)}</td>
+      <td className="px-4 py-3 text-right align-top">{formatNumber(row.remaining_quantity)}</td><td className="px-4 py-3 text-right align-top font-medium">{formatMoney(row.total, row.currency)}</td>
+      <td className="px-4 py-3 align-top">{statusBadge(row.status, row.suggested_status)}</td><td className="px-4 py-3 align-top text-xs text-[rgb(var(--muted))]">{new Date(row.updated_at).toLocaleDateString()}</td>
+    </tr>
+    {expanded && <tr className="border-t border-[rgb(var(--border))] bg-slate-50/60"><td colSpan="9" className="px-5 py-4"><div className="rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--background))] shadow-sm"><div className="flex flex-wrap items-center justify-between gap-2 border-b border-[rgb(var(--border))] px-4 py-3"><div><div className="text-sm font-semibold">PO line items</div><div className="text-xs text-[rgb(var(--muted))]">{items.length} item{items.length === 1 ? "" : "s"} · {formatNumber(row.ordered_quantity)} total ordered</div></div><Button variant="outline" size="sm" onClick={function(event) { event.stopPropagation(); onOpen(); }}>View PO details</Button></div><div className="overflow-x-auto"><table className="w-full text-sm"><thead className="bg-slate-50 text-left text-xs uppercase text-[rgb(var(--muted))]"><tr><th className="px-4 py-2">SKU</th><th className="px-4 py-2">Description</th><th className="px-4 py-2 text-right">Ordered</th><th className="px-4 py-2 text-right">Produced</th><th className="px-4 py-2 text-right">Remaining</th><th className="px-4 py-2">Match</th></tr></thead><tbody>{items.length ? items.map(function(item, index) { return <tr key={(item.lineNumber || index) + ":" + item.sku} className="border-t border-[rgb(var(--border))]"><td className="whitespace-nowrap px-4 py-2.5 font-medium">{item.sku || "No SKU"}</td><td className="min-w-72 px-4 py-2.5 text-[rgb(var(--muted))]">{item.description || "No description"}</td><td className="px-4 py-2.5 text-right">{formatNumber(item.quantity)}</td><td className="px-4 py-2.5 text-right">{formatNumber(item.producedQuantity)}</td><td className="px-4 py-2.5 text-right">{formatNumber(item.remainingQuantity)}</td><td className="px-4 py-2.5"><Badge variant="outline">{String(item.matchStatus || "unmatched").replace(/_/g, " ")}</Badge></td></tr>; }) : <tr><td colSpan="6" className="p-5 text-center text-[rgb(var(--muted))]">No active line items.</td></tr>}</tbody></table></div></div></td></tr>}
+  </Fragment>;
+}
+
 function PurchaseOrdersRegister({ onOpenCountChange }) {
   const queryClient = useQueryClient();
   const inputRef = useRef(null);
@@ -467,6 +483,7 @@ function PurchaseOrdersRegister({ onOpenCountChange }) {
   const [uploading, setUploading] = useState([]);
   const [reviewQueue, setReviewQueue] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
+  const [expandedRows, setExpandedRows] = useState({});
   const [error, setError] = useState("");
   const listQuery = useQuery({
     queryKey: ["purchase-orders", tab, deferredSearch, page, sort, direction],
@@ -552,19 +569,7 @@ function PurchaseOrdersRegister({ onOpenCountChange }) {
             </tr></thead>
             <tbody>{listQuery.isLoading ? <tr><td colSpan="9" className="p-10 text-center"><Loader2 className="mx-auto h-6 w-6 animate-spin" /></td></tr> :
               rows.length === 0 ? <tr><td colSpan="9" className="p-10 text-center text-[rgb(var(--muted))]">No purchase orders in this view.</td></tr> :
-              rows.map(function(row) { return <tr key={row.id} onClick={function() { setSelectedId(row.id); }} className="cursor-pointer border-t border-[rgb(var(--border))] hover:bg-slate-50">
-                <td className="px-4 py-3"><div className="font-semibold">{row.po_number}</div><div className="text-xs text-[rgb(var(--muted))]">{row.customer_name} · Rev {row.revision_number}</div>
-                  {row.has_onboarding_document === false && <div className="mt-1.5 inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800" title="Open this purchase order to attach an onboarding document."><AlertTriangle className="h-3 w-3" />Onboarding needed</div>}
-                </td>
-                <td className="min-w-64 max-w-96 px-4 py-3">{row.sku_items && row.sku_items.length ? <div className="space-y-1.5">{row.sku_items.map(function(item, index) { return <div key={(item.lineNumber || index) + ":" + item.sku}>
-                  <div className="font-medium">{item.sku || "No SKU number"}</div>
-                  <div className="line-clamp-2 text-xs text-[rgb(var(--muted))]" title={item.description || ""}>{item.description || "No description"}</div>
-                </div>; })}</div> : <span className="text-xs text-[rgb(var(--muted))]">No SKU details</span>}</td>
-                <td className="px-4 py-3"><div>{row.po_date || "—"}</div><div className="text-xs text-[rgb(var(--muted))]">Due {row.expected_date || "—"}</div></td>
-                <td className="px-4 py-3 text-right">{formatNumber(row.ordered_quantity)}</td><td className="px-4 py-3 text-right">{formatNumber(row.produced_quantity)}</td>
-                <td className="px-4 py-3 text-right">{formatNumber(row.remaining_quantity)}</td><td className="px-4 py-3 text-right font-medium">{formatMoney(row.total, row.currency)}</td>
-                <td className="px-4 py-3">{statusBadge(row.status, row.suggested_status)}</td><td className="px-4 py-3 text-xs text-[rgb(var(--muted))]">{new Date(row.updated_at).toLocaleDateString()}</td>
-              </tr>; })}</tbody>
+              rows.map(function(row) { return <PurchaseOrderRegisterRow key={row.id} row={row} expanded={Boolean(expandedRows[row.id])} onToggle={function() { setExpandedRows(function(old) { return Object.assign({}, old, { [row.id]: !old[row.id] }); }); }} onOpen={function() { setSelectedId(row.id); }} />; })}</tbody>
           </table>
         </div>
         <div className="flex items-center justify-between border-t border-[rgb(var(--border))] px-4 py-3 text-sm">

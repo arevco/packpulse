@@ -74,7 +74,11 @@ export default async function handler(req, res) {
         return {
           lineNumber: Number(line.line_number || 0),
           sku: text(line.sku, 160),
-          description: text(line.description, 1000)
+          description: text(line.description, 1000),
+          quantity: Number(line.quantity || 0),
+          producedQuantity: Number(line.produced_quantity || 0),
+          remainingQuantity: Number(line.remaining_quantity || 0),
+          matchStatus: text(line.match_status, 40) || "unmatched"
         };
       });
       delete row.purchase_order_lines;
