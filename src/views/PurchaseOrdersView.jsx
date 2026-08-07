@@ -2,7 +2,7 @@ import { Fragment, useCallback, useDeferredValue, useEffect, useRef, useState } 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle, Check, ChevronLeft, ChevronRight, FileSpreadsheet, FileText,
-  Loader2, Paperclip, Pencil, Plus, RefreshCw, Search, Upload, X
+  Link2, Loader2, Paperclip, Pencil, Plus, RefreshCw, Search, Upload, X
 } from "lucide-react";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -286,12 +286,42 @@ function ReconciliationReview({ preview, onCancel, onApply, saving, error }) {
   </section>;
 }
 
+function WorkOrderMatchingReview({ preview, onCancel, onApply, saving, error }) {
+  const [selections, setSelections] = useState(function() {
+    var initial = {};
+    (preview.lines || []).forEach(function(line) {
+      var candidateCodes = {};
+      (line.candidates || []).forEach(function(candidate) { candidateCodes[candidate.code] = true; });
+      initial[line.id] = (line.selectedWorkOrderCodes || []).filter(function(code) { return candidateCodes[code]; });
+    });
+    return initial;
+  });
+  var toggle = function(lineId, code) {
+    setSelections(function(old) {
+      var selected = old[lineId] || [];
+      var next = selected.indexOf(code) === -1 ? selected.concat([code]) : selected.filter(function(value) { return value !== code; });
+      return Object.assign({}, old, { [lineId]: next });
+    });
+  };
+  return <section className="space-y-4 rounded-md border border-indigo-200 bg-indigo-50/40 p-4">
+    <div className="flex flex-wrap items-start justify-between gap-3"><div><div className="font-semibold">Match Work Orders to this PO</div><div className="text-xs text-[rgb(var(--muted))]">Suggestions use exact PO number first, then SKU and customer. Review every selection before saving.</div></div><div className="flex gap-2"><Badge variant="outline">{preview.workOrderCount} WOs searched</Badge>{preview.snapshotAt && <Badge variant="outline">Synced {new Date(preview.snapshotAt).toLocaleDateString()}</Badge>}</div></div>
+    {preview.databaseStatus === "missing_table" && <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900"><strong>Database setup required.</strong> Run <code>docs/supabase-purchase-order-work-order-matches.sql</code> in Supabase before applying matches.</div>}
+    <div className="space-y-3">{preview.lines.map(function(line) { return <div key={line.id} className="rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--background))] p-3"><div className="flex flex-wrap items-start justify-between gap-2"><div><div className="font-medium">{line.sku || "No SKU"} · {line.description}</div><div className="text-xs text-[rgb(var(--muted))]">PO line {line.lineNumber} · {formatNumber(line.quantity)} ordered</div></div><Badge variant="outline">{(selections[line.id] || []).length} selected</Badge></div>
+      {line.candidates.length ? <div className="mt-3 space-y-2">{line.candidates.map(function(candidate) { var checked = (selections[line.id] || []).indexOf(candidate.code) !== -1; return <label key={candidate.codeKey} className={cn("flex cursor-pointer gap-3 rounded-md border p-3 transition-colors", checked ? "border-indigo-300 bg-indigo-50" : "border-[rgb(var(--border))] hover:bg-slate-50")}><input type="checkbox" className="mt-1 h-4 w-4" checked={checked} onChange={function() { toggle(line.id, candidate.code); }} /><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><span className="font-semibold">WO {candidate.code}</span><Badge variant={candidate.confidence === "high" ? "success" : candidate.confidence === "medium" ? "warning" : "outline"}>{candidate.confidence} confidence</Badge><span className="text-xs text-[rgb(var(--muted))]">{candidate.reasons.join(" · ")}</span></div><div className="mt-1 text-xs text-[rgb(var(--muted))]">{candidate.sku || "No SKU"}{candidate.description ? " · " + candidate.description : ""}</div><div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs"><span>{candidate.customer || "No customer"}</span><span>Status {candidate.status || "—"}</span><span>Due {candidate.dueDate || "—"}</span><span>{formatNumber(candidate.quantity)} ordered</span><span>{formatNumber(candidate.remaining)} remaining</span></div></div></label>; })}</div> : <div className="mt-3 rounded-md border border-dashed border-[rgb(var(--border))] p-3 text-sm text-[rgb(var(--muted))]">No Work Order candidates met the PO number or SKU + customer matching rules.</div>}
+    </div>; })}</div>
+    {error && <div className="text-sm text-red-600">{error.message}</div>}
+    <div className="flex justify-end gap-2"><Button variant="outline" onClick={onCancel}>Cancel</Button><Button disabled={saving || preview.databaseStatus !== "ready"} onClick={function() { onApply(preview.lines.map(function(line) { return { lineId: line.id, workOrderCodes: selections[line.id] || [] }; })); }}>{saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save Work Order matches</Button></div>
+  </section>;
+}
+
 function Detail({ id, onClose, onChanged, onRevisionStaged }) {
   const revisionInputRef = useRef(null);
   const onboardingInputRef = useRef(null);
   const [editing, setEditing] = useState(false);
   const [reconciliationOpen, setReconciliationOpen] = useState(false);
   const [reconciliationResult, setReconciliationResult] = useState(null);
+  const [workOrderMatchingOpen, setWorkOrderMatchingOpen] = useState(false);
+  const [workOrderMatchingResult, setWorkOrderMatchingResult] = useState(null);
   const query = useQuery({ queryKey: ["purchase-order", id], queryFn: function() { return api("/api/purchase-orders/" + id); } });
   const action = useMutation({
     mutationFn: function(input) {
@@ -308,6 +338,14 @@ function Detail({ id, onClose, onChanged, onRevisionStaged }) {
   const applyReconciliation = useMutation({
     mutationFn: function(mappings) { return api("/api/purchase-orders/" + id + "/reconcile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "apply", mappings: mappings }) }); },
     onSuccess: function(result) { setReconciliationOpen(false); setReconciliationResult(result); query.refetch(); onChanged(); }
+  });
+  const workOrderMatching = useMutation({
+    mutationFn: function() { return api("/api/purchase-orders/" + id + "/work-orders"); },
+    onSuccess: function() { setWorkOrderMatchingResult(null); setWorkOrderMatchingOpen(true); }
+  });
+  const applyWorkOrderMatching = useMutation({
+    mutationFn: function(matches) { return api("/api/purchase-orders/" + id + "/work-orders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ matches: matches }) }); },
+    onSuccess: function(result) { setWorkOrderMatchingOpen(false); setWorkOrderMatchingResult(result); query.refetch(); onChanged(); }
   });
   const revisionUpload = useMutation({
     mutationFn: async function(file) {
@@ -356,6 +394,9 @@ function Detail({ id, onClose, onChanged, onRevisionStaged }) {
               <Button variant="outline" disabled={reconcile.isPending} onClick={function() { reconcile.mutate(); }}>
                 <RefreshCw className={cn("mr-2 h-4 w-4", reconcile.isPending && "animate-spin")} />{reconcile.isPending ? "Finding matches…" : "Reconcile production"}
               </Button>
+              <Button variant="outline" disabled={workOrderMatching.isPending} onClick={function() { workOrderMatching.mutate(); }}>
+                {workOrderMatching.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Link2 className="mr-2 h-4 w-4" />}{workOrderMatching.isPending ? "Finding Work Orders…" : "Match Work Orders"}
+              </Button>
               {data.purchaseOrder.status === "open" && data.purchaseOrder.suggested_status === "closed" &&
                 <Button onClick={function() { action.mutate({ status: "closed", note: "Accepted production-based closure suggestion." }); }}>Accept closure</Button>}
               {data.purchaseOrder.status !== "open" &&
@@ -374,7 +415,9 @@ function Detail({ id, onClose, onChanged, onRevisionStaged }) {
             {editing && <EditPurchaseOrder data={data} saving={action.isPending} error={action.error} onCancel={function() { setEditing(false); }} onSave={function(draft) { action.mutate({ data: draft, note: "Purchase order details edited by user." }); }} />}
             {reconciliationOpen && reconcile.data && <ReconciliationReview preview={reconcile.data} saving={applyReconciliation.isPending} error={applyReconciliation.error} onCancel={function() { setReconciliationOpen(false); }} onApply={function(mappings) { applyReconciliation.mutate(mappings); }} />}
             {reconciliationResult && <div className="rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-800"><div className="font-semibold">Reconciliation complete</div><div>{reconciliationResult.message}{reconciliationResult.suggestedStatus === "closed" ? " All active lines are fulfilled; closure can now be accepted." : ""}</div></div>}
-            {(!editing && action.error || reconcile.error || revisionUpload.error || onboardingUpload.error) && <div className="text-sm text-red-600">{(!editing && action.error || reconcile.error || revisionUpload.error || onboardingUpload.error).message}</div>}
+            {workOrderMatchingOpen && workOrderMatching.data && <WorkOrderMatchingReview preview={workOrderMatching.data} saving={applyWorkOrderMatching.isPending} error={applyWorkOrderMatching.error} onCancel={function() { setWorkOrderMatchingOpen(false); }} onApply={function(matches) { applyWorkOrderMatching.mutate(matches); }} />}
+            {workOrderMatchingResult && <div className="rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-800"><div className="font-semibold">Work Order matches saved</div><div>{workOrderMatchingResult.message}</div></div>}
+            {(!editing && action.error || reconcile.error || workOrderMatching.error || revisionUpload.error || onboardingUpload.error) && <div className="text-sm text-red-600">{(!editing && action.error || reconcile.error || workOrderMatching.error || revisionUpload.error || onboardingUpload.error).message}</div>}
             <section>
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <div>
