@@ -34,6 +34,10 @@ function poNumberValue(row) {
   ]), 160);
 }
 
+function workOrderCodeValue(row) {
+  return text(pick(row, ["Work Order Code", "work_order_code", "project_code", "Project Code", "Work Order", "WO Number", "wo_number"]), 160);
+}
+
 function priceValue(row) {
   return pick(row, [
     "Purchase Price Per Unit", "purchase_price_per_unit", "Price Per Unit", "price_per_unit",
@@ -56,7 +60,7 @@ export function buildNulogySetupStatus(po, lines, snapshot) {
       check("unknown", "Price", "No Nulogy snapshot is available."),
       check("unknown", "Work Order", "No Nulogy snapshot is available.")
     ];
-    return { status: "unknown", completeCount: 0, totalCount: 4, checks: unavailableChecks, verifiedAt: null };
+    return { status: "unknown", completeCount: 0, totalCount: 4, checks: unavailableChecks, workOrderNumbers: [], verifiedAt: null };
   }
 
   var inventory = Array.isArray(payload.inventory) ? payload.inventory : [];
@@ -79,6 +83,11 @@ export function buildNulogySetupStatus(po, lines, snapshot) {
   var missingPrices = poSkus.filter(function(sku) { return !sku || !pricedSkus[key(sku)]; });
   var poNumberKey = key(po && po.po_number);
   var matchingWorkOrders = workOrders.filter(function(row) { return poNumberKey && key(poNumberValue(row)) === poNumberKey; });
+  var workOrderNumbers = [];
+  matchingWorkOrders.forEach(function(row) {
+    var code = workOrderCodeValue(row);
+    if (code && workOrderNumbers.indexOf(code) === -1) workOrderNumbers.push(code);
+  });
 
   var checks = [
     customerFound
@@ -100,6 +109,7 @@ export function buildNulogySetupStatus(po, lines, snapshot) {
     completeCount: completeCount,
     totalCount: checks.length,
     checks: checks,
+    workOrderNumbers: workOrderNumbers,
     verifiedAt: snapshot.synced_at || null
   };
 }
