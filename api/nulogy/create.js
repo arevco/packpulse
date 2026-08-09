@@ -280,6 +280,11 @@ const REPORT_CONFIGS = {
   workorders: {
     report: "project_status",
     columnSets: [
+      ["project_id", "project_code", "item_code", "item_description", "customer_name",
+       "units_expected", "units_produced", "units_remaining", "due_date_at",
+       "project_status", "standard_units_per_hour", "standard_people",
+       "planned_start_at", "planned_end_at", "reference_1",
+       "purchase_order_number"],
       ["project_code", "item_code", "item_description", "customer_name",
        "units_expected", "units_produced", "units_remaining", "due_date_at",
        "project_status", "standard_units_per_hour", "standard_people",
