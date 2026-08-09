@@ -1,6 +1,7 @@
 import Sentry from "../_sentry.js";
 import { CACHE_SITE_ID, getAuthenticatedUser, getSupabaseAdmin, withCors } from "../ops/_common.js";
 import { key, text } from "./_service.js";
+import { buildNulogySetupStatus } from "./_nulogy-setup.js";
 
 function missingTable(error) {
   var message = String(error && error.message || "").toLowerCase();
@@ -31,7 +32,7 @@ export default async function handler(req, res) {
     if (!sortable[sort]) sort = "updated_at";
     var offset = (page - 1) * pageSize;
     var query = supabase.from("purchase_orders")
-      .select("*,purchase_order_lines(id,line_number,sku,description,quantity,produced_quantity,remaining_quantity,match_status,active)", { count: "exact" })
+      .select("*,purchase_order_lines(id,line_number,sku,description,quantity,unit_rate,produced_quantity,remaining_quantity,match_status,active)", { count: "exact" })
       .eq("site_id", CACHE_SITE_ID)
       .order(sort, { ascending: direction, nullsFirst: false })
       .range(offset, offset + pageSize - 1);
@@ -48,12 +49,15 @@ export default async function handler(req, res) {
       supabase.from("purchase_orders").select("status,suggested_status").eq("site_id", CACHE_SITE_ID),
       purchaseOrderIds.length
         ? supabase.from("purchase_order_onboarding_documents").select("purchase_order_id").eq("site_id", CACHE_SITE_ID).in("purchase_order_id", purchaseOrderIds)
-        : Promise.resolve({ data: [], error: null })
+        : Promise.resolve({ data: [], error: null }),
+      supabase.from("cache_snapshots").select("payload,synced_at").eq("site_id", CACHE_SITE_ID).maybeSingle()
     ]);
     var countsResult = related[0];
     var onboardingResult = related[1];
+    var snapshotResult = related[2];
     if (countsResult.error) throw countsResult.error;
     if (onboardingResult.error && !missingOnboardingDocumentsTable(onboardingResult.error)) throw onboardingResult.error;
+    if (snapshotResult.error) throw snapshotResult.error;
     var onboardingByPurchaseOrder = {};
     (onboardingResult.data || []).forEach(function(document) { onboardingByPurchaseOrder[document.purchase_order_id] = true; });
     var counts = { all: 0, open: 0, suggested_closed: 0, closed: 0, cancelled: 0, draft: 0 };
@@ -70,6 +74,7 @@ export default async function handler(req, res) {
       row.produced_quantity = activeLines.reduce(function(sum, line) { return sum + Number(line.produced_quantity || 0); }, 0);
       row.remaining_quantity = activeLines.reduce(function(sum, line) { return sum + Number(line.remaining_quantity || 0); }, 0);
       row.has_onboarding_document = onboardingResult.error ? null : Boolean(onboardingByPurchaseOrder[row.id]);
+      row.nulogy_setup = buildNulogySetupStatus(row, activeLines, snapshotResult.data);
       row.sku_items = activeLines.map(function(line) {
         return {
           lineNumber: Number(line.line_number || 0),

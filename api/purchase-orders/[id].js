@@ -1,6 +1,7 @@
 import Sentry from "../_sentry.js";
 import { CACHE_SITE_ID, getAuthenticatedUser, getSupabaseAdmin, withCors } from "../ops/_common.js";
 import { addEvent, key, signedDocumentUrl, text, validateConfirmed } from "./_service.js";
+import { buildNulogySetupStatus } from "./_nulogy-setup.js";
 
 function missingOnboardingDocumentsTable(error) {
   var message = String(error && error.message || "").toLowerCase();
@@ -108,10 +109,12 @@ export default async function handler(req, res) {
       supabase.from("purchase_order_lines").select("*").eq("site_id", CACHE_SITE_ID).eq("purchase_order_id", id).eq("revision_id", found.data.current_revision_id).eq("active", true).order("line_number"),
       supabase.from("purchase_order_revisions").select("*").eq("site_id", CACHE_SITE_ID).eq("purchase_order_id", id).order("revision_number", { ascending: false }),
       supabase.from("purchase_order_events").select("*").eq("site_id", CACHE_SITE_ID).eq("purchase_order_id", id).order("created_at", { ascending: false }),
-      supabase.from("purchase_order_onboarding_documents").select("*").eq("site_id", CACHE_SITE_ID).eq("purchase_order_id", id).order("created_at", { ascending: false })
+      supabase.from("purchase_order_onboarding_documents").select("*").eq("site_id", CACHE_SITE_ID).eq("purchase_order_id", id).order("created_at", { ascending: false }),
+      supabase.from("cache_snapshots").select("payload,synced_at").eq("site_id", CACHE_SITE_ID).maybeSingle()
     ]);
     related.slice(0, 3).forEach(function(result) { if (result.error) throw result.error; });
     if (related[3].error && !missingOnboardingDocumentsTable(related[3].error)) throw related[3].error;
+    if (related[4].error) throw related[4].error;
     var currentRevision = (related[1].data || []).find(function(row) { return row.id === found.data.current_revision_id; });
     var documentUrl = await signedDocumentUrl(supabase, currentRevision);
     var onboardingDocuments = [];
@@ -124,7 +127,8 @@ export default async function handler(req, res) {
       purchaseOrder: found.data, lines: related[0].data || [], revisions: related[1].data || [],
       events: related[2].data || [], documentUrl: documentUrl,
       onboardingDocuments: onboardingDocuments,
-      onboardingDocumentsStatus: related[3].error ? "missing_table" : "ready"
+      onboardingDocumentsStatus: related[3].error ? "missing_table" : "ready",
+      nulogySetup: buildNulogySetupStatus(found.data, related[0].data || [], related[4].data)
     });
   } catch (error) {
     Sentry.captureException(error);
