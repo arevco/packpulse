@@ -365,10 +365,13 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       var sku = normalizeStr(skuRaw);
       if (!sku) return;
       var masterDescRaw = firstValue(row, ["Description", "description", "Item Description", "item_description"]).toString().trim();
+      var rawItemId = String(firstValueLoose(row, ["Item ID", "item_id", "id", "ID"]) || "").trim();
+      var itemId = /^\d+$/.test(rawItemId) ? rawItemId : "";
       var costPerUnit = safeNum(firstCostValue(row));
       if (!itemMasterBySku[sku]) itemMasterBySku[sku] = { sku:sku, skuRaw:skuRaw, desc:"" };
       itemMasterBySku[sku].desc = pickBetterDescription(itemMasterBySku[sku].desc || "", masterDescRaw, skuRaw);
       if (!itemMasterBySku[sku].skuRaw && skuRaw) itemMasterBySku[sku].skuRaw = skuRaw;
+      if (!itemMasterBySku[sku].itemId && itemId) itemMasterBySku[sku].itemId = itemId;
       if (costPerUnit > 0) itemMasterBySku[sku].costPerUnit = costPerUnit;
     });
     var inferredInvStatusCol = "";
@@ -481,6 +484,8 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
         customer:customer,
         workOrderId:workOrderId,
         workOrderUrl:workOrderId ? "https://app.nulogy.net/work_orders/" + workOrderId : "",
+        productItemId:itemMasterBySku[productSku] && itemMasterBySku[productSku].itemId || "",
+        productItemUrl:itemMasterBySku[productSku] && itemMasterBySku[productSku].itemId ? "https://app.nulogy.net/items/" + itemMasterBySku[productSku].itemId + "/item_information_section" : "",
         unitsProduced:unitsProduced,
         unitsRemaining:unitsRemaining,
         unitsPerHour:unitsPerHour,
