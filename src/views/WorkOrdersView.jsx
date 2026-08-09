@@ -1151,7 +1151,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       detailContent: isExpanded ? renderWOExpandedDetails(wo, commitment, batchMeta, runMeta) : null,
       summaryCells: [
         { key:"dispatchRank", style:Object.assign({}, denseTdN, { color:runMeta ? C.bright : C.dim, whiteSpace:"nowrap" }), content:runMeta ? <span title={(runMeta.action || "Run Next") + (runMeta.why ? " • " + runMeta.why : "")} style={{ color:C.accent, fontWeight:700 }}>#{runMeta.rank}</span> : "--" },
-        { key:"woNum", style:Object.assign({}, denseTdM, { fontWeight:600, color:C.bright }), content:wo.woNum },
+        { key:"woNum", style:Object.assign({}, denseTdM, { fontWeight:600, color:C.bright }), content:wo.workOrderUrl ? <a href={wo.workOrderUrl} target="_blank" rel="noreferrer" onClick={function(event) { event.stopPropagation(); }} className="rounded-sm border-b border-slate-300 text-inherit no-underline transition-colors hover:border-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-1" title={"Open Work Order " + wo.woNum + " in Nulogy"}>{wo.woNum}</a> : wo.woNum },
         { key:"product", style:Object.assign({}, denseTdM, truncate(104)), content:wo.productSkuRaw },
         { key:"batchCount", style:Object.assign({}, denseTdN, { whiteSpace:"nowrap" }), content:batchMeta ? (
           <Badge

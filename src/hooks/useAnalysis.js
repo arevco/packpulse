@@ -445,6 +445,8 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
     });
     var results = workOrders.map(wo => {
       var woNum = (wo[woMapping.woNumber]||"").toString().trim(); var productSku = normalizeStr(wo[woMapping.productSku]); var productSkuRaw = (wo[woMapping.productSku]||"").toString().trim();
+      var rawWorkOrderId = String(firstValueLoose(wo, ["Project ID", "project_id", "Work Order ID", "work_order_id"]) || "").trim();
+      var workOrderId = /^\d+$/.test(rawWorkOrderId) ? rawWorkOrderId : "";
       var qtyToProduce = safeNum(wo[woMapping.qtyToProduce]); var dueDate = woMapping.dueDate ? (wo[woMapping.dueDate]||"").toString().trim() : ""; var status = woMapping.status ? (wo[woMapping.status]||"").toString().trim() : "";
       var customer = woMapping.customer ? (wo[woMapping.customer]||"").toString().trim() : "";
       var statusNorm = normalizeStr(status);
@@ -477,6 +479,8 @@ export function useAnalysis({ mappingConfirmed, allUploaded, inventory, itemMast
       var prodPct = qtyToProduce > 0 ? Math.round(unitsProduced / qtyToProduce * 100) : 0;
       var extra = {
         customer:customer,
+        workOrderId:workOrderId,
+        workOrderUrl:workOrderId ? "https://app.nulogy.net/work_orders/" + workOrderId : "",
         unitsProduced:unitsProduced,
         unitsRemaining:unitsRemaining,
         unitsPerHour:unitsPerHour,
