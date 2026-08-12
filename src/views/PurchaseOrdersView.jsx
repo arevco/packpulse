@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useDeferredValue, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle, Check, ChevronLeft, ChevronRight, FileSpreadsheet, FileText,
@@ -375,8 +376,8 @@ function Detail({ id, onClose, onChanged, onRevisionStaged }) {
     onSuccess: function() { query.refetch(); onChanged(); }
   });
   var data = query.data;
-  return (
-    <div className="fixed inset-0 z-50 bg-slate-950/40 backdrop-blur-sm" onMouseDown={onClose}>
+  return createPortal(
+    <div className="fixed inset-0 z-[110] bg-slate-950/40 backdrop-blur-sm" onMouseDown={onClose}>
       <div className="absolute inset-y-0 right-0 w-full max-w-3xl overflow-auto border-l border-[rgb(var(--border))] bg-[rgb(var(--background))] shadow-2xl" onMouseDown={function(e) { e.stopPropagation(); }}>
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[rgb(var(--border))] bg-[rgb(var(--background))] px-5 py-3">
           <div className="font-semibold">{data ? data.purchaseOrder.po_number + " · " + data.purchaseOrder.customer_name : "Purchase order"}</div>
@@ -501,7 +502,8 @@ function Detail({ id, onClose, onChanged, onRevisionStaged }) {
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
