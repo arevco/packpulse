@@ -1,6 +1,7 @@
 import Sentry from "../../_sentry.js";
 import { CACHE_SITE_ID, getAuthenticatedUser, getSupabaseAdmin, toNum, withCors } from "../../ops/_common.js";
 import { addEvent, date, key, text } from "../_service.js";
+import { matchCustomerName } from "../../ops/_customer-aliases.js";
 
 function pick(row, names) {
   var keys = Object.keys(row || {});
@@ -37,10 +38,11 @@ function normalizeWorkOrder(row) {
   };
 }
 
-function scoreCandidate(po, line, workOrder) {
+function scoreCandidate(po, line, workOrder, customerNames) {
   var exactPo = key(workOrder.purchaseOrderNumber) === key(po.po_number) || key(workOrder.reference) === key(po.po_number);
   var exactSku = Boolean(key(line.sku)) && key(workOrder.sku) === key(line.sku);
-  var exactCustomer = Boolean(key(po.customer_name)) && key(workOrder.customer) === key(po.customer_name);
+  var customerMatch = matchCustomerName(po.customer_name, customerNames);
+  var exactCustomer = customerMatch.matched && key(workOrder.customer) === key(customerMatch.matchedName);
   if (!exactPo && !(exactSku && exactCustomer)) return null;
   var score = (exactPo ? 60 : 0) + (exactSku ? 25 : 0) + (exactCustomer ? 15 : 0);
   var reasons = [];
@@ -74,7 +76,7 @@ async function buildPreview(supabase, po) {
   });
   var lines = (results[0].data || []).map(function(line) {
     var candidates = workOrders.map(function(workOrder) {
-      var match = scoreCandidate(po, line, workOrder);
+      var match = scoreCandidate(po, line, workOrder, workOrders.map(function(row) { return row.customer; }).filter(Boolean));
       return match ? Object.assign({}, workOrder, match) : null;
     }).filter(Boolean).sort(function(left, right) { return right.score - left.score || String(left.code).localeCompare(String(right.code)); }).slice(0, 25);
     return {

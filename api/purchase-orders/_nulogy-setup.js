@@ -1,4 +1,5 @@
 import { key, text } from "./_service.js";
+import { matchCustomerName } from "../ops/_customer-aliases.js";
 
 function pick(row, names) {
   var rowKeys = Object.keys(row || {});
@@ -72,8 +73,7 @@ export function buildNulogySetupStatus(po, lines, snapshot) {
   var itemMaster = Array.isArray(payload.itemMaster) ? payload.itemMaster : [];
   var workOrders = Array.isArray(payload.workOrders) ? payload.workOrders : [];
   var allRows = itemMaster.concat(inventory, workOrders);
-  var customerKey = key(po && po.customer_name);
-  var customerFound = Boolean(customerKey) && allRows.some(function(row) { return key(customerValue(row)) === customerKey; });
+  var customerMatch = matchCustomerName(po && po.customer_name, allRows.map(customerValue).filter(Boolean));
 
   var nulogySkus = {};
   var pricedSkus = {};
@@ -98,9 +98,11 @@ export function buildNulogySetupStatus(po, lines, snapshot) {
   var workOrderNumbers = matchedWorkOrders.map(function(item) { return item.code; });
 
   var checks = [
-    customerFound
-      ? check("complete", "Customer", "Exact customer found in Nulogy.")
-      : check("needed", "Customer", "Customer name was not found in the current Nulogy data.", [text(po && po.customer_name, 240) || "Customer name"]),
+    customerMatch.matched
+      ? check("complete", "Customer", "Matched to " + customerMatch.matchedName + " in Nulogy (" + customerMatch.reason + ").")
+      : customerMatch.ambiguous
+        ? check("needed", "Customer", "Multiple Nulogy customers matched; review is required.", customerMatch.candidates)
+        : check("needed", "Customer", "Customer name was not found in the current Nulogy data.", [text(po && po.customer_name, 240) || "Customer name"]),
     poSkus.length && !missingItems.length
       ? check("complete", "Item numbers", poSkus.length + " of " + poSkus.length + " PO SKUs found in Nulogy.")
       : check("needed", "Item numbers", (poSkus.length - missingItems.length) + " of " + poSkus.length + " PO SKUs found in Nulogy.", missingItems),
@@ -117,6 +119,7 @@ export function buildNulogySetupStatus(po, lines, snapshot) {
     completeCount: completeCount,
     totalCount: checks.length,
     checks: checks,
+    customerMatch: customerMatch,
     workOrders: matchedWorkOrders,
     workOrderNumbers: workOrderNumbers,
     verifiedAt: snapshot.synced_at || null
