@@ -306,7 +306,6 @@ const REPORT_CONFIGS = {
   itemmaster: {
     report: "item_master",
     columnSets: [
-      ["id", "code", "description", "customer", "is_subcomponent", "is_finished_good", "item_type", "item_category", "inactive", "cost_per_unit", "unit_purchase_price", "upc", "gtin", "alternate_code_1", "alternate_code_2"],
       ["code", "description", "customer", "is_subcomponent", "is_finished_good", "item_type", "item_category", "inactive", "cost_per_unit", "unit_purchase_price", "upc", "gtin", "alternate_code_1", "alternate_code_2"],
       ["code", "description", "customer", "is_subcomponent", "is_finished_good", "item_type", "item_category", "inactive", "cost_per_unit"],
       // Keep a cost-bearing fallback before any no-cost fallback to avoid zero-cost UI when optional fields are unsupported.

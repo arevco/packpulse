@@ -135,7 +135,27 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
   const [sortField, setSortField] = useState(initialSortField);
   const [sortDir, setSortDir] = useState(initialSortDir);
   const [expandedWOs, setExpandedWOs] = useState({});
+  const [resolvedItemUrls, setResolvedItemUrls] = useState({});
   const workOrdersScrollRef = useRef(null);
+
+  useEffect(function() {
+    var rows = analysis && Array.isArray(analysis.results) ? analysis.results : [];
+    var requested = rows.filter(function(wo) { return wo && wo.workOrderId && !wo.productItemUrl; }).map(function(wo) {
+      return { workOrderId: wo.workOrderId, sku: wo.productSkuRaw || "" };
+    });
+    if (!requested.length) return;
+    var cancelled = false;
+    fetch("/api/nulogy/work-order-items", {
+      method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workOrders: requested })
+    }).then(function(response) { return response.ok ? response.json() : null; }).then(function(body) {
+      if (cancelled || !body || !Array.isArray(body.items)) return;
+      var next = {};
+      body.items.forEach(function(item) { if (item.workOrderId && item.itemUrl) next[item.workOrderId] = item.itemUrl; });
+      setResolvedItemUrls(next);
+    }).catch(function() {});
+    return function() { cancelled = true; };
+  }, [analysis]);
 
   var runStatusMeta = function(s) {
     if (s === "ready") return { label:"RDY", variant:"success" };
@@ -1145,6 +1165,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
     var rs = runStatusMeta(wo.runStatus);
     var skuType = detectPackType(wo.productDesc || wo.productSkuRaw || "", wo.productSkuRaw || wo.productSku || "");
     var readyPct = getNetReadyPct(wo, commitment);
+    var productItemUrl = wo.productItemUrl || resolvedItemUrls[wo.workOrderId] || "";
     return {
       rowKey: rowKey,
       isExpanded: isExpanded,
@@ -1152,7 +1173,7 @@ export default function WorkOrdersView({ analysis, woStatuses, woCustomers, reco
       summaryCells: [
         { key:"dispatchRank", style:Object.assign({}, denseTdN, { color:runMeta ? C.bright : C.dim, whiteSpace:"nowrap" }), content:runMeta ? <span title={(runMeta.action || "Run Next") + (runMeta.why ? " • " + runMeta.why : "")} style={{ color:C.accent, fontWeight:700 }}>#{runMeta.rank}</span> : "--" },
         { key:"woNum", style:Object.assign({}, denseTdM, { fontWeight:600, color:C.bright }), content:wo.workOrderUrl ? <a href={wo.workOrderUrl} target="_blank" rel="noreferrer" onClick={function(event) { event.stopPropagation(); }} className="rounded-sm border-b border-slate-300 text-inherit no-underline transition-colors hover:border-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-1" title={"Open Work Order " + wo.woNum + " in Nulogy"}>{wo.woNum}</a> : wo.woNum },
-        { key:"product", style:Object.assign({}, denseTdM, truncate(104)), content:wo.productItemUrl ? <a href={wo.productItemUrl} target="_blank" rel="noreferrer" onClick={function(event) { event.stopPropagation(); }} className="rounded-sm border-b border-slate-300 text-inherit no-underline transition-colors hover:border-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-1" title={"Open item " + wo.productSkuRaw + " in Nulogy"}>{wo.productSkuRaw}</a> : wo.productSkuRaw },
+        { key:"product", style:Object.assign({}, denseTdM, truncate(104)), content:productItemUrl ? <a href={productItemUrl} target="_blank" rel="noreferrer" onClick={function(event) { event.stopPropagation(); }} className="rounded-sm border-b border-slate-300 text-inherit no-underline transition-colors hover:border-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-1" title={"Open item " + wo.productSkuRaw + " in Nulogy"}>{wo.productSkuRaw}</a> : wo.productSkuRaw },
         { key:"batchCount", style:Object.assign({}, denseTdN, { whiteSpace:"nowrap" }), content:batchMeta ? (
           <Badge
             variant="info"
