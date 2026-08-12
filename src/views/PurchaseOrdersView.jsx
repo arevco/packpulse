@@ -2,12 +2,13 @@ import { Fragment, useCallback, useDeferredValue, useEffect, useRef, useState } 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle, Check, ChevronLeft, ChevronRight, FileSpreadsheet, FileText,
-  Link2, Loader2, Paperclip, Pencil, Plus, RefreshCw, Search, Upload, X
+  Link2, Loader2, MessageSquare, Paperclip, Pencil, Plus, RefreshCw, Search, Send, Upload, X
 } from "lucide-react";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader } from "../components/ui/card";
 import { Input } from "../components/ui/input";
+import { Textarea } from "../components/ui/textarea";
 import TableShell from "../components/ui/table-shell";
 import { cn } from "../lib/utils";
 import QuotesPanel from "./QuotesPanel";
@@ -322,6 +323,7 @@ function Detail({ id, onClose, onChanged, onRevisionStaged }) {
   const [reconciliationResult, setReconciliationResult] = useState(null);
   const [workOrderMatchingOpen, setWorkOrderMatchingOpen] = useState(false);
   const [workOrderMatchingResult, setWorkOrderMatchingResult] = useState(null);
+  const [noteDraft, setNoteDraft] = useState("");
   const query = useQuery({ queryKey: ["purchase-order", id], queryFn: function() { return api("/api/purchase-orders/" + id); } });
   const action = useMutation({
     mutationFn: function(input) {
@@ -346,6 +348,10 @@ function Detail({ id, onClose, onChanged, onRevisionStaged }) {
   const applyWorkOrderMatching = useMutation({
     mutationFn: function(matches) { return api("/api/purchase-orders/" + id + "/work-orders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ matches: matches }) }); },
     onSuccess: function(result) { setWorkOrderMatchingOpen(false); setWorkOrderMatchingResult(result); query.refetch(); onChanged(); }
+  });
+  const addNote = useMutation({
+    mutationFn: function(note) { return api("/api/purchase-orders/" + id + "/notes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ note: note }) }); },
+    onSuccess: function() { setNoteDraft(""); query.refetch(); }
   });
   const revisionUpload = useMutation({
     mutationFn: async function(file) {
@@ -473,6 +479,11 @@ function Detail({ id, onClose, onChanged, onRevisionStaged }) {
                 </div>
               </TableShell>
             </section>
+            <section className="rounded-md border border-[rgb(var(--border))] p-4">
+              <div className="flex items-start gap-2"><MessageSquare className="mt-0.5 h-4 w-4 text-[rgb(var(--muted))]" /><div><div className="text-sm font-semibold">Notes</div><div className="text-xs text-[rgb(var(--muted))]">Leave updates or messages for anyone reviewing this purchase order.</div></div></div>
+              <div className="mt-3 space-y-2">{data.events.filter(function(event) { return event.event_type === "po_note_added"; }).length ? data.events.filter(function(event) { return event.event_type === "po_note_added"; }).map(function(event) { return <div key={event.id} className="rounded-md bg-slate-50 px-3 py-2.5"><div className="whitespace-pre-wrap text-sm text-slate-800">{event.note}</div><div className="mt-1.5 text-xs text-[rgb(var(--muted))]">{event.actor || "Unknown user"} · {new Date(event.created_at).toLocaleString()}</div></div>; }) : <div className="rounded-md border border-dashed border-[rgb(var(--border))] p-3 text-center text-sm text-[rgb(var(--muted))]">No notes yet.</div>}</div>
+              <div className="mt-3"><Textarea maxLength={2000} rows={3} placeholder="Add a note or update…" value={noteDraft} onChange={function(event) { setNoteDraft(event.target.value); }} /><div className="mt-2 flex items-center justify-between gap-3"><span className="text-xs text-[rgb(var(--muted))]">{noteDraft.length}/2,000</span><Button size="sm" disabled={addNote.isPending || !noteDraft.trim()} onClick={function() { addNote.mutate(noteDraft); }}>{addNote.isPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Send className="mr-1.5 h-3.5 w-3.5" />}Post note</Button></div>{addNote.error && <div className="mt-2 text-sm text-red-600">{addNote.error.message}</div>}</div>
+            </section>
             <section>
               <div className="mb-2 text-sm font-semibold">Revision history</div>
               <div className="space-y-2">{data.revisions.map(function(revision) { return <div key={revision.id} className="flex items-center justify-between rounded-md border border-[rgb(var(--border))] px-3 py-2 text-sm">
@@ -482,7 +493,7 @@ function Detail({ id, onClose, onChanged, onRevisionStaged }) {
             </section>
             <section>
               <div className="mb-2 text-sm font-semibold">Audit history</div>
-              <div className="space-y-2">{data.events.map(function(event) { return <div key={event.id} className="border-l-2 border-[rgb(var(--border))] pl-3 text-sm">
+              <div className="space-y-2">{data.events.filter(function(event) { return event.event_type !== "po_note_added"; }).map(function(event) { return <div key={event.id} className="border-l-2 border-[rgb(var(--border))] pl-3 text-sm">
                 <div className="font-medium">{String(event.event_type).replace(/_/g, " ")}</div>
                 <div className="text-xs text-[rgb(var(--muted))]">{event.actor || "System"} · {new Date(event.created_at).toLocaleString()}</div>
               </div>; })}</div>
