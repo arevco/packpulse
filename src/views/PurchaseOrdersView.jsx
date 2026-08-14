@@ -83,8 +83,29 @@ function normalizeDraft(data) {
   return draft;
 }
 
+function useNulogyOptions() {
+  return useQuery({
+    queryKey: ["purchase-order-nulogy-options"],
+    queryFn: function() { return api("/api/purchase-orders/nulogy-options"); },
+    staleTime: 5 * 60 * 1000
+  });
+}
+
+function SuggestedField({ label, value, onChange, options, listId, placeholder, help }) {
+  return <label className="block">
+    <span className="mb-1 block text-xs font-medium text-[rgb(var(--muted))]">{label}</span>
+    <Input value={value == null ? "" : value} list={listId} placeholder={placeholder} autoComplete="off" onChange={function(event) { onChange(event.target.value); }} />
+    <datalist id={listId}>{(options || []).map(function(option) {
+      var optionValue = typeof option === "string" ? option : option.value;
+      return <option key={optionValue} value={optionValue}>{typeof option === "string" ? option : option.label}</option>;
+    })}</datalist>
+    {help && <span className="mt-1 block text-[11px] text-[rgb(var(--muted))]">{help}</span>}
+  </label>;
+}
+
 function UploadReview({ staged, onClose, onConfirmed }) {
   const [draft, setDraft] = useState(function() { return normalizeDraft(staged.extracted); });
+  const nulogyOptions = useNulogyOptions();
   const mutation = useMutation({
     mutationFn: function() {
       return api("/api/purchase-orders/" + staged.revision.id + "/confirm", {
@@ -104,6 +125,11 @@ function UploadReview({ staged, onClose, onConfirmed }) {
       var subtotal = lines.reduce(function(sum, line) { return sum + Number(line.lineAmount || 0); }, 0);
       return Object.assign({}, old, { lines: lines, subtotal: subtotal, total: subtotal + Number(old.taxTotal || 0) });
     });
+  };
+  var selectSku = function(index, sku) {
+    var matched = ((nulogyOptions.data && nulogyOptions.data.items) || []).find(function(item) { return item.sku === sku; });
+    updateLine(index, "sku", sku);
+    if (matched && matched.description && !draft.lines[index].description) updateLine(index, "description", matched.description);
   };
   var requiredMissing = !draft.customerName || !draft.poNumber || !draft.poDate ||
     !draft.lines.length || draft.lines.some(function(line) { return !line.description || !(Number(line.quantity) > 0) || !line.uom; });
@@ -142,7 +168,7 @@ function UploadReview({ staged, onClose, onConfirmed }) {
               </div>
             )}
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Customer *" value={draft.customerName} onChange={function(v) { update("customerName", v); }} />
+              <SuggestedField label="Customer *" value={draft.customerName} onChange={function(v) { update("customerName", v); }} options={(nulogyOptions.data && nulogyOptions.data.customers) || []} listId="upload-po-customers" placeholder="Select or enter a customer" help="Choose a Nulogy customer or type a new customer name." />
               <Field label="PO number *" value={draft.poNumber} onChange={function(v) { update("poNumber", v); }} />
               <Field label="PO date *" type="date" value={draft.poDate} onChange={function(v) { update("poDate", v); }} />
               <Field label="Expected / receive-by" type="date" value={draft.expectedDate} onChange={function(v) { update("expectedDate", v); }} />
@@ -166,7 +192,7 @@ function UploadReview({ staged, onClose, onConfirmed }) {
                       </div>
                       <div className="grid gap-2 sm:grid-cols-6">
                         <div className="sm:col-span-2"><Field label="Description *" value={line.description} onChange={function(v) { updateLine(index, "description", v); }} /></div>
-                        <Field label="SKU" value={line.sku} onChange={function(v) { updateLine(index, "sku", v); }} />
+                        <SuggestedField label="SKU" value={line.sku} onChange={function(v) { selectSku(index, v); }} options={((nulogyOptions.data && nulogyOptions.data.items) || []).map(function(item) { return { value: item.sku, label: [item.description, item.customer].filter(Boolean).join(" · ") }; })} listId={"upload-po-skus-" + index} placeholder="Select or enter SKU" />
                         <Field label="Quantity *" type="number" value={line.quantity} onChange={function(v) { updateLine(index, "quantity", Number(v)); }} />
                         <Field label="UOM *" value={line.uom} onChange={function(v) { updateLine(index, "uom", v); }} />
                         <Field label="Unit rate" type="number" value={line.unitRate} onChange={function(v) { updateLine(index, "unitRate", Number(v)); }} />
@@ -210,6 +236,7 @@ function Field({ label, value, onChange, type, disabled }) {
 }
 
 function EditPurchaseOrder({ data, onCancel, onSave, saving, error }) {
+  const nulogyOptions = useNulogyOptions();
   const [draft, setDraft] = useState(function() {
     var initial = normalizeDraft({
       customerName: data.purchaseOrder.customer_name, poNumber: data.purchaseOrder.po_number,
@@ -235,13 +262,21 @@ function EditPurchaseOrder({ data, onCancel, onSave, saving, error }) {
     lines[index] = Object.assign({}, lines[index], { [field]: value });
     return Object.assign({}, old, recalculate(lines, Number(old.taxTotal || 0)));
   }); };
+  var selectSku = function(index, sku) {
+    var matched = ((nulogyOptions.data && nulogyOptions.data.items) || []).find(function(item) { return item.sku === sku; });
+    setDraft(function(old) {
+      var lines = old.lines.slice();
+      lines[index] = Object.assign({}, lines[index], { sku: sku }, matched && matched.description && !lines[index].description ? { description: matched.description } : {});
+      return Object.assign({}, old, recalculate(lines, Number(old.taxTotal || 0)));
+    });
+  };
   var missing = !draft.customerName || !draft.poNumber || !draft.poDate || !draft.lines.length || draft.lines.some(function(line) {
     return !line.description || !(Number(line.quantity) > 0) || !line.uom;
   });
   return <section className="space-y-4 rounded-md border border-blue-200 bg-blue-50/40 p-4">
     <div><div className="font-semibold">Edit purchase order</div><div className="text-xs text-[rgb(var(--muted))]">Changes update the register and are recorded in audit history. The original document is preserved.</div></div>
     <div className="grid gap-3 sm:grid-cols-2">
-      <Field label="Customer *" value={draft.customerName} onChange={function(v) { update("customerName", v); }} />
+      <SuggestedField label="Customer *" value={draft.customerName} onChange={function(v) { update("customerName", v); }} options={(nulogyOptions.data && nulogyOptions.data.customers) || []} listId={"edit-po-customers-" + data.purchaseOrder.id} placeholder="Select or enter a customer" help="Choose a Nulogy customer or type a new customer name." />
       <Field label="PO number *" value={draft.poNumber} onChange={function(v) { update("poNumber", v); }} />
       <Field label="PO date *" type="date" value={draft.poDate} onChange={function(v) { update("poDate", v); }} />
       <Field label="Expected / receive-by" type="date" value={draft.expectedDate} onChange={function(v) { update("expectedDate", v); }} />
@@ -252,7 +287,7 @@ function EditPurchaseOrder({ data, onCancel, onSave, saving, error }) {
       <div className="flex items-center justify-between"><div className="text-sm font-semibold">Line items</div><Button variant="outline" size="sm" onClick={function() { setDraft(function(old) { return Object.assign({}, old, recalculate(old.lines.concat([blankLine()]), Number(old.taxTotal || 0))); }); }}><Plus className="mr-1 h-3.5 w-3.5" />Add line</Button></div>
       {draft.lines.map(function(line, index) { return <div key={line.id || "new-" + index} className="rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--background))] p-3">
         <div className="mb-2 flex justify-between text-xs font-semibold text-[rgb(var(--muted))]"><span>LINE {index + 1}</span>{draft.lines.length > 1 && <button type="button" onClick={function() { setDraft(function(old) { return Object.assign({}, old, recalculate(old.lines.filter(function(_, i) { return i !== index; }), Number(old.taxTotal || 0))); }); }}><X className="h-4 w-4" /></button>}</div>
-        <div className="grid gap-2 sm:grid-cols-6"><div className="sm:col-span-2"><Field label="Description *" value={line.description} onChange={function(v) { updateLine(index, "description", v); }} /></div><Field label="SKU" value={line.sku} onChange={function(v) { updateLine(index, "sku", v); }} /><Field label="Quantity *" type="number" value={line.quantity} onChange={function(v) { updateLine(index, "quantity", Number(v)); }} /><Field label="UOM *" value={line.uom} onChange={function(v) { updateLine(index, "uom", v); }} /><Field label="Unit rate" type="number" value={line.unitRate} onChange={function(v) { updateLine(index, "unitRate", Number(v)); }} /></div>
+        <div className="grid gap-2 sm:grid-cols-6"><div className="sm:col-span-2"><Field label="Description *" value={line.description} onChange={function(v) { updateLine(index, "description", v); }} /></div><SuggestedField label="SKU" value={line.sku} onChange={function(v) { selectSku(index, v); }} options={((nulogyOptions.data && nulogyOptions.data.items) || []).map(function(item) { return { value: item.sku, label: [item.description, item.customer].filter(Boolean).join(" · ") }; })} listId={"edit-po-skus-" + data.purchaseOrder.id + "-" + index} placeholder="Select or enter SKU" /><Field label="Quantity *" type="number" value={line.quantity} onChange={function(v) { updateLine(index, "quantity", Number(v)); }} /><Field label="UOM *" value={line.uom} onChange={function(v) { updateLine(index, "uom", v); }} /><Field label="Unit rate" type="number" value={line.unitRate} onChange={function(v) { updateLine(index, "unitRate", Number(v)); }} /></div>
       </div>; })}
     </div>
     <div className="flex items-center justify-between"><div className="text-sm"><span className="text-[rgb(var(--muted))]">Calculated total: </span><strong>{formatMoney(draft.total, draft.currency)}</strong></div><div className="flex gap-2"><Button variant="outline" onClick={onCancel}>Cancel</Button><Button disabled={missing || saving} onClick={function() { onSave(draft); }}>{saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save changes</Button></div></div>
