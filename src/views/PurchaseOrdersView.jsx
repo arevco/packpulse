@@ -527,7 +527,7 @@ function NulogySetupChecklist({ setup }) {
   </section>;
 }
 
-function PurchaseOrderRegisterRow({ row, expanded, onToggle, onOpen }) {
+function PurchaseOrderRegisterRow({ row, expanded, onToggle, onOpen, onOnboardingUpload, onboardingUploading }) {
   var items = Array.isArray(row.sku_items) ? row.sku_items : [];
   var firstItem = items[0];
   var workOrders = row.nulogy_setup && Array.isArray(row.nulogy_setup.workOrders)
@@ -535,7 +535,7 @@ function PurchaseOrderRegisterRow({ row, expanded, onToggle, onOpen }) {
     : (row.nulogy_setup && Array.isArray(row.nulogy_setup.workOrderNumbers) ? row.nulogy_setup.workOrderNumbers.map(function(code) { return { code: code, url: null }; }) : []);
   return <Fragment>
     <tr onClick={onToggle} className={cn("cursor-pointer border-t border-[rgb(var(--border))] transition-colors hover:bg-slate-50", expanded && "bg-slate-50/70")}>
-      <td className="px-4 py-3 align-top"><div className="flex items-start gap-2"><button type="button" className="mt-0.5 rounded p-0.5 text-[rgb(var(--muted))] hover:bg-slate-200 hover:text-slate-900" aria-label={(expanded ? "Collapse " : "Expand ") + row.po_number} aria-expanded={expanded} onClick={function(event) { event.stopPropagation(); onToggle(); }}><ChevronRight className={cn("h-4 w-4 transition-transform", expanded && "rotate-90")} /></button><div><div className="font-semibold">{row.po_number}</div><div className="text-xs text-[rgb(var(--muted))]">{row.customer_name} · Rev {row.revision_number}</div><div className="mt-1 text-[11px] text-[rgb(var(--muted))]">{expanded ? "Hide line items" : "View " + items.length + " line item" + (items.length === 1 ? "" : "s")}</div><div className="mt-1.5 flex flex-wrap gap-1.5">{row.has_onboarding_document === false && <span className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800" title="Open this purchase order to attach an onboarding document."><AlertTriangle className="h-3 w-3" />Onboarding needed</span>}<NulogySetupIndicator setup={row.nulogy_setup} compact /></div></div></div></td>
+      <td className="px-4 py-3 align-top"><div className="flex items-start gap-2"><button type="button" className="mt-0.5 rounded p-0.5 text-[rgb(var(--muted))] hover:bg-slate-200 hover:text-slate-900" aria-label={(expanded ? "Collapse " : "Expand ") + row.po_number} aria-expanded={expanded} onClick={function(event) { event.stopPropagation(); onToggle(); }}><ChevronRight className={cn("h-4 w-4 transition-transform", expanded && "rotate-90")} /></button><div><div className="font-semibold">{row.po_number}</div><div className="text-xs text-[rgb(var(--muted))]">{row.customer_name} · Rev {row.revision_number}</div><div className="mt-1 text-[11px] text-[rgb(var(--muted))]">{expanded ? "Hide line items" : "View " + items.length + " line item" + (items.length === 1 ? "" : "s")}</div><div className="mt-1.5 flex flex-col items-start gap-1.5">{row.has_onboarding_document === false && <button type="button" disabled={onboardingUploading} onClick={function(event) { event.stopPropagation(); onOnboardingUpload(); }} className="group inline-flex items-center gap-2 rounded-md border border-dashed border-slate-300 bg-white px-2 py-1 text-left text-[11px] font-medium text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-50 disabled:cursor-wait disabled:opacity-70" title="Choose an onboarding file to attach to this purchase order.">{onboardingUploading ? <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-500" /> : <span className="h-3.5 w-3.5 rounded-[3px] border border-slate-400 bg-white group-hover:border-slate-500" />}<span>Task: Upload Onboarding Document</span></button>}<NulogySetupIndicator setup={row.nulogy_setup} compact /></div></div></div></td>
       <td className="min-w-64 max-w-96 px-4 py-3 align-top">{firstItem ? <div><div className="font-medium">{firstItem.sku || "No SKU number"}</div><div className="line-clamp-2 text-xs text-[rgb(var(--muted))]" title={firstItem.description || ""}>{firstItem.description || "No description"}</div>{items.length > 1 && <div className="mt-1.5 inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700">+{items.length - 1} more</div>}</div> : <span className="text-xs text-[rgb(var(--muted))]">No SKU details</span>}</td>
       <td className="min-w-32 px-4 py-3 align-top">{workOrders.length ? <div className="flex flex-wrap gap-1">{workOrders.slice(0, 3).map(function(workOrder) { return workOrder.url ? <a key={workOrder.code} href={workOrder.url} target="_blank" rel="noreferrer" onClick={function(event) { event.stopPropagation(); }} className="inline-flex rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-1" title={"Open Work Order " + workOrder.code + " in Nulogy"}><Badge variant="outline" className="cursor-pointer font-medium text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-100 hover:text-slate-900">{workOrder.code}</Badge></a> : <Badge key={workOrder.code} variant="outline" title="Run a new Nulogy sync to load the Work Order ID for linking.">{workOrder.code}</Badge>; })}{workOrders.length > 3 && <Badge variant="outline">+{workOrders.length - 3}</Badge>}</div> : <span className={cn("text-xs", row.nulogy_setup && row.nulogy_setup.status !== "unknown" ? "text-amber-700" : "text-[rgb(var(--muted))]")}>{row.nulogy_setup && row.nulogy_setup.status !== "unknown" ? "Not created" : "Unverified"}</span>}</td>
       <td className="px-4 py-3 align-top"><div>{row.po_date || "—"}</div><div className="text-xs text-[rgb(var(--muted))]">Due {row.expected_date || "—"}</div></td>
@@ -550,6 +550,8 @@ function PurchaseOrderRegisterRow({ row, expanded, onToggle, onOpen }) {
 function PurchaseOrdersRegister({ onOpenCountChange }) {
   const queryClient = useQueryClient();
   const inputRef = useRef(null);
+  const onboardingTaskInputRef = useRef(null);
+  const onboardingTargetIdRef = useRef("");
   const [tab, setTab] = useState("open");
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
@@ -562,6 +564,22 @@ function PurchaseOrdersRegister({ onOpenCountChange }) {
   const [selectedId, setSelectedId] = useState(null);
   const [expandedRows, setExpandedRows] = useState({});
   const [error, setError] = useState("");
+  const onboardingTaskUpload = useMutation({
+    mutationFn: async function(input) {
+      var file = input.file;
+      if (!/\.(pdf|doc|docx|xls|xlsx|csv|jpe?g|png)$/i.test(file.name)) throw new Error("Use a PDF, Word, Excel, CSV, JPG, or PNG file.");
+      if (file.size > 3 * 1024 * 1024) throw new Error(file.name + " is larger than 3 MB.");
+      return api("/api/purchase-orders/" + input.purchaseOrderId + "/onboarding-documents", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileName: file.name, contentType: file.type || "application/octet-stream", base64: await base64File(file) })
+      });
+    },
+    onSuccess: function() {
+      setError("");
+      queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
+    },
+    onError: function(uploadError) { setError(uploadError.message); }
+  });
   const listQuery = useQuery({
     queryKey: ["purchase-orders", tab, deferredSearch, page, sort, direction],
     queryFn: function() {
@@ -617,6 +635,12 @@ function PurchaseOrdersRegister({ onOpenCountChange }) {
         <div><h1 className="text-2xl font-semibold tracking-tight">Purchase Orders</h1><p className="mt-1 text-sm text-[rgb(var(--muted))]">Upload client POs, review extracted data, and track fulfillment.</p></div>
         <Button onClick={function() { inputRef.current && inputRef.current.click(); }}><Upload className="mr-2 h-4 w-4" />Upload purchase orders</Button>
         <input ref={inputRef} className="hidden" type="file" multiple accept={ACCEPT} onChange={function(e) { handleFiles(e.target.files); e.target.value = ""; }} />
+        <input ref={onboardingTaskInputRef} className="hidden" type="file" accept={ONBOARDING_ACCEPT} onChange={function(event) {
+          var file = event.target.files && event.target.files[0];
+          var purchaseOrderId = onboardingTargetIdRef.current;
+          if (file && purchaseOrderId) onboardingTaskUpload.mutate({ purchaseOrderId: purchaseOrderId, file: file });
+          event.target.value = "";
+        }} />
       </div>
       <Card className={cn("border-dashed transition-colors", dragging && "border-blue-500 bg-blue-50")}>
         <div className="flex min-h-28 items-center justify-center p-5 text-center" onDragOver={function(e) { e.preventDefault(); setDragging(true); }}
@@ -646,7 +670,7 @@ function PurchaseOrdersRegister({ onOpenCountChange }) {
             </tr></thead>
             <tbody>{listQuery.isLoading ? <tr><td colSpan="10" className="p-10 text-center"><Loader2 className="mx-auto h-6 w-6 animate-spin" /></td></tr> :
               rows.length === 0 ? <tr><td colSpan="10" className="p-10 text-center text-[rgb(var(--muted))]">No purchase orders in this view.</td></tr> :
-              rows.map(function(row) { return <PurchaseOrderRegisterRow key={row.id} row={row} expanded={Boolean(expandedRows[row.id])} onToggle={function() { setExpandedRows(function(old) { return Object.assign({}, old, { [row.id]: !old[row.id] }); }); }} onOpen={function() { setSelectedId(row.id); }} />; })}</tbody>
+              rows.map(function(row) { return <PurchaseOrderRegisterRow key={row.id} row={row} expanded={Boolean(expandedRows[row.id])} onboardingUploading={onboardingTaskUpload.isPending && onboardingTargetIdRef.current === row.id} onOnboardingUpload={function() { onboardingTargetIdRef.current = row.id; setError(""); onboardingTaskInputRef.current && onboardingTaskInputRef.current.click(); }} onToggle={function() { setExpandedRows(function(old) { return Object.assign({}, old, { [row.id]: !old[row.id] }); }); }} onOpen={function() { setSelectedId(row.id); }} />; })}</tbody>
           </table>
         </div>
         <div className="flex items-center justify-between border-t border-[rgb(var(--border))] px-4 py-3 text-sm">
