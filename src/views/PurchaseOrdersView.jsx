@@ -18,6 +18,7 @@ var ACCEPT = ".pdf,.jpg,.jpeg,.png,.csv,.xls,.xlsx";
 var ONBOARDING_ACCEPT = ".pdf,.doc,.docx,.xls,.xlsx,.csv,.jpg,.jpeg,.png";
 var TABS = [
   { key: "open", label: "Open" },
+  { key: "setup_tasks", label: "Setup tasks" },
   { key: "suggested_closed", label: "Suggested closed" },
   { key: "closed", label: "Closed" },
   { key: "cancelled", label: "Cancelled" },
@@ -316,7 +317,7 @@ function WorkOrderMatchingReview({ preview, onCancel, onApply, saving, error }) 
   </section>;
 }
 
-function Detail({ id, onClose, onChanged, onRevisionStaged }) {
+function Detail({ id, initialAction, onClose, onChanged, onRevisionStaged }) {
   const revisionInputRef = useRef(null);
   const onboardingInputRef = useRef(null);
   const [editing, setEditing] = useState(false);
@@ -325,6 +326,7 @@ function Detail({ id, onClose, onChanged, onRevisionStaged }) {
   const [workOrderMatchingOpen, setWorkOrderMatchingOpen] = useState(false);
   const [workOrderMatchingResult, setWorkOrderMatchingResult] = useState(null);
   const [noteDraft, setNoteDraft] = useState("");
+  const initialActionHandledRef = useRef(false);
   const query = useQuery({ queryKey: ["purchase-order", id], queryFn: function() { return api("/api/purchase-orders/" + id); } });
   const action = useMutation({
     mutationFn: function(input) {
@@ -350,6 +352,11 @@ function Detail({ id, onClose, onChanged, onRevisionStaged }) {
     mutationFn: function(matches) { return api("/api/purchase-orders/" + id + "/work-orders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ matches: matches }) }); },
     onSuccess: function(result) { setWorkOrderMatchingOpen(false); setWorkOrderMatchingResult(result); query.refetch(); onChanged(); }
   });
+  useEffect(function() {
+    if (initialActionHandledRef.current || initialAction !== "match_work_orders" || !query.data) return;
+    initialActionHandledRef.current = true;
+    workOrderMatching.mutate();
+  }, [initialAction, query.data]);
   const addNote = useMutation({
     mutationFn: function(note) { return api("/api/purchase-orders/" + id + "/notes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ note: note }) }); },
     onSuccess: function() { setNoteDraft(""); query.refetch(); }
@@ -527,7 +534,19 @@ function NulogySetupChecklist({ setup }) {
   </section>;
 }
 
-function PurchaseOrderRegisterRow({ row, expanded, onToggle, onOpen, onOnboardingUpload, onboardingUploading }) {
+function NulogyTaskSummary({ setup, expanded, onToggle }) {
+  if (!setup || setup.status === "unknown") return <button type="button" onClick={onToggle} className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50"><RefreshCw className="h-3 w-3" />Nulogy tasks unverified</button>;
+  var remaining = Math.max(0, Number(setup.totalCount || 4) - Number(setup.completeCount || 0));
+  if (!remaining) return <span className="inline-flex items-center gap-1.5 rounded-md border border-green-200 bg-green-50 px-2 py-1 text-[11px] font-medium text-green-800"><Check className="h-3 w-3" />Nulogy setup complete</span>;
+  return <button type="button" aria-expanded={expanded} onClick={onToggle} className="inline-flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50/60 px-2 py-1 text-left text-[11px] font-medium text-amber-900 transition-colors hover:border-amber-300 hover:bg-amber-50"><span className="h-3.5 w-3.5 rounded-[3px] border border-amber-500 bg-white" /><span>Nulogy setup · {setup.completeCount}/{setup.totalCount}</span><span className="text-amber-700">{remaining} task{remaining === 1 ? "" : "s"}</span><ChevronRight className={cn("h-3 w-3 transition-transform", expanded && "rotate-90")} /></button>;
+}
+
+function NulogyInlineTasks({ setup, onOpenDetails, onMatchWorkOrders, onCopyMissing, onRecheck, rechecking }) {
+  var checks = setup && Array.isArray(setup.checks) ? setup.checks : [];
+  return <div className="rounded-md border border-[rgb(var(--border))] bg-white shadow-sm"><div className="flex flex-wrap items-center justify-between gap-2 border-b border-[rgb(var(--border))] px-4 py-3"><div><div className="text-sm font-semibold">Nulogy setup tasks</div><div className="text-xs text-[rgb(var(--muted))]">Complete these in Nulogy, then recheck the PO.</div></div><Button variant="outline" size="sm" disabled={rechecking} onClick={onRecheck}><RefreshCw className={cn("mr-1.5 h-3.5 w-3.5", rechecking && "animate-spin")} />Recheck Nulogy</Button></div><div className="divide-y divide-[rgb(var(--border))]">{checks.map(function(task) { var complete = task.status === "complete"; var unknown = task.status === "unknown"; return <div key={task.key || task.label} className="flex flex-wrap items-center gap-3 px-4 py-3"><span className={cn("flex h-5 w-5 shrink-0 items-center justify-center rounded border", complete ? "border-green-300 bg-green-50 text-green-700" : unknown ? "border-slate-300 text-slate-400" : "border-amber-400 bg-white text-amber-700")}>{complete ? <Check className="h-3.5 w-3.5" /> : unknown ? "?" : ""}</span><div className="min-w-52 flex-1"><div className="text-sm font-medium">{task.label}</div><div className="text-xs text-[rgb(var(--muted))]">{task.detail}</div>{task.missing && task.missing.length > 0 && <div className="mt-1 text-xs font-medium text-amber-800">Missing: {task.missing.join(", ")}</div>}</div>{!complete && !unknown && <div className="flex gap-2">{(task.key === "items" || task.key === "pricing") && task.missing && task.missing.length > 0 && <Button variant="outline" size="sm" onClick={function() { onCopyMissing(task); }}>Copy missing SKUs</Button>}{task.key === "work_order" ? <Button size="sm" onClick={onMatchWorkOrders}>Match Work Orders</Button> : <Button variant="outline" size="sm" onClick={onOpenDetails}>Review PO</Button>}</div>}</div>; })}</div></div>;
+}
+
+function PurchaseOrderRegisterRow({ row, expanded, setupExpanded, onToggle, onToggleSetup, onOpen, onMatchWorkOrders, onCopyMissing, onRecheck, rechecking, onOnboardingUpload, onboardingUploading }) {
   var items = Array.isArray(row.sku_items) ? row.sku_items : [];
   var firstItem = items[0];
   var workOrders = row.nulogy_setup && Array.isArray(row.nulogy_setup.workOrders)
@@ -535,7 +554,7 @@ function PurchaseOrderRegisterRow({ row, expanded, onToggle, onOpen, onOnboardin
     : (row.nulogy_setup && Array.isArray(row.nulogy_setup.workOrderNumbers) ? row.nulogy_setup.workOrderNumbers.map(function(code) { return { code: code, url: null }; }) : []);
   return <Fragment>
     <tr onClick={onToggle} className={cn("cursor-pointer border-t border-[rgb(var(--border))] transition-colors hover:bg-slate-50", expanded && "bg-slate-50/70")}>
-      <td className="px-4 py-3 align-top"><div className="flex items-start gap-2"><button type="button" className="mt-0.5 rounded p-0.5 text-[rgb(var(--muted))] hover:bg-slate-200 hover:text-slate-900" aria-label={(expanded ? "Collapse " : "Expand ") + row.po_number} aria-expanded={expanded} onClick={function(event) { event.stopPropagation(); onToggle(); }}><ChevronRight className={cn("h-4 w-4 transition-transform", expanded && "rotate-90")} /></button><div><div className="font-semibold">{row.po_number}</div><div className="text-xs text-[rgb(var(--muted))]">{row.customer_name} · Rev {row.revision_number}</div><div className="mt-1 text-[11px] text-[rgb(var(--muted))]">{expanded ? "Hide line items" : "View " + items.length + " line item" + (items.length === 1 ? "" : "s")}</div><div className="mt-1.5 flex flex-col items-start gap-1.5">{row.has_onboarding_document === false && <button type="button" disabled={onboardingUploading} onClick={function(event) { event.stopPropagation(); onOnboardingUpload(); }} className="group inline-flex items-center gap-2 rounded-md border border-dashed border-slate-300 bg-white px-2 py-1 text-left text-[11px] font-medium text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-50 disabled:cursor-wait disabled:opacity-70" title="Choose an onboarding file to attach to this purchase order.">{onboardingUploading ? <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-500" /> : <span className="h-3.5 w-3.5 rounded-[3px] border border-slate-400 bg-white group-hover:border-slate-500" />}<span>Task: Upload Onboarding Document</span></button>}<NulogySetupIndicator setup={row.nulogy_setup} compact /></div></div></div></td>
+      <td className="px-4 py-3 align-top"><div className="flex items-start gap-2"><button type="button" className="mt-0.5 rounded p-0.5 text-[rgb(var(--muted))] hover:bg-slate-200 hover:text-slate-900" aria-label={(expanded ? "Collapse " : "Expand ") + row.po_number} aria-expanded={expanded} onClick={function(event) { event.stopPropagation(); onToggle(); }}><ChevronRight className={cn("h-4 w-4 transition-transform", expanded && "rotate-90")} /></button><div><div className="font-semibold">{row.po_number}</div><div className="text-xs text-[rgb(var(--muted))]">{row.customer_name} · Rev {row.revision_number}</div><div className="mt-1 text-[11px] text-[rgb(var(--muted))]">{expanded ? "Hide line items" : "View " + items.length + " line item" + (items.length === 1 ? "" : "s")}</div><div className="mt-1.5 flex flex-col items-start gap-1.5">{row.has_onboarding_document === false && <button type="button" disabled={onboardingUploading} onClick={function(event) { event.stopPropagation(); onOnboardingUpload(); }} className="group inline-flex items-center gap-2 rounded-md border border-dashed border-slate-300 bg-white px-2 py-1 text-left text-[11px] font-medium text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-50 disabled:cursor-wait disabled:opacity-70" title="Choose an onboarding file to attach to this purchase order.">{onboardingUploading ? <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-500" /> : <span className="h-3.5 w-3.5 rounded-[3px] border border-slate-400 bg-white group-hover:border-slate-500" />}<span>Task: Upload Onboarding Document</span></button>}<NulogyTaskSummary setup={row.nulogy_setup} expanded={setupExpanded} onToggle={function(event) { event.stopPropagation(); onToggleSetup(); }} /></div></div></div></td>
       <td className="min-w-64 max-w-96 px-4 py-3 align-top">{firstItem ? <div><div className="font-medium">{firstItem.sku || "No SKU number"}</div><div className="line-clamp-2 text-xs text-[rgb(var(--muted))]" title={firstItem.description || ""}>{firstItem.description || "No description"}</div>{items.length > 1 && <div className="mt-1.5 inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700">+{items.length - 1} more</div>}</div> : <span className="text-xs text-[rgb(var(--muted))]">No SKU details</span>}</td>
       <td className="min-w-32 px-4 py-3 align-top">{workOrders.length ? <div className="flex flex-wrap gap-1">{workOrders.slice(0, 3).map(function(workOrder) { return workOrder.url ? <a key={workOrder.code} href={workOrder.url} target="_blank" rel="noreferrer" onClick={function(event) { event.stopPropagation(); }} className="inline-flex rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-1" title={"Open Work Order " + workOrder.code + " in Nulogy"}><Badge variant="outline" className="cursor-pointer font-medium text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-100 hover:text-slate-900">{workOrder.code}</Badge></a> : <Badge key={workOrder.code} variant="outline" title="Run a new Nulogy sync to load the Work Order ID for linking.">{workOrder.code}</Badge>; })}{workOrders.length > 3 && <Badge variant="outline">+{workOrders.length - 3}</Badge>}</div> : <span className={cn("text-xs", row.nulogy_setup && row.nulogy_setup.status !== "unknown" ? "text-amber-700" : "text-[rgb(var(--muted))]")}>{row.nulogy_setup && row.nulogy_setup.status !== "unknown" ? "Not created" : "Unverified"}</span>}</td>
       <td className="px-4 py-3 align-top"><div>{row.po_date || "—"}</div><div className="text-xs text-[rgb(var(--muted))]">Due {row.expected_date || "—"}</div></td>
@@ -543,6 +562,7 @@ function PurchaseOrderRegisterRow({ row, expanded, onToggle, onOpen, onOnboardin
       <td className="px-4 py-3 text-right align-top">{formatNumber(row.remaining_quantity)}</td><td className="px-4 py-3 text-right align-top font-medium">{formatMoney(row.total, row.currency)}</td>
       <td className="px-4 py-3 align-top">{statusBadge(row.status, row.suggested_status)}</td><td className="px-4 py-3 align-top text-xs text-[rgb(var(--muted))]">{new Date(row.updated_at).toLocaleDateString()}</td>
     </tr>
+    {setupExpanded && <tr className="border-t border-[rgb(var(--border))] bg-amber-50/20"><td colSpan="10" className="px-5 py-4"><NulogyInlineTasks setup={row.nulogy_setup} onOpenDetails={onOpen} onMatchWorkOrders={onMatchWorkOrders} onCopyMissing={onCopyMissing} onRecheck={onRecheck} rechecking={rechecking} /></td></tr>}
     {expanded && <tr className="border-t border-[rgb(var(--border))] bg-slate-50/60"><td colSpan="10" className="px-5 py-4"><div className="rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--background))] shadow-sm"><div className="flex flex-wrap items-center justify-between gap-2 border-b border-[rgb(var(--border))] px-4 py-3"><div><div className="text-sm font-semibold">PO line items</div><div className="text-xs text-[rgb(var(--muted))]">{items.length} item{items.length === 1 ? "" : "s"} · {formatNumber(row.ordered_quantity)} total ordered</div></div><Button variant="outline" size="sm" onClick={function(event) { event.stopPropagation(); onOpen(); }}>View PO details</Button></div><div className="overflow-x-auto"><table className="w-full text-sm"><thead className="bg-slate-50 text-left text-xs uppercase text-[rgb(var(--muted))]"><tr><th className="px-4 py-2">SKU</th><th className="px-4 py-2">Description</th><th className="px-4 py-2 text-right">Ordered</th><th className="px-4 py-2 text-right">Produced</th><th className="px-4 py-2 text-right">Remaining</th><th className="px-4 py-2">Match</th></tr></thead><tbody>{items.length ? items.map(function(item, index) { return <tr key={(item.lineNumber || index) + ":" + item.sku} className="border-t border-[rgb(var(--border))]"><td className="whitespace-nowrap px-4 py-2.5 font-medium">{item.sku || "No SKU"}</td><td className="min-w-72 px-4 py-2.5 text-[rgb(var(--muted))]">{item.description || "No description"}</td><td className="px-4 py-2.5 text-right">{formatNumber(item.quantity)}</td><td className="px-4 py-2.5 text-right">{formatNumber(item.producedQuantity)}</td><td className="px-4 py-2.5 text-right">{formatNumber(item.remainingQuantity)}</td><td className="px-4 py-2.5"><Badge variant="outline">{String(item.matchStatus || "unmatched").replace(/_/g, " ")}</Badge></td></tr>; }) : <tr><td colSpan="6" className="p-5 text-center text-[rgb(var(--muted))]">No active line items.</td></tr>}</tbody></table></div></div></td></tr>}
   </Fragment>;
 }
@@ -562,8 +582,11 @@ function PurchaseOrdersRegister({ onOpenCountChange }) {
   const [uploading, setUploading] = useState([]);
   const [reviewQueue, setReviewQueue] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
+  const [selectedAction, setSelectedAction] = useState("");
   const [expandedRows, setExpandedRows] = useState({});
+  const [setupExpandedRows, setSetupExpandedRows] = useState({});
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const onboardingTaskUpload = useMutation({
     mutationFn: async function(input) {
       var file = input.file;
@@ -595,6 +618,14 @@ function PurchaseOrdersRegister({ onOpenCountChange }) {
     if (onOpenCountChange && counts.open != null) onOpenCountChange(counts.open);
   }, [counts.open, onOpenCountChange]);
   var totalPages = Math.max(1, Math.ceil(Number(data.total || 0) / 25));
+  var copyMissing = function(task) {
+    var value = (task.missing || []).join("\n");
+    if (!value) return;
+    navigator.clipboard.writeText(value).then(function() {
+      setNotice("Copied " + task.missing.length + " missing SKU" + (task.missing.length === 1 ? "" : "s") + ".");
+      window.setTimeout(function() { setNotice(""); }, 2500);
+    }).catch(function() { setError("Could not copy the missing SKUs."); });
+  };
   var handleFiles = useCallback(async function(fileList) {
     var files = Array.from(fileList || []);
     if (!files.length) return;
@@ -653,6 +684,7 @@ function PurchaseOrdersRegister({ onOpenCountChange }) {
         </div>; })}</div>}
       </Card>
       {(error || listQuery.error) && <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error || listQuery.error.message}</div>}
+      {notice && <div className="rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-800">{notice}</div>}
       {data.status === "missing_table" && <div className="rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"><strong>Database setup required.</strong> Run <code>docs/supabase-purchase-orders.sql</code> in Supabase, then refresh.</div>}
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex gap-1 rounded-md border border-[rgb(var(--border))] p-1">
@@ -670,7 +702,7 @@ function PurchaseOrdersRegister({ onOpenCountChange }) {
             </tr></thead>
             <tbody>{listQuery.isLoading ? <tr><td colSpan="10" className="p-10 text-center"><Loader2 className="mx-auto h-6 w-6 animate-spin" /></td></tr> :
               rows.length === 0 ? <tr><td colSpan="10" className="p-10 text-center text-[rgb(var(--muted))]">No purchase orders in this view.</td></tr> :
-              rows.map(function(row) { return <PurchaseOrderRegisterRow key={row.id} row={row} expanded={Boolean(expandedRows[row.id])} onboardingUploading={onboardingTaskUpload.isPending && onboardingTargetIdRef.current === row.id} onOnboardingUpload={function() { onboardingTargetIdRef.current = row.id; setError(""); onboardingTaskInputRef.current && onboardingTaskInputRef.current.click(); }} onToggle={function() { setExpandedRows(function(old) { return Object.assign({}, old, { [row.id]: !old[row.id] }); }); }} onOpen={function() { setSelectedId(row.id); }} />; })}</tbody>
+              rows.map(function(row) { return <PurchaseOrderRegisterRow key={row.id} row={row} expanded={Boolean(expandedRows[row.id])} setupExpanded={Boolean(setupExpandedRows[row.id])} rechecking={listQuery.isFetching} onboardingUploading={onboardingTaskUpload.isPending && onboardingTargetIdRef.current === row.id} onOnboardingUpload={function() { onboardingTargetIdRef.current = row.id; setError(""); onboardingTaskInputRef.current && onboardingTaskInputRef.current.click(); }} onToggle={function() { setExpandedRows(function(old) { return Object.assign({}, old, { [row.id]: !old[row.id] }); }); }} onToggleSetup={function() { setSetupExpandedRows(function(old) { return Object.assign({}, old, { [row.id]: !old[row.id] }); }); }} onOpen={function() { setSelectedAction(""); setSelectedId(row.id); }} onMatchWorkOrders={function() { setSelectedAction("match_work_orders"); setSelectedId(row.id); }} onCopyMissing={copyMissing} onRecheck={function() { listQuery.refetch(); }} />; })}</tbody>
           </table>
         </div>
         <div className="flex items-center justify-between border-t border-[rgb(var(--border))] px-4 py-3 text-sm">
@@ -679,7 +711,7 @@ function PurchaseOrdersRegister({ onOpenCountChange }) {
         </div>
       </TableShell>
       {staged && <UploadReview staged={staged} onClose={function() { setReviewQueue(function(old) { return old.slice(1); }); }} onConfirmed={function(result) { setReviewQueue(function(old) { return old.slice(1); }); refresh(); setSelectedId(result.purchaseOrder.id); }} />}
-      {selectedId && <Detail id={selectedId} onClose={function() { setSelectedId(null); }} onChanged={refresh} onRevisionStaged={function(result) {
+      {selectedId && <Detail id={selectedId} initialAction={selectedAction} onClose={function() { setSelectedId(null); setSelectedAction(""); }} onChanged={refresh} onRevisionStaged={function(result) {
         setSelectedId(null);
         setReviewQueue(function(old) { return old.concat([result]); });
       }} />}

@@ -23,6 +23,7 @@ export default async function handler(req, res) {
     if (!user) return res.status(401).json({ error: "Unauthorized" });
     var supabase = getSupabaseAdmin();
     var status = text(req.query && req.query.status, 40).toLowerCase();
+    var setupTasksOnly = status === "setup_tasks";
     var q = text(req.query && req.query.q, 160);
     var page = Math.max(1, Number(req.query && req.query.page || 1));
     var pageSize = Math.min(100, Math.max(10, Number(req.query && req.query.pageSize || 25)));
@@ -35,8 +36,9 @@ export default async function handler(req, res) {
       .select("*,purchase_order_lines(id,line_number,sku,description,quantity,unit_rate,produced_quantity,remaining_quantity,match_status,active)", { count: "exact" })
       .eq("site_id", CACHE_SITE_ID)
       .order(sort, { ascending: direction, nullsFirst: false })
-      .range(offset, offset + pageSize - 1);
-    if (status === "suggested_closed") query = query.eq("status", "open").eq("suggested_status", "closed");
+      .range(setupTasksOnly ? 0 : offset, setupTasksOnly ? 999 : offset + pageSize - 1);
+    if (setupTasksOnly) query = query.eq("status", "open");
+    else if (status === "suggested_closed") query = query.eq("status", "open").eq("suggested_status", "closed");
     else if (["open","closed","cancelled","draft"].indexOf(status) !== -1) query = query.eq("status", status);
     if (q) query = query.or("po_number.ilike.%" + q.replace(/[%_,()]/g, "") + "%,customer_name.ilike.%" + q.replace(/[%_,()]/g, "") + "%");
     var result = await query;
@@ -89,6 +91,13 @@ export default async function handler(req, res) {
       delete row.purchase_order_lines;
       return row;
     });
+    if (setupTasksOnly) {
+      rows = rows.filter(function(row) { return row.nulogy_setup && row.nulogy_setup.status === "needed"; });
+      counts.setup_tasks = rows.length;
+      var setupTotal = rows.length;
+      rows = rows.slice(offset, offset + pageSize);
+      return res.status(200).json({ rows: rows, counts: counts, total: setupTotal, page: page, pageSize: pageSize });
+    }
     return res.status(200).json({ rows: rows, counts: counts, total: result.count || 0, page: page, pageSize: pageSize });
   } catch (error) {
     Sentry.captureException(error);

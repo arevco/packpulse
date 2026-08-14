@@ -52,8 +52,8 @@ function priceValue(row) {
   ]);
 }
 
-function check(status, label, detail, missing) {
-  return { status: status, label: label, detail: detail, missing: missing || [] };
+function check(keyName, status, label, detail, missing) {
+  return { key: keyName, status: status, label: label, detail: detail, missing: missing || [] };
 }
 
 export function buildNulogySetupStatus(po, lines, snapshot) {
@@ -61,10 +61,10 @@ export function buildNulogySetupStatus(po, lines, snapshot) {
   var activeLines = (Array.isArray(lines) ? lines : []).filter(function(line) { return line && line.active !== false; });
   if (!payload) {
     var unavailableChecks = [
-      check("unknown", "Customer", "No Nulogy snapshot is available."),
-      check("unknown", "Item numbers", "No Nulogy snapshot is available."),
-      check("unknown", "Price", "No Nulogy snapshot is available."),
-      check("unknown", "Work Order", "No Nulogy snapshot is available.")
+      check("customer", "unknown", "Customer", "No Nulogy snapshot is available."),
+      check("items", "unknown", "Item numbers", "No Nulogy snapshot is available."),
+      check("pricing", "unknown", "Price", "No Nulogy snapshot is available."),
+      check("work_order", "unknown", "Work Order", "No Nulogy snapshot is available.")
     ];
     return { status: "unknown", completeCount: 0, totalCount: 4, checks: unavailableChecks, workOrders: [], workOrderNumbers: [], verifiedAt: null };
   }
@@ -99,19 +99,19 @@ export function buildNulogySetupStatus(po, lines, snapshot) {
 
   var checks = [
     customerMatch.matched
-      ? check("complete", "Customer", "Matched to " + customerMatch.matchedName + " in Nulogy (" + customerMatch.reason + ").")
+      ? check("customer", "complete", "Customer", "Matched to " + customerMatch.matchedName + " in Nulogy (" + customerMatch.reason + ").")
       : customerMatch.ambiguous
-        ? check("needed", "Customer", "Multiple Nulogy customers matched; review is required.", customerMatch.candidates)
-        : check("needed", "Customer", "Customer name was not found in the current Nulogy data.", [text(po && po.customer_name, 240) || "Customer name"]),
+        ? check("customer", "needed", "Customer", "Multiple Nulogy customers matched; review is required.", customerMatch.candidates)
+        : check("customer", "needed", "Customer", "Customer name was not found in the current Nulogy data.", [text(po && po.customer_name, 240) || "Customer name"]),
     poSkus.length && !missingItems.length
-      ? check("complete", "Item numbers", poSkus.length + " of " + poSkus.length + " PO SKUs found in Nulogy.")
-      : check("needed", "Item numbers", (poSkus.length - missingItems.length) + " of " + poSkus.length + " PO SKUs found in Nulogy.", missingItems),
+      ? check("items", "complete", "Item numbers", poSkus.length + " of " + poSkus.length + " PO SKUs found in Nulogy.")
+      : check("items", "needed", "Item numbers", (poSkus.length - missingItems.length) + " of " + poSkus.length + " PO SKUs found in Nulogy.", missingItems),
     poSkus.length && !missingPrices.length
-      ? check("complete", "Price", poSkus.length + " of " + poSkus.length + " PO SKUs have Nulogy pricing.")
-      : check("needed", "Price", (poSkus.length - missingPrices.length) + " of " + poSkus.length + " PO SKUs have Nulogy pricing.", missingPrices),
+      ? check("pricing", "complete", "Price", poSkus.length + " of " + poSkus.length + " PO SKUs have Nulogy pricing.")
+      : check("pricing", "needed", "Price", (poSkus.length - missingPrices.length) + " of " + poSkus.length + " PO SKUs have Nulogy pricing.", missingPrices),
     matchingWorkOrders.length
-      ? check("complete", "Work Order", matchingWorkOrders.length + " Work Order" + (matchingWorkOrders.length === 1 ? "" : "s") + " found with this exact PO number.")
-      : check("needed", "Work Order", "No Work Order has this exact PO number.", [text(po && po.po_number, 160) || "PO number"])
+      ? check("work_order", "complete", "Work Order", matchingWorkOrders.length + " Work Order" + (matchingWorkOrders.length === 1 ? "" : "s") + " found with this exact PO number.")
+      : check("work_order", "needed", "Work Order", "No Work Order has this exact PO number.", [text(po && po.po_number, 160) || "PO number"])
   ];
   var completeCount = checks.filter(function(item) { return item.status === "complete"; }).length;
   return {
