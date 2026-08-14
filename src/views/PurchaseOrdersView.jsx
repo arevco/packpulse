@@ -2,7 +2,7 @@ import { Fragment, useCallback, useDeferredValue, useEffect, useRef, useState } 
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  AlertTriangle, Check, ChevronLeft, ChevronRight, FileSpreadsheet, FileText,
+  AlertTriangle, Check, ChevronDown, ChevronLeft, ChevronRight, FileSpreadsheet, FileText,
   Link2, Loader2, MessageSquare, Paperclip, Pencil, Plus, RefreshCw, Search, Send, Upload, X
 } from "lucide-react";
 import { Badge } from "../components/ui/badge";
@@ -92,15 +92,34 @@ function useNulogyOptions() {
 }
 
 function SuggestedField({ label, value, onChange, options, listId, placeholder, help }) {
-  return <label className="block">
-    <span className="mb-1 block text-xs font-medium text-[rgb(var(--muted))]">{label}</span>
-    <Input value={value == null ? "" : value} list={listId} placeholder={placeholder} autoComplete="off" onChange={function(event) { onChange(event.target.value); }} />
-    <datalist id={listId}>{(options || []).map(function(option) {
-      var optionValue = typeof option === "string" ? option : option.value;
-      return <option key={optionValue} value={optionValue}>{typeof option === "string" ? option : option.label}</option>;
-    })}</datalist>
+  const [open, setOpen] = useState(false);
+  var typed = String(value == null ? "" : value);
+  var normalized = typed.trim().toLowerCase();
+  var matches = (options || []).filter(function(option) {
+    var optionValue = typeof option === "string" ? option : option.value;
+    var optionLabel = typeof option === "string" ? "" : option.label;
+    return !normalized || (optionValue + " " + optionLabel).toLowerCase().indexOf(normalized) !== -1;
+  }).slice(0, 50);
+  var exact = (options || []).some(function(option) {
+    var optionValue = typeof option === "string" ? option : option.value;
+    return optionValue.toLowerCase() === normalized;
+  });
+  return <div className="relative block">
+    <label htmlFor={listId} className="mb-1 block text-xs font-medium text-[rgb(var(--muted))]">{label}</label>
+    <div className="relative">
+      <Input id={listId} value={typed} placeholder={placeholder} autoComplete="off" className="pr-9" onFocus={function() { setOpen(true); }} onBlur={function() { window.setTimeout(function() { setOpen(false); }, 120); }} onChange={function(event) { onChange(event.target.value); setOpen(true); }} />
+      <button type="button" aria-label={"Show " + label + " options"} aria-expanded={open} onMouseDown={function(event) { event.preventDefault(); setOpen(function(current) { return !current; }); }} className="absolute inset-y-0 right-0 flex w-9 items-center justify-center text-slate-500 hover:text-slate-800"><ChevronDown className={cn("h-4 w-4 transition-transform", open && "rotate-180")} /></button>
+    </div>
+    {open && <div className="absolute z-[70] mt-1 max-h-64 w-full min-w-64 overflow-auto rounded-md border border-[rgb(var(--border))] bg-white p-1 shadow-xl">
+      {matches.length > 0 ? matches.map(function(option) {
+        var optionValue = typeof option === "string" ? option : option.value;
+        var optionLabel = typeof option === "string" ? "" : option.label;
+        return <button key={optionValue} type="button" onMouseDown={function(event) { event.preventDefault(); onChange(optionValue); setOpen(false); }} className="block w-full rounded px-3 py-2 text-left hover:bg-slate-100"><span className="block text-sm font-medium text-slate-900">{optionValue}</span>{optionLabel && <span className="block truncate text-xs text-[rgb(var(--muted))]">{optionLabel}</span>}</button>;
+      }) : <div className="px-3 py-2 text-sm text-[rgb(var(--muted))]">No matching Nulogy records.</div>}
+      {typed.trim() && !exact && <button type="button" onMouseDown={function(event) { event.preventDefault(); setOpen(false); }} className="mt-1 block w-full rounded border-t border-[rgb(var(--border))] px-3 py-2 text-left text-sm font-medium text-blue-700 hover:bg-blue-50">Use “{typed.trim()}” as a new manual entry</button>}
+    </div>}
     {help && <span className="mt-1 block text-[11px] text-[rgb(var(--muted))]">{help}</span>}
-  </label>;
+  </div>;
 }
 
 function UploadReview({ staged, onClose, onConfirmed }) {
