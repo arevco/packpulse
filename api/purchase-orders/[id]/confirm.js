@@ -42,7 +42,7 @@ export default async function handler(req, res) {
       if (attachedPo.error) throw attachedPo.error;
       po = attachedPo.data;
     }
-    var revisionNumber = revisionResult.data.revision_number
+    var revisionNumber = revisionResult.data.purchase_order_id && revisionResult.data.revision_number
       ? Number(revisionResult.data.revision_number)
       : po ? Number(po.revision_number || 0) + 1 : 1;
     if (!po) {

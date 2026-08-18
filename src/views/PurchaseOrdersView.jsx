@@ -154,6 +154,7 @@ function UploadReview({ staged, onClose, onConfirmed, onOpenExisting }) {
     !draft.lines.length || draft.lines.some(function(line) { return !line.description || !(Number(line.quantity) > 0) || !line.uom; });
   var exactExistingFile = staged.duplicateType === "exact_file" && staged.existingPurchaseOrder;
   var existingPo = staged.existingPurchaseOrder;
+  var replacingCurrentPo = staged.uploadMode === "revision";
   return (
     <div className="fixed inset-0 z-50 flex bg-slate-950/40 p-3 backdrop-blur-sm">
       <div className="m-auto flex max-h-[94vh] w-full max-w-6xl flex-col overflow-hidden rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--background))] shadow-2xl">
@@ -182,6 +183,11 @@ function UploadReview({ staged, onClose, onConfirmed, onOpenExisting }) {
             </div>
           </Card>
           <div className="space-y-4">
+            {replacingCurrentPo && <div className="rounded-md border border-blue-300 bg-blue-50 p-4 text-blue-950">
+              <div className="font-semibold">Replace current PO with this revision</div>
+              <div className="mt-1 text-sm">Review the extracted fields and line items below. Confirming will make this revision current and replace the active PO data.</div>
+              <div className="mt-1 text-xs text-blue-800">The original document and all earlier revision snapshots will remain preserved in revision history.</div>
+            </div>}
             {existingPo && <div className="rounded-md border-2 border-amber-400 bg-amber-50 p-4 text-amber-950">
               <div className="flex items-start gap-3"><AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" /><div className="min-w-0 flex-1">
                 <div className="font-semibold">PO already exists</div>
@@ -245,7 +251,7 @@ function UploadReview({ staged, onClose, onConfirmed, onOpenExisting }) {
           <div className="flex gap-2">
             <Button variant="outline" onClick={onClose}>Cancel</Button>
             {!exactExistingFile && <Button disabled={requiredMissing || mutation.isPending} onClick={function() { mutation.mutate(); }}>
-              {mutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}{existingPo ? "Save as new revision" : "Confirm and save"}
+              {mutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}{replacingCurrentPo ? "Replace current PO with revision" : existingPo ? "Save as new revision" : "Confirm and save"}
             </Button>}
           </div>
         </div>

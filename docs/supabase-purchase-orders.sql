@@ -73,9 +73,11 @@ create table if not exists public.purchase_order_revisions (
   confirmed_at timestamptz,
   created_by text,
   created_at timestamptz not null default now(),
-  unique (site_id, sha256),
   unique (purchase_order_id, revision_number)
 );
+
+create index if not exists purchase_order_revisions_site_sha256_idx
+  on public.purchase_order_revisions (site_id, sha256, created_at desc);
 
 create table if not exists public.purchase_order_lines (
   id uuid primary key default gen_random_uuid(),

@@ -264,13 +264,15 @@ async function findExistingPurchaseOrder(supabase, revision, extracted) {
   return result.data || null;
 }
 
-export async function stageUpload(input, user) {
+export async function stageUpload(input, user, options) {
   var valid = validateUpload(input);
   var supabase = getSupabaseAdmin();
+  var allowExactRevision = Boolean(options && options.allowExactRevision);
   var sha256 = crypto.createHash("sha256").update(valid.buffer).digest("hex");
-  var existing = await supabase.from("purchase_order_revisions").select("*").eq("site_id", CACHE_SITE_ID).eq("sha256", sha256).maybeSingle();
+  var existing = await supabase.from("purchase_order_revisions").select("*").eq("site_id", CACHE_SITE_ID)
+    .eq("sha256", sha256).order("created_at", { ascending: false }).limit(1).maybeSingle();
   if (existing.error) throw existing.error;
-  if (existing.data) {
+  if (existing.data && !allowExactRevision) {
     var exactFilePo = await findExistingPurchaseOrder(supabase, existing.data, existing.data.extracted_data);
     return {
       duplicate: true, duplicateType: "exact_file", revision: existing.data,
@@ -310,7 +312,8 @@ export async function stageUpload(input, user) {
   var existingPurchaseOrder = await findExistingPurchaseOrder(supabase, null, extraction.data);
   return {
     duplicate: false, duplicateType: existingPurchaseOrder ? "po_identity" : null,
-    revision: inserted.data, extracted: extraction.data, existingPurchaseOrder: existingPurchaseOrder,
+    repairRevision: Boolean(existing.data && allowExactRevision), revision: inserted.data,
+    extracted: extraction.data, existingPurchaseOrder: existingPurchaseOrder,
     documentUrl: await signedDocumentUrl(supabase, inserted.data)
   };
 }
