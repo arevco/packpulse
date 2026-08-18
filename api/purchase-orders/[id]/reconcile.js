@@ -42,7 +42,7 @@ export default async function handler(req, res) {
     }
     var result = await reconcilePurchaseOrder(supabase, found.data);
     await addEvent(supabase, id, found.data.current_revision_id, "reconciled", user, {
-      metadata: { suggestedStatus: result.suggestedStatus, matchedProductionRows: result.matchedProductionRows, reviewedMappings: mappings.length }
+      metadata: { suggestedStatus: result.suggestedStatus, matchedProductionRows: result.matchedProductionRows, reviewedMappings: mappings.length, reconciliationSource: result.reconciliationSource, linkedWorkOrderCount: result.linkedWorkOrderCount }
     });
     return res.status(200).json(Object.assign({}, result, {
       message: result.lines.filter(function(line) { return line.match_status !== "unmatched"; }).length + " of " + result.lines.length + " lines matched."

@@ -131,13 +131,15 @@ export async function fetchProductionTotalsForWorkOrders(supabase, workOrders) {
       requestedRows: 0,
       matchedRows: 0,
       byWorkOrder: {},
-      bySku: {}
+      bySku: {},
+      byWorkOrderSku: {}
     };
   }
 
   var uniqueRawCodes = Array.from(new Set(refs.map(function(row) { return row.woCode; }).filter(Boolean)));
   var byWorkOrder = {};
   var bySku = {};
+  var byWorkOrderSku = {};
   var matchedRows = 0;
   var querySource = "ops_work_order_production_totals_mv";
 
@@ -166,6 +168,10 @@ export async function fetchProductionTotalsForWorkOrders(supabase, workOrders) {
         : 1;
       if (woKey) byWorkOrder[woKey] = (byWorkOrder[woKey] || 0) + units;
       if (skuKey) bySku[skuKey] = (bySku[skuKey] || 0) + units;
+      if (woKey && skuKey) {
+        var pairKey = woKey + "|" + skuKey;
+        byWorkOrderSku[pairKey] = (byWorkOrderSku[pairKey] || 0) + units;
+      }
     });
   }
 
@@ -174,6 +180,7 @@ export async function fetchProductionTotalsForWorkOrders(supabase, workOrders) {
     matchedRows: matchedRows,
     byWorkOrder: byWorkOrder,
     bySku: bySku,
+    byWorkOrderSku: byWorkOrderSku,
     querySource: querySource
   };
 }

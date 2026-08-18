@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import * as XLSX from "xlsx";
 import { CACHE_SITE_ID, getSupabaseAdmin, toNum } from "../ops/_common.js";
+import { fetchProductionTotalsForWorkOrders, normalizeSkuCode, normalizeWorkOrderCode } from "../ops/_production.js";
 
 export const MAX_FILE_BYTES = 3 * 1024 * 1024;
 export const BUCKET = "purchase-orders";
@@ -374,11 +375,20 @@ export async function previewPurchaseOrderReconciliation(supabase, po) {
     supabase.from("purchase_order_lines").select("*").eq("site_id", CACHE_SITE_ID)
       .eq("purchase_order_id", po.id).eq("revision_id", po.current_revision_id).eq("active", true).order("line_number"),
     supabase.from("purchase_order_item_mappings").select("*").eq("site_id", CACHE_SITE_ID).eq("purchase_order_id", po.id),
+    supabase.from("purchase_order_work_order_matches").select("line_id,work_order_code").eq("site_id", CACHE_SITE_ID).eq("purchase_order_id", po.id),
     productionForPurchaseOrder(supabase, po.po_number)
   ]);
   if (results[0].error) throw results[0].error;
   if (results[1].error) throw results[1].error;
-  var production = results[2] || [];
+  if (results[2].error) throw results[2].error;
+  var production = results[3] || [];
+  var workOrdersByLine = {};
+  (results[2].data || []).forEach(function(match) {
+    if (!workOrdersByLine[match.line_id]) workOrdersByLine[match.line_id] = [];
+    workOrdersByLine[match.line_id].push(match.work_order_code);
+  });
+  var reviewedWorkOrderCodes = Array.from(new Set((results[2].data || []).map(function(match) { return match.work_order_code; }).filter(Boolean)));
+  var workOrderProduction = await fetchProductionTotalsForWorkOrders(supabase, reviewedWorkOrderCodes.map(function(code) { return { woCode: code }; }));
   var mappingByLine = {};
   (results[1].data || []).forEach(function(row) { mappingByLine[row.line_id] = row.production_item_code; });
   var candidatesByKey = {};
@@ -409,42 +419,64 @@ export async function previewPurchaseOrderReconciliation(supabase, po) {
     return candidate;
   }).sort(function(a, b) { return String(a.itemCode).localeCompare(String(b.itemCode)); });
   var lines = (results[0].data || []).map(function(line) {
+    var linkedWorkOrders = workOrdersByLine[line.id] || [];
+    var linkedProduced = linkedWorkOrders.reduce(function(sum, code) {
+      return sum + toNum(workOrderProduction.byWorkOrderSku[normalizeWorkOrderCode(code) + "|" + normalizeSkuCode(line.sku)]);
+    }, 0);
     var reviewedCode = mappingByLine[line.id] || "";
     var exact = candidates.find(function(candidate) { return candidate.itemKey === key(line.sku); });
     var selectedItemCode = reviewedCode || exact && exact.itemCode || "";
     return {
       id: line.id, lineNumber: line.line_number, sku: line.sku || "", description: line.description,
       ordered: toNum(line.quantity), currentProduced: toNum(line.produced_quantity),
+      linkedWorkOrders: linkedWorkOrders, linkedProduced: linkedProduced,
       selectedItemCode: selectedItemCode, selectionSource: reviewedCode ? "reviewed" : exact ? "exact_sku" : "unmatched",
-      candidates: candidates.map(function(candidate) { return Object.assign({}, candidate, { exactSku: candidate.itemKey === key(line.sku) }); })
+      candidates: linkedWorkOrders.length ? [] : candidates.map(function(candidate) { return Object.assign({}, candidate, { exactSku: candidate.itemKey === key(line.sku) }); })
     };
   });
   return {
     poNumber: po.po_number, productionRowCount: production.length, candidateItemCount: candidates.length,
     jobCount: candidates.reduce(function(sum, candidate) { return sum + candidate.jobCount; }, 0),
+    reconciliationSource: reviewedWorkOrderCodes.length ? "reviewed_work_orders" : "po_number_fallback",
+    linkedWorkOrderCount: reviewedWorkOrderCodes.length,
+    matchedProductionRows: workOrderProduction.matchedRows || 0,
     lines: lines, candidates: candidates,
-    message: !production.length ? "No Nulogy production records were found for PO " + po.po_number + "." : null
+    message: reviewedWorkOrderCodes.length && !workOrderProduction.matchedRows
+      ? "Work Orders are linked, but no production has been reported for them yet."
+      : !reviewedWorkOrderCodes.length && !production.length ? "No Nulogy production records were found for PO " + po.po_number + "." : null
   };
 }
 
 export async function reconcilePurchaseOrder(supabase, po) {
-  var linesResult = await supabase.from("purchase_order_lines").select("*")
-    .eq("site_id", CACHE_SITE_ID).eq("purchase_order_id", po.id).eq("revision_id", po.current_revision_id).eq("active", true);
-  if (linesResult.error) throw linesResult.error;
-  var lines = linesResult.data || [];
+  var results = await Promise.all([
+    supabase.from("purchase_order_lines").select("*").eq("site_id", CACHE_SITE_ID).eq("purchase_order_id", po.id).eq("revision_id", po.current_revision_id).eq("active", true),
+    supabase.from("purchase_order_item_mappings").select("*").eq("site_id", CACHE_SITE_ID).eq("purchase_order_id", po.id),
+    supabase.from("purchase_order_work_order_matches").select("line_id,work_order_code").eq("site_id", CACHE_SITE_ID).eq("purchase_order_id", po.id)
+  ]);
+  results.forEach(function(result) { if (result.error) throw result.error; });
+  var lines = results[0].data || [];
   var matchingEvents = await productionForPurchaseOrder(supabase, po.po_number);
-  var mappingsResult = await supabase.from("purchase_order_item_mappings").select("*").eq("site_id", CACHE_SITE_ID).eq("purchase_order_id", po.id);
-  if (mappingsResult.error) throw mappingsResult.error;
   var mappingByLine = {};
-  (mappingsResult.data || []).forEach(function(row) { mappingByLine[row.line_id] = row.production_item_key; });
+  (results[1].data || []).forEach(function(row) { mappingByLine[row.line_id] = row.production_item_key; });
+  var workOrdersByLine = {};
+  (results[2].data || []).forEach(function(match) {
+    if (!workOrdersByLine[match.line_id]) workOrdersByLine[match.line_id] = [];
+    workOrdersByLine[match.line_id].push(match.work_order_code);
+  });
+  var reviewedWorkOrderCodes = Array.from(new Set((results[2].data || []).map(function(match) { return match.work_order_code; }).filter(Boolean)));
+  var workOrderProduction = await fetchProductionTotalsForWorkOrders(supabase, reviewedWorkOrderCodes.map(function(code) { return { woCode: code }; }));
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i];
     var matchKey = mappingByLine[line.id] || key(line.sku);
-    var produced = matchKey ? matchingEvents.reduce(function(sum, event) {
+    var linkedWorkOrders = workOrdersByLine[line.id] || [];
+    var produced = linkedWorkOrders.length ? linkedWorkOrders.reduce(function(sum, code) {
+      return sum + toNum(workOrderProduction.byWorkOrderSku[normalizeWorkOrderCode(code) + "|" + normalizeSkuCode(line.sku)]);
+    }, 0) : matchKey ? matchingEvents.reduce(function(sum, event) {
       return key(event.item_code) === matchKey ? sum + toNum(event.units_produced) : sum;
     }, 0) : 0;
     var remaining = Math.max(0, toNum(line.quantity) - produced);
-    var status = !matchKey || !matchingEvents.length ? "unmatched" :
+    var hasProductionIdentity = linkedWorkOrders.length || matchKey && matchingEvents.length;
+    var status = !hasProductionIdentity ? "unmatched" :
       produced <= 0 ? "matched" : remaining > 0 ? "partial" :
       produced > toNum(line.quantity) ? "overproduced" : "fulfilled";
     var update = await supabase.from("purchase_order_lines").update({
@@ -460,5 +492,10 @@ export async function reconcilePurchaseOrder(supabase, po) {
   }) ? "closed" : "open";
   var poUpdate = await supabase.from("purchase_orders").update({ suggested_status: suggested }).eq("id", po.id).eq("site_id", CACHE_SITE_ID);
   if (poUpdate.error) throw poUpdate.error;
-  return { suggestedStatus: suggested, lines: lines, matchedProductionRows: matchingEvents.length };
+  return {
+    suggestedStatus: suggested, lines: lines,
+    matchedProductionRows: reviewedWorkOrderCodes.length ? workOrderProduction.matchedRows : matchingEvents.length,
+    reconciliationSource: reviewedWorkOrderCodes.length ? "reviewed_work_orders" : "po_number_fallback",
+    linkedWorkOrderCount: reviewedWorkOrderCodes.length
+  };
 }
