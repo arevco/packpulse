@@ -122,7 +122,7 @@ function SuggestedField({ label, value, onChange, options, listId, placeholder, 
   </div>;
 }
 
-function UploadReview({ staged, onClose, onConfirmed }) {
+function UploadReview({ staged, onClose, onConfirmed, onOpenExisting }) {
   const [draft, setDraft] = useState(function() { return normalizeDraft(staged.extracted); });
   const nulogyOptions = useNulogyOptions();
   const mutation = useMutation({
@@ -152,6 +152,8 @@ function UploadReview({ staged, onClose, onConfirmed }) {
   };
   var requiredMissing = !draft.customerName || !draft.poNumber || !draft.poDate ||
     !draft.lines.length || draft.lines.some(function(line) { return !line.description || !(Number(line.quantity) > 0) || !line.uom; });
+  var exactExistingFile = staged.duplicateType === "exact_file" && staged.existingPurchaseOrder;
+  var existingPo = staged.existingPurchaseOrder;
   return (
     <div className="fixed inset-0 z-50 flex bg-slate-950/40 p-3 backdrop-blur-sm">
       <div className="m-auto flex max-h-[94vh] w-full max-w-6xl flex-col overflow-hidden rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--background))] shadow-2xl">
@@ -180,6 +182,14 @@ function UploadReview({ staged, onClose, onConfirmed }) {
             </div>
           </Card>
           <div className="space-y-4">
+            {existingPo && <div className="rounded-md border-2 border-amber-400 bg-amber-50 p-4 text-amber-950">
+              <div className="flex items-start gap-3"><AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" /><div className="min-w-0 flex-1">
+                <div className="font-semibold">PO already exists</div>
+                <div className="mt-1 text-sm">{existingPo.po_number} · {existingPo.customer_name} is already in PackPulse as revision {existingPo.revision_number}.</div>
+                <div className="mt-1 text-xs text-amber-800">{exactExistingFile ? "This is the exact same file. No new revision is needed." : "This file is different. Continue only if it should become a new revision of the existing PO."}</div>
+                <Button className="mt-3" variant="outline" size="sm" onClick={function() { onOpenExisting(existingPo.id); }}>Open existing PO</Button>
+              </div></div>
+            </div>}
             {draft.warnings && draft.warnings.length > 0 && (
               <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
                 <div className="mb-1 flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4" />Review warnings</div>
@@ -234,9 +244,9 @@ function UploadReview({ staged, onClose, onConfirmed }) {
           <div className="text-xs text-[rgb(var(--muted))]">Saving confirms the extraction and opens the PO.</div>
           <div className="flex gap-2">
             <Button variant="outline" onClick={onClose}>Cancel</Button>
-            <Button disabled={requiredMissing || mutation.isPending} onClick={function() { mutation.mutate(); }}>
-              {mutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}Confirm and save
-            </Button>
+            {!exactExistingFile && <Button disabled={requiredMissing || mutation.isPending} onClick={function() { mutation.mutate(); }}>
+              {mutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}{existingPo ? "Save as new revision" : "Confirm and save"}
+            </Button>}
           </div>
         </div>
       </div>
@@ -764,7 +774,7 @@ function PurchaseOrdersRegister({ onOpenCountChange }) {
           <div className="flex items-center gap-2"><Button variant="outline" size="icon" disabled={page <= 1} onClick={function() { setPage(page - 1); }}><ChevronLeft className="h-4 w-4" /></Button><span>Page {page} of {totalPages}</span><Button variant="outline" size="icon" disabled={page >= totalPages} onClick={function() { setPage(page + 1); }}><ChevronRight className="h-4 w-4" /></Button></div>
         </div>
       </TableShell>
-      {staged && <UploadReview staged={staged} onClose={function() { setReviewQueue(function(old) { return old.slice(1); }); }} onConfirmed={function(result) { setReviewQueue(function(old) { return old.slice(1); }); refresh(); setSelectedId(result.purchaseOrder.id); }} />}
+      {staged && <UploadReview staged={staged} onClose={function() { setReviewQueue(function(old) { return old.slice(1); }); }} onOpenExisting={function(id) { setReviewQueue(function(old) { return old.slice(1); }); setSelectedId(id); }} onConfirmed={function(result) { setReviewQueue(function(old) { return old.slice(1); }); refresh(); setSelectedId(result.purchaseOrder.id); }} />}
       {selectedId && <Detail id={selectedId} initialAction={selectedAction} onClose={function() { setSelectedId(null); setSelectedAction(""); }} onChanged={refresh} onRevisionStaged={function(result) {
         setSelectedId(null);
         setReviewQueue(function(old) { return old.concat([result]); });

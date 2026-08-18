@@ -248,16 +248,36 @@ export function validateUpload(body) {
   return { fileName: fileName, contentType: contentType, buffer: buffer };
 }
 
+async function findExistingPurchaseOrder(supabase, revision, extracted) {
+  var query = supabase.from("purchase_orders")
+    .select("id,customer_name,po_number,status,revision_number,current_revision_id,updated_at")
+    .eq("site_id", CACHE_SITE_ID);
+  if (revision && revision.purchase_order_id) query = query.eq("id", revision.purchase_order_id);
+  else {
+    var customerKey = key(extracted && extracted.customerName);
+    var poNumberKey = key(extracted && extracted.poNumber);
+    if (!customerKey || !poNumberKey) return null;
+    query = query.eq("customer_key", customerKey).eq("po_number_key", poNumberKey);
+  }
+  var result = await query.maybeSingle();
+  if (result.error) throw result.error;
+  return result.data || null;
+}
+
 export async function stageUpload(input, user) {
   var valid = validateUpload(input);
   var supabase = getSupabaseAdmin();
   var sha256 = crypto.createHash("sha256").update(valid.buffer).digest("hex");
   var existing = await supabase.from("purchase_order_revisions").select("*").eq("site_id", CACHE_SITE_ID).eq("sha256", sha256).maybeSingle();
   if (existing.error) throw existing.error;
-  if (existing.data) return {
-    duplicate: true, revision: existing.data, extracted: existing.data.extracted_data,
-    documentUrl: await signedDocumentUrl(supabase, existing.data)
-  };
+  if (existing.data) {
+    var exactFilePo = await findExistingPurchaseOrder(supabase, existing.data, existing.data.extracted_data);
+    return {
+      duplicate: true, duplicateType: "exact_file", revision: existing.data,
+      extracted: existing.data.extracted_data, existingPurchaseOrder: exactFilePo,
+      documentUrl: await signedDocumentUrl(supabase, existing.data)
+    };
+  }
   var storagePath = CACHE_SITE_ID + "/" + sha256.slice(0, 2) + "/" + sha256 + "." + ALLOWED_TYPES[valid.contentType];
   var stored = await supabase.storage.from(BUCKET).upload(storagePath, valid.buffer, {
     contentType: valid.contentType,
@@ -287,8 +307,10 @@ export async function stageUpload(input, user) {
     warnings: extraction.data.warnings, extraction_model: extraction.model, created_by: user.email
   }).select("*").single();
   if (inserted.error) throw inserted.error;
+  var existingPurchaseOrder = await findExistingPurchaseOrder(supabase, null, extraction.data);
   return {
-    duplicate: false, revision: inserted.data, extracted: extraction.data,
+    duplicate: false, duplicateType: existingPurchaseOrder ? "po_identity" : null,
+    revision: inserted.data, extracted: extraction.data, existingPurchaseOrder: existingPurchaseOrder,
     documentUrl: await signedDocumentUrl(supabase, inserted.data)
   };
 }
