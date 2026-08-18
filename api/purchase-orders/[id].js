@@ -9,6 +9,12 @@ function missingOnboardingDocumentsTable(error) {
     (message.indexOf("schema cache") !== -1 || message.indexOf("relation") !== -1);
 }
 
+function missingWorkOrderMatchesTable(error) {
+  var message = String(error && error.message || "").toLowerCase();
+  return message.indexOf("purchase_order_work_order_matches") !== -1 &&
+    (message.indexOf("schema cache") !== -1 || message.indexOf("relation") !== -1);
+}
+
 export default async function handler(req, res) {
   withCors(req, res, ["GET", "PATCH", "OPTIONS"]);
   if (req.method === "OPTIONS") return res.status(200).end();
@@ -110,11 +116,13 @@ export default async function handler(req, res) {
       supabase.from("purchase_order_revisions").select("*").eq("site_id", CACHE_SITE_ID).eq("purchase_order_id", id).order("revision_number", { ascending: false }),
       supabase.from("purchase_order_events").select("*").eq("site_id", CACHE_SITE_ID).eq("purchase_order_id", id).order("created_at", { ascending: false }),
       supabase.from("purchase_order_onboarding_documents").select("*").eq("site_id", CACHE_SITE_ID).eq("purchase_order_id", id).order("created_at", { ascending: false }),
-      supabase.from("cache_snapshots").select("payload,synced_at").eq("site_id", CACHE_SITE_ID).maybeSingle()
+      supabase.from("cache_snapshots").select("payload,synced_at").eq("site_id", CACHE_SITE_ID).maybeSingle(),
+      supabase.from("purchase_order_work_order_matches").select("line_id,work_order_code,work_order_snapshot,reviewed_by,reviewed_at").eq("site_id", CACHE_SITE_ID).eq("purchase_order_id", id)
     ]);
     related.slice(0, 3).forEach(function(result) { if (result.error) throw result.error; });
     if (related[3].error && !missingOnboardingDocumentsTable(related[3].error)) throw related[3].error;
     if (related[4].error) throw related[4].error;
+    if (related[5].error && !missingWorkOrderMatchesTable(related[5].error)) throw related[5].error;
     var currentRevision = (related[1].data || []).find(function(row) { return row.id === found.data.current_revision_id; });
     var documentUrl = await signedDocumentUrl(supabase, currentRevision);
     var onboardingDocuments = [];
@@ -123,11 +131,20 @@ export default async function handler(req, res) {
         return Object.assign({}, row, { url: await signedDocumentUrl(supabase, row) });
       }));
     }
+    var workOrderMatchesByLine = {};
+    if (!related[5].error) (related[5].data || []).forEach(function(match) {
+      if (!workOrderMatchesByLine[match.line_id]) workOrderMatchesByLine[match.line_id] = [];
+      workOrderMatchesByLine[match.line_id].push(match);
+    });
+    var detailLines = (related[0].data || []).map(function(line) {
+      return Object.assign({}, line, { work_order_matches: workOrderMatchesByLine[line.id] || [] });
+    });
     return res.status(200).json({
-      purchaseOrder: found.data, lines: related[0].data || [], revisions: related[1].data || [],
+      purchaseOrder: found.data, lines: detailLines, revisions: related[1].data || [],
       events: related[2].data || [], documentUrl: documentUrl,
       onboardingDocuments: onboardingDocuments,
       onboardingDocumentsStatus: related[3].error ? "missing_table" : "ready",
+      workOrderMatchesStatus: related[5].error ? "missing_table" : "ready",
       nulogySetup: buildNulogySetupStatus(found.data, related[0].data || [], related[4].data)
     });
   } catch (error) {
