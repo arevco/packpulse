@@ -38,18 +38,17 @@ function normalizeWorkOrder(row) {
   };
 }
 
-function scoreCandidate(po, line, workOrder, customerNames) {
-  var exactPo = key(workOrder.purchaseOrderNumber) === key(po.po_number) || key(workOrder.reference) === key(po.po_number);
+export function scoreCandidate(po, line, workOrder, customerNames) {
+  var normalizedPo = text(po.po_number, 160).replace(/\s+/g, "").toLowerCase();
+  var normalizedWorkOrderCode = text(workOrder.code, 160).replace(/\s+/g, "").toLowerCase();
+  var escapedPo = normalizedPo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  var poBasedWorkOrderCode = Boolean(normalizedPo) && new RegExp("^" + escapedPo + "-\\d+$").test(normalizedWorkOrderCode);
+  var exactPo = key(workOrder.purchaseOrderNumber) === key(po.po_number) || key(workOrder.reference) === key(po.po_number) || poBasedWorkOrderCode;
   var exactSku = Boolean(key(line.sku)) && key(workOrder.sku) === key(line.sku);
   var customerMatch = matchCustomerName(po.customer_name, customerNames);
   var exactCustomer = customerMatch.matched && key(workOrder.customer) === key(customerMatch.matchedName);
-  if (!exactPo && !(exactSku && exactCustomer)) return null;
-  var score = (exactPo ? 60 : 0) + (exactSku ? 25 : 0) + (exactCustomer ? 15 : 0);
-  var reasons = [];
-  if (exactPo) reasons.push("Exact PO number");
-  if (exactSku) reasons.push("Exact SKU");
-  if (exactCustomer) reasons.push("Exact customer");
-  return { score: score, confidence: score >= 85 ? "high" : score >= 60 ? "medium" : "low", reasons: reasons };
+  if (!exactPo || !exactSku || !exactCustomer) return null;
+  return { score: 100, confidence: "exact", reasons: [poBasedWorkOrderCode ? "PO base number + run suffix" : "Exact PO number", "Exact SKU", "Exact customer"] };
 }
 
 async function buildPreview(supabase, po) {
