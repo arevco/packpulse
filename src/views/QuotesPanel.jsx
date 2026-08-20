@@ -7,23 +7,16 @@ import { Card } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import TableShell from "../components/ui/table-shell";
 import { cn } from "../lib/utils";
+import { getSupabaseClient } from "../lib/supabaseClient";
 
 const ACCEPT = ".pdf,.jpg,.jpeg,.png,.csv,.xls,.xlsx";
+const MAX_QUOTE_FILE_BYTES = 10 * 1024 * 1024;
 
 function api(path, options) {
   return fetch(path, Object.assign({ credentials: "include" }, options || {})).then(async function(response) {
     var body = await response.json().catch(function() { return {}; });
     if (!response.ok) throw new Error(body.error || "Request failed (" + response.status + ")");
     return body;
-  });
-}
-
-function base64File(file) {
-  return new Promise(function(resolve, reject) {
-    var reader = new FileReader();
-    reader.onload = function() { resolve(String(reader.result || "").split(",")[1] || ""); };
-    reader.onerror = function() { reject(reader.error || new Error("Could not read file")); };
-    reader.readAsDataURL(file);
   });
 }
 
@@ -148,14 +141,17 @@ export default function QuotesPanel() {
       var token = file.name + ":" + file.size + ":" + fileIndex + ":" + Date.now();
       setUploading(function(old) { return old.concat([{ token: token, name: file.name, status: "uploading" }]); });
       try {
-        if (file.size > 3 * 1024 * 1024) throw new Error(file.name + " is larger than 3 MB.");
-        var result = await api("/api/quotes/uploads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileName: file.name, contentType: file.type || "application/octet-stream", base64: await base64File(file) }) });
+        if (file.size > MAX_QUOTE_FILE_BYTES) throw new Error(file.name + " is larger than 10 MB.");
+        var contentType = file.type || "application/octet-stream";
+        var prepared = await api("/api/quotes/upload-url", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileName: file.name, contentType: contentType, byteSize: file.size }) });
+        var directUpload = await getSupabaseClient().storage.from("purchase-orders").uploadToSignedUrl(prepared.storagePath, prepared.token, file, { contentType: contentType });
+        if (directUpload.error) throw directUpload.error;
+        var result = await api("/api/quotes/uploads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileName: file.name, contentType: contentType, storagePath: prepared.storagePath }) });
         if (result.error) throw new Error(result.error);
         setUploading(function(old) { return old.map(function(row) { return row.token === token ? Object.assign({}, row, { status: "ready" }) : row; }); });
         setReviewQueue(function(old) { return old.some(function(item) { return item.revision.id === result.revision.id; }) ? old : old.concat([result]); });
       } catch (uploadError) {
         setUploading(function(old) { return old.map(function(row) { return row.token === token ? Object.assign({}, row, { status: "failed", error: uploadError.message }) : row; }); });
-        setError(uploadError.message);
       }
     }
   };
@@ -165,7 +161,7 @@ export default function QuotesPanel() {
   return <div className="space-y-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><h1 className="text-2xl font-semibold tracking-tight">Quotes</h1><p className="mt-1 text-sm text-[rgb(var(--muted))]">Upload customer quotes, review pricing, and link accepted quotes to purchase orders.</p></div><Button onClick={function() { inputRef.current && inputRef.current.click(); }}><Upload className="mr-2 h-4 w-4" />Upload quotes</Button><input ref={inputRef} className="hidden" type="file" multiple accept={ACCEPT} onChange={function(e) { handleFiles(e.target.files); e.target.value = ""; }} /></div>
     <Card className={cn("border-dashed transition-colors", dragging && "border-blue-500 bg-blue-50")}>
       <div className="flex min-h-28 items-center justify-center p-5 text-center" onDragOver={function(e) { e.preventDefault(); setDragging(true); }} onDragLeave={function() { setDragging(false); }} onDrop={function(e) { e.preventDefault(); setDragging(false); handleFiles(e.dataTransfer.files); }}>
-        <div><Upload className="mx-auto h-7 w-7 text-[rgb(var(--muted))]" /><div className="mt-2 text-sm font-medium">Drop PDF, image, CSV, or Excel quotes here</div><div className="mt-1 text-xs text-[rgb(var(--muted))]">Multiple files supported · 3 MB per file · review required before saving</div></div>
+        <div><Upload className="mx-auto h-7 w-7 text-[rgb(var(--muted))]" /><div className="mt-2 text-sm font-medium">Drop PDF, image, CSV, or Excel quotes here</div><div className="mt-1 text-xs text-[rgb(var(--muted))]">Multiple files supported · 10 MB per file · review required before saving</div></div>
       </div>
       {uploading.length > 0 && <div className="border-t border-[rgb(var(--border))] px-4 py-2">{uploading.slice(-5).map(function(row) { return <div key={row.token} className="flex items-center gap-2 py-1 text-xs">{row.status === "uploading" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : row.status === "ready" ? <Check className="h-3.5 w-3.5 text-green-600" /> : <AlertTriangle className="h-3.5 w-3.5 text-red-600" />}<span>{row.name}</span>{row.error && <span className="text-red-600">{row.error}</span>}</div>; })}</div>}
     </Card>

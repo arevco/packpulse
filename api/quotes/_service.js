@@ -3,6 +3,7 @@ import { CACHE_SITE_ID, getSupabaseAdmin } from "../ops/_common.js";
 import { ALLOWED_TYPES, BUCKET, date, extractFile, key, signedDocumentUrl, text, validateConfirmed, validateUpload } from "../purchase-orders/_service.js";
 
 export { date, key, signedDocumentUrl, text, validateConfirmed };
+export const MAX_QUOTE_FILE_BYTES = 10 * 1024 * 1024;
 
 export function missingQuotesTable(error) {
   var message = String(error && error.message || "").toLowerCase();
@@ -19,15 +20,33 @@ export async function addQuoteEvent(supabase, quoteId, revisionId, type, user, m
 }
 
 export async function stageQuoteUpload(input, user) {
-  var valid = validateUpload(input);
   var supabase = getSupabaseAdmin();
+  var stagedStoragePath = text(input && input.storagePath, 500);
+  var valid;
+  if (stagedStoragePath) {
+    var expectedPrefix = CACHE_SITE_ID + "/quotes/staged/";
+    if (stagedStoragePath.indexOf(expectedPrefix) !== 0 || stagedStoragePath.indexOf("..") !== -1) {
+      throw Object.assign(new Error("Invalid staged quote upload."), { statusCode: 400 });
+    }
+    var downloaded = await supabase.storage.from(BUCKET).download(stagedStoragePath);
+    if (downloaded.error) throw downloaded.error;
+    var stagedBuffer = Buffer.from(await downloaded.data.arrayBuffer());
+    valid = validateUpload(Object.assign({}, input, { base64: stagedBuffer.toString("base64") }), { maxFileBytes: MAX_QUOTE_FILE_BYTES, maxFileLabel: "10 MB" });
+  } else {
+    valid = validateUpload(input, { maxFileBytes: MAX_QUOTE_FILE_BYTES, maxFileLabel: "10 MB" });
+  }
   var sha256 = crypto.createHash("sha256").update(valid.buffer).digest("hex");
   var existing = await supabase.from("quote_revisions").select("*").eq("site_id", CACHE_SITE_ID).eq("sha256", sha256).maybeSingle();
   if (existing.error) throw existing.error;
-  if (existing.data) return { duplicate: true, revision: existing.data, extracted: existing.data.extracted_data, documentUrl: await signedDocumentUrl(supabase, existing.data) };
-  var storagePath = CACHE_SITE_ID + "/quotes/" + sha256.slice(0, 2) + "/" + sha256 + "." + ALLOWED_TYPES[valid.contentType];
-  var stored = await supabase.storage.from(BUCKET).upload(storagePath, valid.buffer, { contentType: valid.contentType, upsert: false });
-  if (stored.error && String(stored.error.message || "").toLowerCase().indexOf("already exists") === -1) throw stored.error;
+  if (existing.data) {
+    if (stagedStoragePath) await supabase.storage.from(BUCKET).remove([stagedStoragePath]);
+    return { duplicate: true, revision: existing.data, extracted: existing.data.extracted_data, documentUrl: await signedDocumentUrl(supabase, existing.data) };
+  }
+  var storagePath = stagedStoragePath || CACHE_SITE_ID + "/quotes/" + sha256.slice(0, 2) + "/" + sha256 + "." + ALLOWED_TYPES[valid.contentType];
+  if (!stagedStoragePath) {
+    var stored = await supabase.storage.from(BUCKET).upload(storagePath, valid.buffer, { contentType: valid.contentType, upsert: false });
+    if (stored.error && String(stored.error.message || "").toLowerCase().indexOf("already exists") === -1) throw stored.error;
+  }
   var extraction;
   try {
     extraction = await extractFile(valid.buffer, valid.contentType, "quote");

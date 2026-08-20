@@ -225,14 +225,16 @@ export async function extractFile(buffer, contentType, documentKind) {
   return modelExtraction(buffer, contentType, documentKind);
 }
 
-export function validateUpload(body) {
+export function validateUpload(body, options) {
   var fileName = text(body && body.fileName, 240).replace(/[\/\\]/g, "_");
   var contentType = text(body && body.contentType, 120).toLowerCase();
   if (!fileName || !body || !body.base64) throw new Error("File name and file content are required.");
   if (!ALLOWED_TYPES[contentType]) throw new Error("Unsupported file type.");
   var buffer = Buffer.from(String(body.base64), "base64");
   if (!buffer.length) throw new Error("The uploaded file is empty.");
-  if (buffer.length > MAX_FILE_BYTES) throw new Error("Files must be 3 MB or smaller.");
+  var maxFileBytes = Number(options && options.maxFileBytes) || MAX_FILE_BYTES;
+  var maxFileLabel = text(options && options.maxFileLabel, 40) || "3 MB";
+  if (buffer.length > maxFileBytes) throw new Error("Files must be " + maxFileLabel + " or smaller.");
   var claimedExtension = fileName.split(".").pop().toLowerCase();
   var expected = ALLOWED_TYPES[contentType];
   var extensionOk = claimedExtension === expected ||
