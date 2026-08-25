@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, Clock3, DollarSign, Gauge, Users } from "lucide-react";
+import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, Clock3, DollarSign, Gauge, Sparkles, Target, Users } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Card } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -22,6 +22,13 @@ async function getJson(url) {
   var response = await fetch(url, { credentials: "include" });
   var body = await response.json().catch(function() { return {}; });
   if (!response.ok) throw new Error(body.error || "Analytics data could not be loaded");
+  return body;
+}
+
+async function postJson(url, payload) {
+  var response = await fetch(url, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  var body = await response.json().catch(function() { return {}; });
+  if (!response.ok) throw new Error(body.error || "AI insights could not be generated");
   return body;
 }
 
@@ -138,6 +145,47 @@ function summarize(range, production, labor, resolvePrice) {
 
 function delta(current, prior) { return prior ? (current - prior) / Math.abs(prior) * 100 : null; }
 
+function directionSentence(label, current, prior, goodWhenDown) {
+  var change = delta(current, prior);
+  if (change == null) return label + " has no prior baseline.";
+  var better = goodWhenDown ? change < 0 : change > 0;
+  return label + " is " + Math.abs(change).toFixed(1) + "% " + (change >= 0 ? "higher" : "lower") + " than the comparison period" + (better ? "." : ", which needs attention.");
+}
+
+function deterministicReadout(current, prior, rows) {
+  var outputChange = delta(current.unitsPerDay, prior.unitsPerDay);
+  var laborChange = delta(current.casesPerPayableHour, prior.casesPerPayableHour);
+  var best = rows.slice().filter(function(row) { return row.unitDelta != null; }).sort(function(a, b) { return b.unitDelta - a.unitDelta; })[0];
+  var watch = rows.slice().sort(function(a, b) {
+    var aScore = (a.marginPct != null && a.marginPct < 20 ? 100 : 0) + (a.unitDelta != null && a.unitDelta < 0 ? Math.abs(a.unitDelta) : 0) + (100 - a.priceCoverage) / 2;
+    var bScore = (b.marginPct != null && b.marginPct < 20 ? 100 : 0) + (b.unitDelta != null && b.unitDelta < 0 ? Math.abs(b.unitDelta) : 0) + (100 - b.priceCoverage) / 2;
+    return bScore - aScore;
+  })[0];
+  return {
+    headline: outputChange == null ? "Plant performance is ready for review." : "Plant output is " + (outputChange >= 0 ? "improving" : "softening") + " versus the comparison period.",
+    summary: directionSentence("Output per production day", current.unitsPerDay, prior.unitsPerDay, false) + " " + directionSentence("Labor productivity", current.casesPerPayableHour, prior.casesPerPayableHour, false),
+    primaryDriver: best ? best.line + " shows the strongest output-per-day movement." : "No single line has a reliable comparison baseline.",
+    watchItem: watch ? watch.line + " is the clearest line to review for performance, margin, or data coverage." : "No material line exception is available.",
+    recommendedAction: watch ? "Review " + watch.line + " job mix, crew deployment, and configured pricing before the next production meeting." : "Confirm labor and pricing coverage before acting on the comparison."
+  };
+}
+
+function evidenceText(current, prior, rows) {
+  var best = rows.slice().filter(function(row) { return row.unitDelta != null; }).sort(function(a, b) { return b.unitDelta - a.unitDelta; })[0];
+  var watch = rows.slice().filter(function(row) { return row.marginPct != null || row.unitDelta != null; }).sort(function(a, b) {
+    var as = (a.marginPct != null && a.marginPct < 20 ? 100 : 0) + (a.unitDelta < 0 ? Math.abs(a.unitDelta) : 0);
+    var bs = (b.marginPct != null && b.marginPct < 20 ? 100 : 0) + (b.unitDelta < 0 ? Math.abs(b.unitDelta) : 0);
+    return bs - as;
+  })[0];
+  return {
+    headline: integer(current.unitsPerDay) + " cases/day · " + (delta(current.unitsPerDay, prior.unitsPerDay) == null ? "no baseline" : (delta(current.unitsPerDay, prior.unitsPerDay) > 0 ? "+" : "") + delta(current.unitsPerDay, prior.unitsPerDay).toFixed(1) + "%"),
+    summary: current.casesPerPayableHour.toFixed(1) + " cases/payable hr · $" + current.laborCostPerUnit.toFixed(2) + " labor/case",
+    primaryDriver: best ? best.line + " · " + (best.unitDelta > 0 ? "+" : "") + best.unitDelta.toFixed(1) + "% output/day" : "No comparable line",
+    watchItem: watch ? watch.line + " · " + (watch.marginPct == null ? (watch.unitDelta || 0).toFixed(1) + "% output/day" : pct(watch.marginPct) + " labor margin") : "No material exception",
+    recommendedAction: pct(current.priceCoverage) + " plant price coverage · " + current.jobs + " jobs reviewed"
+  };
+}
+
 function Metric({ icon: Icon, label, value, change, goodWhenDown, note }) {
   var improving = change != null && (goodWhenDown ? change < 0 : change > 0);
   var worsening = change != null && (goodWhenDown ? change > 0 : change < 0);
@@ -176,6 +224,31 @@ export default function AnalyticsView({ evoconData }) {
   var flags = comparisonRows.filter(function(row) { return (row.marginPct != null && row.marginPct < 20 && row.units >= current.units * 0.05) || (row.unitDelta != null && row.unitDelta < -15) || (row.priceCoverage < 80 && row.units > 0); }).slice(0, 4);
   var loading = productionQuery.isPending || laborQuery.isPending || configQuery.isPending;
   var error = productionQuery.error || laborQuery.error || configQuery.error;
+  var insightPayload = useMemo(function() {
+    return {
+      currentPeriod: { start: ranges.currentStart, end: ranges.currentEnd, productionDays: current.productionDays, jobs: current.jobs },
+      comparisonPeriod: { start: ranges.priorStart, end: ranges.priorEnd, productionDays: prior.productionDays, jobs: prior.jobs },
+      metrics: [
+        { label: "cases per production day", current: current.unitsPerDay, prior: prior.unitsPerDay, changePct: delta(current.unitsPerDay, prior.unitsPerDay), unit: "cases/day" },
+        { label: "cases per payable hour", current: current.casesPerPayableHour, prior: prior.casesPerPayableHour, changePct: delta(current.casesPerPayableHour, prior.casesPerPayableHour), unit: "cases/hour" },
+        { label: "labor cost per case", current: current.laborCostPerUnit, prior: prior.laborCostPerUnit, changePct: delta(current.laborCostPerUnit, prior.laborCostPerUnit), unit: "USD/case", goodWhenDown: true },
+        { label: "average crew", current: current.crew, prior: prior.crew, changePct: current.crew == null || prior.crew == null ? null : delta(current.crew, prior.crew), unit: "people", goodWhenDown: true },
+        { label: "labor margin per production day", current: current.margin / Math.max(1, current.productionDays), prior: prior.margin / Math.max(1, prior.productionDays), changePct: delta(current.margin / Math.max(1, current.productionDays), prior.margin / Math.max(1, prior.productionDays)), unit: "USD/day" }
+      ],
+      lines: comparisonRows.slice(0, 10).map(function(row) { return { line: row.line, casesPerDay: row.unitsPerDay, outputChangePct: row.unitDelta, casesPerPayableHour: row.casesPerPayableHour, crew: row.crew, laborCostPerCase: row.laborCostPerUnit, laborMarginPct: row.marginPct, volumeSharePct: current.units > 0 ? row.units / current.units * 100 : 0, priceCoveragePct: row.priceCoverage }; }),
+      dataQuality: { pricingCoveragePct: current.priceCoverage, hasLabor: current.payableHours > 0, hasOee: oee != null }
+    };
+  }, [ranges, current, prior, comparisonRows, oee]);
+  var insightsQuery = useQuery({
+    queryKey: ["analytics-ai-insights", insightPayload],
+    queryFn: function() { return postJson("/api/ai/analytics-insights", insightPayload); },
+    enabled: !loading && !error && current.units > 0,
+    staleTime: 15 * 60 * 1000,
+    retry: false
+  });
+  var fallbackReadout = useMemo(function() { return deterministicReadout(current, prior, comparisonRows); }, [current, prior, comparisonRows]);
+  var readout = insightsQuery.data && insightsQuery.data.insights ? insightsQuery.data.insights : fallbackReadout;
+  var evidence = useMemo(function() { return evidenceText(current, prior, comparisonRows); }, [current, prior, comparisonRows]);
 
   return <div className="space-y-4">
     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -190,6 +263,19 @@ export default function AnalyticsView({ evoconData }) {
       <div className="mt-2 text-xs text-[rgb(var(--muted))]">Normalized by actual production days. Current: {current.productionDays || 0} days / {current.jobs} jobs · Prior: {prior.productionDays || 0} days / {prior.jobs} jobs.</div>
     </Card>
     {error ? <Card className="border-[rgb(var(--danger-line))] bg-[rgb(var(--danger-soft))] px-4 py-4 text-sm text-[rgb(var(--danger))]">{error.message}</Card> : null}
+    <Card className="overflow-hidden border-[color-mix(in_oklab,rgb(var(--accent))_35%,rgb(var(--border)))]">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[rgb(var(--border))] bg-[color-mix(in_oklab,rgb(var(--accent))_7%,rgb(var(--surface)))] px-4 py-3">
+        <div className="flex items-center gap-2"><Sparkles className="h-4 w-4 text-[rgb(var(--accent))]" /><div><div className="text-sm font-semibold">Executive readout</div><div className="text-xs text-[rgb(var(--muted))]">Conclusion first, verified evidence underneath.</div></div></div>
+        <div className="flex items-center gap-2"><span className="text-[11px] text-[rgb(var(--muted))]">{insightsQuery.isFetching ? "OpenAI is reading the fact pack…" : insightsQuery.data ? "AI-written · PackPulse-verified" : "Deterministic fallback"}</span><Button variant="outline" size="sm" onClick={function() { insightsQuery.refetch(); }} disabled={loading || insightsQuery.isFetching}>{insightsQuery.isFetching ? "Refreshing…" : "Refresh insight"}</Button></div>
+      </div>
+      <div className="px-4 py-4">
+        <div className="text-xl font-bold leading-snug">{readout.headline}</div><div className="mt-1 max-w-4xl text-sm text-[rgb(var(--muted))]">{readout.summary}</div>
+        <div className="mt-4 grid gap-3 lg:grid-cols-3">
+          {[{ key: "primaryDriver", label: "Primary driver", icon: ArrowUpRight, iconClass: "text-[rgb(var(--success))]" }, { key: "watchItem", label: "Watch item", icon: AlertTriangle, iconClass: "text-[rgb(var(--warning))]" }, { key: "recommendedAction", label: "Recommended next step", icon: Target, iconClass: "text-[rgb(var(--accent))]" }].map(function(item) { var Icon = item.icon; return <div key={item.key} className="rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-3"><div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]"><Icon className={"h-3.5 w-3.5 " + item.iconClass} />{item.label}</div><div className="mt-2 text-sm font-medium leading-relaxed">{readout[item.key]}</div><div className="mt-2 text-xs text-[rgb(var(--muted))]">{evidence[item.key]}</div></div>; })}
+        </div>
+        {insightsQuery.isError ? <div className="mt-3 text-xs text-[rgb(var(--warning))]">OpenAI narrative is temporarily unavailable; verified deterministic insights are shown instead.</div> : null}
+      </div>
+    </Card>
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       <Metric icon={Activity} label="Cases / production day" value={loading ? "—" : integer(current.unitsPerDay)} change={delta(current.unitsPerDay, prior.unitsPerDay)} />
       <Metric icon={Clock3} label="Cases / payable hour" value={loading ? "—" : current.casesPerPayableHour.toFixed(1)} change={delta(current.casesPerPayableHour, prior.casesPerPayableHour)} />
