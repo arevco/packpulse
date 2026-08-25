@@ -73,6 +73,7 @@ export default async function handler(req, res) {
   try {
     var body = req.body && typeof req.body === "object" ? req.body : {};
     var factPack = {
+      audience: ["supervisor", "operations", "finance"].includes(text(body.audience, 20)) ? text(body.audience, 20) : "operations",
       currentPeriod: { start: text(body.currentPeriod && body.currentPeriod.start, 10), end: text(body.currentPeriod && body.currentPeriod.end, 10), productionDays: number(body.currentPeriod && body.currentPeriod.productionDays), jobs: number(body.currentPeriod && body.currentPeriod.jobs) },
       comparisonPeriod: { start: text(body.comparisonPeriod && body.comparisonPeriod.start, 10), end: text(body.comparisonPeriod && body.comparisonPeriod.end, 10), productionDays: number(body.comparisonPeriod && body.comparisonPeriod.productionDays), jobs: number(body.comparisonPeriod && body.comparisonPeriod.jobs) },
       metrics: (Array.isArray(body.metrics) ? body.metrics : []).slice(0, 10).map(cleanMetric),
@@ -87,6 +88,7 @@ export default async function handler(req, res) {
 
     var instructions = [
       "You are a plant operations analyst writing a highly scannable executive readout.",
+      "Write for the audience named in the fact pack: supervisor means immediate shift execution, operations means cross-line performance and labor deployment, and finance means labor contribution, cost variance, and pricing confidence.",
       "Use only the supplied PackPulse facts. Do not calculate or invent values.",
       "Do not include any digits or numeric values in your prose; the interface displays verified evidence separately.",
       "Lead with the conclusion, identify one primary operational driver, identify one material watch item, and give one practical investigation or action.",

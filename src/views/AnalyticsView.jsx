@@ -135,6 +135,7 @@ function summarize(range, production, labor, resolvePrice) {
   return {
     units: units, jobs: jobs.size, productionDays: activeDays.size, unitsPerDay: units / productionDays,
     payableHours: payableHours, productiveHours: productiveHours, laborCost: laborCost,
+    laborUtilizationPct: payableHours > 0 ? productiveHours / payableHours * 100 : null,
     casesPerPayableHour: payableHours > 0 ? units / payableHours : 0,
     laborCostPerUnit: units > 0 ? laborCost / units : 0,
     crew: headcountWeight > 0 ? headcountWeighted / headcountWeight : null,
@@ -152,7 +153,7 @@ function directionSentence(label, current, prior, goodWhenDown) {
   return label + " is " + Math.abs(change).toFixed(1) + "% " + (change >= 0 ? "higher" : "lower") + " than the comparison period" + (better ? "." : ", which needs attention.");
 }
 
-function deterministicReadout(current, prior, rows) {
+function deterministicReadout(current, prior, rows, role) {
   var outputChange = delta(current.unitsPerDay, prior.unitsPerDay);
   var laborChange = delta(current.casesPerPayableHour, prior.casesPerPayableHour);
   var best = rows.slice().filter(function(row) { return row.unitDelta != null; }).sort(function(a, b) { return b.unitDelta - a.unitDelta; })[0];
@@ -166,7 +167,7 @@ function deterministicReadout(current, prior, rows) {
     summary: directionSentence("Output per production day", current.unitsPerDay, prior.unitsPerDay, false) + " " + directionSentence("Labor productivity", current.casesPerPayableHour, prior.casesPerPayableHour, false),
     primaryDriver: best ? best.line + " shows the strongest output-per-day movement." : "No single line has a reliable comparison baseline.",
     watchItem: watch ? watch.line + " is the clearest line to review for performance, margin, or data coverage." : "No material line exception is available.",
-    recommendedAction: watch ? "Review " + watch.line + " job mix, crew deployment, and configured pricing before the next production meeting." : "Confirm labor and pricing coverage before acting on the comparison."
+    recommendedAction: watch ? (role === "finance" ? "Validate pricing and direct labor contribution on " : role === "supervisor" ? "Review today’s staffing and job execution on " : "Review job mix, crew deployment, and performance on ") + watch.line + "." : "Confirm labor and pricing coverage before acting on the comparison."
   };
 }
 
@@ -186,7 +187,7 @@ function evidenceText(current, prior, rows) {
   };
 }
 
-function Metric({ icon: Icon, label, value, change, goodWhenDown, note }) {
+function Metric({ icon: Icon, label, value, change, goodWhenDown, note, changeIsPoints }) {
   var improving = change != null && (goodWhenDown ? change < 0 : change > 0);
   var worsening = change != null && (goodWhenDown ? change > 0 : change < 0);
   var Trend = change != null && change < 0 ? ArrowDownRight : ArrowUpRight;
@@ -194,7 +195,7 @@ function Metric({ icon: Icon, label, value, change, goodWhenDown, note }) {
     <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]"><span>{label}</span><Icon className="h-4 w-4" /></div>
     <div className="mt-2 text-2xl font-bold [font-variant-numeric:tabular-nums]">{value}</div>
     <div className="mt-1 flex min-h-5 items-center gap-1 text-xs">
-      {change == null ? <span className="text-[rgb(var(--muted))]">No prior baseline</span> : <><Trend className={"h-3.5 w-3.5 " + (improving ? "text-[rgb(var(--success))]" : worsening ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--muted))]")} /><span className={improving ? "text-[rgb(var(--success))]" : worsening ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--muted))]"}>{change > 0 ? "+" : ""}{change.toFixed(1)}% vs prior</span></>}
+      {change == null ? <span className="text-[rgb(var(--muted))]">No prior baseline</span> : <><Trend className={"h-3.5 w-3.5 " + (improving ? "text-[rgb(var(--success))]" : worsening ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--muted))]")} /><span className={improving ? "text-[rgb(var(--success))]" : worsening ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--muted))]"}>{change > 0 ? "+" : ""}{change.toFixed(1)}{changeIsPoints ? " pts" : "%"} vs prior</span></>}
     </div>
     {note ? <div className="mt-1 text-[11px] text-[rgb(var(--muted))]">{note}</div> : null}
   </Card>;
@@ -204,6 +205,7 @@ export default function AnalyticsView({ evoconData }) {
   const { C, mono } = useTheme();
   const defaults = useMemo(defaultPeriods, []);
   const [ranges, setRanges] = useState(defaults);
+  const [role, setRole] = useState("supervisor");
   var fetchStart = ranges.priorStart < ranges.currentStart ? ranges.priorStart : ranges.currentStart;
   var fetchEnd = ranges.priorEnd > ranges.currentEnd ? ranges.priorEnd : ranges.currentEnd;
   var productionQuery = useQuery({ queryKey: ["analytics-production", fetchStart, fetchEnd], queryFn: function() { return getJson("/api/ops/production-breakdown?start=" + fetchStart + "&end=" + fetchEnd); }, staleTime: 300000 });
@@ -226,6 +228,7 @@ export default function AnalyticsView({ evoconData }) {
   var error = productionQuery.error || laborQuery.error || configQuery.error;
   var insightPayload = useMemo(function() {
     return {
+      audience: role,
       currentPeriod: { start: ranges.currentStart, end: ranges.currentEnd, productionDays: current.productionDays, jobs: current.jobs },
       comparisonPeriod: { start: ranges.priorStart, end: ranges.priorEnd, productionDays: prior.productionDays, jobs: prior.jobs },
       metrics: [
@@ -238,7 +241,7 @@ export default function AnalyticsView({ evoconData }) {
       lines: comparisonRows.slice(0, 10).map(function(row) { return { line: row.line, casesPerDay: row.unitsPerDay, outputChangePct: row.unitDelta, casesPerPayableHour: row.casesPerPayableHour, crew: row.crew, laborCostPerCase: row.laborCostPerUnit, laborMarginPct: row.marginPct, volumeSharePct: current.units > 0 ? row.units / current.units * 100 : 0, priceCoveragePct: row.priceCoverage }; }),
       dataQuality: { pricingCoveragePct: current.priceCoverage, hasLabor: current.payableHours > 0, hasOee: oee != null }
     };
-  }, [ranges, current, prior, comparisonRows, oee]);
+  }, [ranges, current, prior, comparisonRows, oee, role]);
   var insightsQuery = useQuery({
     queryKey: ["analytics-ai-insights", insightPayload],
     queryFn: function() { return postJson("/api/ai/analytics-insights", insightPayload); },
@@ -246,14 +249,31 @@ export default function AnalyticsView({ evoconData }) {
     staleTime: 15 * 60 * 1000,
     retry: false
   });
-  var fallbackReadout = useMemo(function() { return deterministicReadout(current, prior, comparisonRows); }, [current, prior, comparisonRows]);
+  var fallbackReadout = useMemo(function() { return deterministicReadout(current, prior, comparisonRows, role); }, [current, prior, comparisonRows, role]);
   var readout = insightsQuery.data && insightsQuery.data.insights ? insightsQuery.data.insights : fallbackReadout;
   var evidence = useMemo(function() { return evidenceText(current, prior, comparisonRows); }, [current, prior, comparisonRows]);
+  var laborCostVariance = prior.laborCostPerUnit > 0 ? (current.laborCostPerUnit - prior.laborCostPerUnit) * current.units : 0;
+  var roleKpis = role === "finance" ? [
+    { icon: DollarSign, label: "Labor margin / day", value: compactMoney(current.margin / Math.max(1, current.productionDays)), change: delta(current.margin / Math.max(1, current.productionDays), prior.margin / Math.max(1, prior.productionDays)), note: "Revenue less direct labor" },
+    { icon: Gauge, label: "Labor margin %", value: current.marginPct == null ? "—" : pct(current.marginPct), change: current.marginPct == null || prior.marginPct == null ? null : current.marginPct - prior.marginPct, changeIsPoints: true, note: pct(current.priceCoverage) + " pricing coverage" },
+    { icon: DollarSign, label: "Labor spend / day", value: compactMoney(current.laborCost / Math.max(1, current.productionDays)), change: delta(current.laborCost / Math.max(1, current.productionDays), prior.laborCost / Math.max(1, prior.productionDays)), goodWhenDown: true },
+    { icon: Target, label: "Labor cost variance", value: (laborCostVariance > 0 ? "+" : "") + compactMoney(laborCostVariance), change: null, goodWhenDown: true, note: "Current volume at prior labor cost/case" }
+  ] : role === "operations" ? [
+    { icon: Activity, label: "Cases / production day", value: integer(current.unitsPerDay), change: delta(current.unitsPerDay, prior.unitsPerDay) },
+    { icon: Gauge, label: "Productive / payable hours", value: current.laborUtilizationPct == null ? "—" : pct(current.laborUtilizationPct), change: current.laborUtilizationPct == null || prior.laborUtilizationPct == null ? null : current.laborUtilizationPct - prior.laborUtilizationPct, changeIsPoints: true, note: "Labor utilization" },
+    { icon: Users, label: "Average crew", value: current.crew == null ? "—" : current.crew.toFixed(1), change: current.crew == null || prior.crew == null ? null : delta(current.crew, prior.crew), goodWhenDown: true },
+    { icon: DollarSign, label: "Labor cost / case", value: "$" + current.laborCostPerUnit.toFixed(2), change: delta(current.laborCostPerUnit, prior.laborCostPerUnit), goodWhenDown: true }
+  ] : [
+    { icon: Activity, label: "Cases / production day", value: integer(current.unitsPerDay), change: delta(current.unitsPerDay, prior.unitsPerDay) },
+    { icon: Clock3, label: "Cases / payable hour", value: current.casesPerPayableHour.toFixed(1), change: delta(current.casesPerPayableHour, prior.casesPerPayableHour) },
+    { icon: Activity, label: "Jobs / production day", value: (current.jobs / Math.max(1, current.productionDays)).toFixed(1), change: delta(current.jobs / Math.max(1, current.productionDays), prior.jobs / Math.max(1, prior.productionDays)), note: "Workload and changeover proxy" },
+    { icon: Gauge, label: "OEE", value: oee == null ? "—" : pct(oee <= 1 ? oee * 100 : oee), change: null, note: oee == null ? "Evocon data unavailable" : oeeValues.length + " Evocon observations" }
+  ];
 
   return <div className="space-y-4">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div><h1 className="text-xl font-bold">Plant Analytics</h1><p className="text-sm text-[rgb(var(--muted))]">Deterministic production, labor, profitability, and OEE signals—without downloading job data.</p></div>
-      <Button variant="outline" size="sm" onClick={function() { setRanges(defaults); }}>Reset to month</Button>
+      <div className="flex flex-wrap gap-1.5">{[{ key: "supervisor", label: "Plant supervisor" }, { key: "operations", label: "Operations manager" }, { key: "finance", label: "CFO / Finance" }].map(function(item) { return <Button key={item.key} variant={role === item.key ? "active" : "outline"} size="sm" onClick={function() { setRole(item.key); }}>{item.label}</Button>; })}</div>
     </div>
     <Card className="px-4 py-3">
       <div className="grid gap-3 lg:grid-cols-2">
@@ -261,11 +281,12 @@ export default function AnalyticsView({ evoconData }) {
         <div><div className="mb-1 text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Comparison period</div><div className="flex items-center gap-2"><DatePicker value={ranges.priorStart} onChange={function(v) { setRanges(Object.assign({}, ranges, { priorStart: v })); }} /><span className="text-xs text-[rgb(var(--muted))]">to</span><DatePicker value={ranges.priorEnd} onChange={function(v) { setRanges(Object.assign({}, ranges, { priorEnd: v })); }} /></div></div>
       </div>
       <div className="mt-2 text-xs text-[rgb(var(--muted))]">Normalized by actual production days. Current: {current.productionDays || 0} days / {current.jobs} jobs · Prior: {prior.productionDays || 0} days / {prior.jobs} jobs.</div>
+      <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-[rgb(var(--border))] pt-3 text-xs"><span className="font-semibold">Decision confidence</span><span className={"rounded-full border px-2 py-1 " + (current.units > 0 ? "border-[rgb(var(--success-line))] bg-[rgb(var(--success-soft))] text-[rgb(var(--success))]" : "border-[rgb(var(--danger-line))] bg-[rgb(var(--danger-soft))] text-[rgb(var(--danger))]")}>Production {current.units > 0 ? "ready" : "missing"}</span><span className={"rounded-full border px-2 py-1 " + (current.payableHours > 0 ? "border-[rgb(var(--success-line))] bg-[rgb(var(--success-soft))] text-[rgb(var(--success))]" : "border-[rgb(var(--warning-line))] bg-[rgb(var(--warning-soft))] text-[rgb(var(--warning))]")}>Labor {current.payableHours > 0 ? "matched" : "unavailable"}</span><span className={"rounded-full border px-2 py-1 " + (current.priceCoverage >= 95 ? "border-[rgb(var(--success-line))] bg-[rgb(var(--success-soft))] text-[rgb(var(--success))]" : "border-[rgb(var(--warning-line))] bg-[rgb(var(--warning-soft))] text-[rgb(var(--warning))]")}>Pricing {pct(current.priceCoverage)}</span><span className={"rounded-full border px-2 py-1 " + (oee != null ? "border-[rgb(var(--success-line))] bg-[rgb(var(--success-soft))] text-[rgb(var(--success))]" : "border-[rgb(var(--border))] text-[rgb(var(--muted))]")}>OEE {oee != null ? "connected" : "unavailable"}</span><Button variant="outline" size="sm" onClick={function() { setRanges(defaults); }}>Reset dates</Button></div>
     </Card>
     {error ? <Card className="border-[rgb(var(--danger-line))] bg-[rgb(var(--danger-soft))] px-4 py-4 text-sm text-[rgb(var(--danger))]">{error.message}</Card> : null}
     <Card className="overflow-hidden border-[color-mix(in_oklab,rgb(var(--accent))_35%,rgb(var(--border)))]">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[rgb(var(--border))] bg-[color-mix(in_oklab,rgb(var(--accent))_7%,rgb(var(--surface)))] px-4 py-3">
-        <div className="flex items-center gap-2"><Sparkles className="h-4 w-4 text-[rgb(var(--accent))]" /><div><div className="text-sm font-semibold">Executive readout</div><div className="text-xs text-[rgb(var(--muted))]">Conclusion first, verified evidence underneath.</div></div></div>
+        <div className="flex items-center gap-2"><Sparkles className="h-4 w-4 text-[rgb(var(--accent))]" /><div><div className="text-sm font-semibold">{role === "finance" ? "Financial readout" : role === "operations" ? "Operations readout" : "Shift-lead readout"}</div><div className="text-xs text-[rgb(var(--muted))]">Conclusion first, verified evidence underneath.</div></div></div>
         <div className="flex items-center gap-2"><span className="text-[11px] text-[rgb(var(--muted))]">{insightsQuery.isFetching ? "OpenAI is reading the fact pack…" : insightsQuery.data ? "AI-written · PackPulse-verified" : "Deterministic fallback"}</span><Button variant="outline" size="sm" onClick={function() { insightsQuery.refetch(); }} disabled={loading || insightsQuery.isFetching}>{insightsQuery.isFetching ? "Refreshing…" : "Refresh insight"}</Button></div>
       </div>
       <div className="px-4 py-4">
@@ -276,16 +297,7 @@ export default function AnalyticsView({ evoconData }) {
         {insightsQuery.isError ? <div className="mt-3 text-xs text-[rgb(var(--warning))]">OpenAI narrative is temporarily unavailable; verified deterministic insights are shown instead.</div> : null}
       </div>
     </Card>
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      <Metric icon={Activity} label="Cases / production day" value={loading ? "—" : integer(current.unitsPerDay)} change={delta(current.unitsPerDay, prior.unitsPerDay)} />
-      <Metric icon={Clock3} label="Cases / payable hour" value={loading ? "—" : current.casesPerPayableHour.toFixed(1)} change={delta(current.casesPerPayableHour, prior.casesPerPayableHour)} />
-      <Metric icon={DollarSign} label="Labor cost / case" value={loading ? "—" : "$" + current.laborCostPerUnit.toFixed(2)} change={delta(current.laborCostPerUnit, prior.laborCostPerUnit)} goodWhenDown />
-      <Metric icon={Users} label="Average crew" value={loading || current.crew == null ? "—" : current.crew.toFixed(1)} change={current.crew == null || prior.crew == null ? null : delta(current.crew, prior.crew)} goodWhenDown />
-      <Metric icon={DollarSign} label="Revenue / day" value={loading ? "—" : compactMoney(current.revenue / Math.max(1, current.productionDays))} change={delta(current.revenue / Math.max(1, current.productionDays), prior.revenue / Math.max(1, prior.productionDays))} note={pct(current.priceCoverage) + " SKU price coverage"} />
-      <Metric icon={DollarSign} label="Labor margin / day" value={loading ? "—" : compactMoney(current.margin / Math.max(1, current.productionDays))} change={delta(current.margin / Math.max(1, current.productionDays), prior.margin / Math.max(1, prior.productionDays))} note="Revenue less direct labor" />
-      <Metric icon={Gauge} label="Labor margin %" value={loading || current.marginPct == null ? "—" : pct(current.marginPct)} change={current.marginPct == null || prior.marginPct == null ? null : current.marginPct - prior.marginPct} note="Change shown as percentage-point proxy" />
-      <Metric icon={Gauge} label="OEE" value={oee == null ? "—" : pct(oee <= 1 ? oee * 100 : oee)} change={null} note={oee == null ? "No Evocon OEE rows available" : oeeValues.length + " Evocon observations"} />
-    </div>
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{roleKpis.map(function(metric) { return <Metric key={metric.label} icon={metric.icon} label={metric.label} value={loading ? "—" : metric.value} change={metric.change} goodWhenDown={metric.goodWhenDown} note={metric.note} changeIsPoints={metric.changeIsPoints} />; })}</div>
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(300px,0.7fr)]">
       <Card className="px-4 py-4">
         <div className="mb-3"><div className="text-sm font-semibold">Output by line</div><div className="text-xs text-[rgb(var(--muted))]">Current versus comparison period; totals are normalized in the table below.</div></div>
