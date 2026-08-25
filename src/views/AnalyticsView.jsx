@@ -32,14 +32,63 @@ async function postJson(url, payload) {
   return body;
 }
 
-function defaultPeriods() {
+function quickCompareRanges(key) {
   var now = new Date();
-  var currentEnd = iso(now);
-  var currentStart = iso(new Date(now.getFullYear(), now.getMonth(), 1, 12));
-  var priorEnd = shift(currentStart, -1);
-  var priorDate = new Date(priorEnd + "T12:00:00");
-  var priorStart = iso(new Date(priorDate.getFullYear(), priorDate.getMonth(), 1, 12));
-  return { currentStart: currentStart, currentEnd: currentEnd, priorStart: priorStart, priorEnd: priorEnd };
+  var today = iso(now);
+  var currentStart;
+  var priorStart;
+  var priorEnd;
+  if (key === "week") {
+    var day = now.getDay();
+    currentStart = shift(today, day === 0 ? -6 : 1 - day);
+    priorStart = shift(currentStart, -7);
+    priorEnd = shift(currentStart, -1);
+  } else if (key === "quarter") {
+    var quarterMonth = Math.floor(now.getMonth() / 3) * 3;
+    currentStart = iso(new Date(now.getFullYear(), quarterMonth, 1, 12));
+    var priorQuarterDate = new Date(now.getFullYear(), quarterMonth - 3, 1, 12);
+    priorStart = iso(priorQuarterDate);
+    priorEnd = iso(new Date(priorQuarterDate.getFullYear(), priorQuarterDate.getMonth() + 3, 0, 12));
+  } else if (key === "year") {
+    currentStart = iso(new Date(now.getFullYear(), 0, 1, 12));
+    priorStart = iso(new Date(now.getFullYear() - 1, 0, 1, 12));
+    priorEnd = iso(new Date(now.getFullYear() - 1, 11, 31, 12));
+  } else {
+    currentStart = iso(new Date(now.getFullYear(), now.getMonth(), 1, 12));
+    var priorMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1, 12);
+    priorStart = iso(priorMonthDate);
+    priorEnd = iso(new Date(priorMonthDate.getFullYear(), priorMonthDate.getMonth() + 1, 0, 12));
+  }
+  return { currentStart: currentStart, currentEnd: today, priorStart: priorStart, priorEnd: priorEnd };
+}
+
+function productionDatesInRange(production, range) {
+  var found = {};
+  (production && Array.isArray(production.rowsLite) ? production.rowsLite : []).forEach(function(row) {
+    var date = String(row && row.produced_date_et || "").slice(0, 10);
+    if (date >= range.start && date <= range.end && n(row && row.units_produced) > 0) found[date] = true;
+  });
+  return Object.keys(found).sort();
+}
+
+function matchedProductionDayRanges(ranges, production, enabled) {
+  var currentRange = { start: ranges.currentStart, end: ranges.currentEnd };
+  var priorRange = { start: ranges.priorStart, end: ranges.priorEnd };
+  if (!enabled) return { current: currentRange, prior: priorRange, matched: false };
+  var currentDates = productionDatesInRange(production, currentRange);
+  var priorDates = productionDatesInRange(production, priorRange);
+  if (!currentDates.length || !priorDates.length) return { current: currentRange, prior: priorRange, matched: false };
+  var matchedCount = Math.min(currentDates.length, priorDates.length);
+  var matchedCurrentEnd = currentDates[matchedCount - 1];
+  var matchedPriorEnd = priorDates[matchedCount - 1];
+  return {
+    current: { start: currentRange.start, end: matchedCurrentEnd },
+    prior: { start: priorRange.start, end: matchedPriorEnd },
+    matched: matchedCurrentEnd !== currentRange.end || matchedPriorEnd !== priorRange.end || currentDates.length !== priorDates.length,
+    productionDays: matchedCount,
+    availableCurrentDays: currentDates.length,
+    availablePriorDays: priorDates.length
+  };
 }
 
 function pricingResolver(config) {
@@ -203,8 +252,9 @@ function Metric({ icon: Icon, label, value, change, goodWhenDown, note, changeIs
 
 export default function AnalyticsView({ evoconData }) {
   const { C, mono } = useTheme();
-  const defaults = useMemo(defaultPeriods, []);
+  const defaults = useMemo(function() { return quickCompareRanges("month"); }, []);
   const [ranges, setRanges] = useState(defaults);
+  const [comparePreset, setComparePreset] = useState("month");
   const [role, setRole] = useState("supervisor");
   var fetchStart = ranges.priorStart < ranges.currentStart ? ranges.priorStart : ranges.currentStart;
   var fetchEnd = ranges.priorEnd > ranges.currentEnd ? ranges.priorEnd : ranges.currentEnd;
@@ -212,8 +262,9 @@ export default function AnalyticsView({ evoconData }) {
   var laborQuery = useQuery({ queryKey: ["analytics-labor", fetchStart, fetchEnd], queryFn: function() { return getJson("/api/ops/labor-actuals?start=" + fetchStart + "&end=" + fetchEnd); }, staleTime: 300000 });
   var configQuery = useQuery({ queryKey: ["analytics-config"], queryFn: function() { return getJson("/api/ops/config"); }, staleTime: 900000 });
   var resolvePrice = useMemo(function() { return pricingResolver(configQuery.data || {}); }, [configQuery.data]);
-  var current = useMemo(function() { return summarize({ start: ranges.currentStart, end: ranges.currentEnd }, productionQuery.data || {}, laborQuery.data || {}, resolvePrice); }, [ranges, productionQuery.data, laborQuery.data, resolvePrice]);
-  var prior = useMemo(function() { return summarize({ start: ranges.priorStart, end: ranges.priorEnd }, productionQuery.data || {}, laborQuery.data || {}, resolvePrice); }, [ranges, productionQuery.data, laborQuery.data, resolvePrice]);
+  var effectiveRanges = useMemo(function() { return matchedProductionDayRanges(ranges, productionQuery.data || {}, comparePreset !== "custom"); }, [ranges, productionQuery.data, comparePreset]);
+  var current = useMemo(function() { return summarize(effectiveRanges.current, productionQuery.data || {}, laborQuery.data || {}, resolvePrice); }, [effectiveRanges.current, productionQuery.data, laborQuery.data, resolvePrice]);
+  var prior = useMemo(function() { return summarize(effectiveRanges.prior, productionQuery.data || {}, laborQuery.data || {}, resolvePrice); }, [effectiveRanges.prior, productionQuery.data, laborQuery.data, resolvePrice]);
   var oeeRows = Array.isArray(evoconData) ? evoconData : [];
   var oeeValues = oeeRows.map(function(row) { return n(row && (row.oee || row.OEE || row.oee_pct || row.oeePercent)); }).filter(function(value) { return value > 0; });
   var oee = oeeValues.length ? oeeValues.reduce(function(a, b) { return a + b; }, 0) / oeeValues.length : null;
@@ -229,8 +280,8 @@ export default function AnalyticsView({ evoconData }) {
   var insightPayload = useMemo(function() {
     return {
       audience: role,
-      currentPeriod: { start: ranges.currentStart, end: ranges.currentEnd, productionDays: current.productionDays, jobs: current.jobs },
-      comparisonPeriod: { start: ranges.priorStart, end: ranges.priorEnd, productionDays: prior.productionDays, jobs: prior.jobs },
+      currentPeriod: { start: effectiveRanges.current.start, end: effectiveRanges.current.end, productionDays: current.productionDays, jobs: current.jobs },
+      comparisonPeriod: { start: effectiveRanges.prior.start, end: effectiveRanges.prior.end, productionDays: prior.productionDays, jobs: prior.jobs },
       metrics: [
         { label: "cases per production day", current: current.unitsPerDay, prior: prior.unitsPerDay, changePct: delta(current.unitsPerDay, prior.unitsPerDay), unit: "cases/day" },
         { label: "cases per payable hour", current: current.casesPerPayableHour, prior: prior.casesPerPayableHour, changePct: delta(current.casesPerPayableHour, prior.casesPerPayableHour), unit: "cases/hour" },
@@ -241,7 +292,7 @@ export default function AnalyticsView({ evoconData }) {
       lines: comparisonRows.slice(0, 10).map(function(row) { return { line: row.line, casesPerDay: row.unitsPerDay, outputChangePct: row.unitDelta, casesPerPayableHour: row.casesPerPayableHour, crew: row.crew, laborCostPerCase: row.laborCostPerUnit, laborMarginPct: row.marginPct, volumeSharePct: current.units > 0 ? row.units / current.units * 100 : 0, priceCoveragePct: row.priceCoverage }; }),
       dataQuality: { pricingCoveragePct: current.priceCoverage, hasLabor: current.payableHours > 0, hasOee: oee != null }
     };
-  }, [ranges, current, prior, comparisonRows, oee, role]);
+  }, [effectiveRanges, current, prior, comparisonRows, oee, role]);
   var insightsQuery = useQuery({
     queryKey: ["analytics-ai-insights", insightPayload],
     queryFn: function() { return postJson("/api/ai/analytics-insights", insightPayload); },
@@ -276,12 +327,18 @@ export default function AnalyticsView({ evoconData }) {
       <div className="flex flex-wrap gap-1.5">{[{ key: "supervisor", label: "Plant supervisor" }, { key: "operations", label: "Operations manager" }, { key: "finance", label: "CFO / Finance" }].map(function(item) { return <Button key={item.key} variant={role === item.key ? "active" : "outline"} size="sm" onClick={function() { setRole(item.key); }}>{item.label}</Button>; })}</div>
     </div>
     <Card className="px-4 py-3">
-      <div className="grid gap-3 lg:grid-cols-2">
+      <div className="text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Quick compare</div>
+      <div className="mt-2 flex flex-wrap gap-1.5">{[{ key: "week", label: "This week vs last" }, { key: "month", label: "This month vs last" }, { key: "quarter", label: "This quarter vs last" }, { key: "year", label: "This year vs last" }, { key: "custom", label: "Custom" }].map(function(item) { return <Button key={item.key} variant={comparePreset === item.key ? "active" : "outline"} size="sm" onClick={function() { setComparePreset(item.key); if (item.key !== "custom") setRanges(quickCompareRanges(item.key)); }}>{item.label}</Button>; })}</div>
+      {comparePreset === "custom" ? <div className="mt-3 grid gap-3 border-t border-[rgb(var(--border))] pt-3 lg:grid-cols-2">
         <div><div className="mb-1 text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Current period</div><div className="flex items-center gap-2"><DatePicker value={ranges.currentStart} onChange={function(v) { setRanges(Object.assign({}, ranges, { currentStart: v })); }} /><span className="text-xs text-[rgb(var(--muted))]">to</span><DatePicker value={ranges.currentEnd} onChange={function(v) { setRanges(Object.assign({}, ranges, { currentEnd: v })); }} /></div></div>
         <div><div className="mb-1 text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Comparison period</div><div className="flex items-center gap-2"><DatePicker value={ranges.priorStart} onChange={function(v) { setRanges(Object.assign({}, ranges, { priorStart: v })); }} /><span className="text-xs text-[rgb(var(--muted))]">to</span><DatePicker value={ranges.priorEnd} onChange={function(v) { setRanges(Object.assign({}, ranges, { priorEnd: v })); }} /></div></div>
+      </div> : null}
+      <div className="mt-3 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-2 text-xs">
+        <span className="font-semibold">Comparing:</span> {effectiveRanges.current.start} to {effectiveRanges.current.end} <span className="text-[rgb(var(--muted))]">vs</span> {effectiveRanges.prior.start} to {effectiveRanges.prior.end}
+        <span className="ml-2 text-[rgb(var(--muted))]">· Current {current.productionDays || 0} production days / {current.jobs} jobs · Prior {prior.productionDays || 0} production days / {prior.jobs} jobs</span>
+        {effectiveRanges.matched ? <span className="ml-2 font-medium text-[rgb(var(--accent))]">Matched to {effectiveRanges.productionDays} production days.</span> : null}
       </div>
-      <div className="mt-2 text-xs text-[rgb(var(--muted))]">Normalized by actual production days. Current: {current.productionDays || 0} days / {current.jobs} jobs · Prior: {prior.productionDays || 0} days / {prior.jobs} jobs.</div>
-      <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-[rgb(var(--border))] pt-3 text-xs"><span className="font-semibold">Decision confidence</span><span className={"rounded-full border px-2 py-1 " + (current.units > 0 ? "border-[rgb(var(--success-line))] bg-[rgb(var(--success-soft))] text-[rgb(var(--success))]" : "border-[rgb(var(--danger-line))] bg-[rgb(var(--danger-soft))] text-[rgb(var(--danger))]")}>Production {current.units > 0 ? "ready" : "missing"}</span><span className={"rounded-full border px-2 py-1 " + (current.payableHours > 0 ? "border-[rgb(var(--success-line))] bg-[rgb(var(--success-soft))] text-[rgb(var(--success))]" : "border-[rgb(var(--warning-line))] bg-[rgb(var(--warning-soft))] text-[rgb(var(--warning))]")}>Labor {current.payableHours > 0 ? "matched" : "unavailable"}</span><span className={"rounded-full border px-2 py-1 " + (current.priceCoverage >= 95 ? "border-[rgb(var(--success-line))] bg-[rgb(var(--success-soft))] text-[rgb(var(--success))]" : "border-[rgb(var(--warning-line))] bg-[rgb(var(--warning-soft))] text-[rgb(var(--warning))]")}>Pricing {pct(current.priceCoverage)}</span><span className={"rounded-full border px-2 py-1 " + (oee != null ? "border-[rgb(var(--success-line))] bg-[rgb(var(--success-soft))] text-[rgb(var(--success))]" : "border-[rgb(var(--border))] text-[rgb(var(--muted))]")}>OEE {oee != null ? "connected" : "unavailable"}</span><Button variant="outline" size="sm" onClick={function() { setRanges(defaults); }}>Reset dates</Button></div>
+      <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-[rgb(var(--border))] pt-3 text-xs"><span className="font-semibold">Decision confidence</span><span className={"rounded-full border px-2 py-1 " + (current.units > 0 ? "border-[rgb(var(--success-line))] bg-[rgb(var(--success-soft))] text-[rgb(var(--success))]" : "border-[rgb(var(--danger-line))] bg-[rgb(var(--danger-soft))] text-[rgb(var(--danger))]")}>Production {current.units > 0 ? "ready" : "missing"}</span><span className={"rounded-full border px-2 py-1 " + (current.payableHours > 0 ? "border-[rgb(var(--success-line))] bg-[rgb(var(--success-soft))] text-[rgb(var(--success))]" : "border-[rgb(var(--warning-line))] bg-[rgb(var(--warning-soft))] text-[rgb(var(--warning))]")}>Labor {current.payableHours > 0 ? "matched" : "unavailable"}</span><span className={"rounded-full border px-2 py-1 " + (current.priceCoverage >= 95 ? "border-[rgb(var(--success-line))] bg-[rgb(var(--success-soft))] text-[rgb(var(--success))]" : "border-[rgb(var(--warning-line))] bg-[rgb(var(--warning-soft))] text-[rgb(var(--warning))]")}>Pricing {pct(current.priceCoverage)}</span><span className={"rounded-full border px-2 py-1 " + (oee != null ? "border-[rgb(var(--success-line))] bg-[rgb(var(--success-soft))] text-[rgb(var(--success))]" : "border-[rgb(var(--border))] text-[rgb(var(--muted))]")}>OEE {oee != null ? "connected" : "unavailable"}</span></div>
     </Card>
     {error ? <Card className="border-[rgb(var(--danger-line))] bg-[rgb(var(--danger-soft))] px-4 py-4 text-sm text-[rgb(var(--danger))]">{error.message}</Card> : null}
     <Card className="overflow-hidden border-[color-mix(in_oklab,rgb(var(--accent))_35%,rgb(var(--border)))]">
@@ -312,6 +369,6 @@ export default function AnalyticsView({ evoconData }) {
       <div className="mb-3"><div className="text-sm font-semibold">Line performance</div><div className="text-xs text-[rgb(var(--muted))]">Revenue and margin are shown only from configured pricing/item-master coverage; margin is revenue less direct labor.</div></div>
       <TableShell><table style={{ width: "100%", borderCollapse: "collapse" }}><thead><tr style={{ background: C.raised }}>{["Line","Cases/day","Δ output","Cases/pay hr","Avg crew","Labor/case","Revenue","Labor margin","Price coverage"].map(function(label, index) { return <th key={label} className={"px-2 py-2 text-xs font-semibold uppercase tracking-wide text-[rgb(var(--muted))] " + (index ? "text-right" : "text-left")}>{label}</th>; })}</tr></thead><tbody>{comparisonRows.map(function(row) { return <tr key={row.line} style={{ borderBottom: "1px solid " + C.border }}><td className="px-2 py-2 text-sm font-medium">{row.line}</td><td className="px-2 py-2 text-right text-sm" style={{ fontFamily: mono }}>{integer(row.unitsPerDay)}</td><td className={"px-2 py-2 text-right text-sm " + (row.unitDelta > 0 ? "text-[rgb(var(--success))]" : row.unitDelta < 0 ? "text-[rgb(var(--danger))]" : "text-[rgb(var(--muted))]")} style={{ fontFamily: mono }}>{row.unitDelta == null ? "—" : (row.unitDelta > 0 ? "+" : "") + row.unitDelta.toFixed(1) + "%"}</td><td className="px-2 py-2 text-right text-sm" style={{ fontFamily: mono }}>{row.casesPerPayableHour ? row.casesPerPayableHour.toFixed(1) : "—"}</td><td className="px-2 py-2 text-right text-sm" style={{ fontFamily: mono }}>{row.crew == null ? "—" : row.crew.toFixed(1)}</td><td className="px-2 py-2 text-right text-sm" style={{ fontFamily: mono }}>{row.units ? "$" + row.laborCostPerUnit.toFixed(2) : "—"}</td><td className="px-2 py-2 text-right text-sm" style={{ fontFamily: mono }}>{money(row.revenue)}</td><td className="px-2 py-2 text-right text-sm" style={{ fontFamily: mono }}>{row.marginPct == null ? "—" : pct(row.marginPct)}</td><td className="px-2 py-2 text-right text-sm" style={{ fontFamily: mono }}>{pct(row.priceCoverage)}</td></tr>; })}{!comparisonRows.length ? <tr><td colSpan={9} className="px-2 py-8 text-center text-sm text-[rgb(var(--muted))]">No production rows in this period.</td></tr> : null}</tbody></table></TableShell>
     </Card>
-    <div className="text-xs text-[rgb(var(--muted))]">Data audit: production events are authoritative for output and job dimensions; labor events are authoritative for hours, cost, and crew; configured SKU rates drive revenue; Evocon drives OEE. Calendar range spans {days(ranges.currentStart, ranges.currentEnd)} days.</div>
+    <div className="text-xs text-[rgb(var(--muted))]">Data audit: production events are authoritative for output and job dimensions; labor events are authoritative for hours, cost, and crew; configured SKU rates drive revenue; Evocon drives OEE. Effective current range spans {days(effectiveRanges.current.start, effectiveRanges.current.end)} calendar days.</div>
   </div>;
 }
