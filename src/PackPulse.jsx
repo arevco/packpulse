@@ -43,6 +43,7 @@ function writeAutoSyncCheckpoint(mode, value) {
 }
 
 var operationsViewImportPromise = null;
+var analyticsViewImportPromise = null;
 var operationsInsightsPanelImportPromise = null;
 var forecastViewImportPromise = null;
 var inventoryViewImportPromise = null;
@@ -55,6 +56,11 @@ var purchaseOrdersViewImportPromise = null;
 function importOperationsView() {
   if (!operationsViewImportPromise) operationsViewImportPromise = import("./views/OperationsView");
   return operationsViewImportPromise;
+}
+
+function importAnalyticsView() {
+  if (!analyticsViewImportPromise) analyticsViewImportPromise = import("./views/AnalyticsView");
+  return analyticsViewImportPromise;
 }
 
 function importOperationsInsightsPanel() {
@@ -102,6 +108,10 @@ function prefetchOperationsView() {
     importOperationsView(),
     importOperationsInsightsPanel()
   ]).catch(function() {});
+}
+
+function prefetchAnalyticsView() {
+  return importAnalyticsView().catch(function() {});
 }
 
 function prefetchForecastView() {
@@ -454,6 +464,7 @@ async function writeLaborRowsToCache(rows, syncedAt) {
 }
 
 const OperationsView = lazySafe(importOperationsView, "Operations");
+const AnalyticsView = lazySafe(importAnalyticsView, "Analytics");
 const ForecastView = lazySafe(importForecastView, "Forecast");
 const WorkOrdersView = lazySafe(function() { return import("./views/WorkOrdersView"); }, "Work Orders");
 const InventoryView = lazySafe(importInventoryView, "Inventory");
@@ -488,7 +499,7 @@ export default function ProductionReadiness() {
   var parseInitialPermalink = function() {
     if (typeof window === "undefined") return { view: "workorders", wo: {}, forecast: {}, operations: {}, invoicing: {} };
     var qs = new URLSearchParams(window.location.search || "");
-    var allowedViews = { aicopilot:true, operations:true, invoicing:true, reporting:true, forecast:true, workorders:true, purchaseorders:true, inventory:true, onboarding:true, calendar:true, supplyrisk:true, flags:true, itemmaster:true };
+    var allowedViews = { aicopilot:true, operations:true, analytics:true, invoicing:true, reporting:true, forecast:true, workorders:true, purchaseorders:true, inventory:true, onboarding:true, calendar:true, supplyrisk:true, flags:true, itemmaster:true };
     var rawView = String(qs.get("view") || "workorders");
     if (rawView === "overview") rawView = "workorders";
     var view = allowedViews[rawView] ? rawView : "workorders";
@@ -679,6 +690,7 @@ export default function ProductionReadiness() {
 
   var navPrefetchers = {
     operations: prefetchOperationsView,
+    analytics: prefetchAnalyticsView,
     invoicing: prefetchInvoicingView,
     reporting: prefetchReportingView,
     inventory: prefetchInventoryView,
@@ -688,7 +700,7 @@ export default function ProductionReadiness() {
     purchaseorders: prefetchPurchaseOrdersView,
   };
 
-  var navItems = [{key:"purchaseorders",label:"POs",count:openPurchaseOrderCount},{key:"workorders",label:"Work Orders",count:null},{key:"operations",label:"Operations",count:null,alert:false},{key:"inventory",label:"Inventory",count:null},{key:"reporting",label:"Reporting",count:null},{key:"onboarding",label:"Onboarding",count:null,alert:false},{key:"invoicing",label:"Invoicing",count:null,alert:false},{key:"supplyrisk",label:"Supply Risk",count:null,alert:false},{key:"forecast",label:"Forecast",count:null,alert:false},{key:"calendar",label:"Calendar",count:null,alert:false},{key:"aicopilot",label:"AI Copilot",count:null,alert:false}]
+  var navItems = [{key:"purchaseorders",label:"POs",count:openPurchaseOrderCount},{key:"workorders",label:"Work Orders",count:null},{key:"operations",label:"Operations",count:null,alert:false},{key:"analytics",label:"Analytics",count:null,alert:false},{key:"inventory",label:"Inventory",count:null},{key:"reporting",label:"Reporting",count:null},{key:"onboarding",label:"Onboarding",count:null,alert:false},{key:"invoicing",label:"Invoicing",count:null,alert:false},{key:"supplyrisk",label:"Supply Risk",count:null,alert:false},{key:"forecast",label:"Forecast",count:null,alert:false},{key:"calendar",label:"Calendar",count:null,alert:false},{key:"aicopilot",label:"AI Copilot",count:null,alert:false}]
     .map(function(item) {
       return Object.assign({}, item, {
         href: buildPermalinkUrl(item.key, workOrdersPermalinkState, forecastPermalinkState, operationsPermalinkState, invoicingPermalinkState),
@@ -1945,6 +1957,7 @@ export default function ProductionReadiness() {
         <Suspense fallback={<Card className="mt-3 p-4 text-sm text-[rgb(var(--muted))]">Loading view...</Card>}>
           {activeView === "aicopilot" && <AICopilotView summary={summaryForUI} criticalItems={criticalItemsForUI} dispatchQueue={dispatchQueue || []} recommendations={recommendationsForUI} productionSegments={productionSegmentsForUI} evoconData={ds.evoconData || []} workOrders={analysisForUI.results || []} metrics={askAiMetrics} onNavigate={setActiveView} />}
           {activeView === "operations" && <OperationsView productionSegments={productionSegmentsForUI} productionDataRaw={ds.productionData || []} laborDataRaw={ds.laborData || []} evoconData={ds.evoconData || []} evoconTimestamp={ds.evoconTimestamp || evoconLastSyncAt} itemMaster={ds.itemMaster || []} workOrders={analysisForUI.results || []} dispatchQueue={dispatchQueue || []} initialFilters={operationsPermalinkState} onPermalinkChange={handleOperationsPermalinkChange} serverSyncVersion={operationsServerSyncVersion} onRefreshProduction={triggerProductionRefresh} refreshingProduction={visibleNulogySyncBusy} />}
+          {activeView === "analytics" && <AnalyticsView evoconData={ds.evoconData || []} />}
           {activeView === "invoicing" && <InvoicingView productionData={ds.productionData || []} workOrders={ds.workOrders || []} itemMaster={ds.itemMaster || []} productionTimestamp={ds.productionTimestamp} initialFilters={invoicingPermalinkState} onPermalinkChange={handleInvoicingPermalinkChange} />}
           {activeView === "reporting" && <ReportingView />}
           {activeView === "forecast" && <ForecastView workOrders={ds.workOrders || []} itemMaster={ds.itemMaster || []} productionData={ds.productionData || []} laborData={ds.laborData || []} initialFilters={forecastPermalinkState} onPermalinkChange={handleForecastPermalinkChange} />}
