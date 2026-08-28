@@ -573,6 +573,7 @@ export default function ProductionReadiness() {
   const [invoicingPermalinkState, setInvoicingPermalinkState] = useState(function() { return parseInitialPermalink().invoicing || {}; });
   const [operationsServerSyncVersion, setOperationsServerSyncVersion] = useState(0);
   const [cacheWriteError, setCacheWriteError] = useState("");
+  const [productionReconciliationHealth, setProductionReconciliationHealth] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showDataSetup, setShowDataSetup] = useState(false);
   const [showDataControlsPanel, setShowDataControlsPanel] = useState(false);
@@ -607,6 +608,25 @@ export default function ProductionReadiness() {
     full: readAutoSyncCheckpoint("full"),
     production_only: readAutoSyncCheckpoint("production_only")
   });
+
+  useEffect(function() {
+    var cancelled = false;
+    var load = async function() {
+      try {
+        var response = await fetch("/api/ops/production-reconciliation-status", { credentials: "include" });
+        var body = await response.json();
+        if (!cancelled && response.ok) setProductionReconciliationHealth(body || null);
+      } catch (_error) {
+        // Existing feed freshness indicators remain available if the health endpoint is unavailable.
+      }
+    };
+    load();
+    var interval = setInterval(load, 5 * 60 * 1000);
+    return function() {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [operationsServerSyncVersion]);
 
   var buildPermalinkUrl = useCallback(function(nextView, woState, fcState, opsState, ivState) {
     if (typeof window === "undefined") return "";
@@ -1127,7 +1147,8 @@ export default function ProductionReadiness() {
       }
       serverWrites.push(postJsonOrThrow("/api/cache/production-events", {
         rows: productionRows,
-        syncedAt: syncedAtIso
+        syncedAt: syncedAtIso,
+        syncProfile: hiddenNulogySyncMode === "production_only" ? "recent_production" : "full"
       }, "Production event ingest"));
     }
     if (results.labor) {
@@ -1740,6 +1761,15 @@ export default function ProductionReadiness() {
         <input ref={ds.woRefreshRef} type="file" accept=".csv" className="hidden" onChange={e => {ds.handleRefreshFile("wo",e.target.files[0]);e.target.value="";}} />
         <input ref={ds.edrRefreshRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e => {ds.handleRefreshFile("edr",e.target.files[0]);e.target.value="";}} />
         <input ref={ds.dockRefreshRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e => {ds.handleRefreshFile("dock",e.target.files[0]);e.target.value="";}} />
+
+        {productionReconciliationHealth && productionReconciliationHealth.healthStatus === "mismatch" && (
+          <div className="mb-2.5 rounded-md border border-red-300 bg-red-50 px-3 py-2.5 text-red-900">
+            <div className="text-sm font-semibold">Production data validation failed</div>
+            <div className="mt-0.5 text-xs">
+              PackPulse production does not match the latest Nulogy validation. Do not use production totals for operational or accounting decisions until the reconciliation is resolved.
+            </div>
+          </div>
+        )}
 
         {showSyncBannerContainer ? (
           <div className="mb-2.5 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2.5 py-2">

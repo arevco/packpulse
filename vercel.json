@@ -3,6 +3,15 @@
   "functions": {
     "api/nulogy/*.js": {
       "maxDuration": 60
+    },
+    "api/cron/*.js": {
+      "maxDuration": 60
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/production-reconciliation",
+      "schedule": "15 6 * * *"
+    }
+  ]
 }
