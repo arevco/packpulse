@@ -79,6 +79,31 @@ test("partial source windows cannot silently replace or validate fuller stored p
   assert.equal(result.extraJobs.length, 72);
 });
 
+test("routine ingestion excludes guarded dates from request-level reconciliation", function() {
+  var sourceRows = [
+    { produced_date_et: "2026-08-27", job_id: "guarded-job", units_produced: 100 },
+    { produced_date_et: "2026-08-28", job_id: "current-job", units_produced: 75 }
+  ];
+  var storedRows = [
+    { produced_date_et: "2026-08-27", job_id: "guarded-job", units_produced: 200 },
+    { produced_date_et: "2026-08-27", job_id: "preserved-extra-job", units_produced: 50 },
+    { produced_date_et: "2026-08-28", job_id: "current-job", units_produced: 75 }
+  ];
+
+  var unscoped = buildProductionIngestReconciliation(sourceRows, storedRows);
+  assert.equal(unscoped.reconciled, false);
+  assert.equal(unscoped.extraJobs.length, 1);
+  assert.equal(unscoped.revisedJobs.length, 1);
+
+  var guarded = buildProductionIngestReconciliation(sourceRows, storedRows, {
+    excludedDateKeys: ["2026-08-27"]
+  });
+  assert.equal(guarded.reconciled, true);
+  assert.deepEqual(guarded.excludedDateKeys, ["2026-08-27"]);
+  assert.deepEqual(guarded.extraJobs, []);
+  assert.deepEqual(guarded.revisedJobs, []);
+});
+
 test("scheduled reconciliation uses an inclusive 45-day rolling window", function() {
   assert.deepEqual(productionReconciliationWindow({ endDate: "2026-08-27", lookbackDays: 45 }), {
     startDate: "2026-07-14",

@@ -133,10 +133,34 @@ async function fetchStoredProductionRows(supabase, siteId, startDate, endDate) {
   return rows;
 }
 
-export function buildProductionIngestReconciliation(sourceRows, storedRows) {
-  var reconciliation = reconcileProductionJobCoverage(sourceRows, storedRows);
+function excludeProductionDates(rows, excludedDateKeys) {
+  var excluded = {};
+  (Array.isArray(excludedDateKeys) ? excludedDateKeys : []).forEach(function(dateKey) {
+    excluded[String(dateKey || "").slice(0, 10)] = true;
+  });
+  if (!Object.keys(excluded).length) return Array.isArray(rows) ? rows : [];
+  return (Array.isArray(rows) ? rows : []).filter(function(row) {
+    var dateKey = String(row && row.produced_date_et || "").slice(0, 10);
+    return !dateKey || !excluded[dateKey];
+  });
+}
+
+export function buildProductionIngestReconciliation(sourceRows, storedRows, options) {
+  // A guarded date was intentionally not replaced because Nulogy returned a
+  // suspiciously sparse snapshot. Comparing that partial source with the
+  // preserved stored date would turn the data-loss guard into a guaranteed
+  // reconciliation error. Leave guarded dates for the scheduled full-window
+  // reconciliation and validate every date that this request actually applied.
+  var excludedDateKeys = Array.isArray(options && options.excludedDateKeys)
+    ? options.excludedDateKeys
+    : [];
+  var reconciliation = reconcileProductionJobCoverage(
+    excludeProductionDates(sourceRows, excludedDateKeys),
+    excludeProductionDates(storedRows, excludedDateKeys)
+  );
   return Object.assign({}, reconciliation, {
-    status: reconciliation.reconciled ? "reconciled" : "mismatch"
+    status: reconciliation.reconciled ? "reconciled" : "mismatch",
+    excludedDateKeys: excludedDateKeys.slice()
   });
 }
 
@@ -213,7 +237,9 @@ export default async function handler(req, res) {
       var storedRows = dateWindow.startDate && dateWindow.endDate
         ? await fetchStoredProductionRows(supabase, CACHE_SITE_ID, dateWindow.startDate, dateWindow.endDate)
         : [];
-      var reconciliation = buildProductionIngestReconciliation(rows, storedRows);
+      var reconciliation = buildProductionIngestReconciliation(events, storedRows, {
+        excludedDateKeys: writeResult.guardedDateKeys || []
+      });
       var responseBody = {
         ok: reconciliation.reconciled,
         submitted: rows.length,
@@ -247,7 +273,16 @@ export default async function handler(req, res) {
           reconciliation.missingJobs.length + " missing, " +
           reconciliation.extraJobs.length + " extra, " +
           reconciliation.revisedJobs.length + " revised jobs",
-          "error"
+          {
+            level: "error",
+            extra: {
+              reconciliationWindow: dateWindow,
+              correctionStart: writeResult.correctionStart,
+              writeMode: writeResult.writeMode,
+              guardedDateKeys: writeResult.guardedDateKeys || [],
+              reconciliation: reconciliation
+            }
+          }
         );
         return res.status(409).json(responseBody);
       }
