@@ -13,6 +13,7 @@ import { Textarea } from "../components/ui/textarea";
 import TableShell from "../components/ui/table-shell";
 import { cn } from "../lib/utils";
 import QuotesPanel from "./QuotesPanel";
+import PricingPanel from "./PricingPanel";
 
 var ACCEPT = ".pdf,.jpg,.jpeg,.png,.csv,.xls,.xlsx";
 var ONBOARDING_ACCEPT = ".pdf,.doc,.docx,.xls,.xlsx,.csv,.jpg,.jpeg,.png";
@@ -799,7 +800,8 @@ export default function PurchaseOrdersView({ onOpenCountChange }) {
     <div className="inline-flex gap-1 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--background))] p-1">
       <button className={cn("rounded px-4 py-2 text-sm font-medium", section === "purchase-orders" ? "bg-slate-900 text-white" : "text-[rgb(var(--muted))] hover:bg-slate-100")} onClick={function() { setSection("purchase-orders"); }}>Purchase Orders</button>
       <button className={cn("rounded px-4 py-2 text-sm font-medium", section === "quotes" ? "bg-slate-900 text-white" : "text-[rgb(var(--muted))] hover:bg-slate-100")} onClick={function() { setSection("quotes"); }}>Quotes</button>
+      <button className={cn("rounded px-4 py-2 text-sm font-medium", section === "pricing" ? "bg-slate-900 text-white" : "text-[rgb(var(--muted))] hover:bg-slate-100")} onClick={function() { setSection("pricing"); }}>Pricing</button>
     </div>
-    {section === "purchase-orders" ? <PurchaseOrdersRegister onOpenCountChange={onOpenCountChange} /> : <QuotesPanel />}
+    {section === "purchase-orders" ? <PurchaseOrdersRegister onOpenCountChange={onOpenCountChange} /> : section === "quotes" ? <QuotesPanel /> : <PricingPanel />}
   </div>;
 }
