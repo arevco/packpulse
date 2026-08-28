@@ -136,6 +136,127 @@ function toCoveragePct(numerator, denominator) {
   return Math.round((numerator / denominator) * 100);
 }
 
+function toProductionUnits(value) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  var parsed = parseFloat(String(value == null ? "" : value).replace(/[^0-9.\-]/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizeProductionJob(row) {
+  var raw = normalizeRawRow(row && Object.prototype.hasOwnProperty.call(row, "raw") ? row.raw : row);
+  return {
+    jobId: String(pickFieldLoose(raw, ["Job ID", "Job", "job_id"]) || row && row.job_id || "").trim(),
+    workOrder: String(
+      pickFieldLoose(raw, ["Work Order Code", "Work Order code", "work_order_code", "project_code", "Project Code"]) ||
+      row && row.work_order_code || ""
+    ).trim(),
+    itemCode: String(pickFieldLoose(raw, ["Item Code", "Item code", "item_code", "SKU", "sku"]) || row && row.item_code || "").trim(),
+    line: String(pickFieldLoose(raw, ["Line", "line", "line_name", "Line Name"]) || row && row.line || "").trim(),
+    units: toProductionUnits(
+      pickFieldLoose(raw, ["Units Produced", "Units produced", "units_produced", "Produced Units", "Quantity Produced", "Qty Produced"]) ||
+      row && row.units_produced || 0
+    )
+  };
+}
+
+function aggregateProductionJobs(rows) {
+  var jobs = {};
+  (Array.isArray(rows) ? rows : []).forEach(function(row) {
+    var normalized = normalizeProductionJob(row);
+    if (!normalized.jobId || !(normalized.units > 0)) return;
+    if (!jobs[normalized.jobId]) {
+      jobs[normalized.jobId] = {
+        jobId: normalized.jobId,
+        workOrders: {},
+        itemCodes: {},
+        lines: {},
+        units: 0
+      };
+    }
+    var job = jobs[normalized.jobId];
+    job.units += normalized.units;
+    if (normalized.workOrder) job.workOrders[normalized.workOrder] = true;
+    if (normalized.itemCode) job.itemCodes[normalized.itemCode] = true;
+    if (normalized.line) job.lines[normalized.line] = true;
+  });
+  return jobs;
+}
+
+function sortedKeys(value) {
+  return Object.keys(value || {}).sort(function(left, right) {
+    return left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" });
+  });
+}
+
+export function reconcileProductionJobCoverage(sourceRows, storedRows) {
+  var sourceJobs = aggregateProductionJobs(sourceRows);
+  var storedJobs = aggregateProductionJobs(storedRows);
+  var sourceIds = sortedKeys(sourceJobs);
+  var storedIds = sortedKeys(storedJobs);
+  var missingJobs = [];
+  var extraJobs = [];
+  var revisedJobs = [];
+  var renamedWorkOrders = [];
+
+  sourceIds.forEach(function(jobId) {
+    var source = sourceJobs[jobId];
+    var stored = storedJobs[jobId];
+    if (!stored) {
+      missingJobs.push({
+        jobId: jobId,
+        units: source.units,
+        workOrders: sortedKeys(source.workOrders),
+        itemCodes: sortedKeys(source.itemCodes),
+        lines: sortedKeys(source.lines)
+      });
+      return;
+    }
+    if (source.units !== stored.units) {
+      revisedJobs.push({
+        jobId: jobId,
+        sourceUnits: source.units,
+        storedUnits: stored.units,
+        unitDelta: source.units - stored.units
+      });
+    }
+    var sourceWorkOrders = sortedKeys(source.workOrders);
+    var storedWorkOrders = sortedKeys(stored.workOrders);
+    if (sourceWorkOrders.join("|") !== storedWorkOrders.join("|")) {
+      renamedWorkOrders.push({
+        jobId: jobId,
+        sourceWorkOrders: sourceWorkOrders,
+        storedWorkOrders: storedWorkOrders
+      });
+    }
+  });
+
+  storedIds.forEach(function(jobId) {
+    if (sourceJobs[jobId]) return;
+    var stored = storedJobs[jobId];
+    extraJobs.push({
+      jobId: jobId,
+      units: stored.units,
+      workOrders: sortedKeys(stored.workOrders),
+      itemCodes: sortedKeys(stored.itemCodes),
+      lines: sortedKeys(stored.lines)
+    });
+  });
+
+  return {
+    sourceJobCount: sourceIds.length,
+    storedJobCount: storedIds.length,
+    sourceUnits: sourceIds.reduce(function(sum, jobId) { return sum + sourceJobs[jobId].units; }, 0),
+    storedUnits: storedIds.reduce(function(sum, jobId) { return sum + storedJobs[jobId].units; }, 0),
+    unitDelta: sourceIds.reduce(function(sum, jobId) { return sum + sourceJobs[jobId].units; }, 0) -
+      storedIds.reduce(function(sum, jobId) { return sum + storedJobs[jobId].units; }, 0),
+    missingJobs: missingJobs,
+    extraJobs: extraJobs,
+    revisedJobs: revisedJobs,
+    renamedWorkOrders: renamedWorkOrders,
+    reconciled: !missingJobs.length && !extraJobs.length && !revisedJobs.length && !renamedWorkOrders.length
+  };
+}
+
 function sortDimensionRows(left, right) {
   if (right.missingLotRows !== left.missingLotRows) return right.missingLotRows - left.missingLotRows;
   if (right.missingUnitOfMeasureRows !== left.missingUnitOfMeasureRows) return right.missingUnitOfMeasureRows - left.missingUnitOfMeasureRows;

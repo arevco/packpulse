@@ -12,6 +12,7 @@
     "dev": "vite",
     "build": "vite build",
     "build:analyze": "BUNDLE_ANALYZE=true vite build",
+    "test:production-coverage": "node --test api/ops/_production-coverage.test.js",
     "mcp:packpulse": "node ./mcp/packpulse-server.mjs",
     "preview": "vite preview",
     "forecast:eval": "node scripts/forecast/evaluate-daily-targets.mjs",

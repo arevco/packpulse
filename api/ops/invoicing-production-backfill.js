@@ -22,6 +22,9 @@ export default async function handler(req, res) {
     if (result && result.pending) {
       return res.status(202).json(result);
     }
+    if (result && result.ok === false && result.reconciliationStatus === "mismatch") {
+      return res.status(409).json(result);
+    }
     return res.status(200).json(result);
   } catch (err) {
     Sentry.captureException(err);

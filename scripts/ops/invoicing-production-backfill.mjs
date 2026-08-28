@@ -36,6 +36,7 @@ async function main() {
   }
 
   process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+  if (result && result.ok === false && !result.pending) process.exitCode = 2;
 }
 
 function parseArgs(argv) {

@@ -7,7 +7,13 @@ import { refreshOpsPerformanceViews } from "../cache/_performance-views.js";
 import { buildProductionEvents } from "../cache/production-events.js";
 import { writeProductionEventsSafely } from "../cache/_production-write.js";
 import { CACHE_SITE_ID, getSupabaseAdmin } from "./_common.js";
-import { buildProductionCoverageAudit, pickFieldLoose, resolveProducedDateKey, sanitizeIsoDate } from "./_production-coverage.js";
+import {
+  buildProductionCoverageAudit,
+  pickFieldLoose,
+  reconcileProductionJobCoverage,
+  resolveProducedDateKey,
+  sanitizeIsoDate
+} from "./_production-coverage.js";
 
 export const MAX_INVOICING_PRODUCTION_BACKFILL_DAYS = 45;
 
@@ -39,6 +45,13 @@ export function daySpanInclusive(startDate, endDate) {
   var endMs = Date.parse(end + "T12:00:00Z");
   if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return 0;
   return Math.round((endMs - startMs) / 86400000) + 1;
+}
+
+export function buildProductionBackfillReconciliation(sourceRows, storedRows) {
+  var reconciliation = reconcileProductionJobCoverage(sourceRows, storedRows);
+  return Object.assign({}, reconciliation, {
+    status: reconciliation.reconciled ? "reconciled" : "mismatch"
+  });
 }
 
 async function fetchRangeRows(supabase, siteId, startDate, endDate) {
@@ -193,9 +206,10 @@ export async function runInvoicingProductionBackfill(options) {
     if (!isMissingTableError("production_events", afterErr)) throw afterErr;
   }
   var afterAudit = buildProductionCoverageAudit(afterRows, { focusWorkOrders: focusWorkOrders });
+  var reconciliation = buildProductionBackfillReconciliation(sourceRows, afterRows);
 
   return {
-    ok: true,
+    ok: reconciliation.reconciled,
     startDate: startDate,
     endDate: endDate,
     windowDays: windowDays,
@@ -218,6 +232,10 @@ export async function runInvoicingProductionBackfill(options) {
     beforeAudit: beforeAudit,
     sourceAudit: sourceAudit,
     afterAudit: afterAudit,
-    note: "Backfill rewrote the full selected production date window. Focus work orders are used for audit summaries only to avoid partial-date event replacement."
+    reconciliationStatus: reconciliation.status,
+    reconciliation: reconciliation,
+    note: reconciliation.reconciled
+      ? "Backfill rewrote and verified the full selected production date window. Focus work orders are used for audit summaries only to avoid partial-date event replacement."
+      : "Backfill write completed, but stored production does not reconcile to the fresh Nulogy source. Review reconciliation details before treating the window as complete."
   };
 }
