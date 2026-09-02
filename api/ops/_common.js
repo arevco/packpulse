@@ -1,5 +1,5 @@
-import { createClient } from "@supabase/supabase-js";
 import { getAuthenticatedUser as getAuthenticatedUserFromSession } from "../_session.js";
+import { getSupabaseAdminClient } from "../lib/supabase.js";
 
 export const CACHE_SITE_ID = process.env.CACHE_SITE_ID || "default";
 
@@ -15,10 +15,7 @@ export function getAuthenticatedUser(req) {
 }
 
 export function getSupabaseAdmin() {
-  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-  if (!url || !key) throw new Error("Missing SUPABASE_URL/VITE_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
-  return createClient(url, key, { auth: { persistSession: false } });
+  return getSupabaseAdminClient();
 }
 
 export function toNum(v) {

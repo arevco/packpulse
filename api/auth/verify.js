@@ -1,19 +1,16 @@
 // POST /api/auth/verify
 // Verifies Google ID token, checks email domain, sets session cookie
 
-import { createClient } from "@supabase/supabase-js";
 import Sentry from "../_sentry.js";
 import { SESSION_SECRET_MISSING_ERROR, signSession } from "../_session.js";
+import { getSupabaseAdminClient } from "../lib/supabase.js";
 
 const ALLOWED_DOMAIN = process.env.ALLOWED_DOMAIN || "revcopack.com";
 const SESSION_DAYS = 7;
 const CACHE_SITE_ID = process.env.CACHE_SITE_ID || "default";
 
 function getSupabaseAdminSafe() {
-  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-  if (!url || !key) return null;
-  return createClient(url, key, { auth: { persistSession: false } });
+  return getSupabaseAdminClient({ required: false });
 }
 
 function requestIp(req) {

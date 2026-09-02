@@ -1,15 +1,12 @@
-import { createClient } from "@supabase/supabase-js";
 import Sentry from "../_sentry.js";
+import { getSupabaseAdminClient } from "../lib/supabase.js";
 import { getAuthenticatedUser } from "../_session.js";
 
 const CACHE_SITE_ID = process.env.CACHE_SITE_ID || "default";
 const SHIFT_HOURS = Math.max(1, Number(process.env.SHIFT_HOURS || 8));
 
 function getSupabaseAdmin() {
-  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-  if (!url || !key) throw new Error("Missing SUPABASE_URL/VITE_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
-  return createClient(url, key, { auth: { persistSession: false } });
+  return getSupabaseAdminClient();
 }
 
 function toNum(v) {

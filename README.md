@@ -89,6 +89,24 @@ Go to **Vercel → your project → Settings → Environment Variables** and add
 ### 3. Deploy
 Push to GitHub. Vercel auto-deploys. The Nulogy sync panel will appear on the PackPulse upload screen.
 
+## Deployment Health Check
+
+After adding both Vercel and Supabase plugins, verify runtime wiring with:
+
+- `GET /api/health`
+- expected status: `200` for fully ready, `503` for issues
+
+Response fields:
+
+- `checks.supabase`: verifies `SUPABASE_URL`/`VITE_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and a lightweight `cache_snapshots` probe
+- `checks.auth.hasSessionSecret`: confirms `SESSION_SECRET` is set
+- `config.cacheSiteId`: confirms `CACHE_SITE_ID` value in use
+
+Suggested plugin guardrail:
+
+1. Add `GET /api/health` as a manual preflight before promoting a release.
+2. Keep environment keys centralized in Vercel project envs (server values only for `SUPABASE_*` and `SESSION_SECRET`).
+
 ## How It Works
 
 ### API Flow (3-step async process)
