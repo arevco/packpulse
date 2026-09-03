@@ -11,6 +11,7 @@ import { Input } from "../components/ui/input";
 import SortHeaderButton from "../components/ui/sort-header-button";
 import TableShell from "../components/ui/table-shell";
 import TabsNav from "../components/ui/tabs-nav";
+import ProjectBillingPanel from "./ProjectBillingPanel";
 
 var MONTH_INDEX = {
   jan: 0,
@@ -188,7 +189,8 @@ function normalizeLooseKey(value) {
 }
 
 function normalizeInvoiceMode(value) {
-  return String(value || "").trim().toLowerCase() === "warehousing" ? "warehousing" : DEFAULT_INVOICE_MODE;
+  var normalized = String(value || "").trim().toLowerCase();
+  return ["production", "warehousing", "projects"].indexOf(normalized) !== -1 ? normalized : DEFAULT_INVOICE_MODE;
 }
 
 function normalizeSearchValue(value) {
@@ -1491,7 +1493,7 @@ export default function InvoicingView(props) {
     queryFn: function() {
       return fetchInvoicingProductionHistory(startDate, endDate);
     },
-    enabled: hasValidDateRange,
+    enabled: hasValidDateRange && invoiceMode === "production",
     staleTime: 30 * 1000
   });
 
@@ -2646,11 +2648,16 @@ export default function InvoicingView(props) {
         key: "warehousing",
         label: "Warehousing",
         count: warehouseSummary.clientCount
+      },
+      {
+        key: "projects",
+        label: "Projects & Expenses",
+        count: null
       }
     ];
   }, [summary.invoiceLines, warehouseSummary.clientCount]);
 
-  if (!hasValidDateRange) {
+  if (invoiceMode !== "projects" && !hasValidDateRange) {
     return (
       <Card className="mt-3">
         <CardHeader className="border-b border-[rgb(var(--border))] pb-4">
@@ -2682,7 +2689,7 @@ export default function InvoicingView(props) {
     );
   }
 
-  if (invoiceMode !== "warehousing" && productionHistoryQuery.isLoading) {
+  if (invoiceMode === "production" && productionHistoryQuery.isLoading) {
     return (
       <Card className="mt-3">
         <CardHeader className="border-b border-[rgb(var(--border))] pb-4">
@@ -2700,7 +2707,7 @@ export default function InvoicingView(props) {
     );
   }
 
-  if (invoiceMode !== "warehousing" && productionHistoryQuery.isError) {
+  if (invoiceMode === "production" && productionHistoryQuery.isError) {
     return (
       <Card className="mt-3">
         <CardHeader className="border-b border-[rgb(var(--border))] pb-4">
@@ -2723,7 +2730,7 @@ export default function InvoicingView(props) {
     );
   }
 
-  if (invoiceMode !== "warehousing" && !normalizedRows.length) {
+  if (invoiceMode === "production" && !normalizedRows.length) {
     var missingHistoryTable = productionHistory.querySource === "missing_production_events_table";
     var hasAvailableHistory = !!(availableDateRange.min || availableDateRange.max);
     var emptyStateTitle = missingHistoryTable
@@ -2795,12 +2802,14 @@ export default function InvoicingView(props) {
           <div>
             <div className="text-xs font-medium uppercase tracking-[0.12em] text-[rgb(var(--muted))]">Invoice Type</div>
             <div className="mt-1 text-lg font-semibold text-[rgb(var(--foreground))]">
-              {invoiceMode === "production" ? "Production Invoicing" : "Warehousing Invoicing"}
+              {invoiceMode === "production" ? "Production Invoicing" : invoiceMode === "warehousing" ? "Warehousing Invoicing" : "Project & Expense Invoicing"}
             </div>
             <div className="mt-1 max-w-3xl text-sm text-[rgb(var(--muted))]">
               {invoiceMode === "production"
                 ? "Use the existing PO, SKU, lot, and rate workflow for finished-good billing."
-                : "Review live Nulogy pallet activity by client, then tune inbound, outbound, and storage fees in the same invoicing workspace."}
+                : invoiceMode === "warehousing"
+                  ? "Review live Nulogy pallet activity by client, then tune inbound, outbound, and storage fees in the same invoicing workspace."
+                  : "Capture non-standard client work and purchases, approve the charges, and create a traceable invoice snapshot."}
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -2809,10 +2818,15 @@ export default function InvoicingView(props) {
                 <Badge variant="info">{filteredRows.length.toLocaleString()} production rows</Badge>
                 <Badge variant="secondary">{summary.customers.toLocaleString()} customers</Badge>
               </>
-            ) : (
+            ) : invoiceMode === "warehousing" ? (
               <>
                 <Badge variant="info">{warehouseSummary.clientCount.toLocaleString()} clients in scope</Badge>
                 <Badge variant="secondary">Monthly by client</Badge>
+              </>
+            ) : (
+              <>
+                <Badge variant="info">Labor, expenses & fixed fees</Badge>
+                <Badge variant="secondary">Invoice snapshots</Badge>
               </>
             )}
           </div>
@@ -2821,6 +2835,10 @@ export default function InvoicingView(props) {
       </CardContent>
     </Card>
   );
+
+  if (invoiceMode === "projects") {
+    return <div className="space-y-4">{invoiceModeSwitcher}<ProjectBillingPanel /></div>;
+  }
 
   if (invoiceMode === "warehousing") {
     return (
