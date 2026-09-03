@@ -1456,6 +1456,20 @@ export default function InvoicingView(props) {
   var deferredSearchTerm = useDeferredValue(searchTerm);
   var deferredCandidateColumnFilters = useDeferredValue(candidateColumnFilters);
   var hasValidDateRange = !!(startDate && endDate && endDate >= startDate);
+  var nulogyCustomerOptions = useMemo(function() {
+    var seen = {};
+    [productionData, workOrders, itemMaster].forEach(function(rows) {
+      rows.forEach(function(row) {
+        var customer = String(pickFieldLoose(row, [
+          "Customer Name", "Customer name", "customer_name",
+          "Customer", "customer", "item_customer_name", "item_customer",
+          "Project Customer", "project_customer"
+        ]) || "").trim();
+        if (customer) seen[customer.toLowerCase()] = customer;
+      });
+    });
+    return Object.values(seen).sort(function(left, right) { return left.localeCompare(right); });
+  }, [productionData, workOrders, itemMaster]);
 
   useEffect(function() {
     if (!onPermalinkChange) return;
@@ -2837,7 +2851,7 @@ export default function InvoicingView(props) {
   );
 
   if (invoiceMode === "projects") {
-    return <div className="space-y-4">{invoiceModeSwitcher}<ProjectBillingPanel /></div>;
+    return <div className="space-y-4">{invoiceModeSwitcher}<ProjectBillingPanel customerOptions={nulogyCustomerOptions} /></div>;
   }
 
   if (invoiceMode === "warehousing") {

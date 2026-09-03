@@ -65,7 +65,7 @@ function Metric({ label, value, helper }) {
   return <Card><CardContent className="px-4 py-4"><div className="text-xs font-medium uppercase tracking-[0.12em] text-[rgb(var(--muted))]">{label}</div><div className="mt-2 text-2xl font-semibold text-[rgb(var(--foreground))]">{value}</div><div className="mt-1 text-xs text-[rgb(var(--muted))]">{helper}</div></CardContent></Card>;
 }
 
-function ProjectForm({ onCancel, onSaved }) {
+function ProjectForm({ customerOptions, onCancel, onSaved }) {
   const [draft, setDraft] = useState(blankProject);
   const mutation = useMutation({ mutationFn: function(payload) { return api({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); }, onSuccess: onSaved });
   var total = useMemo(function() { return draft.charges.reduce(function(sum, charge) { return sum + chargeAmount(charge); }, 0); }, [draft.charges]);
@@ -84,7 +84,7 @@ function ProjectForm({ onCancel, onSaved }) {
     <CardHeader className="border-b border-[rgb(var(--border))]"><div className="text-lg font-semibold">New billable project</div><div className="mt-1 text-sm text-[rgb(var(--muted))]">Capture the client, reason, and every labor, purchase, or fixed-fee charge. Totals are calculated automatically.</div></CardHeader>
     <CardContent className="space-y-5 px-4 py-4">
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <Field label="Customer *"><Input value={draft.customer} onChange={function(e) { update("customer", e.target.value); }} placeholder="Client name" /></Field>
+        <Field label="Customer *"><select className="h-9 w-full rounded-md border border-[rgb(var(--border))] bg-white px-3 text-sm text-[rgb(var(--foreground))] shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--accent))] focus-visible:ring-offset-1" value={draft.customer} onChange={function(e) { update("customer", e.target.value); }}><option value="">{customerOptions.length ? "Select a Nulogy client" : "No Nulogy clients found"}</option>{customerOptions.map(function(customer) { return <option key={customer} value={customer}>{customer}</option>; })}</select></Field>
         <Field label="Project *"><Input value={draft.title} onChange={function(e) { update("title", e.target.value); }} placeholder="Trailer pallet rebuild" /></Field>
         <Field label="Date *"><Input type="date" value={draft.occurredOn} onChange={function(e) { update("occurredOn", e.target.value); }} /></Field>
         <Field label="Customer PO / approval"><Input value={draft.purchaseOrder} onChange={function(e) { update("purchaseOrder", e.target.value); }} placeholder="Optional reference" /></Field>
@@ -113,7 +113,7 @@ function ProjectForm({ onCancel, onSaved }) {
   </Card>;
 }
 
-export default function ProjectBillingPanel() {
+export default function ProjectBillingPanel({ customerOptions = [] }) {
   const queryClient = useQueryClient();
   const [showForm, setShowForm] = useState(false);
   const [filter, setFilter] = useState("open");
@@ -139,7 +139,7 @@ export default function ProjectBillingPanel() {
   return <div className="space-y-4">
     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><h2 className="text-xl font-semibold">Projects & Expenses</h2><p className="mt-1 max-w-3xl text-sm text-[rgb(var(--muted))]">Track work outside normal production agreements, collect supporting references, and turn approved charges into an invoice.</p></div><Button onClick={function() { setShowForm(true); }}><Plus className="h-4 w-4" />New billable project</Button></div>
     <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4"><Metric label="Unbilled" value={money.format(summary.unbilledValue)} helper={(summary.draftCount + summary.readyCount) + " open projects"} /><Metric label="Ready" value={summary.readyCount} helper="Approved for invoicing" /><Metric label="Invoiced" value={money.format(summary.invoicedValue)} helper={summary.invoicedCount + " invoices created"} /><Metric label="Projects" value={summary.totalProjects} helper="All captured work" /></div>
-    {showForm && <ProjectForm onCancel={function() { setShowForm(false); }} onSaved={function() { setShowForm(false); queryClient.invalidateQueries({ queryKey: ["project-billing"] }); }} />}
+    {showForm && <ProjectForm customerOptions={customerOptions} onCancel={function() { setShowForm(false); }} onSaved={function() { setShowForm(false); queryClient.invalidateQueries({ queryKey: ["project-billing"] }); }} />}
     {(error || query.error) && <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error || query.error.message}</div>}
     {query.data && query.data.status === "missing_table" && <div className="rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"><strong>Database setup required.</strong> Apply migration <code>20260903143000_project_billing.sql</code>, then refresh this page.</div>}
     <Card>
